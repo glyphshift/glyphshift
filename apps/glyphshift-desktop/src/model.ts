@@ -1,6 +1,4 @@
 export type CapabilityState = 'active' | 'ready' | 'candidate' | 'limited' | 'unavailable'
-export type ThemeChoice = 'system' | 'light' | 'dark'
-
 export interface CapabilityEvidence {
   state: CapabilityState
   enabled: boolean
@@ -27,29 +25,24 @@ export interface SoftwareRecord {
   locations: Array<{ id: string; label: string }>
 }
 
-export interface DictionarySummary {
+export interface DictionaryMetadata {
   id: string
+  releaseVersion: string
   name: string
   description: string
-  locale: string
-  hookTypeId: string | null
+  sourceLocale: string
+  targetLocale: string
+  authors: string[]
+  license: string | null
+  homepage: string | null
+  tags: string[]
+}
+
+export interface DictionarySummary {
+  metadata: DictionaryMetadata
   revision: number
   entryCount: number
 }
-
-export interface HookTypeOption {
-  id: string
-  label: string
-}
-
-export type DictionaryDefaultFont
-  = { kind: 'unchanged' }
-    | { kind: 'substitute'; family: string }
-
-export type DictionaryEntryFont
-  = { kind: 'inherit' }
-    | { kind: 'unchanged' }
-    | { kind: 'substitute'; family: string }
 
 export interface DictionaryRuleContext {
   kind: string
@@ -61,24 +54,60 @@ export interface DictionaryRule {
   context: DictionaryRuleContext | null
   source: string
   translation: string | null
-  font: DictionaryEntryFont
-  adapterIds: string[]
 }
 
 export interface DictionaryDetail {
+  metadata: DictionaryMetadata
+  revision: number
+  entries: DictionaryRule[]
+}
+
+export interface FontProfileMetadata {
   id: string
   name: string
   description: string
-  locale: string
-  hookTypeId: string | null
+}
+
+export interface FontProfileSummary {
+  metadata: FontProfileMetadata
   revision: number
-  defaultFont: DictionaryDefaultFont
-  entries: DictionaryRule[]
+  families: string[]
+  resolvedFamily: string | null
+}
+
+export interface FontProfileDetail extends FontProfileSummary {}
+
+export interface AdapterOption {
+  id: string
+  name: string
+  version: string
+  summary: string
+  platforms: string[]
+  technologies: string[]
+  features: string[]
+  technicalTarget: string
+  configuration: 'none'
+}
+
+export interface WorkflowAdapterPlan {
+  strategy: 'parallel'
+  adapterIds: string[]
+}
+
+export type FontProfileScope
+  = { kind: 'all' }
+    | { kind: 'locations'; locationIds: string[] }
+
+export interface FontProfileBinding {
+  fontProfileId: string
+  scope: FontProfileScope
 }
 
 export interface WorkflowTarget {
   softwareId: string
+  adapterPlan: WorkflowAdapterPlan
   dictionaryIds: string[]
+  fontBindings: FontProfileBinding[]
 }
 
 export interface WorkflowSummary {
@@ -125,10 +154,11 @@ export interface DesktopSnapshot {
   selectedSoftwareId: string | null
   software: SoftwareRecord[]
   dictionaries: DictionarySummary[]
+  fontProfiles: FontProfileSummary[]
   workflows: WorkflowSummary[]
   activations: WorkflowActivation[]
   workflowRuntimeStatus: Record<string, WorkflowRuntimeStatus>
-  hookTypes: HookTypeOption[]
+  adapters: AdapterOption[]
   fontFamilies: string[]
 }
 
@@ -140,26 +170,25 @@ export interface WorkflowCommandResult {
 
 export interface DesktopModel extends DesktopSnapshot {
   dictionaryDetails: Record<string, DictionaryDetail>
+  fontProfileDetails: Record<string, FontProfileDetail>
   workflowDetails: Record<string, WorkflowDetail>
-  theme: ThemeChoice
-  translationSource: string
 }
 
-export const STORAGE_KEY = 'glyphshift.workflow-product-model'
+export const STORAGE_KEY = 'glyphshift.composable-product-model.v2'
 
 export function emptyModel(): DesktopModel {
   return {
     selectedSoftwareId: null,
     software: [],
     dictionaries: [],
+    fontProfiles: [],
     workflows: [],
     activations: [],
     workflowRuntimeStatus: {},
-    hookTypes: [],
+    adapters: [],
     fontFamilies: [],
     dictionaryDetails: {},
+    fontProfileDetails: {},
     workflowDetails: {},
-    theme: 'dark',
-    translationSource: '',
   }
 }

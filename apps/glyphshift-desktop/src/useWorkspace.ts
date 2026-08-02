@@ -6,6 +6,8 @@ import {
   type DesktopModel,
   type DesktopSnapshot,
   type DictionaryDetail,
+  type DictionaryMetadata,
+  type FontProfileDetail,
   type SoftwareRecord,
   type WorkflowCommandResult,
   type WorkflowDetail,
@@ -17,38 +19,21 @@ function hasDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
 }
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
 function readModel(): DesktopModel {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return emptyModel()
   try {
-    const value = JSON.parse(raw) as Partial<DesktopModel>
-    if (!Array.isArray(value.software) || !Array.isArray(value.workflows) || !Array.isArray(value.dictionaries)) return emptyModel()
-    const hydrated = { ...emptyModel(), ...value } as DesktopModel
-    hydrated.fontFamilies = Array.isArray(hydrated.fontFamilies) ? hydrated.fontFamilies : []
-    hydrated.software = hydrated.software.map(item => ({ ...item, description: item.description ?? '' }))
-    hydrated.dictionaries = hydrated.dictionaries.map(item => ({
-      ...item,
-      description: item.description ?? '',
-      hookTypeId: item.hookTypeId ?? null,
-    }))
-    hydrated.workflows = hydrated.workflows.map(workflow => ({
-      ...workflow,
-      description: workflow.description ?? '',
-      targets: workflow.targets ?? workflow.softwareIds.map(softwareId => ({
-        softwareId,
-        dictionaryIds: [...workflow.dictionaryIds],
-      })),
-    }))
-    hydrated.dictionaryDetails = Object.fromEntries(Object.entries(hydrated.dictionaryDetails).map(([id, detail]) => {
-      const legacyHookTypeIds = [...new Set(detail.entries.flatMap(entry => entry.adapterIds ?? []))]
-      return [id, {
-        ...detail,
-        description: detail.description ?? '',
-        hookTypeId: detail.hookTypeId ?? (legacyHookTypeIds.length === 1 ? legacyHookTypeIds[0] : null),
-      }]
-    }))
-    hydrated.workflowDetails = Object.fromEntries(Object.entries(hydrated.workflowDetails).map(([id, detail]) => [id, { ...detail, description: detail.description ?? '' }]))
-    return hydrated
+    const value = JSON.parse(raw) as DesktopModel
+    if (!Array.isArray(value.software)
+      || !Array.isArray(value.workflows)
+      || !Array.isArray(value.dictionaries)
+      || !Array.isArray(value.fontProfiles)
+      || !Array.isArray(value.adapters)) return emptyModel()
+    return { ...emptyModel(), ...value }
   }
   catch {
     return emptyModel()
@@ -61,6 +46,7 @@ const workspaceBusy = ref(false)
 const refreshing = ref(false)
 const messages = ref<Record<string, string>>({})
 const dictionaryDetail = ref<DictionaryDetail | null>(null)
+const fontProfileDetail = ref<FontProfileDetail | null>(null)
 const workflowDetail = ref<WorkflowDetail | null>(null)
 
 watch(model, (value) => {
@@ -113,27 +99,18 @@ export function useWorkspace() {
         const activations = model.value.activations.filter(item => item.workflowId !== id)
         if (enabled) activations.push({ workflowId: id, revision: workflow.revision })
         model.value.activations = activations
-        const previous = model.value.workflowRuntimeStatus[id]
         model.value.workflowRuntimeStatus[id] = {
           workflowId: id,
           errors: {},
-          targets: (previous?.targets ?? workflow.softwareIds.map(softwareId => ({
-            softwareId,
+          targets: workflow.targets.map(target => ({
+            softwareId: target.softwareId,
             discovered: false,
             active: false,
-            translationRequested: true,
-            fontRequested: false,
+            translationRequested: enabled && target.dictionaryIds.length > 0,
+            fontRequested: enabled && target.fontBindings.length > 0,
             translationActive: false,
             fontActive: false,
             appliedGeneration: null,
-          }))).map(target => ({
-            ...target,
-            active: enabled && target.discovered,
-            translationRequested: enabled && target.translationRequested,
-            fontRequested: enabled && target.fontRequested,
-            translationActive: enabled && target.discovered && target.translationRequested,
-            fontActive: enabled && target.discovered && target.fontRequested,
-            appliedGeneration: enabled && target.discovered ? target.appliedGeneration : null,
           })),
         }
       }
@@ -190,6 +167,19 @@ export function useWorkspace() {
     }
   }
 
+  async function loadFontProfile(id: string) {
+    try {
+      fontProfileDetail.value = hasDesktopRuntime()
+        ? await invoke<FontProfileDetail>('desktop_font_profile', { fontProfileId: id })
+        : model.value.fontProfileDetails[id] ?? null
+      return fontProfileDetail.value
+    }
+    catch (error) {
+      setMessage(id, String(error))
+      return null
+    }
+  }
+
   async function saveWorkflow(detail: WorkflowDetail) {
     workspaceBusy.value = true
     try {
@@ -239,13 +229,10 @@ export function useWorkspace() {
   function localCreateWorkflow(detail: WorkflowDetail): DesktopSnapshot {
     model.value.workflowDetails[detail.id] = detail
     model.value.workflows = [...model.value.workflows, {
-      id: detail.id,
-      name: detail.name,
-      description: detail.description,
-      revision: detail.revision,
+      ...detail,
       softwareIds: detail.targets.map(target => target.softwareId),
       dictionaryIds: [...new Set(detail.targets.flatMap(target => target.dictionaryIds))].sort(),
-      targets: detail.targets.map(target => ({ ...target, dictionaryIds: [...target.dictionaryIds] })),
+      targets: clone(detail.targets),
     }].sort((left, right) => left.id.localeCompare(right.id))
     model.value.workflowRuntimeStatus[detail.id] = {
       workflowId: detail.id,
@@ -291,7 +278,7 @@ export function useWorkspace() {
   function localCopyWorkflow(sourceId: string, id: string, name: string): DesktopSnapshot {
     const source = model.value.workflowDetails[sourceId]
     if (!source) throw new Error('浏览器预览缺少工作流详情，无法复制。')
-    return localCreateWorkflow({ id, name, description: source.description, revision: 1, targets: source.targets.map(target => ({ ...target, dictionaryIds: [...target.dictionaryIds] })) })
+    return localCreateWorkflow({ ...clone(source), id, name, revision: 1 })
   }
 
   async function removeWorkflows(ids: string[]) {
@@ -304,8 +291,7 @@ export function useWorkspace() {
       }
       else {
         const enabled = new Set(model.value.activations.map(item => item.workflowId))
-        const active = ids.find(id => enabled.has(id))
-        if (active) throw new Error('请先停用工作流，再删除它。')
+        if (ids.some(id => enabled.has(id))) throw new Error('请先停用工作流，再删除它。')
         const removed = new Set(ids)
         model.value.workflows = model.value.workflows.filter(item => !removed.has(item.id))
         for (const id of ids) {
@@ -326,23 +312,17 @@ export function useWorkspace() {
 
   async function setWorkflowsEnabled(ids: string[], enabled: boolean) {
     let succeeded = true
-    for (const id of ids) {
-      if (!await setWorkflowEnabled(id, enabled)) succeeded = false
-    }
+    for (const id of ids) if (!await setWorkflowEnabled(id, enabled)) succeeded = false
     return succeeded
   }
 
   function localSaveWorkflow(detail: WorkflowDetail): DesktopSnapshot {
-    const next = { ...detail, revision: detail.revision + 1 }
+    const next = { ...clone(detail), revision: detail.revision + 1 }
     model.value.workflowDetails[next.id] = next
     model.value.workflows = model.value.workflows.map(item => item.id === next.id ? {
-      id: next.id,
-      name: next.name,
-      description: next.description,
-      revision: next.revision,
+      ...next,
       softwareIds: next.targets.map(target => target.softwareId),
       dictionaryIds: [...new Set(next.targets.flatMap(target => target.dictionaryIds))].sort(),
-      targets: next.targets.map(target => ({ ...target, dictionaryIds: [...target.dictionaryIds] })),
     } : item)
     return model.value
   }
@@ -352,22 +332,17 @@ export function useWorkspace() {
     try {
       const snapshot = hasDesktopRuntime()
         ? await invoke<DesktopSnapshot>('desktop_update_dictionary', { edit: {
-            id: detail.id,
-            name: detail.name,
-            description: detail.description,
-            locale: detail.locale,
-            hookTypeId: detail.hookTypeId,
+            metadata: detail.metadata,
             baseRevision: detail.revision,
-            defaultFont: detail.defaultFont,
             entries: detail.entries,
           } })
         : localSaveDictionary(detail)
       applyDesktopSnapshot(snapshot)
-      await loadDictionary(detail.id)
+      await loadDictionary(detail.metadata.id)
       return true
     }
     catch (error) {
-      setMessage(detail.id, String(error))
+      setMessage(detail.metadata.id, String(error))
       return false
     }
     finally {
@@ -375,44 +350,26 @@ export function useWorkspace() {
     }
   }
 
-  async function createDictionary(name: string, description: string, locale: string, hookTypeId: string | null) {
+  async function createDictionary(metadata: Omit<DictionaryMetadata, 'id'>) {
     if (workspaceBusy.value) return false
     workspaceBusy.value = true
     setMessage('dictionaries', '')
     const id = `dictionary-${crypto.randomUUID()}`
-    const detail: DictionaryDetail = {
-      id,
-      name: name.trim(),
-      description: description.trim(),
-      locale: locale.trim(),
-      hookTypeId,
-      revision: 1,
-      defaultFont: { kind: 'unchanged' },
-      entries: [],
-    }
+    const detail: DictionaryDetail = { metadata: { id, ...metadata }, revision: 1, entries: [] }
     try {
       if (hasDesktopRuntime()) {
         applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_create_dictionary', { create: {
-          id,
-          name: detail.name,
-          description: detail.description,
-          locale: detail.locale,
-          hookTypeId: detail.hookTypeId,
-          defaultFont: detail.defaultFont,
+          metadata: detail.metadata,
           entries: [],
         } }))
       }
       else {
         model.value.dictionaryDetails[id] = detail
         model.value.dictionaries = [...model.value.dictionaries, {
-          id,
-          name: detail.name,
-          description: detail.description,
-          locale: detail.locale,
-          hookTypeId: detail.hookTypeId,
+          metadata: detail.metadata,
           revision: 1,
           entryCount: 0,
-        }].sort((left, right) => left.name.localeCompare(right.name))
+        }].sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
       }
       return true
     }
@@ -434,10 +391,11 @@ export function useWorkspace() {
         applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_delete_dictionaries', { dictionaryIds: ids }))
       }
       else {
-        const referenced = ids.find(id => model.value.workflows.some(workflow => workflow.dictionaryIds.includes(id)))
-        if (referenced) throw new Error('被工作流引用的词典不能删除。')
+        if (ids.some(id => model.value.workflows.some(workflow => workflow.dictionaryIds.includes(id)))) {
+          throw new Error('被工作流引用的词典不能删除。')
+        }
         const removed = new Set(ids)
-        model.value.dictionaries = model.value.dictionaries.filter(item => !removed.has(item.id))
+        model.value.dictionaries = model.value.dictionaries.filter(item => !removed.has(item.metadata.id))
         for (const id of ids) delete model.value.dictionaryDetails[id]
       }
       return true
@@ -452,18 +410,109 @@ export function useWorkspace() {
   }
 
   function localSaveDictionary(detail: DictionaryDetail): DesktopSnapshot {
-    const next = { ...detail, revision: detail.revision + 1 }
-    model.value.dictionaryDetails[next.id] = next
-    model.value.dictionaries = model.value.dictionaries.map(item => item.id === next.id ? {
-      id: next.id,
-      name: next.name,
-      description: next.description,
-      locale: next.locale,
-      hookTypeId: next.hookTypeId,
+    const next = { ...clone(detail), revision: detail.revision + 1 }
+    model.value.dictionaryDetails[next.metadata.id] = next
+    model.value.dictionaries = model.value.dictionaries.map(item => item.metadata.id === next.metadata.id ? {
+      metadata: next.metadata,
       revision: next.revision,
       entryCount: next.entries.length,
     } : item)
     return model.value
+  }
+
+  async function createFontProfile(name: string, description: string, families: string[]) {
+    if (workspaceBusy.value) return false
+    workspaceBusy.value = true
+    setMessage('fontProfiles', '')
+    const id = `font-profile-${crypto.randomUUID()}`
+    const detail: FontProfileDetail = {
+      metadata: { id, name: name.trim(), description: description.trim() },
+      revision: 1,
+      families,
+      resolvedFamily: families.find(family => model.value.fontFamilies.includes(family)) ?? null,
+    }
+    try {
+      if (hasDesktopRuntime()) {
+        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_create_font_profile', { create: {
+          metadata: detail.metadata,
+          families: detail.families,
+        } }))
+      }
+      else {
+        model.value.fontProfileDetails[id] = detail
+        model.value.fontProfiles = [...model.value.fontProfiles, detail]
+          .sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
+      }
+      return true
+    }
+    catch (error) {
+      setMessage('fontProfiles', String(error))
+      return false
+    }
+    finally {
+      workspaceBusy.value = false
+    }
+  }
+
+  async function saveFontProfile(detail: FontProfileDetail) {
+    workspaceBusy.value = true
+    try {
+      const snapshot = hasDesktopRuntime()
+        ? await invoke<DesktopSnapshot>('desktop_update_font_profile', { edit: {
+            metadata: detail.metadata,
+            baseRevision: detail.revision,
+            families: detail.families,
+          } })
+        : localSaveFontProfile(detail)
+      applyDesktopSnapshot(snapshot)
+      await loadFontProfile(detail.metadata.id)
+      return true
+    }
+    catch (error) {
+      setMessage(detail.metadata.id, String(error))
+      return false
+    }
+    finally {
+      workspaceBusy.value = false
+    }
+  }
+
+  function localSaveFontProfile(detail: FontProfileDetail): DesktopSnapshot {
+    const next = {
+      ...clone(detail),
+      revision: detail.revision + 1,
+      resolvedFamily: detail.families.find(family => model.value.fontFamilies.includes(family)) ?? null,
+    }
+    model.value.fontProfileDetails[next.metadata.id] = next
+    model.value.fontProfiles = model.value.fontProfiles.map(item => item.metadata.id === next.metadata.id ? next : item)
+    return model.value
+  }
+
+  async function removeFontProfiles(ids: string[]) {
+    if (workspaceBusy.value || !ids.length) return false
+    workspaceBusy.value = true
+    setMessage('fontProfiles', '')
+    try {
+      if (hasDesktopRuntime()) {
+        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_delete_font_profiles', { fontProfileIds: ids }))
+      }
+      else {
+        if (ids.some(id => model.value.workflows.some(workflow => workflow.targets.some(target => target.fontBindings.some(binding => binding.fontProfileId === id))))) {
+          throw new Error('被工作流引用的字体方案不能删除。')
+        }
+        const removed = new Set(ids)
+        model.value.fontProfiles = model.value.fontProfiles.filter(item => !removed.has(item.metadata.id))
+        for (const id of ids) delete model.value.fontProfileDetails[id]
+      }
+      return true
+    }
+    catch (error) {
+      setMessage('fontProfiles', String(error))
+      return false
+    }
+    finally {
+      workspaceBusy.value = false
+    }
   }
 
   async function selectSoftware(id: string) {
@@ -517,7 +566,7 @@ export function useWorkspace() {
           translation: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未发现文字写回能力', generation: null },
           font: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未发现字体写回能力', generation: null },
           observe: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未连接运行实例', generation: null },
-          locations: [],
+          locations: [{ id: 'main-ui', label: '界面文字' }],
         }
         model.value.software = [...model.value.software, record].sort((left, right) => left.name.localeCompare(right.name))
       }
@@ -570,10 +619,6 @@ export function useWorkspace() {
     }
   }
 
-  function setTranslationSource(value: string) {
-    model.value.translationSource = value
-  }
-
   function runtimeStatus(id: string): WorkflowRuntimeStatus | undefined {
     return model.value.workflowRuntimeStatus[id]
   }
@@ -582,6 +627,7 @@ export function useWorkspace() {
     model,
     activationIds,
     dictionaryDetail,
+    fontProfileDetail,
     workflowDetail,
     softwareBusy,
     workspaceBusy,
@@ -592,6 +638,7 @@ export function useWorkspace() {
     refreshWorkflows,
     loadWorkflow,
     loadDictionary,
+    loadFontProfile,
     createWorkflow,
     copyWorkflow,
     removeWorkflows,
@@ -600,11 +647,13 @@ export function useWorkspace() {
     saveDictionary,
     createDictionary,
     removeDictionaries,
+    createFontProfile,
+    saveFontProfile,
+    removeFontProfiles,
     selectSoftware,
     addSoftware,
     updateSoftware,
     removeSoftware,
-    setTranslationSource,
     runtimeStatus,
   }
 }

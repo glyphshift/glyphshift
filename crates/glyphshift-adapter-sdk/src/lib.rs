@@ -85,6 +85,7 @@ pub struct AdapterDescriptor {
     apply_model: ApplyModel,
     placement: Placement,
     features: BTreeSet<Feature>,
+    platforms: BTreeSet<Box<str>>,
     architectures: BTreeSet<Box<str>>,
     abi: AbiVersion,
 }
@@ -104,9 +105,19 @@ impl AdapterDescriptor {
             apply_model,
             placement,
             features: features.into_iter().collect(),
+            platforms: BTreeSet::new(),
             architectures: BTreeSet::new(),
             abi: AbiVersion::new(1, 0),
         }
+    }
+
+    #[must_use]
+    pub fn with_platforms(
+        mut self,
+        platforms: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.platforms = platforms.into_iter().map(Into::into).collect();
+        self
     }
 
     #[must_use]
@@ -146,6 +157,10 @@ impl AdapterDescriptor {
 
     pub fn features(&self) -> impl Iterator<Item = Feature> + '_ {
         self.features.iter().copied()
+    }
+
+    pub fn platforms(&self) -> impl Iterator<Item = &str> {
+        self.platforms.iter().map(AsRef::as_ref)
     }
 
     pub fn architectures(&self) -> impl Iterator<Item = &str> {

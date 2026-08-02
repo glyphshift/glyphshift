@@ -25,6 +25,7 @@ tauri-plugin-dialog = "2.6.0"
 winreg = "0.55.0"
 
 [dev-dependencies]
+glyphshift-adapter-registry = { path = "../../../crates/glyphshift-adapter-registry" }
 serde_json = "1.0"
 tempfile = "3.23.0"
 

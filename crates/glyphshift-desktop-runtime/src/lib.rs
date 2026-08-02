@@ -103,13 +103,26 @@ struct ArtifactManifest {
     file: Box<str>,
     sha256: Box<str>,
     #[serde(default)]
-    label: Option<Box<str>>,
+    name: Option<Box<str>>,
+    #[serde(default)]
+    summary: Option<Box<str>>,
+    #[serde(default)]
+    technology: Option<Box<str>>,
+    #[serde(default)]
+    technical_target: Option<Box<str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeAdapterOption {
     id: Box<str>,
-    label: Box<str>,
+    name: Box<str>,
+    version: Box<str>,
+    summary: Box<str>,
+    platforms: Vec<Box<str>>,
+    technologies: Vec<Box<str>>,
+    features: Vec<Feature>,
+    technical_target: Box<str>,
+    configuration: Box<str>,
 }
 
 impl RuntimeAdapterOption {
@@ -119,8 +132,43 @@ impl RuntimeAdapterOption {
     }
 
     #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    #[must_use]
+    pub fn platforms(&self) -> &[Box<str>] {
+        &self.platforms
+    }
+
+    #[must_use]
+    pub fn technologies(&self) -> &[Box<str>] {
+        &self.technologies
+    }
+
+    #[must_use]
+    pub fn features(&self) -> &[Feature] {
+        &self.features
+    }
+
+    #[must_use]
+    pub fn technical_target(&self) -> &str {
+        &self.technical_target
+    }
+
+    #[must_use]
+    pub fn configuration(&self) -> &str {
+        &self.configuration
     }
 }
 
@@ -204,10 +252,29 @@ impl RuntimeBundle {
             if features.contains(&Feature::TextReplace) {
                 translation_adapters.push(RuntimeAdapterOption {
                     id: descriptor.adapter_id().as_str().into(),
-                    label: adapter
-                        .label
+                    name: adapter
+                        .name
                         .clone()
                         .unwrap_or_else(|| descriptor.adapter_id().as_str().into()),
+                    version: format!(
+                        "{}.{}.{}",
+                        descriptor.version().major(),
+                        descriptor.version().minor(),
+                        descriptor.version().patch()
+                    )
+                    .into(),
+                    summary: adapter
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| "运行时文字与字体拦截适配器".into()),
+                    platforms: descriptor.platforms().map(Into::into).collect(),
+                    technologies: adapter.technology.iter().cloned().collect(),
+                    features: features.clone(),
+                    technical_target: adapter
+                        .technical_target
+                        .clone()
+                        .unwrap_or_else(|| descriptor.adapter_id().as_str().into()),
+                    configuration: "none".into(),
                 });
             }
             let artifact_id = PackageArtifactId::new(format!("adapters/{index}"));
@@ -263,6 +330,11 @@ impl RuntimeBundle {
     #[must_use]
     pub fn translation_adapter_options(&self) -> &[RuntimeAdapterOption] {
         &self.translation_adapters
+    }
+
+    #[must_use]
+    pub fn adapter_requirements(&self) -> &[AdapterRequirement] {
+        &self.discovered_requirements
     }
 
     pub fn discover(
@@ -1179,7 +1251,7 @@ fn next_nonce(sequence: u64) -> ControllerNonce {
 mod tests {
     use super::*;
     use glyphshift_desktop_backend::{
-        DesktopBackend, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
+        DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
         ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
     };
     use glyphshift_protocol::{
@@ -1187,6 +1259,25 @@ mod tests {
         TransportFailure,
     };
     use tempfile::tempdir;
+
+    const TEST_ADAPTER_ID: &str = "test.inline";
+
+    fn open_test_backend(root: impl AsRef<Path>) -> DesktopBackend {
+        DesktopBackend::open_with_environment(
+            root,
+            DesktopEnvironment::new(
+                [AdapterRequirement::new(
+                    glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
+                    AdapterVersionRequirement::Exact(
+                        glyphshift_adapter_registry::AdapterVersion::new(1, 0, 0),
+                    ),
+                    [Feature::TextReplace, Feature::FontSubstitute],
+                )],
+                Vec::<Box<str>>::new(),
+            ),
+        )
+        .expect("desktop backend")
+    }
 
     struct InventoryController;
 
@@ -1273,7 +1364,7 @@ mod tests {
     #[test]
     fn workflow_reconcile_runs_two_targets_and_stops_only_its_owned_software() {
         let root = tempdir().expect("workflow Runtime data");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let mut software_ids = Vec::new();
         for executable_name in ["Alpha.exe", "Beta.exe", "Gamma.exe"] {
             let executable = root.path().join(executable_name);
@@ -1290,22 +1381,34 @@ mod tests {
         }
         backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.shared", "共享词典", "zh-CN")
+                DictionaryCreate::new("dictionary.shared", "共享词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
             )
             .expect("shared dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.group", "双目标工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.shared"]),
-                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.shared"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[0].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.shared"],
+                    ),
+                    WorkflowTargetCreate::new(
+                        software_ids[1].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.shared"],
+                    ),
                 ]),
             )
             .expect("group workflow");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.other", "独立工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[2].as_str(), ["dictionary.shared"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[2].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.shared"],
+                    ),
                 ]),
             )
             .expect("other workflow");
@@ -1344,7 +1447,7 @@ mod tests {
     #[test]
     fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target() {
         let root = tempdir().expect("workflow Runtime data");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let mut software_ids = Vec::new();
         for executable_name in ["First.exe", "Second.exe"] {
             let executable = root.path().join(executable_name);
@@ -1361,15 +1464,23 @@ mod tests {
         }
         let dictionary = backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.hot", "共享热更新词典", "zh-CN")
+                DictionaryCreate::new("dictionary.hot", "共享热更新词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "第一次")]),
             )
             .expect("shared dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.hot", "热更新工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.hot"]),
-                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.hot"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[0].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.hot"],
+                    ),
+                    WorkflowTargetCreate::new(
+                        software_ids[1].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.hot"],
+                    ),
                 ]),
             )
             .expect("shared workflow");
@@ -1384,8 +1495,9 @@ mod tests {
             .update_dictionary(
                 DictionaryEdit::new(
                     dictionary.id(),
-                    dictionary.name(),
-                    dictionary.locale(),
+                    dictionary.metadata().name(),
+                    dictionary.metadata().source_locale(),
+                    dictionary.metadata().target_locale(),
                     dictionary.revision(),
                 )
                 .with_entries([DictionaryRuleCreate::replace(
@@ -1411,7 +1523,7 @@ mod tests {
     #[test]
     fn explicit_workflow_replacement_removes_the_entire_old_intent() {
         let root = tempdir().expect("workflow Runtime data");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let mut software_ids = Vec::new();
         for executable_name in ["OldPrimary.exe", "OldSecondary.exe"] {
             let executable = root.path().join(executable_name);
@@ -1428,22 +1540,34 @@ mod tests {
         }
         backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.replace", "替换词典", "zh-CN")
+                DictionaryCreate::new("dictionary.replace", "替换词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
             )
             .expect("replacement dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.old", "旧工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.replace"]),
-                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.replace"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[0].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.replace"],
+                    ),
+                    WorkflowTargetCreate::new(
+                        software_ids[1].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.replace"],
+                    ),
                 ]),
             )
             .expect("old workflow");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.new", "新工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.replace"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[0].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.replace"],
+                    ),
                 ]),
             )
             .expect("new workflow");
@@ -1473,7 +1597,7 @@ mod tests {
         let root = tempdir().expect("workflow Runtime data");
         let executable = root.path().join("Restarted.exe");
         fs::write(&executable, b"synthetic executable").expect("selected executable");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let snapshot = backend
             .add_software(ExecutableSelection::new(executable))
             .expect("registered executable");
@@ -1483,14 +1607,18 @@ mod tests {
             .to_owned();
         backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.restart", "重启词典", "zh-CN")
+                DictionaryCreate::new("dictionary.restart", "重启词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "重连")]),
             )
             .expect("restart dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.restart", "重启工作流").with_targets([
-                    WorkflowTargetCreate::new(software_id.as_str(), ["dictionary.restart"]),
+                    WorkflowTargetCreate::new(
+                        software_id.as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.restart"],
+                    ),
                 ]),
             )
             .expect("restart workflow");
@@ -1514,7 +1642,7 @@ mod tests {
     #[test]
     fn workflow_stop_failure_keeps_one_last_applied_target_without_rolling_back_others() {
         let root = tempdir().expect("workflow Runtime data");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let mut software_ids = Vec::new();
         for executable_name in ["StopFailure.exe", "StopSuccess.exe"] {
             let executable = root.path().join(executable_name);
@@ -1531,15 +1659,23 @@ mod tests {
         }
         backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.stop", "停止词典", "zh-CN")
+                DictionaryCreate::new("dictionary.stop", "停止词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "停止")]),
             )
             .expect("stop dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.stop", "停止工作流").with_targets([
-                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.stop"]),
-                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.stop"]),
+                    WorkflowTargetCreate::new(
+                        software_ids[0].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.stop"],
+                    ),
+                    WorkflowTargetCreate::new(
+                        software_ids[1].as_str(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.stop"],
+                    ),
                 ]),
             )
             .expect("stop workflow");
@@ -1626,7 +1762,7 @@ mod tests {
         let root = tempdir().expect("desktop data");
         let executable = root.path().join("MotionCanvas.exe");
         fs::write(&executable, b"synthetic executable").expect("selected executable");
-        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut backend = open_test_backend(root.path().join("data"));
         let snapshot = backend
             .add_software(ExecutableSelection::new(executable))
             .expect("registered executable");

@@ -89,6 +89,11 @@ impl TargetFacts {
     }
 
     #[must_use]
+    pub fn operating_system(&self) -> &str {
+        &self.operating_system
+    }
+
+    #[must_use]
     pub fn architecture(&self) -> &str {
         &self.architecture
     }

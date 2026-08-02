@@ -14,6 +14,10 @@ pub const FEATURE_RESOURCE_REPLACE: u64 = 1 << 4;
 
 pub const ARCH_X86: u32 = 1 << 0;
 pub const ARCH_X86_64: u32 = 1 << 1;
+pub const ARCH_ARM64: u32 = 1 << 2;
+
+pub const PLATFORM_WINDOWS: u32 = 1 << 0;
+pub const PLATFORM_MACOS: u32 = 1 << 1;
 
 pub const STATUS_OK: i32 = 0;
 pub const STATUS_UNSUPPORTED_FEATURE: i32 = 1;
@@ -75,6 +79,7 @@ pub struct NativeAdapterDescriptorV1 {
     pub apply_model: u32,
     pub placement: u32,
     pub feature_bits: u64,
+    pub platform_bits: u32,
     pub architecture_bits: u32,
 }
 
@@ -84,6 +89,7 @@ impl NativeAdapterDescriptorV1 {
         adapter_id: &'static str,
         version: (u16, u16, u16),
         feature_bits: u64,
+        platform_bits: u32,
         architecture_bits: u32,
     ) -> Self {
         Self {
@@ -97,6 +103,7 @@ impl NativeAdapterDescriptorV1 {
             apply_model: APPLY_MODEL_INLINE_RENDER,
             placement: PLACEMENT_TARGET_PROCESS,
             feature_bits,
+            platform_bits,
             architecture_bits,
         }
     }
@@ -121,6 +128,7 @@ impl NativeAdapterDescriptorV1 {
             placement,
             features_from_bits(self.feature_bits)?,
         )
+        .with_platforms(platforms_from_bits(self.platform_bits)?)
         .with_architectures(architectures_from_bits(self.architecture_bits)?)
         .with_abi(AbiVersion::new(self.abi_major, self.abi_minor));
         Ok(descriptor)
@@ -187,6 +195,7 @@ pub enum NativeAbiError {
     UnknownApplyModel(u32),
     UnknownPlacement(u32),
     UnknownFeatureBits(u64),
+    UnknownPlatformBits(u32),
     UnknownArchitectureBits(u32),
 }
 
@@ -226,7 +235,7 @@ fn features_from_bits(bits: u64) -> Result<Vec<Feature>, NativeAbiError> {
 }
 
 fn architectures_from_bits(bits: u32) -> Result<Vec<&'static str>, NativeAbiError> {
-    let known = ARCH_X86 | ARCH_X86_64;
+    let known = ARCH_X86 | ARCH_X86_64 | ARCH_ARM64;
     if bits & !known != 0 {
         return Err(NativeAbiError::UnknownArchitectureBits(bits & !known));
     }
@@ -237,7 +246,25 @@ fn architectures_from_bits(bits: u32) -> Result<Vec<&'static str>, NativeAbiErro
     if bits & ARCH_X86_64 != 0 {
         architectures.push("x86_64");
     }
+    if bits & ARCH_ARM64 != 0 {
+        architectures.push("aarch64");
+    }
     Ok(architectures)
+}
+
+fn platforms_from_bits(bits: u32) -> Result<Vec<&'static str>, NativeAbiError> {
+    let known = PLATFORM_WINDOWS | PLATFORM_MACOS;
+    if bits & !known != 0 {
+        return Err(NativeAbiError::UnknownPlatformBits(bits & !known));
+    }
+    let mut platforms = Vec::new();
+    if bits & PLATFORM_WINDOWS != 0 {
+        platforms.push("windows");
+    }
+    if bits & PLATFORM_MACOS != 0 {
+        platforms.push("macos");
+    }
+    Ok(platforms)
 }
 
 #[must_use]
@@ -247,6 +274,7 @@ pub fn descriptor_matches(actual: &AdapterDescriptor, expected: &AdapterDescript
         && actual.apply_model() == expected.apply_model()
         && actual.placement() == expected.placement()
         && actual.features().eq(expected.features())
+        && actual.platforms().eq(expected.platforms())
         && actual.architectures().eq(expected.architectures())
         && actual.abi() == expected.abi()
 }

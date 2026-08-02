@@ -45,7 +45,7 @@ test('Vue surfaces use Nuxt UI for controls, tables, and overlays', () => {
 })
 
 test('management pages share the project management-page modules', () => {
-  const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue']
+  const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'FontProfileLibrary.vue']
 
   for (const page of pages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')

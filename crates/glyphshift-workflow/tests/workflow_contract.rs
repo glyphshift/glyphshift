@@ -1,15 +1,20 @@
 use glyphshift_domain::{Feature, Generation, RouteProgram};
-use glyphshift_translation::FontPolicy;
 use glyphshift_workflow::{
-    resolve, CompositionDiagnostic, DefaultFontBehavior, Dictionary, DictionaryEntry,
-    EntryFontBehavior, ResolveError, SoftwareInput, Workflow, WorkflowTarget,
+    resolve, AdapterInput, AdapterPlan, CompositionDiagnostic, CompositionEnvironment, Dictionary,
+    DictionaryEntry, FontProfile, FontProfileBinding, ResolveError, SoftwareInput, Workflow,
+    WorkflowTarget,
 };
 
 #[test]
-fn wf_001_one_software_and_dictionary_compile_to_text_only() {
+fn wf_001_composes_text_fonts_and_parallel_adapters_as_independent_assets() {
     let workflow = Workflow::new(
         "workflow-main",
-        [WorkflowTarget::new("software-editor", ["dictionary-zh-cn"])],
+        [WorkflowTarget::new(
+            "software-editor",
+            AdapterPlan::parallel(["adapter-gdi", "adapter-gdiplus"]),
+            ["dictionary-zh-cn"],
+        )
+        .with_font_bindings([FontProfileBinding::all("font-profile-cjk")])],
     );
     let software = [SoftwareInput::new(
         "software-editor",
@@ -23,495 +28,393 @@ fn wf_001_one_software_and_dictionary_compile_to_text_only() {
         "zh-CN",
         [DictionaryEntry::replace("menu", "File", "文件")],
     )];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("one valid target should compile completely");
-    let target = compiled
-        .targets()
-        .first()
-        .expect("the compiled workflow should contain its target");
-
-    assert_eq!(
-        (
-            compiled.id(),
-            target.software_id(),
-            target.generation(),
-            target.route(),
-            target.requested_features(),
-            target.snapshot().lookup("menu", "File").as_deref(),
-            target.font_policy(),
-        ),
-        (
-            "workflow-main",
-            "software-editor",
-            Generation::new(7),
-            &RouteProgram::direct("menu"),
-            &[Feature::TextReplace][..],
-            Some("文件"),
-            &FontPolicy::empty(),
-        )
-    );
-}
-
-#[test]
-fn wf_002_entry_font_override_compiles_to_text_and_font() {
-    let workflow = Workflow::new(
-        "workflow-main",
-        [WorkflowTarget::new("software-editor", ["dictionary-zh-cn"])],
-    );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(8),
-        RouteProgram::direct("menu"),
-        ["menu"],
+    let font_profiles = [FontProfile::new(
+        "font-profile-cjk",
+        ["Unavailable Sans", "Available Sans"],
     )];
-    let dictionaries = [Dictionary::new(
-        "dictionary-zh-cn",
-        "zh-CN",
-        [DictionaryEntry::replace("menu", "File", "文件")
-            .with_font(EntryFontBehavior::substitute("Entry Font"))],
-    )];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("a text and font rule should compile completely");
-    let target = &compiled.targets()[0];
-
-    assert_eq!(
-        (target.requested_features(), target.font_policy()),
-        (
-            &[Feature::TextReplace, Feature::FontSubstitute][..],
-            &FontPolicy::empty().with_entry(
-                "menu",
-                "File",
-                glyphshift_translation::FontRule::Substitute("Entry Font".into()),
+    let environment = CompositionEnvironment::new(
+        [
+            AdapterInput::new(
+                "adapter-gdi",
+                [Feature::TextReplace, Feature::FontSubstitute],
             ),
-        )
+            AdapterInput::new(
+                "adapter-gdiplus",
+                [Feature::TextReplace, Feature::FontSubstitute],
+            ),
+        ],
+        ["Available Sans"],
     );
-}
 
-#[test]
-fn wf_003_unchanged_entry_blocks_the_dictionary_default_font() {
-    let workflow = Workflow::new(
-        "workflow-main",
-        [WorkflowTarget::new("software-editor", ["dictionary-zh-cn"])],
-    );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(9),
-        RouteProgram::direct("menu"),
-        ["menu"],
-    )];
-    let dictionaries =
-        [Dictionary::new(
-            "dictionary-zh-cn",
-            "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "文件")
-                .with_font(EntryFontBehavior::Unchanged)],
-        )
-        .with_default_font(DefaultFontBehavior::substitute("Dictionary Default"))];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("a dictionary default and unchanged entry should compile");
+    let compiled = resolve(
+        &workflow,
+        &software,
+        &dictionaries,
+        &font_profiles,
+        &environment,
+    )
+    .expect("independent assets should compose into one complete target intent");
     let target = &compiled.targets()[0];
 
     assert_eq!(
         (
+            target.adapter_ids(),
             target.requested_features(),
             target
-                .font_policy()
-                .lookup_entry_for_adapter("menu", "adapter-a", "File"),
+                .snapshot()
+                .lookup_for_adapter("menu", "adapter-gdi", "File")
+                .as_deref(),
             target
                 .font_policy()
-                .lookup_entry_for_adapter("menu", "adapter-a", "Edit"),
+                .lookup_entry_for_adapter("menu", "adapter-gdiplus", "Edit"),
         ),
         (
+            &[
+                Box::<str>::from("adapter-gdi"),
+                Box::<str>::from("adapter-gdiplus")
+            ][..],
             &[Feature::TextReplace, Feature::FontSubstitute][..],
-            Some(glyphshift_translation::FontRule::Unchanged),
+            Some("文件"),
             Some(glyphshift_translation::FontRule::Substitute(
-                "Dictionary Default".into()
+                "Available Sans".into(),
             )),
         )
     );
 }
 
 #[test]
-fn dictionary_hook_scope_applies_once_to_text_and_default_font_rules() {
-    let workflow = Workflow::new(
-        "workflow-main",
-        [WorkflowTarget::new("software-editor", ["dictionary-zh-cn"])],
-    );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(10),
-        RouteProgram::direct("menu"),
-        ["menu"],
-    )];
-    let dictionaries = [Dictionary::new(
-        "dictionary-zh-cn",
-        "zh-CN",
-        [DictionaryEntry::replace("menu", "File", "文件")],
-    )
-    .with_default_font(DefaultFontBehavior::substitute("Dictionary Default"))
-    .for_adapters(["adapter-gdi"])];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("a dictionary-level hook scope should compile");
-    let target = &compiled.targets()[0];
-
-    assert_eq!(
-        target
-            .snapshot()
-            .lookup_for_adapter("menu", "adapter-gdi", "File")
-            .as_deref(),
-        Some("文件")
-    );
-    assert!(target
-        .snapshot()
-        .lookup_for_adapter("menu", "adapter-gdiplus", "File")
-        .is_none());
-    assert_eq!(
-        target
-            .font_policy()
-            .lookup_entry_for_adapter("menu", "adapter-gdi", "Edit"),
-        Some(glyphshift_translation::FontRule::Substitute(
-            "Dictionary Default".into(),
-        ))
-    );
-    assert!(target
-        .font_policy()
-        .lookup_entry_for_adapter("menu", "adapter-gdiplus", "Edit")
-        .is_none());
-}
-
-#[test]
-fn wf_004_higher_priority_dictionary_wins_and_reports_the_conflict_sources() {
-    let workflow = Workflow::new(
-        "workflow-main",
-        [WorkflowTarget::new(
+fn wf_004_allows_a_font_only_target_without_a_dictionary() {
+    let compiled = resolve(
+        &Workflow::new(
+            "workflow-font-only",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-font"]),
+                [] as [&str; 0],
+            )
+            .with_font_bindings([FontProfileBinding::locations(
+                "font-profile-cjk",
+                ["dialog"],
+            )])],
+        ),
+        &[SoftwareInput::new(
             "software-editor",
-            ["dictionary-high", "dictionary-low"],
+            "zh-CN",
+            Generation::new(10),
+            RouteProgram::direct("dialog"),
+            ["dialog"],
         )],
-    );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(10),
-        RouteProgram::direct("menu"),
-        ["menu"],
-    )];
-    let dictionaries = [
-        Dictionary::new(
-            "dictionary-high",
-            "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "高优先级")],
+        &[],
+        &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
+        &CompositionEnvironment::new(
+            [AdapterInput::new("adapter-font", [Feature::FontSubstitute])],
+            ["Available Sans"],
         ),
-        Dictionary::new(
-            "dictionary-low",
-            "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "低优先级")],
-        ),
-    ];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("conflicting valid dictionaries should compile deterministically");
+    )
+    .expect("font bindings are independent from dictionaries");
 
     assert_eq!(
-        (
-            compiled.targets()[0]
-                .snapshot()
-                .lookup("menu", "File")
-                .as_deref(),
-            compiled.diagnostics(),
-        ),
-        (
-            Some("高优先级"),
-            &[CompositionDiagnostic::RuleConflict {
-                software_id: "software-editor".into(),
-                location: "menu".into(),
-                context_kind: None,
-                context_key: None,
-                source: "File".into(),
-                adapter_ids: Default::default(),
-                winning_dictionary_id: "dictionary-high".into(),
-                shadowed_dictionary_id: "dictionary-low".into(),
-            }][..],
-        )
+        compiled.targets()[0].requested_features(),
+        &[Feature::FontSubstitute]
     );
 }
 
 #[test]
-fn wf_005_reuses_a_dictionary_and_rejects_an_unknown_target_location() {
-    let shared_dictionary = Dictionary::new(
-        "dictionary-shared",
-        "zh-CN",
-        [DictionaryEntry::replace("menu", "File", "文件")],
-    );
-    let workflow = Workflow::new(
-        "workflow-shared",
-        [
-            WorkflowTarget::new("software-a", ["dictionary-shared"]),
-            WorkflowTarget::new("software-b", ["dictionary-shared"]),
-        ],
-    );
-    let software = [
-        SoftwareInput::new(
-            "software-a",
+fn wf_005_composes_required_features_across_multiple_adapters() {
+    let compiled = resolve(
+        &Workflow::new(
+            "workflow-split-capabilities",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-text", "adapter-font"]),
+                ["dictionary-zh-cn"],
+            )
+            .with_font_bindings([FontProfileBinding::all("font-profile-cjk")])],
+        ),
+        &[SoftwareInput::new(
+            "software-editor",
             "zh-CN",
             Generation::new(11),
             RouteProgram::direct("menu"),
             ["menu"],
+        )],
+        &[Dictionary::new(
+            "dictionary-zh-cn",
+            "zh-CN",
+            [DictionaryEntry::replace("menu", "File", "文件")],
+        )],
+        &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
+        &CompositionEnvironment::new(
+            [
+                AdapterInput::new("adapter-text", [Feature::TextReplace]),
+                AdapterInput::new("adapter-font", [Feature::FontSubstitute]),
+            ],
+            ["Available Sans"],
         ),
-        SoftwareInput::new(
-            "software-b",
+    )
+    .expect("parallel adapters may contribute different capabilities");
+
+    assert_eq!(
+        compiled.targets()[0].requested_features(),
+        &[Feature::TextReplace, Feature::FontSubstitute]
+    );
+}
+
+#[test]
+fn wf_006_reports_dictionary_precedence_without_exposing_adapter_identity() {
+    let compiled = resolve(
+        &Workflow::new(
+            "workflow-precedence",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-text"]),
+                ["dictionary-first", "dictionary-second"],
+            )],
+        ),
+        &[SoftwareInput::new(
+            "software-editor",
             "zh-CN",
             Generation::new(12),
             RouteProgram::direct("menu"),
             ["menu"],
+        )],
+        &[
+            Dictionary::new(
+                "dictionary-first",
+                "zh-CN",
+                [DictionaryEntry::replace("menu", "File", "文件")],
+            ),
+            Dictionary::new(
+                "dictionary-second",
+                "zh-CN",
+                [DictionaryEntry::replace("menu", "File", "档案")],
+            ),
+        ],
+        &[],
+        &CompositionEnvironment::new(
+            [AdapterInput::new("adapter-text", [Feature::TextReplace])],
+            [] as [&str; 0],
         ),
-    ];
-    let compiled = resolve(
-        &workflow,
-        &software,
-        std::slice::from_ref(&shared_dictionary),
     )
-    .expect("one dictionary should compile independently for both software targets");
+    .expect("the first dictionary owns a duplicate semantic rule");
 
-    let invalid = resolve(
+    assert_eq!(
+        compiled.diagnostics(),
+        &[CompositionDiagnostic::RuleConflict {
+            software_id: "software-editor".into(),
+            location: "menu".into(),
+            context_kind: None,
+            context_key: None,
+            source: "File".into(),
+            winning_dictionary_id: "dictionary-first".into(),
+            shadowed_dictionary_id: "dictionary-second".into(),
+        }]
+    );
+}
+
+#[test]
+fn wf_007_rejects_a_dictionary_target_locale_mismatch() {
+    let result = resolve(
         &Workflow::new(
-            "workflow-invalid",
+            "workflow-locale",
             [WorkflowTarget::new(
-                "software-invalid",
-                ["dictionary-shared"],
+                "software-editor",
+                AdapterPlan::parallel(["adapter-text"]),
+                ["dictionary-ja-jp"],
             )],
         ),
         &[SoftwareInput::new(
-            "software-invalid",
+            "software-editor",
             "zh-CN",
             Generation::new(13),
-            RouteProgram::direct("panel"),
-            ["panel"],
+            RouteProgram::direct("menu"),
+            ["menu"],
         )],
-        &[shared_dictionary],
+        &[Dictionary::new(
+            "dictionary-ja-jp",
+            "ja-JP",
+            [DictionaryEntry::replace("menu", "File", "ファイル")],
+        )],
+        &[],
+        &CompositionEnvironment::new(
+            [AdapterInput::new("adapter-text", [Feature::TextReplace])],
+            [] as [&str; 0],
+        ),
     );
 
     assert_eq!(
-        (
-            compiled
-                .targets()
-                .iter()
-                .map(|target| (
-                    target.software_id(),
-                    target.generation(),
-                    target.snapshot().lookup("menu", "File")
-                ))
-                .collect::<Vec<_>>(),
-            invalid,
-        ),
-        (
-            vec![
-                ("software-a", Generation::new(11), Some("文件".into()),),
-                ("software-b", Generation::new(12), Some("文件".into()),),
-            ],
-            Err(ResolveError::UnknownLocation {
-                software_id: "software-invalid".into(),
-                dictionary_id: "dictionary-shared".into(),
-                location: "menu".into(),
-            }),
-        )
+        result,
+        Err(ResolveError::LocaleMismatch {
+            software_id: "software-editor".into(),
+            dictionary_id: "dictionary-ja-jp".into(),
+        })
     );
 }
 
 #[test]
-fn wf_006_rejects_incomplete_targets_without_a_partial_intent() {
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(14),
-        RouteProgram::direct("menu"),
-        ["menu"],
-    )];
-    let valid_dictionary = Dictionary::new(
-        "dictionary-valid",
-        "zh-CN",
-        [DictionaryEntry::replace("menu", "File", "文件")],
-    );
-    let empty_dictionary = Dictionary::new("dictionary-empty", "zh-CN", []);
-    let wrong_locale = Dictionary::new(
-        "dictionary-en",
-        "en-US",
-        [DictionaryEntry::replace("menu", "File", "File")],
-    );
-
-    let results = [
-        resolve(
-            &Workflow::new(
-                "workflow-empty-target",
-                [WorkflowTarget::new("software-editor", [] as [&str; 0])],
-            ),
-            &software,
-            std::slice::from_ref(&valid_dictionary),
-        ),
-        resolve(
-            &Workflow::new(
-                "workflow-missing-dictionary",
-                [WorkflowTarget::new(
-                    "software-editor",
-                    ["dictionary-missing"],
-                )],
-            ),
-            &software,
-            std::slice::from_ref(&valid_dictionary),
-        ),
-        resolve(
-            &Workflow::new(
-                "workflow-wrong-locale",
-                [WorkflowTarget::new("software-editor", ["dictionary-en"])],
-            ),
-            &software,
-            std::slice::from_ref(&wrong_locale),
-        ),
-        resolve(
-            &Workflow::new(
-                "workflow-no-rules",
-                [WorkflowTarget::new("software-editor", ["dictionary-empty"])],
-            ),
-            &software,
-            std::slice::from_ref(&empty_dictionary),
-        ),
-    ];
-
-    assert_eq!(
-        results,
-        [
-            Err(ResolveError::EmptyTarget {
-                software_id: "software-editor".into(),
-            }),
-            Err(ResolveError::UnknownDictionary("dictionary-missing".into())),
-            Err(ResolveError::LocaleMismatch {
-                software_id: "software-editor".into(),
-                dictionary_id: "dictionary-en".into(),
-            }),
-            Err(ResolveError::NoEffectiveRules {
-                software_id: "software-editor".into(),
-            }),
-        ]
-    );
-}
-
-#[test]
-fn workflow_preserves_context_and_adapter_scope_for_text_and_font() {
+fn wf_002_rejects_duplicate_adapter_bindings_before_compilation() {
     let workflow = Workflow::new(
-        "workflow-context",
+        "workflow-duplicate-adapter",
         [WorkflowTarget::new(
             "software-editor",
-            ["dictionary-context"],
+            AdapterPlan::parallel(["adapter-gdi", "adapter-gdi"]),
+            ["dictionary-zh-cn"],
         )],
     );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(15),
-        RouteProgram::direct("parameter"),
-        ["parameter"],
-    )];
-    let dictionaries = [Dictionary::new(
-        "dictionary-context",
-        "zh-CN",
-        [
-            DictionaryEntry::replace("parameter", "Radius", "模糊半径")
-                .with_context("tool", "blur")
-                .for_adapters(["adapter-a"])
-                .with_font(EntryFontBehavior::substitute("Blur Font")),
-            DictionaryEntry::replace("parameter", "Radius", "锐化半径")
-                .with_context("tool", "sharpen")
-                .for_adapters(["adapter-b"]),
+    let result = resolve(
+        &workflow,
+        &[SoftwareInput::new(
+            "software-editor",
+            "zh-CN",
+            Generation::new(8),
+            RouteProgram::direct("menu"),
+            ["menu"],
+        )],
+        &[Dictionary::new(
+            "dictionary-zh-cn",
+            "zh-CN",
+            [DictionaryEntry::replace("menu", "File", "文件")],
+        )],
+        &[],
+        &CompositionEnvironment::new(
+            [AdapterInput::new("adapter-gdi", [Feature::TextReplace])],
+            [] as [&str; 0],
+        ),
+    );
+
+    assert_eq!(
+        result,
+        Err(ResolveError::DuplicateAdapter {
+            software_id: "software-editor".into(),
+            adapter_id: "adapter-gdi".into(),
+        })
+    );
+}
+
+#[test]
+fn wf_003_rejects_an_empty_font_location_scope() {
+    let workflow = Workflow::new(
+        "workflow-empty-font-scope",
+        [WorkflowTarget::new(
+            "software-editor",
+            AdapterPlan::parallel(["adapter-gdi"]),
+            ["dictionary-zh-cn"],
+        )
+        .with_font_bindings([FontProfileBinding::locations(
+            "font-profile-cjk",
+            [] as [&str; 0],
+        )])],
+    );
+    let result = resolve(
+        &workflow,
+        &[SoftwareInput::new(
+            "software-editor",
+            "zh-CN",
+            Generation::new(9),
+            RouteProgram::direct("menu"),
+            ["menu"],
+        )],
+        &[Dictionary::new(
+            "dictionary-zh-cn",
+            "zh-CN",
+            [DictionaryEntry::replace("menu", "File", "文件")],
+        )],
+        &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
+        &CompositionEnvironment::new(
+            [AdapterInput::new(
+                "adapter-gdi",
+                [Feature::TextReplace, Feature::FontSubstitute],
+            )],
+            ["Available Sans"],
+        ),
+    );
+
+    assert_eq!(
+        result,
+        Err(ResolveError::EmptyFontScope {
+            software_id: "software-editor".into(),
+            font_profile_id: "font-profile-cjk".into(),
+        })
+    );
+}
+
+#[test]
+fn wf_008_rejects_overlapping_font_profile_bindings() {
+    let result = resolve(
+        &Workflow::new(
+            "workflow-overlapping-font-scopes",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-font"]),
+                [] as [&str; 0],
+            )
+            .with_font_bindings([
+                FontProfileBinding::locations("font-profile-primary", ["dialog"]),
+                FontProfileBinding::locations("font-profile-secondary", ["dialog"]),
+            ])],
+        ),
+        &[SoftwareInput::new(
+            "software-editor",
+            "zh-CN",
+            Generation::new(14),
+            RouteProgram::direct("dialog"),
+            ["dialog"],
+        )],
+        &[],
+        &[
+            FontProfile::new("font-profile-primary", ["Available Sans"]),
+            FontProfile::new("font-profile-secondary", ["Available Sans"]),
         ],
-    )];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("different context and adapter keys should compile independently");
-    let target = &compiled.targets()[0];
+        &CompositionEnvironment::new(
+            [AdapterInput::new("adapter-font", [Feature::FontSubstitute])],
+            ["Available Sans"],
+        ),
+    );
 
     assert_eq!(
-        (
-            target.snapshot().lookup_context_for_adapter(
-                "parameter",
-                "tool",
-                "blur",
-                "adapter-a",
-                "Radius",
-            ),
-            target.snapshot().lookup_context_for_adapter(
-                "parameter",
-                "tool",
-                "blur",
-                "adapter-b",
-                "Radius",
-            ),
-            target.font_policy().lookup_context_entry_for_adapter(
-                "parameter",
-                "tool",
-                "blur",
-                "adapter-a",
-                "Radius",
-            ),
-            compiled.diagnostics(),
-        ),
-        (
-            Some("模糊半径".into()),
-            None,
-            Some(glyphshift_translation::FontRule::Substitute(
-                "Blur Font".into()
-            )),
-            &[][..],
-        )
+        result,
+        Err(ResolveError::FontScopeConflict {
+            software_id: "software-editor".into(),
+            location: "dialog".into(),
+        })
     );
 }
 
 #[test]
-fn keep_text_with_a_font_override_compiles_to_font_only() {
-    let workflow = Workflow::new(
-        "workflow-font-only",
-        [WorkflowTarget::new(
+fn wf_009_rejects_a_plan_without_the_required_adapter_capability() {
+    let result = resolve(
+        &Workflow::new(
+            "workflow-missing-font-capability",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-text-only"]),
+                [] as [&str; 0],
+            )
+            .with_font_bindings([FontProfileBinding::all("font-profile-cjk")])],
+        ),
+        &[SoftwareInput::new(
             "software-editor",
-            ["dictionary-font-only"],
+            "zh-CN",
+            Generation::new(15),
+            RouteProgram::direct("dialog"),
+            ["dialog"],
         )],
+        &[],
+        &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
+        &CompositionEnvironment::new(
+            [AdapterInput::new(
+                "adapter-text-only",
+                [Feature::TextReplace],
+            )],
+            ["Available Sans"],
+        ),
     );
-    let software = [SoftwareInput::new(
-        "software-editor",
-        "zh-CN",
-        Generation::new(16),
-        RouteProgram::direct("menu"),
-        ["menu"],
-    )];
-    let dictionaries = [Dictionary::new(
-        "dictionary-font-only",
-        "zh-CN",
-        [DictionaryEntry::keep("menu", "File")
-            .with_font(EntryFontBehavior::substitute("Entry Font"))],
-    )];
-
-    let compiled = resolve(&workflow, &software, &dictionaries)
-        .expect("a keep-text font rule should be an effective target intent");
-    let target = &compiled.targets()[0];
 
     assert_eq!(
-        (
-            target.requested_features(),
-            target.snapshot().lookup("menu", "File"),
-            target
-                .font_policy()
-                .lookup_entry_for_adapter("menu", "adapter-a", "File"),
-        ),
-        (
-            &[Feature::FontSubstitute][..],
-            None,
-            Some(glyphshift_translation::FontRule::Substitute(
-                "Entry Font".into()
-            )),
-        )
+        result,
+        Err(ResolveError::FeatureUnavailable {
+            software_id: "software-editor".into(),
+            feature: Feature::FontSubstitute,
+        })
     );
 }

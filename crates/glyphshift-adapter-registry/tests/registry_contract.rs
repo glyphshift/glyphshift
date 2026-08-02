@@ -173,6 +173,37 @@ fn adr_008_rejects_a_target_architecture_mismatch() {
 }
 
 #[test]
+fn adr_014_rejects_a_target_platform_mismatch() {
+    let adapter_id = AdapterId::new("example.synthetic.windows-only");
+    let descriptor = AdapterDescriptor::new(
+        adapter_id.clone(),
+        foundation_version(),
+        ApplyModel::InlineRender,
+        Placement::TargetProcess,
+        [Feature::TextReplace],
+    )
+    .with_platforms(["windows"])
+    .with_architectures(["x86_64"]);
+    let mut registry = registry_for("example.synthetic.windows-only");
+    registry
+        .reload(AdapterPackageSet::new([package(descriptor)]))
+        .expect("descriptor should load before target compatibility is checked");
+
+    let result = registry.resolve(
+        &requirement(adapter_id.clone(), [Feature::TextReplace]),
+        &TargetFacts::new("macos", "x86_64"),
+    );
+
+    assert_eq!(
+        result,
+        Err(RegistryError::UnsupportedPlatform {
+            adapter_id,
+            platform: "macos".into(),
+        })
+    );
+}
+
+#[test]
 fn adr_007_rejects_an_incompatible_abi_major() {
     let descriptor = AdapterDescriptor::new(
         AdapterId::new("example.synthetic.future-abi"),

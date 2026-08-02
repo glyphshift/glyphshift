@@ -26,6 +26,7 @@ pub fn descriptor() -> AdapterDescriptor {
             Feature::FontSubstitute,
         ],
     )
+    .with_platforms(["windows"])
     .with_architectures(["x86", "x86_64"])
 }
 

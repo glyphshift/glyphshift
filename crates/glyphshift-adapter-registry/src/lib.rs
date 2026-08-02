@@ -196,6 +196,10 @@ pub enum RegistryError {
         adapter_id: AdapterId,
         feature: Feature,
     },
+    UnsupportedPlatform {
+        adapter_id: AdapterId,
+        platform: Box<str>,
+    },
     UnsupportedArchitecture {
         adapter_id: AdapterId,
         architecture: Box<str>,
@@ -363,6 +367,14 @@ impl AdapterRegistry {
                 adapter_id: descriptor.adapter_id().clone(),
                 host: self.supported_abi,
                 adapter: descriptor.abi(),
+            });
+        }
+
+        let platforms = descriptor.platforms().collect::<Vec<_>>();
+        if !platforms.is_empty() && !platforms.contains(&target.operating_system()) {
+            return Err(RegistryError::UnsupportedPlatform {
+                adapter_id: descriptor.adapter_id().clone(),
+                platform: target.operating_system().into(),
             });
         }
 

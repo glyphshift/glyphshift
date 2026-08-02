@@ -5,8 +5,8 @@ use glyphshift_adapter_native_abi::{
     DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
     NativeNegotiationV1, NativeRuntimeHostV1, ARCH_X86, ARCH_X86_64, DECISION_FONT_SUBSTITUTE,
     DECISION_TEXT_REPLACE, FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE,
-    STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
-    STATUS_UNSUPPORTED_FEATURE,
+    PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK,
+    STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use retour::GenericDetour;
 use std::cell::Cell;
@@ -352,6 +352,7 @@ pub extern "C" fn glyphshift_adapter_entry_v1() -> NativeAdapterApiV1 {
             ADAPTER_ID,
             (1, 0, 0),
             SUPPORTED_FEATURES,
+            PLATFORM_WINDOWS,
             ARCH_X86 | ARCH_X86_64,
         ),
         negotiate_features,

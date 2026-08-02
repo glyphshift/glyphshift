@@ -9,7 +9,7 @@ use glyphshift_runtime_contract::{RuntimePublication, RuntimeWireError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/1";
+const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/2";
 pub const STATUS_TARGET_RUNTIME_OK: u32 = 0;
 pub const STATUS_TARGET_RUNTIME_INVALID_COMMAND: u32 = 1;
 pub const STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT: u32 = 2;
@@ -152,6 +152,7 @@ struct WireAdapterDeployment {
     placement: WirePlacement,
     descriptor_features: Vec<WireFeature>,
     requested_features: Vec<WireFeature>,
+    platforms: Vec<Box<str>>,
     architectures: Vec<Box<str>>,
     abi: [u16; 2],
 }
@@ -182,6 +183,7 @@ impl WireAdapterDeployment {
                 .copied()
                 .map(Into::into)
                 .collect(),
+            platforms: descriptor.platforms().map(Into::into).collect(),
             architectures: descriptor.architectures().map(Into::into).collect(),
             abi: [descriptor.abi().major(), descriptor.abi().minor()],
         })
@@ -195,6 +197,7 @@ impl WireAdapterDeployment {
             self.placement.into(),
             self.descriptor_features.into_iter().map(Into::into),
         )
+        .with_platforms(self.platforms)
         .with_architectures(self.architectures)
         .with_abi(AbiVersion::new(self.abi[0], self.abi[1]));
         let host = match descriptor.placement() {

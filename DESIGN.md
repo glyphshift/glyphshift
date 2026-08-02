@@ -1,6 +1,6 @@
 ---
 name: Glyphshift Desktop
-description: A compact workflow, software, and dictionary manager for Windows runtime translation.
+description: A compact workflow, software, dictionary, and font-profile manager for runtime translation.
 colors:
   accent: "Nuxt UI emerald"
   surface: "oklch(23% 0.013 270)"
@@ -23,9 +23,9 @@ geometry:
 
 ## 产品方向
 
-Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流、软件和词典：工作流表达持续
-运行期望，软件只管理身份与程序绑定，词典是可复用的文字和字体规则资产。启用工作流就是持续
-期望，没有第二个“开始翻译”动作。
+Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流、软件、词典和字体：工作流表达
+持续运行期望，软件只管理身份与程序绑定，词典是可复用语言资产，字体方案是可复用排版资产。
+启用工作流就是持续期望，没有第二个“开始翻译”动作。
 
 界面采用成熟数据管理器语法：单层标题/导航栏、图标标题与说明、搜索和批量工具栏、满宽表格、
 分页与行级操作。不使用首页卡片、软件主从详情、营销式仪表盘或大面积强调色。
@@ -35,16 +35,22 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **工作流：** 默认页。展示名称、说明、软件和词典摘要、期望/实际状态、启用、编辑、复制和
   删除；支持搜索、筛选、显示列、多选、分页与批量操作。
 - **软件：** 只管理名称、用途说明和完整程序路径；不展示或配置文字/字体能力。
-- **词典：** 独立资产表展示名称、说明、适用 Hook、语言、规则数与修订。编辑器按原文、译文、
-  文字处理、字体处理、字体排列规则，并支持搜索、筛选、显示列、多选和批量删除。
-- **设置：** 只在标题栏提供图标入口，不占主导航文字位置。
+- **词典：** 独立资产表展示名称、说明、源/目标语言、发布版本、标签、规则数与修订。编辑器
+  分为 metadata 与纯文字规则，不出现字体、Hook 或 Adapter。
+- **字体：** 独立字体方案表展示名称、说明、有序候选、当前机器命中结果与引用状态。
+- **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
+  Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
+- **帮助：** 由标题栏图标进入，使用紧凑表格展示当前 Runtime Bundle 的 Adapter 名称、说明、
+  Platform、Technology、Capability、配置要求与版本；不展示内部 ID 或 DLL target。
+- **设置：** 只在标题栏提供图标入口，不占主导航文字位置。设置页不提供在线翻译器或服务地址，
+  只说明资产来源与组合边界，并导航到词典库、工作流和帮助。
 
 完整软件或词典集合不用普通下拉框承载。Workflow 编辑弹窗使用可搜索、多选的管理列表，并为
-每个目标维护有序词典集合。
+每个目标维护 Adapter Plan、有序词典集合和 Font Profile Bindings。
 
 ## 布局与密度
 
-- 标题、品牌、主导航、服务状态、设置与窗口控件位于同一条 48px 顶栏。
+- 标题、品牌、主导航、帮助、设置与窗口控件位于同一条 48px 顶栏；不显示常驻桌面服务连接状态。
 - 页面外边距 16px；页面标题 20px；普通表格文本 11px，元数据 9–10px。
 - 搜索、筛选、显示列和批量动作共用表格工具栏；选中行时批量动作清楚出现。
 - 表格自己滚动，页面和 `body` 不滚动；960×640 与 1440×900 使用同一结构。
@@ -55,9 +61,12 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - 工作流启用状态表示持久期望；Runtime actual state 与错误单独展示。
 - 创建和编辑资产复用同一 Nuxt UI Modal；Modal 和 Select 浮层必须高于 sticky 表头。
 - 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。
-- 适用 Hook 只在创建词典时选择，编辑页作为不可变范围展示，规则行不重复配置。
+- Dictionary 创建和编辑不出现 Hook、Adapter 或字体字段。
+- Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Profile；不同 Target 不共享
+  隐式选择状态。
 - 原文和译文输入使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。
 - 图标按钮必须有可访问名称；状态不能只依赖颜色。
+- 真实 Tauri 桌面组件不可用时显示阻断错误；浏览器测试预览不伪装成连接状态，帮助页仍可打开。
 
 ## 视觉语言
 

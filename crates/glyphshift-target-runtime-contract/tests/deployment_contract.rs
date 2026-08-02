@@ -18,6 +18,7 @@ fn trc_001_round_trips_verified_binding_evidence_and_publication() {
         Placement::TargetProcess,
         [Feature::TextReplace, Feature::FontSubstitute],
     )
+    .with_platforms(["windows"])
     .with_architectures(["x86_64"])
     .with_abi(AbiVersion::new(1, 4));
     let binding = AdapterBinding {
@@ -47,6 +48,8 @@ fn trc_001_round_trips_verified_binding_evidence_and_publication() {
     let decoded = TargetRuntimeDeployment::decode_json(&encoded).expect("deployment decode");
 
     assert_eq!(decoded, deployment);
+    assert!(encoded.contains("glyphshift.target-runtime/2"));
+    assert!(encoded.contains("windows"));
     assert!(!encoded.contains("process_id"));
     assert!(!encoded.contains("driver"));
 }

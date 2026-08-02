@@ -11,6 +11,8 @@ $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
 $localTaskRoot = Join-Path $repoRoot 'target\local-test\evidence\desktop-dev'
 $cargoTargetDir = Join-Path $repoRoot 'target\local-test\tauri-build'
 $runtimeBundleRoot = Join-Path $repoRoot 'target\local-test\runtime-bundle'
+$desktopDataRoot = Join-Path $repoRoot 'target\local-test\desktop-data'
+$env:GLYPHSHIFT_DATA_ROOT = $desktopDataRoot
 
 if ($Detached) {
     New-Item -ItemType Directory -Path $localTaskRoot -Force | Out-Null
@@ -176,12 +178,18 @@ $runtimeManifest = [ordered]@{
         [ordered]@{
             file = $gdiBundle.file
             sha256 = $gdiBundle.sha256
-            label = 'GDI'
+            name = 'ExtTextOutW'
+            summary = '拦截 GDI ExtTextOutW 绘制并执行文字与字体决策'
+            technology = 'GDI'
+            technicalTarget = 'gdi32.dll!ExtTextOutW'
         },
         [ordered]@{
             file = $gdiPlusBundle.file
             sha256 = $gdiPlusBundle.sha256
-            label = 'GDI+'
+            name = 'GdipDrawString'
+            summary = '拦截 GDI+ GdipDrawString 绘制并执行文字与字体决策'
+            technology = 'GDI+'
+            technicalTarget = 'gdiplus.dll!GdipDrawString'
         }
     )
 }

@@ -1,8 +1,9 @@
 #![cfg(windows)]
 
 use glyphshift_desktop_backend::{
-    DesktopBackend, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
-    DictionaryView, ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
+    DesktopBackend, DesktopEnvironment, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit,
+    DictionaryRuleCreate, DictionaryView, ExecutableSelection, WorkflowCreate,
+    WorkflowTargetCreate,
 };
 use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
 use glyphshift_domain::Feature;
@@ -10,6 +11,20 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use tempfile::tempdir;
+
+const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
+
+fn open_backend(data_root: &Path, runtime_root: &Path) -> DesktopBackend {
+    let bundle = RuntimeBundle::open(runtime_root).expect("verified Runtime bundle");
+    DesktopBackend::open_with_environment(
+        data_root,
+        DesktopEnvironment::new(
+            bundle.adapter_requirements().iter().cloned(),
+            Vec::<Box<str>>::new(),
+        ),
+    )
+    .expect("desktop backend")
+}
 
 struct TargetProcess {
     child: Child,
@@ -74,16 +89,15 @@ fn create_text_workflow(
 ) -> (DictionaryView, DesktopRuntimeSpec) {
     let dictionary = backend
         .create_dictionary(
-            DictionaryCreate::new(dictionary_id, dictionary_id, "zh-CN").with_entries([
+            DictionaryCreate::new(dictionary_id, dictionary_id, "en-US", "zh-CN").with_entries([
                 DictionaryRuleCreate::replace("main-ui", source, translation),
             ]),
         )
         .expect("create Runtime dictionary");
     backend
-        .create_workflow(
-            WorkflowCreate::new(workflow_id, workflow_id)
-                .with_targets([WorkflowTargetCreate::new(software_id, [dictionary_id])]),
-        )
+        .create_workflow(WorkflowCreate::new(workflow_id, workflow_id).with_targets([
+            WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], [dictionary_id]),
+        ]))
         .expect("create Runtime workflow");
     let spec = backend
         .workflow_runtime_spec(workflow_id, software_id)
@@ -102,7 +116,7 @@ fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
     let baseline = target.render();
 
     let data = tempdir().expect("isolated desktop data");
-    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let mut backend = open_backend(data.path(), &runtime_root);
     let snapshot = backend
         .add_software(ExecutableSelection::new(&target_executable))
         .expect("register target executable");
@@ -137,8 +151,9 @@ fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
         .update_dictionary(
             DictionaryEdit::new(
                 dictionary.id(),
-                dictionary.name(),
-                dictionary.locale(),
+                dictionary.metadata().name(),
+                dictionary.metadata().source_locale(),
+                dictionary.metadata().target_locale(),
                 dictionary.revision(),
             )
             .with_entries([DictionaryRuleCreate::replace(
@@ -206,7 +221,7 @@ fn desktop_runtime_refresh_reconnects_requested_features_after_target_restart() 
     let mut target = TargetProcess::spawn(&target_executable);
 
     let data = tempdir().expect("isolated desktop data");
-    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let mut backend = open_backend(data.path(), &runtime_root);
     let snapshot = backend
         .add_software(ExecutableSelection::new(&target_executable))
         .expect("register target executable");
@@ -257,7 +272,7 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         .expect("authorized host executable path");
 
     let data = tempdir().expect("isolated desktop data");
-    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let mut backend = open_backend(data.path(), &runtime_root);
     let snapshot = backend
         .add_software(ExecutableSelection::new(&host_executable))
         .expect("register authorized host executable");
@@ -311,7 +326,7 @@ fn desktop_runtime_pool_keeps_two_software_active_and_isolates_stop() {
     let beta_baseline = beta_target.render();
 
     let data = tempdir().expect("isolated desktop data");
-    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let mut backend = open_backend(data.path(), &runtime_root);
     let alpha_added = backend
         .add_software(ExecutableSelection::new(&alpha_executable))
         .expect("register alpha software");

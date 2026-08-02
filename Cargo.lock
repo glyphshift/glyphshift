@@ -1271,6 +1271,7 @@ dependencies = [
 name = "glyphshift-desktop-shell"
 version = "0.2.0"
 dependencies = [
+ "glyphshift-adapter-registry",
  "glyphshift-desktop-backend",
  "glyphshift-desktop-runtime",
  "glyphshift-domain",

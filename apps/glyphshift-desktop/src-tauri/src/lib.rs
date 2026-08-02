@@ -1,6 +1,7 @@
 use glyphshift_desktop_backend::{
-    BackendError, DesktopBackend, DesktopSnapshot, DictionaryCreate, DictionaryEdit,
-    DictionaryView, EffectiveWorkflowIntent, ExecutableSelection, SoftwareEdit, WorkflowCreate,
+    BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
+    DictionaryEdit, DictionaryView, EffectiveWorkflowIntent, ExecutableSelection,
+    FontProfileCreate, FontProfileEdit, FontProfileView, SoftwareEdit, WorkflowCreate,
     WorkflowEdit, WorkflowView,
 };
 use glyphshift_desktop_runtime::{
@@ -15,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 5;
+const DESKTOP_API_VERSION: u16 = 7;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_error_message(error: BackendError) -> String {
@@ -23,8 +24,8 @@ fn workflow_activation_error_message(error: BackendError) -> String {
         BackendError::WorkflowRejected(ResolveError::NoEffectiveRules { .. }) => {
             "无法启用工作流：词典没有可应用规则，请先添加文字替换或字体规则。".to_owned()
         }
-        BackendError::WorkflowRejected(ResolveError::EmptyTarget { .. }) => {
-            "无法启用工作流：至少需要为每个软件选择一份词典。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::EmptyAdapterPlan { .. }) => {
+            "无法启用工作流：至少需要为每个软件选择一种拦截方式。".to_owned()
         }
         BackendError::WorkflowRejected(ResolveError::LocaleMismatch { .. }) => {
             "无法启用工作流：软件与词典的语言不一致。".to_owned()
@@ -36,6 +37,13 @@ fn workflow_activation_error_message(error: BackendError) -> String {
         | BackendError::UnknownSoftware(_) => "无法启用工作流：引用的软件已不存在。".to_owned(),
         BackendError::WorkflowRejected(ResolveError::UnknownDictionary(_))
         | BackendError::UnknownDictionary(_) => "无法启用工作流：引用的词典已不存在。".to_owned(),
+        BackendError::WorkflowRejected(ResolveError::UnknownFontProfile(_))
+        | BackendError::UnknownFontProfile(_) => {
+            "无法启用工作流：引用的字体方案已不存在。".to_owned()
+        }
+        BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_)) => {
+            "无法启用工作流：引用的拦截方式当前不可用。".to_owned()
+        }
         BackendError::SoftwareOccupied { .. } => {
             "无法启用工作流：目标软件已被其他工作流占用，请先停用冲突工作流。".to_owned()
         }
@@ -92,9 +100,16 @@ struct WorkflowCommandResult {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct HookTypeView {
+struct AdapterView {
     id: Box<str>,
-    label: Box<str>,
+    name: Box<str>,
+    version: Box<str>,
+    summary: Box<str>,
+    platforms: Vec<Box<str>>,
+    technologies: Vec<Box<str>>,
+    features: Vec<Box<str>>,
+    technical_target: Box<str>,
+    configuration: Box<str>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -103,7 +118,7 @@ struct DesktopProductSnapshot {
     #[serde(flatten)]
     configuration: DesktopSnapshot,
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
-    hook_types: Vec<HookTypeView>,
+    adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
 }
 
@@ -154,35 +169,55 @@ struct DesktopApplication {
     backend: DesktopBackend,
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
-    hook_types: Vec<HookTypeView>,
+    adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
 }
 
 impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
         let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
-        let hook_types = runtime_bundle
+        let adapters = runtime_bundle
             .as_ref()
             .map(|bundle| {
                 bundle
                     .translation_adapter_options()
                     .iter()
-                    .map(|adapter| HookTypeView {
+                    .map(|adapter| AdapterView {
                         id: adapter.id().into(),
-                        label: adapter.label().into(),
+                        name: adapter.name().into(),
+                        version: adapter.version().into(),
+                        summary: adapter.summary().into(),
+                        platforms: adapter.platforms().to_vec(),
+                        technologies: adapter.technologies().to_vec(),
+                        features: adapter
+                            .features()
+                            .iter()
+                            .map(|feature| adapter_feature_id(*feature).into())
+                            .collect(),
+                        technical_target: adapter.technical_target().into(),
+                        configuration: adapter.configuration().into(),
                     })
                     .collect()
             })
             .unwrap_or_default();
-        let backend = DesktopBackend::open(data_root).map_err(|error| format!("{error:?}"))?;
+        let font_families = system_font_families();
+        let environment = DesktopEnvironment::new(
+            runtime_bundle
+                .as_ref()
+                .map(|bundle| bundle.adapter_requirements().to_vec())
+                .unwrap_or_default(),
+            font_families.iter().cloned(),
+        );
+        let backend = DesktopBackend::open_with_environment(data_root, environment)
+            .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
             backend,
             runtimes: runtime_bundle.map(|bundle| {
                 Box::new(DesktopRuntimePool::new(bundle)) as Box<dyn WorkflowRuntimeService>
             }),
             workflow_runtime_status: BTreeMap::new(),
-            hook_types,
-            font_families: system_font_families(),
+            adapters,
+            font_families,
         };
         application.restore_enabled_workflows()?;
         Ok(application)
@@ -219,7 +254,7 @@ impl DesktopApplication {
         DesktopProductSnapshot {
             configuration,
             workflow_runtime_status,
-            hook_types: self.hook_types.clone(),
+            adapters: self.adapters.clone(),
             font_families: self.font_families.clone(),
         }
     }
@@ -259,6 +294,44 @@ impl DesktopApplication {
         self.backend
             .delete_dictionaries(dictionary_ids.iter().map(AsRef::as_ref))
             .map_err(|_| "被工作流引用的词典不能删除".to_owned())?;
+        Ok(self.snapshot())
+    }
+
+    fn font_profile_detail(&self, font_profile_id: &str) -> Result<FontProfileView, String> {
+        self.backend
+            .font_profile(font_profile_id)
+            .cloned()
+            .map_err(|_| "没有找到这个字体方案".to_owned())
+    }
+
+    fn create_font_profile(
+        &mut self,
+        create: FontProfileCreate,
+    ) -> Result<DesktopProductSnapshot, String> {
+        self.backend
+            .create_font_profile(create)
+            .map_err(|_| "字体方案名称、标识或候选字体无效".to_owned())?;
+        Ok(self.snapshot())
+    }
+
+    fn update_font_profile(
+        &mut self,
+        edit: FontProfileEdit,
+    ) -> Result<DesktopProductSnapshot, String> {
+        self.backend
+            .update_font_profile(edit)
+            .map_err(|_| "字体方案已变化或候选字体无效，请重新加载".to_owned())?;
+        self.reconcile_enabled_workflows()?;
+        Ok(self.snapshot())
+    }
+
+    fn delete_font_profiles(
+        &mut self,
+        font_profile_ids: &[Box<str>],
+    ) -> Result<DesktopProductSnapshot, String> {
+        self.backend
+            .delete_font_profiles(font_profile_ids.iter().map(AsRef::as_ref))
+            .map_err(|_| "被工作流引用的字体方案不能删除".to_owned())?;
         Ok(self.snapshot())
     }
 
@@ -495,6 +568,16 @@ impl DesktopApplication {
             .map_err(|_| "软件名称或程序路径无效，请重新检查".to_owned())?;
         self.reconcile_enabled_workflows()?;
         Ok(self.snapshot())
+    }
+}
+
+fn adapter_feature_id(feature: Feature) -> &'static str {
+    match feature {
+        Feature::TextObserve => "textObserve",
+        Feature::TextReplace => "textReplace",
+        Feature::FontSubstitute => "fontSubstitute",
+        Feature::LayoutAdjust => "layoutAdjust",
+        Feature::ResourceReplace => "resourceReplace",
     }
 }
 
@@ -743,6 +826,54 @@ fn desktop_delete_dictionaries(
 }
 
 #[tauri::command]
+fn desktop_font_profile(
+    font_profile_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<FontProfileView, String> {
+    application
+        .lock()
+        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .font_profile_detail(&font_profile_id)
+}
+
+#[tauri::command]
+fn desktop_create_font_profile(
+    create: FontProfileCreate,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, String> {
+    application
+        .lock()
+        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .create_font_profile(create)
+}
+
+#[tauri::command]
+fn desktop_update_font_profile(
+    edit: FontProfileEdit,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, String> {
+    application
+        .lock()
+        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .update_font_profile(edit)
+}
+
+#[tauri::command]
+fn desktop_delete_font_profiles(
+    font_profile_ids: Vec<String>,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, String> {
+    let font_profile_ids = font_profile_ids
+        .into_iter()
+        .map(Box::<str>::from)
+        .collect::<Vec<_>>();
+    application
+        .lock()
+        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .delete_font_profiles(&font_profile_ids)
+}
+
+#[tauri::command]
 fn desktop_workflow(
     workflow_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
@@ -888,11 +1019,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let data_root = app
-                .path()
-                .app_data_dir()
-                .map_err(|error| std::io::Error::other(error.to_string()))?
-                .join("workspace");
+            let data_root = std::env::var_os("GLYPHSHIFT_DATA_ROOT")
+                .map(PathBuf::from)
+                .map_or_else(
+                    || {
+                        app.path()
+                            .app_data_dir()
+                            .map(|path| path.join("workspace"))
+                            .map_err(|error| std::io::Error::other(error.to_string()))
+                    },
+                    Ok,
+                )?;
             let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
                 .map(PathBuf::from)
                 .unwrap_or(app.path().resource_dir()?.join("runtime"));
@@ -908,6 +1045,10 @@ pub fn run() {
             desktop_create_dictionary,
             desktop_update_dictionary,
             desktop_delete_dictionaries,
+            desktop_font_profile,
+            desktop_create_font_profile,
+            desktop_update_font_profile,
+            desktop_delete_font_profiles,
             desktop_workflow,
             desktop_create_workflow,
             desktop_update_workflow,
@@ -928,6 +1069,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glyphshift_adapter_registry::{
+        AdapterRequirement, AdapterVersion, AdapterVersionRequirement,
+    };
     use glyphshift_desktop_backend::{
         DictionaryCreate, DictionaryEdit, DictionaryRuleCreate, WorkflowCreate, WorkflowEdit,
         WorkflowTargetCreate,
@@ -935,6 +1079,8 @@ mod tests {
     use std::fs;
     use std::sync::{Arc, Mutex as StdMutex};
     use tempfile::tempdir;
+
+    const TEST_ADAPTER_ID: &str = "test.inline";
 
     #[derive(Default)]
     struct WorkflowRuntimeCalls {
@@ -1040,7 +1186,18 @@ mod tests {
         let data_root = tempdir().expect("temporary product data");
         let executable = data_root.path().join("SyntheticWorkflowHost.exe");
         fs::write(&executable, b"synthetic executable identity").expect("synthetic executable");
-        let mut backend = DesktopBackend::open(data_root.path()).expect("open product backend");
+        let mut backend = DesktopBackend::open_with_environment(
+            data_root.path(),
+            DesktopEnvironment::new(
+                [AdapterRequirement::new(
+                    glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
+                    AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
+                    [Feature::TextReplace, Feature::FontSubstitute],
+                )],
+                Vec::<Box<str>>::new(),
+            ),
+        )
+        .expect("open product backend");
         let software_id: Box<str> = backend
             .add_software(ExecutableSelection::new(&executable))
             .expect("add synthetic software")
@@ -1049,14 +1206,18 @@ mod tests {
             .into();
         backend
             .create_dictionary(
-                DictionaryCreate::new("dictionary.product", "产品词典", "zh-CN")
+                DictionaryCreate::new("dictionary.product", "产品词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
             )
             .expect("create dictionary");
         backend
             .create_workflow(
                 WorkflowCreate::new("workflow.product", "产品工作流").with_targets([
-                    WorkflowTargetCreate::new(software_id.clone(), ["dictionary.product"]),
+                    WorkflowTargetCreate::new(
+                        software_id.clone(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
                 ]),
             )
             .expect("create workflow");
@@ -1069,7 +1230,7 @@ mod tests {
                 backend,
                 runtimes: Some(runtimes),
                 workflow_runtime_status: BTreeMap::new(),
-                hook_types: Vec::new(),
+                adapters: Vec::new(),
                 font_families: Vec::new(),
             },
             calls,
@@ -1255,7 +1416,10 @@ mod tests {
             serde_json::to_value(application.snapshot()).expect("serialize product snapshot");
 
         assert_eq!(json["workflows"][0]["id"], "workflow.product");
-        assert_eq!(json["dictionaries"][0]["id"], "dictionary.product");
+        assert_eq!(
+            json["dictionaries"][0]["metadata"]["id"],
+            "dictionary.product"
+        );
         assert_eq!(
             json["activations"][0],
             serde_json::json!({
@@ -1302,7 +1466,11 @@ mod tests {
         let snapshot = application
             .create_workflow(
                 WorkflowCreate::new("workflow.secondary", "备用工作流").with_targets([
-                    WorkflowTargetCreate::new(software_id, ["dictionary.product"]),
+                    WorkflowTargetCreate::new(
+                        software_id,
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
                 ]),
             )
             .expect("create workflow through product command");
@@ -1338,7 +1506,11 @@ mod tests {
         let snapshot = application
             .update_workflow(
                 WorkflowEdit::new("workflow.product", "已更新工作流", 1).with_targets([
-                    WorkflowTargetCreate::new(software_id, ["dictionary.product"]),
+                    WorkflowTargetCreate::new(
+                        software_id,
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
                 ]),
             )
             .expect("update enabled workflow");
@@ -1392,7 +1564,7 @@ mod tests {
         let (mut application, _calls, _software_id, _data_root) = workflow_application();
         let created = application
             .create_dictionary(
-                DictionaryCreate::new("dictionary.secondary", "备用词典", "zh-CN")
+                DictionaryCreate::new("dictionary.secondary", "备用词典", "en-US", "zh-CN")
                     .with_entries([DictionaryRuleCreate::keep("main-ui", "Close")]),
             )
             .expect("create dictionary");
@@ -1414,7 +1586,7 @@ mod tests {
 
         let updated = application
             .update_dictionary(
-                DictionaryEdit::new("dictionary.product", "产品词典 2", "zh-CN", 1)
+                DictionaryEdit::new("dictionary.product", "产品词典 2", "en-US", "zh-CN", 1)
                     .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "开启")]),
             )
             .expect("update active dictionary");
@@ -1455,7 +1627,18 @@ mod tests {
             .enable_workflow("workflow.product", false)
             .expect("persist enabled workflow");
         drop(application);
-        let backend = DesktopBackend::open(data_root.path()).expect("reopen product backend");
+        let backend = DesktopBackend::open_with_environment(
+            data_root.path(),
+            DesktopEnvironment::new(
+                [AdapterRequirement::new(
+                    glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
+                    AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
+                    [Feature::TextReplace, Feature::FontSubstitute],
+                )],
+                Vec::<Box<str>>::new(),
+            ),
+        )
+        .expect("reopen product backend");
         let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));
         let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
             calls: Arc::clone(&calls),
@@ -1464,7 +1647,7 @@ mod tests {
             backend,
             runtimes: Some(runtimes),
             workflow_runtime_status: BTreeMap::new(),
-            hook_types: Vec::new(),
+            adapters: Vec::new(),
             font_families: Vec::new(),
         };
 
