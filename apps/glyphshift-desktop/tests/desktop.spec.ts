@@ -181,18 +181,66 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
 })
 
-test('settings describes local dictionaries and routes to product surfaces', async ({ page }) => {
+test('settings applies and persists the real locale and theme preferences', async ({ page }) => {
+  await expect(page.locator('html')).toHaveClass(/dark/)
+  await page.getByRole('button', { name: '切换到浅色主题' }).click()
+  await expect(page.locator('html')).toHaveClass(/light/)
+  await page.getByRole('button', { name: '切换到深色主题' }).click()
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
   await page.getByRole('button', { name: '设置' }).click()
 
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
-  await expect(page.getByText('未来可从字典市场或网站下载', { exact: false })).toBeVisible()
   await expect(page.getByText(/在线翻译/)).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
+  await expect(page.getByRole('combobox')).toHaveCount(2)
 
-  await page.getByRole('button', { name: '打开帮助' }).click()
-  await expect(page.getByRole('heading', { name: '帮助' })).toBeVisible()
-  await page.getByRole('button', { name: '打开词典库' }).click()
-  await expect(page.getByRole('heading', { name: '词典' })).toBeVisible()
+  await page.getByRole('combobox', { name: '界面语言' }).click()
+  await page.getByRole('option', { name: 'English', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
+  await expect(page.getByRole('button', { name: 'Workflows', exact: true })).toBeVisible()
+
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Dark', exact: true }).click()
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
+  await expect(page.locator('html')).toHaveClass(/dark/)
+
+  await page.getByRole('button', { name: 'Help', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Available adapters' })).toBeVisible()
+  await page.getByRole('button', { name: 'Software', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Software' })).toBeVisible()
+  await page.getByRole('button', { name: 'Dictionaries', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Dictionaries' })).toBeVisible()
+  await page.getByRole('button', { name: 'Fonts', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Fonts' })).toBeVisible()
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Workflows' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Light', exact: true }).click()
+  await expect(page.locator('html')).toHaveClass(/light/)
+  await expect(page.locator('html')).not.toHaveClass(/dark/)
+})
+
+test('title bar reports a theme persistence failure without changing the active theme', async ({ page }) => {
+  await page.evaluate(() => {
+    Storage.prototype.setItem = () => {
+      throw new DOMException('synthetic storage failure', 'QuotaExceededError')
+    }
+  })
+
+  await page.getByRole('button', { name: '切换到浅色主题' }).click()
+  await expect(page.getByText('设置未保存', { exact: true })).toBeVisible()
+  await expect(page.getByText('操作失败，请重试。', { exact: true })).toBeVisible()
+  await expect(page.locator('html')).toHaveClass(/dark/)
 })
 
 test('dictionary editor contains no adapter or font configuration', async ({ page }) => {

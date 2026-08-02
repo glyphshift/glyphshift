@@ -4,7 +4,6 @@
 @source "./**/*.{vue,ts,js}";
 
 :root {
-  color-scheme: dark;
   --ui-surface: color-mix(in oklab, var(--ui-bg-elevated) 68%, var(--ui-bg));
   --ui-surface-hover: color-mix(in oklab, var(--ui-bg-accented) 20%, var(--ui-bg-elevated));
   --ui-surface-strong: color-mix(in oklab, var(--ui-bg-accented) 52%, var(--ui-bg-elevated));
@@ -18,7 +17,9 @@
   --accent-foreground: #07110d;
 }
 
-.dark {
+.dark,
+[data-theme='dark'] {
+  color-scheme: dark;
   --ui-bg: oklch(17% 0.012 270);
   --ui-bg-muted: oklch(21.5% 0.012 270);
   --ui-bg-elevated: oklch(23% 0.013 270);
@@ -49,6 +50,42 @@
   --control-disabled: var(--ui-bg-accented);
   --success-soft: color-mix(in oklab, var(--ui-color-success-500) 12%, var(--ui-bg-elevated));
   --titlebar: var(--ui-bg);
+}
+
+.light,
+[data-theme='light'] {
+  color-scheme: light;
+  --ui-bg: oklch(97.5% 0.004 270);
+  --ui-bg-muted: oklch(94.8% 0.006 270);
+  --ui-bg-elevated: oklch(99.2% 0.002 270);
+  --ui-bg-accented: oklch(91.8% 0.008 270);
+  --ui-border: oklch(86% 0.008 270);
+  --ui-border-muted: oklch(91.5% 0.006 270);
+  --ui-border-accented: oklch(76% 0.012 270);
+  --app-bg: var(--ui-bg);
+  --surface: var(--ui-bg-elevated);
+  --surface-subtle: var(--ui-bg-muted);
+  --surface-hover: var(--ui-bg-accented);
+  --selection: color-mix(in oklab, var(--ui-primary) 14%, var(--ui-bg-elevated));
+  --text: var(--ui-text-highlighted);
+  --text-secondary: var(--ui-text);
+  --text-muted: var(--ui-text-muted);
+  --border: var(--ui-border);
+  --border-strong: var(--ui-border-accented);
+  --accent: var(--ui-primary);
+  --accent-hover: color-mix(in oklab, var(--ui-primary) 78%, black);
+  --accent-strong: color-mix(in oklab, var(--ui-primary) 72%, var(--ui-text-highlighted));
+  --accent-border: color-mix(in oklab, var(--ui-primary) 35%, var(--ui-border));
+  --accent-soft: color-mix(in oklab, var(--ui-primary) 9%, var(--ui-bg-elevated));
+  --accent-soft-hover: color-mix(in oklab, var(--ui-primary) 14%, var(--ui-bg-elevated));
+  --success: var(--ui-color-success-600);
+  --warning: var(--ui-color-warning-600);
+  --danger: var(--ui-color-error-600);
+  --danger-soft: color-mix(in oklab, var(--ui-color-error-500) 10%, var(--ui-bg-elevated));
+  --control-disabled: var(--ui-bg-accented);
+  --success-soft: color-mix(in oklab, var(--ui-color-success-500) 10%, var(--ui-bg-elevated));
+  --titlebar: var(--ui-bg);
+  --accent-foreground: #ffffff;
 }
 
 * {

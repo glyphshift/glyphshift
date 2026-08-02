@@ -68,6 +68,9 @@ test('capture help and settings surfaces', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/settings-local-assets.png' })
+  await page.setViewportSize({ width: 960, height: 640 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/settings-local-assets-compact.png' })
 })
 
 test('capture compact workflow composition', async ({ page }) => {
@@ -90,4 +93,29 @@ test('capture compact help surface', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '当前适配器' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/help-adapters-compact.png' })
+})
+
+test('capture English light settings at wide and compact widths', async ({ page }) => {
+  await page.addInitScript(({ productModel, appSettings }) => {
+    localStorage.setItem('glyphshift.composable-product-model.v2', JSON.stringify(productModel))
+    localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify(appSettings))
+  }, {
+    productModel: model,
+    appSettings: {
+      settingsSchemaVersion: 1,
+      localePreference: 'en-US',
+      themePreference: 'light',
+    },
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/')
+  await page.evaluate(() => document.fonts.ready)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/settings-english-light.png' })
+
+  await page.setViewportSize({ width: 960, height: 640 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/settings-english-light-compact.png' })
 })

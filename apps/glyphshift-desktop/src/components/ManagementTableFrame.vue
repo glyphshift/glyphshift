@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DropdownMenuItem } from '@nuxt/ui/components/DropdownMenu.vue'
+import { useI18n } from 'vue-i18n'
 
 type FilterOption = {
   label: string
@@ -35,11 +36,13 @@ const props = withDefaults(defineProps<{
   filterAriaLabel: '',
   filterValue: '',
   filterOptions: () => [],
-  columnsLabel: '显示列',
+  columnsLabel: '',
   columnOptions: () => [],
   selectedCount: 0,
-  selectedLabel: '项',
+  selectedLabel: '',
 })
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   'update:query': [value: string]
@@ -71,7 +74,7 @@ const columnItems = computed<DropdownMenuItem[][]>(() => [
     onUpdateChecked: checked => emit('toggleColumn', option.key, checked),
   })),
   [{
-    label: '恢复默认列',
+    label: t('table.resetColumns'),
     icon: 'i-tabler-restore',
     onSelect: () => props.columnOptions.forEach(option => emit('toggleColumn', option.key, option.defaultVisible ?? true)),
   }],
@@ -107,7 +110,7 @@ function updatePageSize(value: unknown) {
           trailing-icon="i-tabler-chevron-down"
           :label="filterLabel"
           class="min-w-32 justify-between"
-          :aria-label="filterAriaLabel || `筛选${itemLabel}`"
+          :aria-label="filterAriaLabel || t('table.filterItems', { items: itemLabel })"
         />
       </UDropdownMenu>
 
@@ -123,8 +126,8 @@ function updatePageSize(value: unknown) {
           size="sm"
           icon="i-tabler-columns-3"
           trailing-icon="i-tabler-chevron-down"
-          :label="columnsLabel"
-          :aria-label="columnsLabel"
+          :label="columnsLabel || t('table.columns')"
+          :aria-label="columnsLabel || t('table.columns')"
         />
       </UDropdownMenu>
 
@@ -135,7 +138,7 @@ function updatePageSize(value: unknown) {
       v-if="selectedCount"
       class="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-subtle)] px-3 text-[10px]"
     >
-      <strong>{{ selectedCount }} {{ selectedLabel }}已选择</strong>
+      <strong>{{ t('table.selected', { count: selectedCount, items: selectedLabel || t('table.items') }) }}</strong>
       <div class="ml-auto flex items-center gap-2">
         <slot name="bulk-actions" />
       </div>
@@ -146,7 +149,7 @@ function updatePageSize(value: unknown) {
     </div>
 
     <footer class="flex h-14 shrink-0 items-center border-t border-[var(--border)] px-3 text-[10px] text-[var(--text-muted)]">
-      <span>显示 {{ rangeStart }}–{{ rangeEnd }}，共 {{ total }} {{ itemLabel }}</span>
+      <span>{{ t('table.range', { start: rangeStart, end: rangeEnd, total, items: itemLabel }) }}</span>
       <div class="ml-auto flex items-center gap-3">
         <UPagination
           :page="page"
@@ -163,19 +166,19 @@ function updatePageSize(value: unknown) {
           @update:page="emit('update:page', $event)"
         >
           <template #first>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-left" aria-label="首页" />
+            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-left" :aria-label="t('table.firstPage')" />
           </template>
           <template #prev>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-left" aria-label="上一页" />
+            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-left" :aria-label="t('table.previousPage')" />
           </template>
           <template #next>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-right" aria-label="下一页" />
+            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-right" :aria-label="t('table.nextPage')" />
           </template>
           <template #last>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-right" aria-label="末页" />
+            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-right" :aria-label="t('table.lastPage')" />
           </template>
         </UPagination>
-        <span class="whitespace-nowrap">每页</span>
+        <span class="whitespace-nowrap">{{ t('table.perPage') }}</span>
         <USelect
           :model-value="pageSize"
           :items="pageSizeOptions"
@@ -185,7 +188,7 @@ function updatePageSize(value: unknown) {
           color="neutral"
           variant="outline"
           class="w-24"
-          aria-label="每页数量"
+          :aria-label="t('table.perPageLabel')"
           @update:model-value="updatePageSize"
         />
       </div>

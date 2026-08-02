@@ -1,3 +1,7 @@
+mod command_error;
+mod settings;
+
+use command_error::CommandError;
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
     DictionaryEdit, DictionaryView, EffectiveWorkflowIntent, ExecutableSelection,
@@ -11,46 +15,61 @@ use glyphshift_desktop_runtime::{
 use glyphshift_domain::Feature;
 use glyphshift_workflow::ResolveError;
 use serde::Serialize;
+use settings::{AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 7;
+const DESKTOP_API_VERSION: u16 = 8;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
-fn workflow_activation_error_message(error: BackendError) -> String {
+fn workflow_activation_command_error(error: BackendError) -> CommandError {
     match error {
-        BackendError::WorkflowRejected(ResolveError::NoEffectiveRules { .. }) => {
-            "无法启用工作流：词典没有可应用规则，请先添加文字替换或字体规则。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::NoEffectiveRules { software_id }) => {
+            CommandError::new("workflow.no_effective_rules")
+                .with_arg("softwareId", software_id.to_string())
         }
-        BackendError::WorkflowRejected(ResolveError::EmptyAdapterPlan { .. }) => {
-            "无法启用工作流：至少需要为每个软件选择一种拦截方式。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::EmptyAdapterPlan { software_id }) => {
+            CommandError::new("workflow.empty_adapter_plan")
+                .with_arg("softwareId", software_id.to_string())
         }
-        BackendError::WorkflowRejected(ResolveError::LocaleMismatch { .. }) => {
-            "无法启用工作流：软件与词典的语言不一致。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::LocaleMismatch {
+            software_id,
+            dictionary_id,
+        }) => CommandError::new("workflow.locale_mismatch")
+            .with_arg("softwareId", software_id.to_string())
+            .with_arg("dictionaryId", dictionary_id.to_string()),
+        BackendError::WorkflowRejected(ResolveError::UnknownLocation {
+            software_id,
+            location,
+            ..
+        }) => CommandError::new("workflow.unknown_location")
+            .with_arg("softwareId", software_id.to_string())
+            .with_arg("location", location.to_string()),
+        BackendError::WorkflowRejected(ResolveError::UnknownSoftware(id))
+        | BackendError::UnknownSoftware(id) => {
+            CommandError::new("workflow.unknown_software").with_arg("softwareId", id.to_string())
         }
-        BackendError::WorkflowRejected(ResolveError::UnknownLocation { .. }) => {
-            "无法启用工作流：词典包含该软件不支持的位置。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::UnknownDictionary(id))
+        | BackendError::UnknownDictionary(id) => CommandError::new("workflow.unknown_dictionary")
+            .with_arg("dictionaryId", id.to_string()),
+        BackendError::WorkflowRejected(ResolveError::UnknownFontProfile(id))
+        | BackendError::UnknownFontProfile(id) => {
+            CommandError::new("workflow.unknown_font_profile")
+                .with_arg("fontProfileId", id.to_string())
         }
-        BackendError::WorkflowRejected(ResolveError::UnknownSoftware(_))
-        | BackendError::UnknownSoftware(_) => "无法启用工作流：引用的软件已不存在。".to_owned(),
-        BackendError::WorkflowRejected(ResolveError::UnknownDictionary(_))
-        | BackendError::UnknownDictionary(_) => "无法启用工作流：引用的词典已不存在。".to_owned(),
-        BackendError::WorkflowRejected(ResolveError::UnknownFontProfile(_))
-        | BackendError::UnknownFontProfile(_) => {
-            "无法启用工作流：引用的字体方案已不存在。".to_owned()
+        BackendError::WorkflowRejected(ResolveError::UnknownAdapter(id)) => {
+            CommandError::new("workflow.unknown_adapter").with_arg("adapterId", id.to_string())
         }
-        BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_)) => {
-            "无法启用工作流：引用的拦截方式当前不可用。".to_owned()
-        }
-        BackendError::SoftwareOccupied { .. } => {
-            "无法启用工作流：目标软件已被其他工作流占用，请先停用冲突工作流。".to_owned()
-        }
-        BackendError::Storage(_) => {
-            "无法启用工作流：启用状态未能保存，请检查数据目录是否可写。".to_owned()
-        }
-        _ => "无法启用工作流：工作流配置无效。".to_owned(),
+        BackendError::SoftwareOccupied {
+            software_id,
+            workflow_id,
+        } => CommandError::new("workflow.software_occupied")
+            .with_arg("softwareId", software_id.to_string())
+            .with_arg("workflowId", workflow_id.to_string()),
+        BackendError::Storage(_) => CommandError::new("storage.write_failed"),
+        _ => CommandError::new("workflow.invalid"),
     }
 }
 
@@ -80,7 +99,7 @@ struct WorkflowTargetRuntimeView {
 struct WorkflowRuntimeView {
     workflow_id: Box<str>,
     targets: Vec<WorkflowTargetRuntimeView>,
-    errors: BTreeMap<Box<str>, String>,
+    errors: BTreeMap<Box<str>, CommandError>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -219,7 +238,9 @@ impl DesktopApplication {
             adapters,
             font_families,
         };
-        application.restore_enabled_workflows()?;
+        application
+            .restore_enabled_workflows()
+            .map_err(|error| format!("{error:?}"))?;
         Ok(application)
     }
 
@@ -259,30 +280,32 @@ impl DesktopApplication {
         }
     }
 
-    fn dictionary_detail(&self, dictionary_id: &str) -> Result<DictionaryView, String> {
+    fn dictionary_detail(&self, dictionary_id: &str) -> Result<DictionaryView, CommandError> {
         self.backend
             .dictionary(dictionary_id)
             .cloned()
-            .map_err(|_| "没有找到这个词典".to_owned())
+            .map_err(|_| {
+                CommandError::new("dictionary.not_found").with_arg("dictionaryId", dictionary_id)
+            })
     }
 
     fn create_dictionary(
         &mut self,
         create: DictionaryCreate,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .create_dictionary(create)
-            .map_err(|_| "词典名称、标识或规则无效".to_owned())?;
+            .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
         Ok(self.snapshot())
     }
 
     fn update_dictionary(
         &mut self,
         edit: DictionaryEdit,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .update_dictionary(edit)
-            .map_err(|_| "词典已变化或规则无效，请重新加载".to_owned())?;
+            .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
         self.reconcile_enabled_workflows()?;
         Ok(self.snapshot())
     }
@@ -290,37 +313,40 @@ impl DesktopApplication {
     fn delete_dictionaries(
         &mut self,
         dictionary_ids: &[Box<str>],
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .delete_dictionaries(dictionary_ids.iter().map(AsRef::as_ref))
-            .map_err(|_| "被工作流引用的词典不能删除".to_owned())?;
+            .map_err(|_| CommandError::new("dictionary.referenced"))?;
         Ok(self.snapshot())
     }
 
-    fn font_profile_detail(&self, font_profile_id: &str) -> Result<FontProfileView, String> {
+    fn font_profile_detail(&self, font_profile_id: &str) -> Result<FontProfileView, CommandError> {
         self.backend
             .font_profile(font_profile_id)
             .cloned()
-            .map_err(|_| "没有找到这个字体方案".to_owned())
+            .map_err(|_| {
+                CommandError::new("font_profile.not_found")
+                    .with_arg("fontProfileId", font_profile_id)
+            })
     }
 
     fn create_font_profile(
         &mut self,
         create: FontProfileCreate,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .create_font_profile(create)
-            .map_err(|_| "字体方案名称、标识或候选字体无效".to_owned())?;
+            .map_err(|_| CommandError::new("font_profile.invalid_create"))?;
         Ok(self.snapshot())
     }
 
     fn update_font_profile(
         &mut self,
         edit: FontProfileEdit,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .update_font_profile(edit)
-            .map_err(|_| "字体方案已变化或候选字体无效，请重新加载".to_owned())?;
+            .map_err(|_| CommandError::new("font_profile.invalid_update"))?;
         self.reconcile_enabled_workflows()?;
         Ok(self.snapshot())
     }
@@ -328,34 +354,37 @@ impl DesktopApplication {
     fn delete_font_profiles(
         &mut self,
         font_profile_ids: &[Box<str>],
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .delete_font_profiles(font_profile_ids.iter().map(AsRef::as_ref))
-            .map_err(|_| "被工作流引用的字体方案不能删除".to_owned())?;
+            .map_err(|_| CommandError::new("font_profile.referenced"))?;
         Ok(self.snapshot())
     }
 
-    fn workflow_detail(&self, workflow_id: &str) -> Result<WorkflowView, String> {
-        self.backend
-            .workflow(workflow_id)
-            .map_err(|_| "没有找到这个工作流".to_owned())
+    fn workflow_detail(&self, workflow_id: &str) -> Result<WorkflowView, CommandError> {
+        self.backend.workflow(workflow_id).map_err(|_| {
+            CommandError::new("workflow.not_found").with_arg("workflowId", workflow_id)
+        })
     }
 
     fn create_workflow(
         &mut self,
         create: WorkflowCreate,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .create_workflow(create)
-            .map_err(|_| "工作流名称、标识或目标无效".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.invalid_create"))?;
         Ok(self.snapshot())
     }
 
-    fn update_workflow(&mut self, edit: WorkflowEdit) -> Result<DesktopProductSnapshot, String> {
+    fn update_workflow(
+        &mut self,
+        edit: WorkflowEdit,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         let workflow_id = self
             .backend
             .update_workflow(edit)
-            .map_err(|_| "工作流已变化或定义无效，请重新加载".to_owned())?
+            .map_err(|_| CommandError::new("workflow.invalid_update"))?
             .id()
             .to_owned();
         self.reconcile_workflow_if_enabled(&workflow_id)?;
@@ -367,27 +396,27 @@ impl DesktopApplication {
         source_workflow_id: &str,
         new_workflow_id: Box<str>,
         name: Box<str>,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .copy_workflow(source_workflow_id, new_workflow_id, name)
-            .map_err(|_| "工作流副本的名称或标识无效".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.invalid_copy"))?;
         Ok(self.snapshot())
     }
 
     fn delete_workflows(
         &mut self,
         workflow_ids: &[Box<str>],
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .delete_workflows(workflow_ids.iter().map(AsRef::as_ref))
-            .map_err(|_| "启用中的工作流不能删除，请先停用".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.enabled_delete"))?;
         for workflow_id in workflow_ids {
             self.workflow_runtime_status.remove(workflow_id.as_ref());
         }
         Ok(self.snapshot())
     }
 
-    fn reconcile_workflow_if_enabled(&mut self, workflow_id: &str) -> Result<(), String> {
+    fn reconcile_workflow_if_enabled(&mut self, workflow_id: &str) -> Result<(), CommandError> {
         if !self
             .backend
             .enabled_workflow_ids()
@@ -399,7 +428,7 @@ impl DesktopApplication {
         let intent = self
             .backend
             .effective_workflow_intent(workflow_id)
-            .map_err(|_| "工作流定义无效，未能更新运行状态".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.reconcile_invalid"))?;
         let runtime = self.runtimes.as_mut().map_or_else(
             || unavailable_workflow_runtime_view(&intent, true),
             |runtimes| runtimes.activate_workflow(&intent, false),
@@ -409,7 +438,7 @@ impl DesktopApplication {
         Ok(())
     }
 
-    fn reconcile_enabled_workflows(&mut self) -> Result<(), String> {
+    fn reconcile_enabled_workflows(&mut self) -> Result<(), CommandError> {
         let workflow_ids = self
             .backend
             .enabled_workflow_ids()
@@ -422,11 +451,11 @@ impl DesktopApplication {
         Ok(())
     }
 
-    fn restore_enabled_workflows(&mut self) -> Result<(), String> {
+    fn restore_enabled_workflows(&mut self) -> Result<(), CommandError> {
         self.reconcile_enabled_workflows()
     }
 
-    fn refresh_workflows(&mut self) -> Result<DesktopProductSnapshot, String> {
+    fn refresh_workflows(&mut self) -> Result<DesktopProductSnapshot, CommandError> {
         let workflow_ids = self
             .backend
             .enabled_workflow_ids()
@@ -437,7 +466,7 @@ impl DesktopApplication {
             let intent = self
                 .backend
                 .effective_workflow_intent(&workflow_id)
-                .map_err(|_| "工作流定义无效，未能刷新运行状态".to_owned())?;
+                .map_err(|_| CommandError::new("workflow.refresh_invalid"))?;
             let runtime = self.runtimes.as_mut().map_or_else(
                 || unavailable_workflow_runtime_view(&intent, true),
                 |runtimes| runtimes.refresh_workflow(&intent),
@@ -452,19 +481,19 @@ impl DesktopApplication {
         &mut self,
         workflow_id: &str,
         replace_conflicts: bool,
-    ) -> Result<WorkflowCommandResult, String> {
+    ) -> Result<WorkflowCommandResult, CommandError> {
         let intent = self
             .backend
             .effective_workflow_intent(workflow_id)
-            .map_err(workflow_activation_error_message)?;
+            .map_err(workflow_activation_command_error)?;
         if replace_conflicts {
             self.backend
                 .replace_workflow_activation(workflow_id)
-                .map_err(workflow_activation_error_message)?;
+                .map_err(workflow_activation_command_error)?;
         } else {
             self.backend
                 .enable_workflow(workflow_id)
-                .map_err(workflow_activation_error_message)?;
+                .map_err(workflow_activation_command_error)?;
         }
         let runtime = self.runtimes.as_mut().map_or_else(
             || unavailable_workflow_runtime_view(&intent, true),
@@ -473,7 +502,7 @@ impl DesktopApplication {
         let definition = self
             .backend
             .workflow(workflow_id)
-            .map_err(|_| "工作流定义无效".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
         self.workflow_runtime_status.retain(|candidate, _| {
             self.backend
                 .enabled_workflow_ids()
@@ -492,14 +521,17 @@ impl DesktopApplication {
         })
     }
 
-    fn disable_workflow(&mut self, workflow_id: &str) -> Result<WorkflowCommandResult, String> {
+    fn disable_workflow(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<WorkflowCommandResult, CommandError> {
         let intent = self
             .backend
             .effective_workflow_intent(workflow_id)
-            .map_err(|_| "工作流定义无效，未能停用".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.disable_invalid"))?;
         self.backend
             .disable_workflow(workflow_id)
-            .map_err(|_| "工作流未能停用".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.disable_failed"))?;
         let runtime = self.runtimes.as_mut().map_or_else(
             || unavailable_workflow_runtime_view(&intent, false),
             |runtimes| runtimes.stop_workflow(&intent),
@@ -507,7 +539,7 @@ impl DesktopApplication {
         let definition = self
             .backend
             .workflow(workflow_id)
-            .map_err(|_| "工作流定义无效".to_owned())?;
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
         Ok(WorkflowCommandResult {
@@ -520,29 +552,38 @@ impl DesktopApplication {
         })
     }
 
-    fn add_software(&mut self, executable_path: String) -> Result<DesktopProductSnapshot, String> {
+    fn add_software(
+        &mut self,
+        executable_path: String,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .add_software(ExecutableSelection::new(executable_path))
-            .map_err(|_| "请选择一个可访问的 Windows 应用程序（.exe）".to_owned())?;
+            .map_err(|_| CommandError::new("software.invalid_executable"))?;
         Ok(self.snapshot())
     }
 
-    fn select_software(&mut self, extension_id: &str) -> Result<DesktopProductSnapshot, String> {
+    fn select_software(
+        &mut self,
+        extension_id: &str,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.backend
             .select_software(extension_id)
-            .map_err(|_| "软件选择未能保存".to_owned())?;
+            .map_err(|_| CommandError::new("software.select_failed"))?;
         Ok(self.snapshot())
     }
 
-    fn remove_software(&mut self, extension_id: &str) -> Result<DesktopProductSnapshot, String> {
+    fn remove_software(
+        &mut self,
+        extension_id: &str,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         if let Some(runtimes) = self.runtimes.as_mut() {
             runtimes
                 .remove_software(extension_id)
-                .map_err(|_| "目标进程未确认停止，软件没有删除".to_owned())?;
+                .map_err(|_| CommandError::new("software.runtime_stop_unconfirmed"))?;
         }
         self.backend
             .remove_software(extension_id)
-            .map_err(|_| "软件未能从 Glyphshift 中删除".to_owned())?;
+            .map_err(|_| CommandError::new("software.delete_failed"))?;
         Ok(self.snapshot())
     }
 
@@ -552,20 +593,20 @@ impl DesktopApplication {
         display_name: String,
         description: String,
         executable_path: String,
-    ) -> Result<DesktopProductSnapshot, String> {
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         let edit = SoftwareEdit::new(extension_id.clone(), display_name, executable_path)
             .with_description(description);
         self.backend
             .validate_software_edit(&edit)
-            .map_err(|_| "软件名称或程序路径无效，请重新检查".to_owned())?;
+            .map_err(|_| CommandError::new("software.invalid_update"))?;
         if let Some(runtimes) = self.runtimes.as_mut() {
             runtimes
                 .remove_software(&extension_id)
-                .map_err(|_| "目标进程未确认停止，软件信息没有修改".to_owned())?;
+                .map_err(|_| CommandError::new("software.runtime_stop_unconfirmed"))?;
         }
         self.backend
             .update_software(edit)
-            .map_err(|_| "软件名称或程序路径无效，请重新检查".to_owned())?;
+            .map_err(|_| CommandError::new("software.invalid_update"))?;
         self.reconcile_enabled_workflows()?;
         Ok(self.snapshot())
     }
@@ -581,19 +622,15 @@ fn adapter_feature_id(feature: Feature) -> &'static str {
     }
 }
 
-fn runtime_error_message(error: DesktopRuntimeError, enabling: bool) -> String {
+fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandError {
     match error {
-        DesktopRuntimeError::UnknownTarget => {
-            "没有找到与该程序路径匹配的运行实例；请先启动这个版本的软件".to_owned()
-        }
+        DesktopRuntimeError::UnknownTarget => CommandError::new("runtime.target_not_found"),
         DesktopRuntimeError::SessionRejected if enabling => {
-            "已找到运行实例，但目标软件拒绝了功能激活；请重试，仍失败时重启目标软件".to_owned()
+            CommandError::new("runtime.session_rejected")
         }
-        DesktopRuntimeError::BundleUnavailable => {
-            "运行组件尚未准备好，请通过开发任务重新启动 Glyphshift".to_owned()
-        }
-        _ if enabling => "已找到运行实例，但翻译组件未能完成激活，功能未开启".to_owned(),
-        _ => "目标进程未确认停止，功能状态没有改变".to_owned(),
+        DesktopRuntimeError::BundleUnavailable => CommandError::new("runtime.bundle_unavailable"),
+        _ if enabling => CommandError::new("runtime.activation_failed"),
+        _ => CommandError::new("runtime.stop_unconfirmed"),
     }
 }
 
@@ -630,7 +667,7 @@ fn workflow_runtime_view(
                 .copied()
                 .or(operation_error)
             {
-                errors.insert(software_id.into(), runtime_error_message(error, enabling));
+                errors.insert(software_id.into(), runtime_command_error(error, enabling));
             }
             target_runtime_view(
                 software_id,
@@ -669,7 +706,7 @@ fn unavailable_workflow_runtime_view(
             .map(|target| {
                 (
                     Box::<str>::from(target.software_id()),
-                    runtime_error_message(DesktopRuntimeError::BundleUnavailable, enabling),
+                    runtime_command_error(DesktopRuntimeError::BundleUnavailable, enabling),
                 )
             })
             .collect(),
@@ -758,6 +795,43 @@ fn system_font_families() -> Vec<Box<str>> {
     Vec::new()
 }
 
+fn settings_command_error(error: SettingsError) -> CommandError {
+    match error {
+        SettingsError::InvalidData => CommandError::new("settings.invalid_data"),
+        SettingsError::Storage => CommandError::new("settings.write_failed"),
+    }
+}
+
+fn workspace_unavailable() -> CommandError {
+    CommandError::new("workspace.unavailable")
+}
+
+fn runtime_unavailable() -> CommandError {
+    CommandError::new("runtime.unavailable")
+}
+
+#[tauri::command]
+fn desktop_settings(
+    settings: State<'_, Mutex<AppSettingsStore>>,
+) -> Result<AppSettings, CommandError> {
+    settings
+        .lock()
+        .map_err(|_| CommandError::new("settings.unavailable"))
+        .and_then(|settings| settings.current().map_err(settings_command_error))
+}
+
+#[tauri::command]
+fn desktop_update_settings(
+    update: AppSettingsUpdate,
+    settings: State<'_, Mutex<AppSettingsStore>>,
+) -> Result<AppSettings, CommandError> {
+    settings
+        .lock()
+        .map_err(|_| CommandError::new("settings.unavailable"))?
+        .update(update)
+        .map_err(settings_command_error)
+}
+
 #[tauri::command]
 fn desktop_status() -> DesktopStatus {
     DesktopStatus {
@@ -770,10 +844,10 @@ fn desktop_status() -> DesktopStatus {
 #[tauri::command]
 fn desktop_snapshot(
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())
+        .map_err(|_| workspace_unavailable())
         .map(|application| application.snapshot())
 }
 
@@ -781,10 +855,10 @@ fn desktop_snapshot(
 fn desktop_dictionary(
     dictionary_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DictionaryView, String> {
+) -> Result<DictionaryView, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .dictionary_detail(&dictionary_id)
 }
 
@@ -792,10 +866,10 @@ fn desktop_dictionary(
 fn desktop_create_dictionary(
     create: DictionaryCreate,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .create_dictionary(create)
 }
 
@@ -803,10 +877,10 @@ fn desktop_create_dictionary(
 fn desktop_update_dictionary(
     edit: DictionaryEdit,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .update_dictionary(edit)
 }
 
@@ -814,14 +888,14 @@ fn desktop_update_dictionary(
 fn desktop_delete_dictionaries(
     dictionary_ids: Vec<String>,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     let dictionary_ids = dictionary_ids
         .into_iter()
         .map(Box::<str>::from)
         .collect::<Vec<_>>();
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .delete_dictionaries(&dictionary_ids)
 }
 
@@ -829,10 +903,10 @@ fn desktop_delete_dictionaries(
 fn desktop_font_profile(
     font_profile_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<FontProfileView, String> {
+) -> Result<FontProfileView, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .font_profile_detail(&font_profile_id)
 }
 
@@ -840,10 +914,10 @@ fn desktop_font_profile(
 fn desktop_create_font_profile(
     create: FontProfileCreate,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .create_font_profile(create)
 }
 
@@ -851,10 +925,10 @@ fn desktop_create_font_profile(
 fn desktop_update_font_profile(
     edit: FontProfileEdit,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .update_font_profile(edit)
 }
 
@@ -862,14 +936,14 @@ fn desktop_update_font_profile(
 fn desktop_delete_font_profiles(
     font_profile_ids: Vec<String>,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     let font_profile_ids = font_profile_ids
         .into_iter()
         .map(Box::<str>::from)
         .collect::<Vec<_>>();
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .delete_font_profiles(&font_profile_ids)
 }
 
@@ -877,10 +951,10 @@ fn desktop_delete_font_profiles(
 fn desktop_workflow(
     workflow_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<WorkflowView, String> {
+) -> Result<WorkflowView, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .workflow_detail(&workflow_id)
 }
 
@@ -888,10 +962,10 @@ fn desktop_workflow(
 fn desktop_create_workflow(
     create: WorkflowCreate,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .create_workflow(create)
 }
 
@@ -899,10 +973,10 @@ fn desktop_create_workflow(
 fn desktop_update_workflow(
     edit: WorkflowEdit,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .update_workflow(edit)
 }
 
@@ -912,10 +986,10 @@ fn desktop_copy_workflow(
     new_workflow_id: String,
     name: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .copy_workflow(&source_workflow_id, new_workflow_id.into(), name.into())
 }
 
@@ -923,14 +997,14 @@ fn desktop_copy_workflow(
 fn desktop_delete_workflows(
     workflow_ids: Vec<String>,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     let workflow_ids = workflow_ids
         .into_iter()
         .map(Box::<str>::from)
         .collect::<Vec<_>>();
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .delete_workflows(&workflow_ids)
 }
 
@@ -938,10 +1012,10 @@ fn desktop_delete_workflows(
 fn desktop_add_software(
     executable_path: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .add_software(executable_path)
 }
 
@@ -949,10 +1023,10 @@ fn desktop_add_software(
 fn desktop_select_software(
     extension_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .select_software(&extension_id)
 }
 
@@ -963,10 +1037,10 @@ fn desktop_update_software(
     description: String,
     executable_path: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .update_software(extension_id, display_name, description, executable_path)
 }
 
@@ -975,10 +1049,10 @@ fn desktop_enable_workflow(
     workflow_id: String,
     replace_conflicts: bool,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<WorkflowCommandResult, String> {
+) -> Result<WorkflowCommandResult, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面运行服务暂时不可用".to_owned())?
+        .map_err(|_| runtime_unavailable())?
         .enable_workflow(&workflow_id, replace_conflicts)
 }
 
@@ -986,20 +1060,20 @@ fn desktop_enable_workflow(
 fn desktop_disable_workflow(
     workflow_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<WorkflowCommandResult, String> {
+) -> Result<WorkflowCommandResult, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面运行服务暂时不可用".to_owned())?
+        .map_err(|_| runtime_unavailable())?
         .disable_workflow(&workflow_id)
 }
 
 #[tauri::command]
 fn desktop_refresh_workflows(
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面运行服务暂时不可用".to_owned())?
+        .map_err(|_| runtime_unavailable())?
         .refresh_workflows()
 }
 
@@ -1007,10 +1081,10 @@ fn desktop_refresh_workflows(
 fn desktop_remove_software(
     extension_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, String> {
+) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
-        .map_err(|_| "桌面工作区暂时不可用".to_owned())?
+        .map_err(|_| workspace_unavailable())?
         .remove_software(&extension_id)
 }
 
@@ -1033,13 +1107,18 @@ pub fn run() {
             let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
                 .map(PathBuf::from)
                 .unwrap_or(app.path().resource_dir()?.join("runtime"));
+            let settings = AppSettingsStore::open(&data_root)
+                .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
             let application =
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
+            app.manage(Mutex::new(settings));
             app.manage(Mutex::new(application));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             desktop_status,
+            desktop_settings,
+            desktop_update_settings,
             desktop_snapshot,
             desktop_dictionary,
             desktop_create_dictionary,
@@ -1263,26 +1342,32 @@ mod tests {
 
     #[test]
     fn distinguishes_a_missing_path_match_from_a_rejected_runtime() {
-        assert!(
-            runtime_error_message(DesktopRuntimeError::UnknownTarget, true)
-                .contains("程序路径匹配")
-        );
-        assert!(
-            runtime_error_message(DesktopRuntimeError::SessionRejected, true)
-                .contains("拒绝了功能激活")
-        );
+        let missing = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::UnknownTarget,
+            true,
+        ))
+        .expect("serialize missing target error");
+        let rejected = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::SessionRejected,
+            true,
+        ))
+        .expect("serialize rejected session error");
+
+        assert_eq!(missing["code"], "runtime.target_not_found");
+        assert_eq!(rejected["code"], "runtime.session_rejected");
     }
 
     #[test]
     fn workflow_activation_error_explains_an_empty_dictionary() {
-        assert_eq!(
-            workflow_activation_error_message(BackendError::WorkflowRejected(
-                ResolveError::NoEffectiveRules {
-                    software_id: "software.empty".into(),
-                },
-            )),
-            "无法启用工作流：词典没有可应用规则，请先添加文字替换或字体规则。"
-        );
+        let error = serde_json::to_value(workflow_activation_command_error(
+            BackendError::WorkflowRejected(ResolveError::NoEffectiveRules {
+                software_id: "software.empty".into(),
+            }),
+        ))
+        .expect("serialize workflow activation error");
+
+        assert_eq!(error["code"], "workflow.no_effective_rules");
+        assert_eq!(error["args"]["softwareId"], "software.empty");
     }
 
     #[test]

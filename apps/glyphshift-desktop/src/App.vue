@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { en, zh_cn } from '@nuxt/ui/locale'
+import { useI18n } from 'vue-i18n'
 import DictionaryLibrary from './components/DictionaryLibrary.vue'
 import DictionaryProof from './components/DictionaryProof.vue'
 import FontProfileLibrary from './components/FontProfileLibrary.vue'
@@ -9,15 +11,20 @@ import SettingsView from './components/SettingsView.vue'
 import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
+import { useAppSettings } from './appSettings'
 import type { FontProfileDetail, WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'help' | 'settings'
-const desktopApiVersion = 7
+const desktopApiVersion = 8
 
+const { t } = useI18n()
+const appSettings = useAppSettings()
 const workspace = useWorkspace()
 const view = ref<View>('workflows')
-const shellCompatibilityError = ref('')
+const shellCompatibilityErrorKey = ref('')
+const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
+const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
 
 async function openWorkflow(id: string) {
   await workspace.loadWorkflow(id)
@@ -48,16 +55,16 @@ async function connectDesktopShell() {
   try {
     const status = await invoke<{ shellReady: boolean; apiVersion: number }>('desktop_status')
     if (status.shellReady && status.apiVersion !== desktopApiVersion) {
-      shellCompatibilityError.value = '桌面接口已更新，请重新启动 Glyphshift。当前窗口不会继续调用不兼容的产品命令。'
+      shellCompatibilityErrorKey.value = 'app.desktopApiChanged'
       return
     }
-    shellCompatibilityError.value = ''
+    shellCompatibilityErrorKey.value = ''
     if (!status.shellReady || !await workspace.connectDesktopBackend()) {
-      shellCompatibilityError.value = '桌面组件启动失败，无法读取本地产品数据。请重新启动 Glyphshift；如果问题持续，请查看帮助中的排查说明。'
+      shellCompatibilityErrorKey.value = 'app.desktopUnavailable'
     }
   }
   catch {
-    shellCompatibilityError.value = '桌面组件启动失败，无法读取本地产品数据。请重新启动 Glyphshift；如果问题持续，请查看帮助中的排查说明。'
+    shellCompatibilityErrorKey.value = 'app.desktopUnavailable'
   }
 }
 
@@ -67,7 +74,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <UApp class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
+  <UApp :locale="nuxtLocale" class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
     <TitleBar :current="view" @navigate="view = $event" />
     <main class="flex min-h-0 flex-1 overflow-hidden">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
@@ -75,7 +82,7 @@ onMounted(() => {
           color="warning"
           variant="soft"
           icon="i-tabler-refresh-alert"
-          title="桌面组件需要重新加载"
+          :title="t('app.desktopReloadTitle')"
           :description="shellCompatibilityError"
           class="max-w-[520px]"
         />

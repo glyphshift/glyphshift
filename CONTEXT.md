@@ -71,6 +71,17 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 **Artifact Descriptor**：在线 Catalog 在 Dictionary payload 外保存的 media type、大小、摘要、
 下载地址、发布者身份和签名来源。它不是 Dictionary Metadata。
 
+## Application
+
+**App Settings**：应用级设备偏好聚合。`AppSettings/1` 仅包含界面语言偏好与主题偏好；首次运行
+默认深色，语言默认跟随系统。Dictionary、Font、Adapter、Software 与 Workflow 都不能进入它。
+
+**UI Locale**：Glyphshift 自身菜单、按钮、提示与错误的展示语言。它与目标软件语言、Dictionary
+内容语言及动态 Artifact presentation locale 相互独立。
+
+**Command Error**：桌面后端跨 IPC 返回的稳定语义失败合同。`CommandError/1` 由 code、类型化
+参数与可选 diagnostic id 构成，不携带 Vue I18n key 或本地化句子。
+
 ## 不变量
 
 - Core、Desktop 和 GUI 不按软件品牌、Adapter ID 或可执行文件名分支。
@@ -85,4 +96,5 @@ Text+Font 的结果。所有失败路径必须 fail-open。
   与配置要求；标题栏不显示桌面服务连接徽标。
 - 设置不保存在线翻译器或服务地址。当前 Dictionary 是本地版本化资产；未来下载来源与安装状态
   进入独立 Catalog/Artifact seam，不进入 Dictionary metadata。
+- 顶部主题切换与设置页操作共同写入唯一 App Settings；页面和组件不各自维护主题副本。
 - 本机路径、实机样本、截图与日志只存在于被忽略的 `target/local-test/`。

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
+import { useI18n } from 'vue-i18n'
 import type { DictionaryMetadata, DictionarySummary } from '../model'
 
 const props = defineProps<{
@@ -13,6 +14,7 @@ const emit = defineEmits<{
   create: [metadata: Omit<DictionaryMetadata, 'id'>]
   remove: [ids: string[]]
 }>()
+const { t } = useI18n()
 
 const query = ref('')
 const page = ref(1)
@@ -40,15 +42,18 @@ const filtered = computed(() => {
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const pageSelected = computed(() => Boolean(pageItems.value.length) && pageItems.value.every(item => selected.value.has(item.metadata.id)))
-const tableColumns: TableColumn<DictionarySummary>[] = [
+const tableColumns = computed<TableColumn<DictionarySummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { id: 'dictionary', header: '词典', meta: { class: { th: 'w-[28%]', td: 'w-[28%]' } } },
-  { id: 'languages', header: '语言', meta: { class: { th: 'w-40', td: 'w-40' } } },
-  { id: 'release', header: '发布', meta: { class: { th: 'w-28', td: 'w-28' } } },
-  { id: 'tags', header: '标签' },
-  { id: 'rules', header: '规则', meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
-  { id: 'actions', header: '操作', meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
-]
+  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[28%]', td: 'w-[28%]' } } },
+  { id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } },
+  { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } },
+  { id: 'tags', header: t('dictionaries.columns.tags') },
+  { id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+])
+const removalDescription = computed(() => pendingRemoval.value.length === 1
+  ? t('dictionaries.deleteOne', { name: pendingRemoval.value[0]?.metadata.name ?? '' })
+  : t('dictionaries.deleteMany', { count: pendingRemoval.value.length }))
 
 watch([query, pageSize], () => { page.value = 1 })
 
@@ -106,43 +111,43 @@ function confirmRemoval() {
   <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="dictionary-library-title">
     <ManagementPageHeader
       title-id="dictionary-library-title"
-      title="词典"
-      description="管理可独立发布和复用的语言资产；词典只保存文字规则与便携元数据。"
+      :title="t('dictionaries.title')"
+      :description="t('dictionaries.description')"
       icon="i-tabler-language"
     >
       <template #actions>
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" label="新建词典" :disabled="busy" @click="creating = true" />
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="creating = true" />
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="messages.dictionaries" role="alert" color="error" variant="soft" title="词典操作失败" :description="messages.dictionaries" class="mb-3" />
+    <UAlert v-if="messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
 
     <ManagementTableFrame
       v-model:query="query"
       v-model:page="page"
       v-model:page-size="pageSize"
-      search-placeholder="搜索名称、语言、版本或标签"
-      search-label="搜索词典"
+      :search-placeholder="t('dictionaries.searchPlaceholder')"
+      :search-label="t('dictionaries.searchLabel')"
       :selected-count="selected.size"
-      selected-label="份词典"
+      :selected-label="t('dictionaries.itemLabel')"
       :total="filtered.length"
-      item-label="份词典"
+      :item-label="t('dictionaries.itemLabel')"
     >
       <template #bulk-actions>
-        <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" label="批量删除" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
+        <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
       </template>
 
       <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[860px]' }">
         <template #select-header>
-          <UCheckbox :model-value="pageSelected" aria-label="选择本页词典" @update:model-value="togglePageSelection" />
+          <UCheckbox :model-value="pageSelected" :aria-label="t('dictionaries.selectPage')" @update:model-value="togglePageSelection" />
         </template>
         <template #select-cell="{ row }">
-          <UCheckbox :model-value="selected.has(row.original.metadata.id)" :aria-label="`选择 ${row.original.metadata.name}`" @update:model-value="toggleSelection(row.original.metadata.id)" />
+          <UCheckbox :model-value="selected.has(row.original.metadata.id)" :aria-label="t('common.selectNamed', { name: row.original.metadata.name })" @update:model-value="toggleSelection(row.original.metadata.id)" />
         </template>
         <template #dictionary-cell="{ row }">
           <UButton color="neutral" variant="link" class="block min-w-0 max-w-full justify-start p-0 text-left" @click="emit('open', row.original.metadata.id)">
             <span class="block truncate font-semibold text-[var(--text)]">{{ row.original.metadata.name }}</span>
-            <span class="mt-0.5 block truncate text-[9px] text-[var(--text-muted)]">{{ row.original.metadata.description || '未填写描述' }}</span>
+            <span class="mt-0.5 block truncate text-[9px] text-[var(--text-muted)]">{{ row.original.metadata.description || t('common.noDescription') }}</span>
           </UButton>
         </template>
         <template #languages-cell="{ row }">
@@ -152,7 +157,7 @@ function confirmRemoval() {
         </template>
         <template #release-cell="{ row }">
           <div>v{{ row.original.metadata.releaseVersion }}</div>
-          <div class="mt-0.5 text-[9px] text-[var(--text-muted)]">本地修订 {{ row.original.revision }}</div>
+          <div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('dictionaries.localRevision', { revision: row.original.revision }) }}</div>
         </template>
         <template #tags-cell="{ row }">
           <div class="flex flex-wrap gap-1">
@@ -163,21 +168,21 @@ function confirmRemoval() {
         <template #rules-cell="{ row }">{{ row.original.entryCount }}</template>
         <template #actions-cell="{ row }">
           <div class="flex justify-center gap-0.5">
-            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="`编辑 ${row.original.metadata.name}`" @click="emit('open', row.original.metadata.id)" />
-            <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="`删除 ${row.original.metadata.name}`" :disabled="busy" @click="pendingRemoval = [row.original]" />
+            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.metadata.name })" @click="emit('open', row.original.metadata.id)" />
+            <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.metadata.name })" :disabled="busy" @click="pendingRemoval = [row.original]" />
           </div>
         </template>
         <template #empty>
-          <UEmpty icon="i-tabler-language" :title="items.length ? '没有匹配的词典' : '还没有词典'" :description="items.length ? '调整搜索条件后再试。' : '先创建一份只包含语言元数据和文字规则的词典。'" />
+          <UEmpty icon="i-tabler-language" :title="items.length ? t('dictionaries.noMatch') : t('dictionaries.empty')" :description="items.length ? t('dictionaries.adjustSearch') : t('dictionaries.emptyDescription')" />
         </template>
       </UTable>
     </ManagementTableFrame>
 
     <ManagementFormModal
       :open="creating"
-      title="新建词典"
-      description="发布版本属于词典内容；下载地址、摘要、签名和安装状态由未来的在线目录管理。"
-      confirm-label="创建词典"
+      :title="t('dictionaries.create')"
+      :description="t('dictionaries.createDescription')"
+      :confirm-label="t('dictionaries.createConfirm')"
       :confirm-disabled="busy || !name.trim() || !sourceLocale.trim() || !targetLocale.trim() || !releaseVersion.trim()"
       :busy="busy"
       width="lg"
@@ -185,22 +190,22 @@ function confirmRemoval() {
       @confirm="submit"
     >
       <div class="grid grid-cols-2 gap-3">
-        <UFormField label="词典名称" required class="col-span-2"><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
-        <UFormField label="说明" class="col-span-2"><UTextarea v-model="description" :maxlength="512" :rows="2" class="w-full" /></UFormField>
-        <UFormField label="源语言" required><UInput v-model="sourceLocale" class="w-full" /></UFormField>
-        <UFormField label="目标语言" required><UInput v-model="targetLocale" class="w-full" /></UFormField>
-        <UFormField label="发布版本" required><UInput v-model="releaseVersion" class="w-full" /></UFormField>
-        <UFormField label="作者" hint="多个作者用逗号分隔"><UInput v-model="authors" class="w-full" /></UFormField>
-        <UFormField label="许可证"><UInput v-model="license" class="w-full" placeholder="例如 MIT" /></UFormField>
-        <UFormField label="主页"><UInput v-model="homepage" class="w-full" placeholder="https://…" /></UFormField>
-        <UFormField label="标签" hint="多个标签用逗号分隔" class="col-span-2"><UInput v-model="tags" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.name')" required class="col-span-2"><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.descriptionField')" class="col-span-2"><UTextarea v-model="description" :maxlength="512" :rows="2" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.sourceLocale')" required><UInput v-model="sourceLocale" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.targetLocale')" required><UInput v-model="targetLocale" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.releaseVersion')" required><UInput v-model="releaseVersion" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.authors')" :hint="t('dictionaries.authorsHint')"><UInput v-model="authors" class="w-full" /></UFormField>
+        <UFormField :label="t('dictionaries.license')"><UInput v-model="license" class="w-full" :placeholder="t('dictionaries.licensePlaceholder')" /></UFormField>
+        <UFormField :label="t('dictionaries.homepage')"><UInput v-model="homepage" class="w-full" placeholder="https://…" /></UFormField>
+        <UFormField :label="t('dictionaries.tags')" :hint="t('dictionaries.tagsHint')" class="col-span-2"><UInput v-model="tags" class="w-full" /></UFormField>
       </div>
     </ManagementFormModal>
 
     <ConfirmDialog
       :open="Boolean(pendingRemoval.length)"
-      title="删除词典"
-      :description="`确认删除 ${pendingRemoval.length === 1 ? `“${pendingRemoval[0]?.metadata.name}”` : `${pendingRemoval.length} 份词典`}？被工作流引用的词典不能删除。`"
+      :title="t('dictionaries.deleteTitle')"
+      :description="removalDescription"
       :busy="busy"
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"

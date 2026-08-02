@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 withDefaults(defineProps<{
   open: boolean
   title: string
@@ -6,9 +8,11 @@ withDefaults(defineProps<{
   confirmLabel?: string
   busy?: boolean
 }>(), {
-  confirmLabel: '确认删除',
+  confirmLabel: '',
   busy: false,
 })
+
+const { t } = useI18n()
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
@@ -36,7 +40,7 @@ const emit = defineEmits<{
         color="neutral"
         variant="outline"
         size="sm"
-        label="取消"
+        :label="t('common.cancel')"
         class="ml-auto"
         :disabled="busy"
         @click="emit('update:open', false)"
@@ -45,7 +49,7 @@ const emit = defineEmits<{
         color="error"
         variant="soft"
         size="sm"
-        :label="confirmLabel"
+        :label="confirmLabel || t('common.confirmDelete')"
         :loading="busy"
         @click="emit('confirm')"
       />

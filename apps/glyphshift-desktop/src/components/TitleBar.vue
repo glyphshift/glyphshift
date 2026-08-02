@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useToast } from '@nuxt/ui/composables'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAppSettings } from '../appSettings'
 
 defineProps<{
   current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'help' | 'settings'
@@ -8,12 +12,30 @@ const emit = defineEmits<{
   navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'fonts' | 'help' | 'settings']
 }>()
 
-const nav = [
-  { id: 'workflows' as const, label: '工作流', icon: 'i-tabler-git-branch' },
-  { id: 'software' as const, label: '软件', icon: 'i-tabler-library' },
-  { id: 'dictionaries' as const, label: '词典', icon: 'i-tabler-book-2' },
-  { id: 'fonts' as const, label: '字体', icon: 'i-tabler-typography' },
-]
+const { t } = useI18n()
+const toast = useToast()
+const appSettings = useAppSettings()
+const nav = computed(() => [
+  { id: 'workflows' as const, label: t('titleBar.workflows'), icon: 'i-tabler-git-branch' },
+  { id: 'software' as const, label: t('titleBar.software'), icon: 'i-tabler-library' },
+  { id: 'dictionaries' as const, label: t('titleBar.dictionaries'), icon: 'i-tabler-book-2' },
+  { id: 'fonts' as const, label: t('titleBar.fonts'), icon: 'i-tabler-typography' },
+])
+const themeToggleLabel = computed(() => appSettings.effectiveTheme.value === 'dark'
+  ? t('titleBar.switchToLight')
+  : t('titleBar.switchToDark'))
+
+function toggleTheme() {
+  const nextTheme = appSettings.effectiveTheme.value === 'dark' ? 'light' : 'dark'
+  void appSettings.setThemePreference(nextTheme).catch(() => {
+    toast.add({
+      title: t('settings.saveFailed'),
+      description: appSettings.settingsError.value || t('errors.unknown'),
+      color: 'error',
+      icon: 'i-tabler-alert-circle',
+    })
+  })
+}
 
 async function native(action: 'minimize' | 'maximize' | 'close') {
   try {
@@ -35,7 +57,7 @@ async function native(action: 'minimize' | 'maximize' | 'close') {
       <strong class="text-[13px] font-semibold tracking-[-0.015em] text-[var(--text)]">Glyphshift</strong>
       <span class="text-[9px] text-[var(--text-muted)]">v0.2</span>
     </div>
-    <nav class="flex items-stretch" aria-label="主导航">
+    <nav class="flex items-stretch" :aria-label="t('titleBar.navigation')">
       <UButton
         v-for="item in nav"
         :key="item.id"
@@ -55,11 +77,20 @@ async function native(action: 'minimize' | 'maximize' | 'close') {
       />
     </nav>
     <div class="ml-auto flex items-stretch" data-tauri-drag-region>
-      <UButton color="neutral" variant="ghost" icon="i-tabler-help-circle" class="h-full w-10 rounded-none" :class="current === 'help' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" aria-label="帮助" :aria-current="current === 'help' ? 'page' : undefined" @click="emit('navigate', 'help')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" aria-label="设置" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" aria-label="最小化窗口" @click="native('minimize')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" aria-label="最大化窗口" @click="native('maximize')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" aria-label="关闭窗口" @click="native('close')" />
+      <UButton
+        color="neutral"
+        variant="ghost"
+        :icon="appSettings.effectiveTheme.value === 'dark' ? 'i-tabler-sun' : 'i-tabler-moon'"
+        class="h-full w-10 rounded-none"
+        :aria-label="themeToggleLabel"
+        :title="themeToggleLabel"
+        @click="toggleTheme"
+      />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-help-circle" class="h-full w-10 rounded-none" :class="current === 'help' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.help')" :aria-current="current === 'help' ? 'page' : undefined" @click="emit('navigate', 'help')" />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.settings')" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" :aria-label="t('titleBar.minimize')" @click="native('minimize')" />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" :aria-label="t('titleBar.maximize')" @click="native('maximize')" />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="native('close')" />
     </div>
   </header>
 </template>

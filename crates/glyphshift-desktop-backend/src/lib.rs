@@ -88,7 +88,7 @@ impl CapabilityView {
             state: "limited",
             enabled: false,
             coverage: 0,
-            detail: "等待兼容性检测",
+            detail: "capability.compatibility-pending",
             generation: None,
         }
     }
@@ -2408,12 +2408,12 @@ impl DesktopBackend {
             id: extension_id.clone(),
             version: "0.1.0".into(),
             name: name.into(),
-            vendor: "未知开发者".into(),
+            vendor: "—".into(),
             executables: vec![executable_name.into()],
             runtime: None,
             locations: vec![ExtensionLocationArtifact {
                 id: "main-ui".into(),
-                label: "界面文字".into(),
+                label: "main-ui".into(),
                 context: None,
             }],
         };
@@ -2668,20 +2668,20 @@ fn software_view(
             .map(|software| software.description.clone())
             .unwrap_or_default(),
         vendor: state.artifact.vendor.clone(),
-        version: "待检测".into(),
+        version: "—".into(),
         executable_name: state
             .artifact
             .executables
             .first()
             .cloned()
-            .unwrap_or_else(|| "未指定".into()),
+            .unwrap_or_default(),
         executable_path: local_software.map(|software| software.executable_path.clone()),
         monogram,
         last_used: None,
         locale: state.locale.clone(),
         connected: false,
-        translation: CapabilityView::unavailable("尚未获得文字替换证据"),
-        font: CapabilityView::unavailable("尚未获得字体替换证据"),
+        translation: CapabilityView::unavailable("capability.text-unavailable"),
+        font: CapabilityView::unavailable("capability.font-unavailable"),
         observe: CapabilityView::pending_observation(),
         locations: state
             .artifact

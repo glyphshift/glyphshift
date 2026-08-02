@@ -1,5 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { presentationError, translateCommandError } from './commandError'
+import { i18n } from './i18n'
 import {
   emptyModel,
   STORAGE_KEY,
@@ -21,6 +23,10 @@ function hasDesktopRuntime() {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function errorMessage(error: unknown) {
+  return translateCommandError(error)
 }
 
 function readModel(): DesktopModel {
@@ -117,7 +123,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(id, String(error))
+      setMessage(id, errorMessage(error))
       return false
     }
     finally {
@@ -133,7 +139,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('workflows', String(error))
+      setMessage('workflows', errorMessage(error))
       return false
     }
     finally {
@@ -149,7 +155,7 @@ export function useWorkspace() {
       return workflowDetail.value
     }
     catch (error) {
-      setMessage(id, String(error))
+      setMessage(id, errorMessage(error))
       return null
     }
   }
@@ -162,7 +168,7 @@ export function useWorkspace() {
       return dictionaryDetail.value
     }
     catch (error) {
-      setMessage(id, String(error))
+      setMessage(id, errorMessage(error))
       return null
     }
   }
@@ -175,7 +181,7 @@ export function useWorkspace() {
       return fontProfileDetail.value
     }
     catch (error) {
-      setMessage(id, String(error))
+      setMessage(id, errorMessage(error))
       return null
     }
   }
@@ -197,7 +203,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(detail.id, String(error))
+      setMessage(detail.id, errorMessage(error))
       return false
     }
     finally {
@@ -218,7 +224,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('workflows', String(error))
+      setMessage('workflows', errorMessage(error))
       return false
     }
     finally {
@@ -258,7 +264,7 @@ export function useWorkspace() {
     workspaceBusy.value = true
     setMessage('workflows', '')
     const id = `workflow-${crypto.randomUUID()}`
-    const name = `${source.name} 副本`
+    const name = `${source.name} ${i18n.global.t('workspace.copySuffix')}`
     try {
       const snapshot = hasDesktopRuntime()
         ? await invoke<DesktopSnapshot>('desktop_copy_workflow', { sourceWorkflowId: sourceId, newWorkflowId: id, name })
@@ -267,7 +273,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('workflows', String(error))
+      setMessage('workflows', errorMessage(error))
       return false
     }
     finally {
@@ -277,7 +283,7 @@ export function useWorkspace() {
 
   function localCopyWorkflow(sourceId: string, id: string, name: string): DesktopSnapshot {
     const source = model.value.workflowDetails[sourceId]
-    if (!source) throw new Error('浏览器预览缺少工作流详情，无法复制。')
+    if (!source) throw presentationError(i18n.global.t('workspace.missingCopySource'))
     return localCreateWorkflow({ ...clone(source), id, name, revision: 1 })
   }
 
@@ -291,7 +297,7 @@ export function useWorkspace() {
       }
       else {
         const enabled = new Set(model.value.activations.map(item => item.workflowId))
-        if (ids.some(id => enabled.has(id))) throw new Error('请先停用工作流，再删除它。')
+        if (ids.some(id => enabled.has(id))) throw presentationError(i18n.global.t('workspace.disableBeforeDelete'))
         const removed = new Set(ids)
         model.value.workflows = model.value.workflows.filter(item => !removed.has(item.id))
         for (const id of ids) {
@@ -302,7 +308,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('workflows', String(error))
+      setMessage('workflows', errorMessage(error))
       return false
     }
     finally {
@@ -342,7 +348,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(detail.metadata.id, String(error))
+      setMessage(detail.metadata.id, errorMessage(error))
       return false
     }
     finally {
@@ -374,7 +380,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('dictionaries', String(error))
+      setMessage('dictionaries', errorMessage(error))
       return false
     }
     finally {
@@ -392,7 +398,7 @@ export function useWorkspace() {
       }
       else {
         if (ids.some(id => model.value.workflows.some(workflow => workflow.dictionaryIds.includes(id)))) {
-          throw new Error('被工作流引用的词典不能删除。')
+          throw presentationError(i18n.global.t('workspace.dictionaryReferenced'))
         }
         const removed = new Set(ids)
         model.value.dictionaries = model.value.dictionaries.filter(item => !removed.has(item.metadata.id))
@@ -401,7 +407,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('dictionaries', String(error))
+      setMessage('dictionaries', errorMessage(error))
       return false
     }
     finally {
@@ -446,7 +452,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('fontProfiles', String(error))
+      setMessage('fontProfiles', errorMessage(error))
       return false
     }
     finally {
@@ -469,7 +475,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(detail.metadata.id, String(error))
+      setMessage(detail.metadata.id, errorMessage(error))
       return false
     }
     finally {
@@ -498,7 +504,7 @@ export function useWorkspace() {
       }
       else {
         if (ids.some(id => model.value.workflows.some(workflow => workflow.targets.some(target => target.fontBindings.some(binding => binding.fontProfileId === id))))) {
-          throw new Error('被工作流引用的字体方案不能删除。')
+          throw presentationError(i18n.global.t('workspace.fontProfileReferenced'))
         }
         const removed = new Set(ids)
         model.value.fontProfiles = model.value.fontProfiles.filter(item => !removed.has(item.metadata.id))
@@ -507,7 +513,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage('fontProfiles', String(error))
+      setMessage('fontProfiles', errorMessage(error))
       return false
     }
     finally {
@@ -539,7 +545,7 @@ export function useWorkspace() {
         const added = await invoke<DesktopSnapshot>('desktop_add_software', { executablePath: path })
         const created = added.software.find(item => !existingIds.has(item.id))
         applyDesktopSnapshot(added)
-        if (!created) throw new Error('软件已添加，但桌面端没有返回新软件记录。')
+        if (!created) throw presentationError(i18n.global.t('workspace.softwareResultMissing'))
         if (created.name !== name || description.trim()) {
           applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_update_software', {
             extensionId: created.id,
@@ -555,25 +561,25 @@ export function useWorkspace() {
           id: `software-${crypto.randomUUID()}`,
           name,
           description: description.trim(),
-          vendor: '用户添加',
-          version: '未标注',
+          vendor: 'Glyphshift',
+          version: '—',
           executableName,
           executablePath: path,
           monogram: name.slice(0, 2).toLocaleUpperCase(),
           lastUsed: null,
           locale: 'zh-CN',
           connected: false,
-          translation: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未发现文字写回能力', generation: null },
-          font: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未发现字体写回能力', generation: null },
-          observe: { state: 'unavailable', enabled: false, coverage: 0, detail: '尚未连接运行实例', generation: null },
-          locations: [{ id: 'main-ui', label: '界面文字' }],
+          translation: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.text-unavailable', generation: null },
+          font: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.font-unavailable', generation: null },
+          observe: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.runtime-unavailable', generation: null },
+          locations: [{ id: 'main-ui', label: 'main-ui' }],
         }
         model.value.software = [...model.value.software, record].sort((left, right) => left.name.localeCompare(right.name))
       }
       return true
     }
     catch (error) {
-      setMessage('software', String(error))
+      setMessage('software', errorMessage(error))
       return false
     }
     finally {
@@ -602,7 +608,7 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(id, String(error))
+      setMessage(id, errorMessage(error))
       return false
     }
   }
@@ -614,7 +620,7 @@ export function useWorkspace() {
         else model.value.software = model.value.software.filter(item => item.id !== id)
       }
       catch (error) {
-        setMessage(id, String(error))
+        setMessage(id, errorMessage(error))
       }
     }
   }

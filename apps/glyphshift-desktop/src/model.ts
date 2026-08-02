@@ -1,3 +1,5 @@
+import type { CommandError } from './commandError'
+
 export type CapabilityState = 'active' | 'ready' | 'candidate' | 'limited' | 'unavailable'
 export interface CapabilityEvidence {
   state: CapabilityState
@@ -147,7 +149,7 @@ export interface WorkflowTargetRuntime {
 export interface WorkflowRuntimeStatus {
   workflowId: string
   targets: WorkflowTargetRuntime[]
-  errors: Record<string, string>
+  errors: Record<string, CommandError>
 }
 
 export interface DesktopSnapshot {

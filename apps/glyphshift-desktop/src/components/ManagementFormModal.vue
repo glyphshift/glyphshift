@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -20,6 +21,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   'confirm': []
 }>()
+const { t } = useI18n()
 
 const widthClass = computed(() => ({
   sm: 'max-w-[400px]',
@@ -54,7 +56,7 @@ const widthClass = computed(() => ({
         color="neutral"
         variant="outline"
         size="sm"
-        label="取消"
+        :label="t('common.cancel')"
         class="ml-auto"
         :disabled="busy"
         @click="emit('update:open', false)"
