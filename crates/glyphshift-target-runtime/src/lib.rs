@@ -1,0 +1,468 @@
+//! Injected target-process Runtime Host for verified native Adapter packages.
+
+use glyphshift_adapter_native_abi::{
+    NativeDecisionV1, NativeRuntimeHostV1, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE,
+    STATUS_OK, STATUS_OUTPUT_TOO_SMALL,
+};
+use glyphshift_adapter_native_host::LoadedNativeAdapter;
+use glyphshift_adapter_registry::AdapterBinding;
+use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
+use glyphshift_runtime_contract::RuntimePublication;
+use glyphshift_runtime_kernel::RuntimeKernel;
+use glyphshift_target_runtime_contract::{
+    RuntimeCommandV1, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
+    STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_CHANGED,
+    STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED, STATUS_TARGET_RUNTIME_ALREADY_ACTIVE,
+    STATUS_TARGET_RUNTIME_INVALID_COMMAND, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
+    STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_OK,
+    STATUS_TARGET_RUNTIME_UNAVAILABLE, STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+const MAX_COMMAND_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetRuntimeError {
+    AlreadyActive,
+    InvalidDeployment,
+    AdapterLoad,
+    AdapterArtifactChanged,
+    KernelActivation,
+    AdapterActivation,
+    RuntimeUnavailable,
+    UpdateRejected,
+}
+
+struct RuntimeState {
+    kernel: RuntimeKernel,
+    publication: RuntimePublication,
+    bindings: Vec<AdapterBinding>,
+    adapter_libraries: Vec<PathBuf>,
+    adapters: Vec<Arc<LoadedNativeAdapter>>,
+    native_hosts: Vec<usize>,
+    active: bool,
+}
+
+fn runtime_state() -> &'static Mutex<Option<RuntimeState>> {
+    static STATE: OnceLock<Mutex<Option<RuntimeState>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(None))
+}
+
+struct NativeDecisionContext {
+    adapter_id: Box<str>,
+}
+
+fn native_host(adapter_id: &str) -> usize {
+    let context = Box::into_raw(Box::new(NativeDecisionContext {
+        adapter_id: adapter_id.into(),
+    }));
+    Box::into_raw(Box::new(NativeRuntimeHostV1 {
+        struct_size: std::mem::size_of::<NativeRuntimeHostV1>() as u32,
+        context: context.cast(),
+        decide_utf16,
+        source_characters_utf16,
+    })) as usize
+}
+
+pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), TargetRuntimeError> {
+    let bindings = deployment
+        .adapters()
+        .iter()
+        .map(|adapter| adapter.binding().clone())
+        .collect::<Vec<_>>();
+    let adapter_libraries = deployment
+        .adapters()
+        .iter()
+        .map(|adapter| adapter.library().to_path_buf())
+        .collect::<Vec<_>>();
+    for adapter in deployment.adapters() {
+        let artifact_hash = file_sha256(adapter.library())
+            .map_err(|_| TargetRuntimeError::AdapterArtifactChanged)?;
+        if artifact_hash != adapter.binding().artifact_hash.as_bytes() {
+            return Err(TargetRuntimeError::AdapterArtifactChanged);
+        }
+    }
+    let publication = deployment.publication().clone();
+    let kernel = RuntimeKernel::from_publication(bindings.clone(), publication.clone())
+        .map_err(|_| TargetRuntimeError::KernelActivation)?;
+    let (adapters, native_hosts) = {
+        let mut state = runtime_state()
+            .lock()
+            .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        if let Some(runtime) = state.as_mut() {
+            if runtime.active {
+                return Err(TargetRuntimeError::AlreadyActive);
+            }
+            if !same_adapter_set(&runtime.bindings, &bindings)
+                || runtime.adapter_libraries != adapter_libraries
+            {
+                return Err(TargetRuntimeError::InvalidDeployment);
+            }
+            runtime.kernel = kernel;
+            runtime.publication = publication;
+            runtime.bindings = bindings;
+            (runtime.adapters.clone(), runtime.native_hosts.clone())
+        } else {
+            let adapters = deployment
+                .adapters()
+                .iter()
+                .map(|adapter| unsafe {
+                    LoadedNativeAdapter::load(adapter.library(), &adapter.binding().descriptor)
+                        .map(Arc::new)
+                        .map_err(|_| TargetRuntimeError::AdapterLoad)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let native_hosts = bindings
+                .iter()
+                .map(|binding| native_host(binding.adapter_id.as_str()))
+                .collect::<Vec<_>>();
+            *state = Some(RuntimeState {
+                kernel,
+                publication,
+                bindings,
+                adapter_libraries,
+                adapters: adapters.clone(),
+                native_hosts: native_hosts.clone(),
+                active: false,
+            });
+            (adapters, native_hosts)
+        }
+    };
+    let mut all_active = true;
+    for ((adapter, deployment), native_host) in
+        adapters.iter().zip(deployment.adapters()).zip(native_hosts)
+    {
+        let requested = deployment.binding().features.iter().copied();
+        let expected = deployment.binding().features.clone();
+        let host = unsafe { &*(native_host as *const NativeRuntimeHostV1) };
+        let active = adapter.activate(host, requested, expected.iter().copied());
+        if active.as_deref() != Ok(expected.as_slice()) {
+            all_active = false;
+            break;
+        }
+    }
+    if !all_active {
+        for adapter in &adapters {
+            let _ = adapter.deactivate();
+        }
+        return Err(TargetRuntimeError::AdapterActivation);
+    }
+    {
+        let mut state = runtime_state()
+            .lock()
+            .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        state
+            .as_mut()
+            .ok_or(TargetRuntimeError::RuntimeUnavailable)?
+            .active = true;
+    }
+    request_current_process_redraw();
+    Ok(())
+}
+
+fn same_adapter_set(previous: &[AdapterBinding], next: &[AdapterBinding]) -> bool {
+    previous.len() == next.len()
+        && previous.iter().zip(next).all(|(previous, next)| {
+            previous.descriptor == next.descriptor
+                && previous.adapter_id == next.adapter_id
+                && previous.version == next.version
+                && previous.apply_model == next.apply_model
+                && previous.artifact_hash == next.artifact_hash
+                && previous.host == next.host
+        })
+}
+
+fn file_sha256(path: &Path) -> Result<[u8; 32], std::io::Error> {
+    let mut file = File::open(path)?;
+    let mut digest = Sha256::new();
+    std::io::copy(&mut file, &mut digest)?;
+    Ok(digest.finalize().into())
+}
+
+pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetRuntimeError> {
+    {
+        let mut state = runtime_state()
+            .lock()
+            .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        let runtime = state
+            .as_mut()
+            .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        if !runtime.active {
+            return Err(TargetRuntimeError::RuntimeUnavailable);
+        }
+        runtime
+            .kernel
+            .apply_publication(publication.clone())
+            .map_err(|_| TargetRuntimeError::UpdateRejected)?;
+        runtime.publication = publication;
+    }
+    request_current_process_redraw();
+    Ok(())
+}
+
+pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
+    {
+        let mut state = runtime_state()
+            .lock()
+            .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        let runtime = state
+            .as_mut()
+            .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        if !runtime.active {
+            return Err(TargetRuntimeError::RuntimeUnavailable);
+        }
+        if runtime
+            .adapters
+            .iter()
+            .all(|adapter| adapter.deactivate().is_ok())
+        {
+            runtime.active = false;
+        } else {
+            return Err(TargetRuntimeError::AdapterActivation);
+        }
+    }
+    request_current_process_redraw();
+    Ok(())
+}
+
+#[cfg(windows)]
+fn request_current_process_redraw() {
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::Graphics::Gdi::{
+        RedrawWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
+
+    struct RefreshState {
+        process_id: u32,
+    }
+
+    unsafe extern "system" fn refresh_window(window: HWND, state: LPARAM) -> i32 {
+        let state = &mut *(state as *mut RefreshState);
+        let mut process_id = 0;
+        GetWindowThreadProcessId(window, &mut process_id);
+        if process_id == state.process_id {
+            // Keep this asynchronous: a synchronous paint can re-enter the Decision callback.
+            RedrawWindow(
+                window,
+                null(),
+                null_mut(),
+                RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME,
+            );
+        }
+        1
+    }
+
+    let mut state = RefreshState {
+        process_id: unsafe { GetCurrentProcessId() },
+    };
+    unsafe {
+        EnumWindows(
+            Some(refresh_window),
+            (&mut state as *mut RefreshState) as LPARAM,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn request_current_process_redraw() {}
+
+extern "C" fn decide_utf16(
+    context: *mut core::ffi::c_void,
+    source: *const u16,
+    source_len: u32,
+    text_out: *mut u16,
+    text_capacity: u32,
+    font_out: *mut u16,
+    font_capacity: u32,
+) -> NativeDecisionV1 {
+    if context.is_null() || source.is_null() || source_len as usize > MAX_COMMAND_BYTES / 2 {
+        return decision_error(STATUS_OUTPUT_TOO_SMALL);
+    }
+    let source = unsafe { std::slice::from_raw_parts(source, source_len as usize) };
+    let source = String::from_utf16_lossy(source);
+    let Ok(state) = runtime_state().lock() else {
+        return decision_error(STATUS_OUTPUT_TOO_SMALL);
+    };
+    let Some(runtime) = state.as_ref() else {
+        return decision_error(STATUS_OUTPUT_TOO_SMALL);
+    };
+    if !runtime.active {
+        return decision_error(STATUS_OUTPUT_TOO_SMALL);
+    }
+    let context = unsafe { &*context.cast::<NativeDecisionContext>() };
+    let decision = runtime.kernel.decide(&TextObservation::new(
+        context.adapter_id.clone(),
+        source,
+        "native.surface",
+    ));
+    let text = match decision.text {
+        TextDecision::Keep => None,
+        TextDecision::Replace(text) => Some(text.encode_utf16().collect::<Vec<_>>()),
+    };
+    let font = match decision.font {
+        FontDecision::Keep => None,
+        FontDecision::Substitute(font) => Some(font.encode_utf16().collect::<Vec<_>>()),
+    };
+    if text
+        .as_ref()
+        .is_some_and(|text| text.len() > text_capacity as usize)
+        || font
+            .as_ref()
+            .is_some_and(|font| font.len() > font_capacity as usize)
+    {
+        return decision_error(STATUS_OUTPUT_TOO_SMALL);
+    }
+    if let Some(text) = &text {
+        unsafe {
+            std::ptr::copy_nonoverlapping(text.as_ptr(), text_out, text.len());
+        }
+    }
+    if let Some(font) = &font {
+        unsafe {
+            std::ptr::copy_nonoverlapping(font.as_ptr(), font_out, font.len());
+        }
+    }
+    NativeDecisionV1 {
+        status: STATUS_OK,
+        generation: decision.generation.value(),
+        decision_bits: if text.is_some() {
+            DECISION_TEXT_REPLACE
+        } else {
+            0
+        } | if font.is_some() {
+            DECISION_FONT_SUBSTITUTE
+        } else {
+            0
+        },
+        text_len: text.as_ref().map_or(0, |text| text.len() as u32),
+        font_len: font.as_ref().map_or(0, |font| font.len() as u32),
+    }
+}
+
+extern "C" fn source_characters_utf16(
+    _context: *mut core::ffi::c_void,
+    output: *mut u16,
+    capacity: u32,
+) -> u32 {
+    let Ok(state) = runtime_state().lock() else {
+        return 0;
+    };
+    let Some(runtime) = state.as_ref() else {
+        return 0;
+    };
+    let mut characters = BTreeSet::new();
+    runtime
+        .publication
+        .snapshot()
+        .visit_entries(|_, source, _| characters.extend(source.encode_utf16()));
+    runtime
+        .publication
+        .snapshot()
+        .visit_context_entries(|_, _, _, source, _| characters.extend(source.encode_utf16()));
+    let units = characters.into_iter().collect::<Vec<_>>();
+    if !output.is_null() && units.len() <= capacity as usize {
+        unsafe {
+            std::ptr::copy_nonoverlapping(units.as_ptr(), output, units.len());
+        }
+    }
+    units.len() as u32
+}
+
+fn decision_error(status: i32) -> NativeDecisionV1 {
+    NativeDecisionV1 {
+        status,
+        generation: 0,
+        decision_bits: 0,
+        text_len: 0,
+        font_len: 0,
+    }
+}
+
+fn activation_status(error: TargetRuntimeError) -> u32 {
+    match error {
+        TargetRuntimeError::AlreadyActive => STATUS_TARGET_RUNTIME_ALREADY_ACTIVE,
+        TargetRuntimeError::InvalidDeployment => STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
+        TargetRuntimeError::AdapterLoad => STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
+        TargetRuntimeError::AdapterArtifactChanged => STATUS_TARGET_RUNTIME_ADAPTER_CHANGED,
+        TargetRuntimeError::KernelActivation => STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED,
+        TargetRuntimeError::AdapterActivation => STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
+        TargetRuntimeError::RuntimeUnavailable => STATUS_TARGET_RUNTIME_UNAVAILABLE,
+        TargetRuntimeError::UpdateRejected => STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    }
+}
+
+unsafe fn command_json<'a>(command: *const RuntimeCommandV1) -> Option<&'a str> {
+    if command.is_null()
+        || (*command).struct_size != std::mem::size_of::<RuntimeCommandV1>() as u32
+        || (*command).json.is_null()
+        || (*command).json_len as usize > MAX_COMMAND_BYTES
+    {
+        return None;
+    }
+    std::str::from_utf8(std::slice::from_raw_parts(
+        (*command).json,
+        (*command).json_len as usize,
+    ))
+    .ok()
+}
+
+#[no_mangle]
+/// Activates a complete target Runtime deployment from a bounded command buffer.
+///
+/// # Safety
+///
+/// `command` and its JSON buffer must remain readable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_activate_v1(
+    command: *const RuntimeCommandV1,
+) -> u32 {
+    let Some(json) = command_json(command) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    let Ok(deployment) = TargetRuntimeDeployment::decode_json(json) else {
+        return STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT;
+    };
+    match std::panic::catch_unwind(|| activate_deployment(deployment)) {
+        Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
+        Ok(Err(error)) => activation_status(error),
+        Err(_) => STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
+    }
+}
+
+#[no_mangle]
+/// Applies a newer Runtime Publication from a bounded command buffer.
+///
+/// # Safety
+///
+/// `command` and its JSON buffer must remain readable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_update_v1(
+    command: *const RuntimeCommandV1,
+) -> u32 {
+    let Some(json) = command_json(command) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    let Ok(publication) = RuntimePublication::decode_json(json) else {
+        return STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT;
+    };
+    match std::panic::catch_unwind(|| update_publication(publication)) {
+        Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
+        Ok(Err(error)) => activation_status(error),
+        Err(_) => STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn glyphshift_runtime_deactivate_v1(_command: *mut core::ffi::c_void) -> u32 {
+    match std::panic::catch_unwind(deactivate_runtime) {
+        Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
+        Ok(Err(error)) => activation_status(error),
+        Err(_) => STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
+    }
+}

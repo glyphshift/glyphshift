@@ -1,0 +1,32 @@
+{
+  "name": "glyphshift-desktop",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "playwright test",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@iconify-json/tabler": "^1.2.38",
+    "@nuxt/ui": "^4.10.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@vueuse/core": "^14.4.0",
+    "vue": "^3.5.39",
+    "vue-router": "^5.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@tauri-apps/cli": "^2.11.3",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0",
+    "vue-tsc": "^3.3.5"
+  }
+}

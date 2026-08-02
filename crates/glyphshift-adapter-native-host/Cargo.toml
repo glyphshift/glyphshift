@@ -1,0 +1,22 @@
+[package]
+name = "glyphshift-adapter-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../glyphshift-adapter-native-abi" }
+glyphshift-adapter-sdk = { path = "../glyphshift-adapter-sdk" }
+glyphshift-domain = { path = "../glyphshift-domain" }
+libloading = "0.8"
+
+[dev-dependencies]
+glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
+glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
+glyphshift-windows-host = { path = "../../test-support/windows-host" }
+
+[lints.rust]
+unsafe_code = "allow"

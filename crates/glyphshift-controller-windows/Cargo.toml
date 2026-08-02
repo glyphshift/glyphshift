@@ -1,0 +1,47 @@
+[package]
+name = "glyphshift-controller-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "glyphshift-controller-windows"
+path = "src/main.rs"
+
+[dependencies]
+glyphshift-controller-sdk = { path = "../glyphshift-controller-sdk" }
+glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }
+glyphshift-target-runtime-contract = { path = "../glyphshift-target-runtime-contract" }
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+]
+
+[dev-dependencies]
+glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
+glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
+glyphshift-domain = { path = "../glyphshift-domain" }
+glyphshift-translation = { path = "../glyphshift-translation" }
+
+[lints.rust]
+unsafe_code = "allow"

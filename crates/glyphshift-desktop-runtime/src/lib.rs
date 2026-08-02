@@ -1,0 +1,1668 @@
+//! Desktop composition root for a verified Controller, target Runtime, and Adapter bundle.
+//!
+//! The desktop shell sees only application instances and session state. Process tokens, artifact
+//! paths, deployment payloads, and controller acknowledgements stay behind this module boundary.
+
+use glyphshift_adapter_native_host::LoadedNativeAdapter;
+use glyphshift_adapter_registry::{
+    AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement, AdapterTrustPolicy,
+    AdapterVersionRequirement, ArtifactHash, PackageArtifactId, SignerId,
+};
+use glyphshift_controller_host::{
+    ControllerStartupConfig, ControllerTrustPolicy, ProcessControllerTransport,
+    VerifiedControllerArtifact,
+};
+use glyphshift_desktop_backend::{DesktopRuntimeSpec, EffectiveWorkflowIntent};
+use glyphshift_domain::{Feature, Generation, TargetFacts};
+use glyphshift_extension::{
+    CodeHash, ControllerArtifactId, ControllerCodeIdentity, ControllerSignerId, ExtensionId,
+    ProtocolVersion,
+};
+use glyphshift_protocol::{
+    ControllerConnection, ControllerNonce, ControllerProtocolError, ControllerTransport,
+    NonceLedger, OpaqueTargetId, PreparedRecipe, RecipeControllerLossPolicy,
+};
+use glyphshift_session::{
+    ControllerFailure, ControllerHealth, ControllerLossPolicy, ControllerRecipePort, SessionId,
+    SessionManager, SessionRecipe, TargetHealth, TargetInstance, TargetInstanceId,
+    TargetLifecyclePort,
+};
+use glyphshift_target_process_host::{RuntimeArtifact, TargetArtifactCatalog, TargetProcessHost};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const BUNDLE_SCHEMA: &str = "glyphshift.runtime-bundle/1";
+const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(8);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DesktopRuntimeError {
+    BundleUnavailable,
+    InvalidManifest,
+    InvalidArtifactPath,
+    InvalidArtifactHash,
+    ArtifactHashMismatch,
+    AdapterInspectionFailed,
+    AdapterRegistryRejected,
+    ControllerRejected,
+    ControllerUnavailable,
+    ProtocolRejected,
+    UnknownTarget,
+    InvalidState,
+    SessionRejected,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeTarget {
+    id: u64,
+    display_name: Box<str>,
+}
+
+impl RuntimeTarget {
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TargetRecord {
+    view: RuntimeTarget,
+    controller_id: OpaqueTargetId,
+    facts: TargetFacts,
+}
+
+#[derive(Deserialize)]
+struct BundleManifest {
+    schema: Box<str>,
+    signer: Box<str>,
+    controller: ControllerManifest,
+    runtime: ArtifactManifest,
+    adapters: Vec<ArtifactManifest>,
+}
+
+#[derive(Deserialize)]
+struct ControllerManifest {
+    artifact: Box<str>,
+    file: Box<str>,
+    sha256: Box<str>,
+    protocol: [u16; 2],
+}
+
+#[derive(Deserialize)]
+struct ArtifactManifest {
+    file: Box<str>,
+    sha256: Box<str>,
+    #[serde(default)]
+    label: Option<Box<str>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeAdapterOption {
+    id: Box<str>,
+    label: Box<str>,
+}
+
+impl RuntimeAdapterOption {
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+/// A verified, path-private set of production runtime artifacts.
+pub struct RuntimeBundle {
+    controller: VerifiedControllerArtifact,
+    controller_protocol: ProtocolVersion,
+    registry: AdapterRegistry,
+    artifacts: TargetArtifactCatalog,
+    discovered_requirements: Vec<AdapterRequirement>,
+    translation_adapters: Vec<RuntimeAdapterOption>,
+    nonce_ledger: NonceLedger,
+    nonce_sequence: u64,
+}
+
+impl RuntimeBundle {
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, DesktopRuntimeError> {
+        let root = root
+            .as_ref()
+            .canonicalize()
+            .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+        let manifest: BundleManifest = serde_json::from_str(
+            &fs::read_to_string(root.join("runtime-bundle.json"))
+                .map_err(|_| DesktopRuntimeError::BundleUnavailable)?,
+        )
+        .map_err(|_| DesktopRuntimeError::InvalidManifest)?;
+        if manifest.schema.as_ref() != BUNDLE_SCHEMA
+            || manifest.signer.trim().is_empty()
+            || manifest.controller.artifact.trim().is_empty()
+            || manifest.adapters.is_empty()
+        {
+            return Err(DesktopRuntimeError::InvalidManifest);
+        }
+
+        let signer = SignerId::new(manifest.signer.clone());
+        let controller_signer = ControllerSignerId::new(manifest.signer.clone());
+        let controller_hash = parse_hash(&manifest.controller.sha256)?;
+        let controller_path = artifact_path(&root, &manifest.controller.file)?;
+        let controller_protocol = ProtocolVersion::new(
+            manifest.controller.protocol[0],
+            manifest.controller.protocol[1],
+        );
+        let controller_identity = ControllerCodeIdentity::new(
+            ControllerArtifactId::new(manifest.controller.artifact),
+            controller_signer,
+            CodeHash::new(controller_hash),
+            controller_protocol,
+        );
+        let controller = VerifiedControllerArtifact::verify(
+            controller_path,
+            &controller_identity,
+            &ControllerTrustPolicy::new([manifest.signer.clone()]),
+        )
+        .map_err(|_| DesktopRuntimeError::ControllerRejected)?;
+
+        let runtime_hash = parse_hash(&manifest.runtime.sha256)?;
+        let runtime_path = verified_artifact(&root, &manifest.runtime.file, runtime_hash)?;
+        let runtime_artifact = RuntimeArtifact::new(runtime_path, runtime_hash);
+
+        let mut packages = Vec::new();
+        let mut catalog_adapters = Vec::new();
+        let mut authorized_adapters = Vec::new();
+        let mut discovered_requirements = Vec::new();
+        let mut translation_adapters = Vec::new();
+        for (index, adapter) in manifest.adapters.iter().enumerate() {
+            let hash = parse_hash(&adapter.sha256)?;
+            let path = verified_artifact(&root, &adapter.file, hash)?;
+            // SAFETY: `verified_artifact` measured the exact file against the signed bundle hash
+            // before native code is loaded. The bundle signer is authorized above.
+            let descriptor = unsafe { LoadedNativeAdapter::inspect(&path) }
+                .map_err(|_| DesktopRuntimeError::AdapterInspectionFailed)?;
+            let features = descriptor
+                .features()
+                .filter(|feature| {
+                    matches!(
+                        feature,
+                        Feature::TextObserve | Feature::TextReplace | Feature::FontSubstitute
+                    )
+                })
+                .collect::<Vec<_>>();
+            if features.contains(&Feature::TextReplace) {
+                translation_adapters.push(RuntimeAdapterOption {
+                    id: descriptor.adapter_id().as_str().into(),
+                    label: adapter
+                        .label
+                        .clone()
+                        .unwrap_or_else(|| descriptor.adapter_id().as_str().into()),
+                });
+            }
+            let artifact_id = PackageArtifactId::new(format!("adapters/{index}"));
+            discovered_requirements.push(AdapterRequirement::new(
+                descriptor.adapter_id().clone(),
+                AdapterVersionRequirement::Exact(descriptor.version()),
+                features,
+            ));
+            authorized_adapters.push(descriptor.adapter_id().clone());
+            packages.push(AdapterPackage::new(
+                descriptor,
+                artifact_id.clone(),
+                signer.clone(),
+                ArtifactHash::sha256(hash),
+                ArtifactHash::sha256(hash),
+            ));
+            catalog_adapters.push((artifact_id, path));
+        }
+
+        let mut registry =
+            AdapterRegistry::new(AdapterTrustPolicy::new([signer], authorized_adapters));
+        registry
+            .reload(AdapterPackageSet::new(packages))
+            .map_err(|_| DesktopRuntimeError::AdapterRegistryRejected)?;
+        let artifacts = TargetArtifactCatalog::new(runtime_artifact, catalog_adapters)
+            .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+
+        Ok(Self {
+            controller,
+            controller_protocol,
+            registry,
+            artifacts,
+            discovered_requirements,
+            translation_adapters,
+            nonce_ledger: NonceLedger::new(),
+            nonce_sequence: 0,
+        })
+    }
+
+    #[must_use]
+    pub fn translation_adapter_ids(&self) -> Vec<Box<str>> {
+        self.discovered_requirements
+            .iter()
+            .filter(|requirement| {
+                requirement
+                    .features()
+                    .any(|feature| feature == Feature::TextReplace)
+            })
+            .map(|requirement| requirement.adapter_id().as_str().into())
+            .collect()
+    }
+
+    #[must_use]
+    pub fn translation_adapter_options(&self) -> &[RuntimeAdapterOption] {
+        &self.translation_adapters
+    }
+
+    pub fn discover(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<WindowsDesktopRuntime, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        let requirements = if spec.requirements().is_empty() {
+            self.discovered_requirements.clone()
+        } else {
+            spec.requirements().to_vec()
+        };
+        let transport = ProcessControllerTransport::spawn_configured(
+            self.controller.clone(),
+            CONTROLLER_TIMEOUT,
+            ControllerStartupConfig::new(
+                spec.executable_names().iter().cloned(),
+                requirements.clone(),
+            )
+            .with_executable_paths(spec.executable_paths().iter().cloned()),
+        )
+        .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        self.nonce_sequence = self.nonce_sequence.saturating_add(1);
+        DesktopRuntime::connect(
+            transport,
+            application_id,
+            requirements,
+            spec.publication().clone(),
+            self.registry.clone(),
+            self.artifacts.clone(),
+            self.controller_protocol,
+            next_nonce(self.nonce_sequence),
+            &mut self.nonce_ledger,
+        )
+    }
+}
+
+pub type WindowsDesktopRuntime = DesktopRuntime<ProcessControllerTransport>;
+
+trait ManagedRuntime: Send {
+    fn application_id(&self) -> &str;
+    fn targets(&self) -> Vec<RuntimeTarget>;
+    fn supported_features(&self) -> BTreeSet<Feature>;
+    fn active_features(&self) -> BTreeSet<Feature>;
+    fn active_target_id(&self) -> Option<u64>;
+    fn applied_generation(&self) -> Option<Generation>;
+    fn start(
+        &mut self,
+        target_id: u64,
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError>;
+    fn publish(
+        &mut self,
+        publication: glyphshift_runtime_contract::RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError>;
+    fn stop(&mut self) -> Result<(), DesktopRuntimeError>;
+    fn abandon(&mut self) {}
+
+    fn is_active(&self) -> bool {
+        self.active_target_id().is_some() && !self.active_features().is_empty()
+    }
+}
+
+impl ManagedRuntime for WindowsDesktopRuntime {
+    fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    fn targets(&self) -> Vec<RuntimeTarget> {
+        self.targets
+            .iter()
+            .map(|target| target.view.clone())
+            .collect()
+    }
+
+    fn supported_features(&self) -> BTreeSet<Feature> {
+        self.supported_features.clone()
+    }
+
+    fn active_features(&self) -> BTreeSet<Feature> {
+        self.active_features.clone()
+    }
+
+    fn active_target_id(&self) -> Option<u64> {
+        DesktopRuntime::active_target_id(self)
+    }
+
+    fn applied_generation(&self) -> Option<Generation> {
+        self.is_active().then(|| self.publication.generation())
+    }
+
+    fn start(
+        &mut self,
+        target_id: u64,
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::start(self, target_id, requested_features.iter().copied())
+    }
+
+    fn publish(
+        &mut self,
+        publication: glyphshift_runtime_contract::RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::publish(self, publication)
+    }
+
+    fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::stop(self)
+    }
+
+    fn abandon(&mut self) {
+        DesktopRuntime::abandon(self);
+    }
+}
+
+trait RuntimeFactory: Send {
+    fn discover(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError>;
+}
+
+impl RuntimeFactory for RuntimeBundle {
+    fn discover(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+        RuntimeBundle::discover(self, application_id, spec)
+            .map(|runtime| Box::new(runtime) as Box<dyn ManagedRuntime>)
+    }
+}
+
+/// Path- and process-private desktop state for one registered application.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DesktopRuntimeStatus {
+    application_id: Box<str>,
+    targets: Vec<RuntimeTarget>,
+    active_target_id: Option<u64>,
+    supported_features: BTreeSet<Feature>,
+    requested_features: BTreeSet<Feature>,
+    active_features: BTreeSet<Feature>,
+    applied_generation: Option<Generation>,
+}
+
+impl DesktopRuntimeStatus {
+    #[must_use]
+    pub fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    pub fn targets(&self) -> impl Iterator<Item = &RuntimeTarget> {
+        self.targets.iter()
+    }
+
+    #[must_use]
+    pub fn active_target_id(&self) -> Option<u64> {
+        self.active_target_id
+    }
+
+    #[must_use]
+    pub fn supports(&self, feature: Feature) -> bool {
+        self.supported_features.contains(&feature)
+    }
+
+    #[must_use]
+    pub fn is_feature_active(&self, feature: Feature) -> bool {
+        self.active_features.contains(&feature)
+    }
+
+    #[must_use]
+    pub fn is_feature_requested(&self, feature: Feature) -> bool {
+        self.requested_features.contains(&feature)
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.active_target_id.is_some() && !self.active_features.is_empty()
+    }
+
+    #[must_use]
+    pub const fn applied_generation(&self) -> Option<Generation> {
+        self.applied_generation
+    }
+
+    fn inactive(application_id: Box<str>) -> Self {
+        Self {
+            application_id,
+            targets: Vec::new(),
+            active_target_id: None,
+            supported_features: BTreeSet::new(),
+            requested_features: BTreeSet::new(),
+            active_features: BTreeSet::new(),
+            applied_generation: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowReconcileReport {
+    workflow_id: Box<str>,
+    statuses: Vec<DesktopRuntimeStatus>,
+    errors: BTreeMap<Box<str>, DesktopRuntimeError>,
+}
+
+impl WorkflowReconcileReport {
+    #[must_use]
+    pub fn workflow_id(&self) -> &str {
+        &self.workflow_id
+    }
+
+    #[must_use]
+    pub fn statuses(&self) -> &[DesktopRuntimeStatus] {
+        &self.statuses
+    }
+
+    #[must_use]
+    pub const fn errors(&self) -> &BTreeMap<Box<str>, DesktopRuntimeError> {
+        &self.errors
+    }
+}
+
+/// Owns independent Runtime sessions for every enabled application.
+///
+/// The desktop shell expresses desired feature state per application. This module owns discovery,
+/// target selection, session replacement, publication, and isolated shutdown.
+pub struct DesktopRuntimePool {
+    factory: Box<dyn RuntimeFactory>,
+    sessions: BTreeMap<Box<str>, Box<dyn ManagedRuntime>>,
+    requested_features: BTreeMap<Box<str>, BTreeSet<Feature>>,
+    workflow_targets: BTreeMap<Box<str>, BTreeSet<Box<str>>>,
+}
+
+impl DesktopRuntimePool {
+    #[must_use]
+    pub fn new(bundle: RuntimeBundle) -> Self {
+        Self::with_factory(Box::new(bundle))
+    }
+
+    fn with_factory(factory: Box<dyn RuntimeFactory>) -> Self {
+        Self {
+            factory,
+            sessions: BTreeMap::new(),
+            requested_features: BTreeMap::new(),
+            workflow_targets: BTreeMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn status(&self, application_id: &str) -> Option<DesktopRuntimeStatus> {
+        self.sessions.get(application_id).map(|runtime| {
+            runtime_status(
+                runtime.as_ref(),
+                self.requested_features
+                    .get(application_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        })
+    }
+
+    pub fn statuses(&self) -> impl Iterator<Item = DesktopRuntimeStatus> + '_ {
+        self.sessions.iter().map(|(application_id, runtime)| {
+            runtime_status(
+                runtime.as_ref(),
+                self.requested_features
+                    .get(application_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        })
+    }
+
+    pub fn discover(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        if !self.sessions.contains_key(application_id.as_ref()) {
+            let runtime = self.factory.discover(application_id.clone(), spec)?;
+            self.sessions.insert(application_id.clone(), runtime);
+        }
+        self.status(&application_id)
+            .ok_or(DesktopRuntimeError::InvalidState)
+    }
+
+    pub fn set_features(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        target_id: Option<u64>,
+        requested_features: impl IntoIterator<Item = Feature>,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        let requested_features = requested_features.into_iter().collect::<BTreeSet<_>>();
+        if requested_features.is_empty() {
+            return self.stop_application(application_id);
+        }
+
+        let must_replace = self
+            .sessions
+            .get(application_id.as_ref())
+            .is_some_and(|runtime| {
+                runtime.is_active() && runtime.active_features() != requested_features
+            });
+        if must_replace {
+            let mut runtime = self
+                .sessions
+                .remove(application_id.as_ref())
+                .ok_or(DesktopRuntimeError::InvalidState)?;
+            if let Err(error) = runtime.stop() {
+                self.sessions.insert(application_id.clone(), runtime);
+                return Err(error);
+            }
+        }
+
+        self.discover(application_id.clone(), spec)?;
+        let runtime = self
+            .sessions
+            .get_mut(application_id.as_ref())
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        if runtime.is_active() {
+            if runtime
+                .applied_generation()
+                .is_none_or(|generation| spec.publication().generation() > generation)
+            {
+                runtime.publish(spec.publication().clone())?;
+            }
+            self.requested_features
+                .insert(application_id.clone(), requested_features.clone());
+            return Ok(runtime_status(runtime.as_ref(), requested_features));
+        }
+        let target_id = target_id
+            .or_else(|| runtime.targets().first().map(RuntimeTarget::id))
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        runtime.start(target_id, &requested_features)?;
+        self.requested_features
+            .insert(application_id.clone(), runtime.active_features());
+        Ok(runtime_status(
+            runtime.as_ref(),
+            self.requested_features
+                .get(application_id.as_ref())
+                .cloned()
+                .unwrap_or_default(),
+        ))
+    }
+
+    pub fn reconcile_workflow(
+        &mut self,
+        intent: &EffectiveWorkflowIntent,
+    ) -> Result<WorkflowReconcileReport, DesktopRuntimeError> {
+        let target_ids = intent
+            .targets()
+            .iter()
+            .map(|target| Box::<str>::from(target.software_id()))
+            .collect::<BTreeSet<_>>();
+        if self.workflow_targets.iter().any(|(workflow_id, owned)| {
+            workflow_id.as_ref() != intent.workflow_id()
+                && owned
+                    .iter()
+                    .any(|software_id| target_ids.contains(software_id))
+        }) {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+
+        let mut statuses = Vec::new();
+        let mut errors = BTreeMap::new();
+        let previous_targets = self
+            .workflow_targets
+            .get(intent.workflow_id())
+            .cloned()
+            .unwrap_or_default();
+        for software_id in previous_targets.difference(&target_ids) {
+            match self.stop_application(software_id.clone()) {
+                Ok(status) => statuses.push(status),
+                Err(error) => {
+                    errors.insert(software_id.clone(), error);
+                }
+            }
+        }
+        for target in intent.targets() {
+            let requested_features = target
+                .requested_features()
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            self.requested_features
+                .insert(target.software_id().into(), requested_features.clone());
+            match self.set_features(
+                target.software_id(),
+                target.runtime_spec(),
+                None,
+                requested_features,
+            ) {
+                Ok(status) => statuses.push(status),
+                Err(error) => {
+                    errors.insert(target.software_id().into(), error);
+                }
+            }
+        }
+        self.workflow_targets
+            .insert(intent.workflow_id().into(), target_ids);
+        Ok(WorkflowReconcileReport {
+            workflow_id: intent.workflow_id().into(),
+            statuses,
+            errors,
+        })
+    }
+
+    pub fn stop_workflow(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<WorkflowReconcileReport, DesktopRuntimeError> {
+        let target_ids = self
+            .workflow_targets
+            .remove(workflow_id)
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        let mut statuses = Vec::new();
+        let mut errors = BTreeMap::new();
+        for software_id in target_ids {
+            match self.stop_application(software_id.clone()) {
+                Ok(status) => statuses.push(status),
+                Err(error) => {
+                    errors.insert(software_id, error);
+                }
+            }
+        }
+        Ok(WorkflowReconcileReport {
+            workflow_id: workflow_id.into(),
+            statuses,
+            errors,
+        })
+    }
+
+    pub fn replace_workflow(
+        &mut self,
+        intent: &EffectiveWorkflowIntent,
+    ) -> Result<WorkflowReconcileReport, DesktopRuntimeError> {
+        let replacement_targets = intent
+            .targets()
+            .iter()
+            .map(|target| target.software_id())
+            .collect::<BTreeSet<_>>();
+        let replaced_workflow_ids = self
+            .workflow_targets
+            .iter()
+            .filter(|(workflow_id, targets)| {
+                workflow_id.as_ref() != intent.workflow_id()
+                    && targets
+                        .iter()
+                        .any(|software_id| replacement_targets.contains(software_id.as_ref()))
+            })
+            .map(|(workflow_id, _)| workflow_id.clone())
+            .collect::<Vec<_>>();
+        let mut statuses = Vec::new();
+        let mut errors = BTreeMap::new();
+        for workflow_id in replaced_workflow_ids {
+            let stopped = self.stop_workflow(&workflow_id)?;
+            statuses.extend(stopped.statuses);
+            errors.extend(stopped.errors);
+        }
+        let reconciled = self.reconcile_workflow(intent)?;
+        statuses.extend(reconciled.statuses);
+        errors.extend(reconciled.errors);
+        Ok(WorkflowReconcileReport {
+            workflow_id: intent.workflow_id().into(),
+            statuses,
+            errors,
+        })
+    }
+
+    fn stop_application(
+        &mut self,
+        application_id: Box<str>,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let Some(mut runtime) = self.sessions.remove(application_id.as_ref()) else {
+            self.requested_features.remove(application_id.as_ref());
+            return Ok(DesktopRuntimeStatus::inactive(application_id));
+        };
+        if runtime.is_active() {
+            if let Err(error) = runtime.stop() {
+                self.sessions.insert(application_id, runtime);
+                return Err(error);
+            }
+        }
+        self.requested_features.remove(application_id.as_ref());
+        Ok(runtime_status(runtime.as_ref(), BTreeSet::new()))
+    }
+
+    pub fn refresh(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        let requested_features = self
+            .requested_features
+            .get(application_id.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(mut runtime) = self.sessions.remove(application_id.as_ref()) {
+            if runtime.is_active() && runtime.stop().is_err() {
+                runtime.abandon();
+            }
+        }
+
+        let mut runtime = self.factory.discover(application_id.clone(), spec)?;
+        if !requested_features.is_empty() {
+            let target_id = runtime.targets().first().map(RuntimeTarget::id);
+            if let Some(target_id) = target_id {
+                runtime.start(target_id, &requested_features)?;
+            }
+        }
+        let status = runtime_status(runtime.as_ref(), requested_features);
+        self.sessions.insert(application_id, runtime);
+        Ok(status)
+    }
+
+    pub fn refresh_workflow(
+        &mut self,
+        intent: &EffectiveWorkflowIntent,
+    ) -> Result<WorkflowReconcileReport, DesktopRuntimeError> {
+        let owned = self
+            .workflow_targets
+            .get(intent.workflow_id())
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        if intent
+            .targets()
+            .iter()
+            .any(|target| !owned.contains(target.software_id()))
+        {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        let mut statuses = Vec::new();
+        let mut errors = BTreeMap::new();
+        for target in intent.targets() {
+            match self.refresh(target.software_id(), target.runtime_spec()) {
+                Ok(status) => statuses.push(status),
+                Err(error) => {
+                    errors.insert(target.software_id().into(), error);
+                }
+            }
+        }
+        Ok(WorkflowReconcileReport {
+            workflow_id: intent.workflow_id().into(),
+            statuses,
+            errors,
+        })
+    }
+
+    pub fn publish(
+        &mut self,
+        application_id: &str,
+        publication: glyphshift_runtime_contract::RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError> {
+        let runtime = self
+            .sessions
+            .get_mut(application_id)
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        runtime.publish(publication)
+    }
+
+    pub fn remove(&mut self, application_id: &str) -> Result<(), DesktopRuntimeError> {
+        let Some(mut runtime) = self.sessions.remove(application_id) else {
+            self.requested_features.remove(application_id);
+            return Ok(());
+        };
+        if runtime.is_active() {
+            if let Err(error) = runtime.stop() {
+                self.sessions.insert(application_id.into(), runtime);
+                return Err(error);
+            }
+        }
+        self.requested_features.remove(application_id);
+        Ok(())
+    }
+}
+
+fn runtime_status(
+    runtime: &dyn ManagedRuntime,
+    requested_features: BTreeSet<Feature>,
+) -> DesktopRuntimeStatus {
+    DesktopRuntimeStatus {
+        application_id: runtime.application_id().into(),
+        targets: runtime.targets(),
+        active_target_id: runtime.active_target_id(),
+        supported_features: runtime.supported_features(),
+        requested_features,
+        active_features: runtime.active_features(),
+        applied_generation: runtime.applied_generation(),
+    }
+}
+
+enum RuntimePhase<T> {
+    Discovered(ControllerConnection<T>),
+    Active {
+        manager: SessionManager,
+        session_id: SessionId,
+        target_id: u64,
+    },
+}
+
+/// One selected application's runtime session. Constructed by [`RuntimeBundle::discover`].
+pub struct DesktopRuntime<T> {
+    application_id: Box<str>,
+    supported_features: BTreeSet<Feature>,
+    publication: glyphshift_runtime_contract::RuntimePublication,
+    registry: AdapterRegistry,
+    artifacts: TargetArtifactCatalog,
+    targets: Vec<TargetRecord>,
+    active_features: BTreeSet<Feature>,
+    phase: Option<RuntimePhase<T>>,
+}
+
+impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
+    #[allow(clippy::too_many_arguments)]
+    fn connect(
+        transport: T,
+        application_id: Box<str>,
+        requirements: Vec<AdapterRequirement>,
+        publication: glyphshift_runtime_contract::RuntimePublication,
+        registry: AdapterRegistry,
+        artifacts: TargetArtifactCatalog,
+        protocol: ProtocolVersion,
+        nonce: ControllerNonce,
+        ledger: &mut NonceLedger,
+    ) -> Result<Self, DesktopRuntimeError> {
+        let mut connection = ControllerConnection::connect(
+            transport,
+            ExtensionId::new(application_id.clone()),
+            protocol,
+            nonce,
+            ledger,
+        )
+        .map_err(|_| DesktopRuntimeError::ProtocolRejected)?;
+        connection.authorize_capabilities(requirements.iter().cloned());
+        let inventory = connection
+            .inventory()
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        let targets = inventory
+            .targets()
+            .iter()
+            .map(|target| TargetRecord {
+                view: RuntimeTarget {
+                    id: target.id().as_u64(),
+                    display_name: target.display_name().into(),
+                },
+                controller_id: target.id(),
+                facts: target.facts().clone(),
+            })
+            .collect();
+        let supported_features = requirements
+            .iter()
+            .flat_map(AdapterRequirement::features)
+            .collect();
+        Ok(Self {
+            application_id,
+            supported_features,
+            publication,
+            registry,
+            artifacts,
+            targets,
+            active_features: BTreeSet::new(),
+            phase: Some(RuntimePhase::Discovered(connection)),
+        })
+    }
+
+    #[must_use]
+    pub fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    pub fn targets(&self) -> impl Iterator<Item = &RuntimeTarget> {
+        self.targets.iter().map(|target| &target.view)
+    }
+
+    #[must_use]
+    pub fn supports(&self, feature: Feature) -> bool {
+        self.supported_features.contains(&feature)
+    }
+
+    #[must_use]
+    pub fn is_feature_active(&self, feature: Feature) -> bool {
+        self.is_active() && self.active_features.contains(&feature)
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        matches!(self.phase, Some(RuntimePhase::Active { .. }))
+    }
+
+    #[must_use]
+    pub fn active_target_id(&self) -> Option<u64> {
+        match self.phase.as_ref() {
+            Some(RuntimePhase::Active { target_id, .. }) => Some(*target_id),
+            _ => None,
+        }
+    }
+
+    pub fn start(
+        &mut self,
+        target_id: u64,
+        requested_features: impl IntoIterator<Item = Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        let requested_features = requested_features.into_iter().collect::<Vec<_>>();
+        if requested_features.is_empty()
+            || requested_features
+                .iter()
+                .any(|feature| !self.supported_features.contains(feature))
+        {
+            return Err(DesktopRuntimeError::SessionRejected);
+        }
+        let target = self
+            .targets
+            .iter()
+            .find(|target| target.view.id == target_id)
+            .cloned()
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        let mut connection = match self.phase.take() {
+            Some(RuntimePhase::Discovered(connection)) => connection,
+            phase => {
+                self.phase = phase;
+                return Err(DesktopRuntimeError::InvalidState);
+            }
+        };
+        let prepared = connection
+            .prepare(target.controller_id, requested_features.iter().copied())
+            .map_err(map_protocol_error)?;
+        let target_instance_id = TargetInstanceId::new(format!("target-{target_id}"));
+        let target_instance = TargetInstance::new(target_instance_id.clone(), target.facts);
+        let mut host = TargetProcessHost::new(connection, self.artifacts.clone());
+        host.register_target(target_instance_id, target.controller_id);
+        let mut manager = SessionManager::new(
+            self.registry.clone(),
+            PreparedController::new(prepared),
+            host,
+            RunningTarget,
+        );
+        let active_features = requested_features.iter().copied().collect();
+        let status = manager
+            .start_with_runtime(target_instance, requested_features, &self.publication)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        self.phase = Some(RuntimePhase::Active {
+            manager,
+            session_id: status.session_id(),
+            target_id,
+        });
+        self.active_features = active_features;
+        Ok(())
+    }
+
+    pub fn publish(
+        &mut self,
+        publication: glyphshift_runtime_contract::RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError> {
+        let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        manager
+            .update_with_runtime(*session_id, &publication)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        self.publication = publication;
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
+        let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        manager
+            .stop(*session_id)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        self.active_features.clear();
+        self.phase = None;
+        Ok(())
+    }
+
+    fn abandon(&mut self) {
+        self.active_features.clear();
+        self.phase = None;
+    }
+}
+
+impl<T> Drop for DesktopRuntime<T> {
+    fn drop(&mut self) {
+        if let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        {
+            let _ = manager.stop(*session_id);
+        }
+    }
+}
+
+struct PreparedController {
+    recipe: SessionRecipe,
+}
+
+impl PreparedController {
+    fn new(prepared: PreparedRecipe) -> Self {
+        let loss_policy = match prepared.controller_loss_policy() {
+            RecipeControllerLossPolicy::Continue => ControllerLossPolicy::Continue,
+            RecipeControllerLossPolicy::Degrade => ControllerLossPolicy::Degrade,
+        };
+        Self {
+            recipe: SessionRecipe::new(prepared.requirements().iter().cloned(), loss_policy),
+        }
+    }
+}
+
+impl ControllerRecipePort for PreparedController {
+    fn prepare(
+        &mut self,
+        _target: &TargetInstance,
+        _requested_features: &BTreeSet<Feature>,
+    ) -> Result<SessionRecipe, ControllerFailure> {
+        Ok(self.recipe.clone())
+    }
+
+    fn health(&mut self, _target: &TargetInstance) -> ControllerHealth {
+        ControllerHealth::Available
+    }
+}
+
+struct RunningTarget;
+
+impl TargetLifecyclePort for RunningTarget {
+    fn health(&mut self, _target: &TargetInstance) -> TargetHealth {
+        TargetHealth::Running
+    }
+}
+
+fn map_protocol_error(_error: ControllerProtocolError) -> DesktopRuntimeError {
+    DesktopRuntimeError::ProtocolRejected
+}
+
+fn artifact_path(root: &Path, file: &str) -> Result<PathBuf, DesktopRuntimeError> {
+    let path = Path::new(file);
+    let mut components = path.components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err(DesktopRuntimeError::InvalidArtifactPath);
+    }
+    Ok(root.join(path))
+}
+
+fn verified_artifact(
+    root: &Path,
+    file: &str,
+    declared_hash: [u8; 32],
+) -> Result<PathBuf, DesktopRuntimeError> {
+    let path = artifact_path(root, file)?;
+    if measure_hash(&path)? != declared_hash {
+        return Err(DesktopRuntimeError::ArtifactHashMismatch);
+    }
+    Ok(path)
+}
+
+fn measure_hash(path: &Path) -> Result<[u8; 32], DesktopRuntimeError> {
+    let mut file = File::open(path).map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest.finalize().into())
+}
+
+fn parse_hash(value: &str) -> Result<[u8; 32], DesktopRuntimeError> {
+    if value.len() != 64 {
+        return Err(DesktopRuntimeError::InvalidArtifactHash);
+    }
+    let mut hash = [0_u8; 32];
+    for (index, byte) in hash.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| DesktopRuntimeError::InvalidArtifactHash)?;
+    }
+    Ok(hash)
+}
+
+fn next_nonce(sequence: u64) -> ControllerNonce {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let mut bytes = [0_u8; 32];
+    bytes[..8].copy_from_slice(&sequence.to_le_bytes());
+    bytes[8..24].copy_from_slice(&timestamp.to_le_bytes());
+    let process = u64::from(std::process::id());
+    bytes[24..].copy_from_slice(&process.to_le_bytes());
+    ControllerNonce::new(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glyphshift_desktop_backend::{
+        DesktopBackend, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
+        ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
+    };
+    use glyphshift_protocol::{
+        ControllerHello, ControllerInventory, ControllerTarget, ControllerTargetToken,
+        TransportFailure,
+    };
+    use tempfile::tempdir;
+
+    struct InventoryController;
+
+    struct InMemoryRuntimeFactory;
+
+    impl RuntimeFactory for InMemoryRuntimeFactory {
+        fn discover(
+            &mut self,
+            application_id: Box<str>,
+            spec: &DesktopRuntimeSpec,
+        ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+            Ok(Box::new(InMemoryRuntime {
+                stop_fails: application_id.contains("stopfailure"),
+                application_id,
+                active_features: BTreeSet::new(),
+                generation: spec.publication().generation(),
+            }))
+        }
+    }
+
+    struct InMemoryRuntime {
+        application_id: Box<str>,
+        active_features: BTreeSet<Feature>,
+        generation: Generation,
+        stop_fails: bool,
+    }
+
+    impl ManagedRuntime for InMemoryRuntime {
+        fn application_id(&self) -> &str {
+            &self.application_id
+        }
+
+        fn targets(&self) -> Vec<RuntimeTarget> {
+            vec![RuntimeTarget {
+                id: 1,
+                display_name: "合成目标".into(),
+            }]
+        }
+
+        fn supported_features(&self) -> BTreeSet<Feature> {
+            [Feature::TextReplace, Feature::FontSubstitute]
+                .into_iter()
+                .collect()
+        }
+
+        fn active_features(&self) -> BTreeSet<Feature> {
+            self.active_features.clone()
+        }
+
+        fn active_target_id(&self) -> Option<u64> {
+            (!self.active_features.is_empty()).then_some(1)
+        }
+
+        fn applied_generation(&self) -> Option<Generation> {
+            (!self.active_features.is_empty()).then_some(self.generation)
+        }
+
+        fn start(
+            &mut self,
+            _target_id: u64,
+            requested_features: &BTreeSet<Feature>,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.active_features = requested_features.clone();
+            Ok(())
+        }
+
+        fn publish(
+            &mut self,
+            publication: glyphshift_runtime_contract::RuntimePublication,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.generation = publication.generation();
+            Ok(())
+        }
+
+        fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
+            if self.stop_fails {
+                return Err(DesktopRuntimeError::SessionRejected);
+            }
+            self.active_features.clear();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn workflow_reconcile_runs_two_targets_and_stops_only_its_owned_software() {
+        let root = tempdir().expect("workflow Runtime data");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut software_ids = Vec::new();
+        for executable_name in ["Alpha.exe", "Beta.exe", "Gamma.exe"] {
+            let executable = root.path().join(executable_name);
+            fs::write(&executable, b"synthetic executable").expect("selected executable");
+            let snapshot = backend
+                .add_software(ExecutableSelection::new(executable))
+                .expect("registered executable");
+            software_ids.push(
+                snapshot
+                    .selected_software_id()
+                    .expect("selected software")
+                    .to_owned(),
+            );
+        }
+        backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.shared", "共享词典", "zh-CN")
+                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+            )
+            .expect("shared dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.group", "双目标工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.shared"]),
+                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.shared"]),
+                ]),
+            )
+            .expect("group workflow");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.other", "独立工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[2].as_str(), ["dictionary.shared"]),
+                ]),
+            )
+            .expect("other workflow");
+        let group = backend
+            .effective_workflow_intent("workflow.group")
+            .expect("compiled group intent");
+        let other = backend
+            .effective_workflow_intent("workflow.other")
+            .expect("compiled other intent");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+
+        pool.reconcile_workflow(&other)
+            .expect("reconcile unrelated workflow");
+        let activated = pool
+            .reconcile_workflow(&group)
+            .expect("reconcile two targets");
+        assert!(activated.errors().is_empty());
+        for software_id in &software_ids[..2] {
+            let status = pool.status(software_id).expect("owned Runtime status");
+            assert!(status.is_feature_requested(Feature::TextReplace));
+            assert!(status.is_feature_active(Feature::TextReplace));
+        }
+
+        let stopped = pool
+            .stop_workflow("workflow.group")
+            .expect("stop only the group workflow");
+        assert!(stopped.errors().is_empty());
+        assert!(software_ids[..2]
+            .iter()
+            .all(|software_id| pool.status(software_id).is_none()));
+        assert!(pool
+            .status(&software_ids[2])
+            .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
+    }
+
+    #[test]
+    fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target() {
+        let root = tempdir().expect("workflow Runtime data");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut software_ids = Vec::new();
+        for executable_name in ["First.exe", "Second.exe"] {
+            let executable = root.path().join(executable_name);
+            fs::write(&executable, b"synthetic executable").expect("selected executable");
+            let snapshot = backend
+                .add_software(ExecutableSelection::new(executable))
+                .expect("registered executable");
+            software_ids.push(
+                snapshot
+                    .selected_software_id()
+                    .expect("selected software")
+                    .to_owned(),
+            );
+        }
+        let dictionary = backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.hot", "共享热更新词典", "zh-CN")
+                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "第一次")]),
+            )
+            .expect("shared dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.hot", "热更新工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.hot"]),
+                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.hot"]),
+                ]),
+            )
+            .expect("shared workflow");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+        let initial = backend
+            .effective_workflow_intent("workflow.hot")
+            .expect("initial intent");
+        pool.reconcile_workflow(&initial)
+            .expect("initial reconcile");
+
+        backend
+            .update_dictionary(
+                DictionaryEdit::new(
+                    dictionary.id(),
+                    dictionary.name(),
+                    dictionary.locale(),
+                    dictionary.revision(),
+                )
+                .with_entries([DictionaryRuleCreate::replace(
+                    "main-ui",
+                    "Open",
+                    "第二次",
+                )]),
+            )
+            .expect("update shared dictionary");
+        let next = backend
+            .effective_workflow_intent("workflow.hot")
+            .expect("next intent");
+        let updated = pool
+            .reconcile_workflow(&next)
+            .expect("publish next generation");
+
+        assert_eq!(updated.statuses().len(), 2);
+        assert!(updated.statuses().iter().all(|status| {
+            status.applied_generation() == Some(glyphshift_domain::Generation::new(3))
+        }));
+    }
+
+    #[test]
+    fn explicit_workflow_replacement_removes_the_entire_old_intent() {
+        let root = tempdir().expect("workflow Runtime data");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut software_ids = Vec::new();
+        for executable_name in ["OldPrimary.exe", "OldSecondary.exe"] {
+            let executable = root.path().join(executable_name);
+            fs::write(&executable, b"synthetic executable").expect("selected executable");
+            let snapshot = backend
+                .add_software(ExecutableSelection::new(executable))
+                .expect("registered executable");
+            software_ids.push(
+                snapshot
+                    .selected_software_id()
+                    .expect("selected software")
+                    .to_owned(),
+            );
+        }
+        backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.replace", "替换词典", "zh-CN")
+                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+            )
+            .expect("replacement dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.old", "旧工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.replace"]),
+                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.replace"]),
+                ]),
+            )
+            .expect("old workflow");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.new", "新工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.replace"]),
+                ]),
+            )
+            .expect("new workflow");
+        let old = backend
+            .effective_workflow_intent("workflow.old")
+            .expect("old intent");
+        let new = backend
+            .effective_workflow_intent("workflow.new")
+            .expect("new intent");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+        pool.reconcile_workflow(&old).expect("start old workflow");
+
+        let replaced = pool
+            .replace_workflow(&new)
+            .expect("replace the complete old intent");
+
+        assert!(replaced.errors().is_empty());
+        assert!(pool
+            .status(&software_ids[0])
+            .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
+        assert!(pool.status(&software_ids[1]).is_none());
+        assert!(pool.stop_workflow("workflow.old").is_err());
+    }
+
+    #[test]
+    fn workflow_refresh_reapplies_requested_features_after_target_restart() {
+        let root = tempdir().expect("workflow Runtime data");
+        let executable = root.path().join("Restarted.exe");
+        fs::write(&executable, b"synthetic executable").expect("selected executable");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let snapshot = backend
+            .add_software(ExecutableSelection::new(executable))
+            .expect("registered executable");
+        let software_id = snapshot
+            .selected_software_id()
+            .expect("selected software")
+            .to_owned();
+        backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.restart", "重启词典", "zh-CN")
+                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "重连")]),
+            )
+            .expect("restart dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.restart", "重启工作流").with_targets([
+                    WorkflowTargetCreate::new(software_id.as_str(), ["dictionary.restart"]),
+                ]),
+            )
+            .expect("restart workflow");
+        let intent = backend
+            .effective_workflow_intent("workflow.restart")
+            .expect("restart intent");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+        pool.reconcile_workflow(&intent).expect("initial reconcile");
+
+        let refreshed = pool
+            .refresh_workflow(&intent)
+            .expect("refresh restarted target");
+
+        assert!(refreshed.errors().is_empty());
+        let status = pool.status(&software_id).expect("refreshed status");
+        assert!(status.is_feature_requested(Feature::TextReplace));
+        assert!(status.is_feature_active(Feature::TextReplace));
+        assert_eq!(status.applied_generation(), Some(Generation::new(2)));
+    }
+
+    #[test]
+    fn workflow_stop_failure_keeps_one_last_applied_target_without_rolling_back_others() {
+        let root = tempdir().expect("workflow Runtime data");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let mut software_ids = Vec::new();
+        for executable_name in ["StopFailure.exe", "StopSuccess.exe"] {
+            let executable = root.path().join(executable_name);
+            fs::write(&executable, b"synthetic executable").expect("selected executable");
+            let snapshot = backend
+                .add_software(ExecutableSelection::new(executable))
+                .expect("registered executable");
+            software_ids.push(
+                snapshot
+                    .selected_software_id()
+                    .expect("selected software")
+                    .to_owned(),
+            );
+        }
+        backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.stop", "停止词典", "zh-CN")
+                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "停止")]),
+            )
+            .expect("stop dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.stop", "停止工作流").with_targets([
+                    WorkflowTargetCreate::new(software_ids[0].as_str(), ["dictionary.stop"]),
+                    WorkflowTargetCreate::new(software_ids[1].as_str(), ["dictionary.stop"]),
+                ]),
+            )
+            .expect("stop workflow");
+        let intent = backend
+            .effective_workflow_intent("workflow.stop")
+            .expect("stop intent");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+        pool.reconcile_workflow(&intent).expect("initial reconcile");
+
+        let stopped = pool
+            .stop_workflow("workflow.stop")
+            .expect("bounded stop report");
+
+        assert_eq!(
+            stopped.errors().get(software_ids[0].as_str()),
+            Some(&DesktopRuntimeError::SessionRejected)
+        );
+        assert!(pool
+            .status(&software_ids[0])
+            .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
+        assert!(pool.status(&software_ids[1]).is_none());
+    }
+
+    impl ControllerTransport for InventoryController {
+        fn handshake(
+            &mut self,
+            expected_extension: &ExtensionId,
+            version: ProtocolVersion,
+            nonce: ControllerNonce,
+        ) -> Result<ControllerHello, TransportFailure> {
+            Ok(ControllerHello::new(
+                expected_extension.clone(),
+                version,
+                nonce,
+            ))
+        }
+
+        fn inventory(&mut self) -> Result<ControllerInventory, TransportFailure> {
+            Ok(ControllerInventory::new(
+                [],
+                [ControllerTarget::new(
+                    ControllerTargetToken::new("private-process-token"),
+                    "MotionCanvas — 主窗口",
+                    TargetFacts::new("windows", "x86_64"),
+                )],
+            ))
+        }
+
+        fn terminate(&mut self) {}
+    }
+
+    #[test]
+    fn rejects_parent_paths_before_loading_native_code() {
+        let root = tempdir().expect("runtime bundle root");
+        fs::write(
+            root.path().join("runtime-bundle.json"),
+            r#"{
+              "schema":"glyphshift.runtime-bundle/1",
+              "signer":"glyphshift.test",
+              "controller":{"artifact":"windows","file":"../controller.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":[1,0]},
+              "runtime":{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+              "adapters":[{"file":"adapter.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]
+            }"#,
+        )
+        .expect("bundle manifest");
+
+        assert_eq!(
+            RuntimeBundle::open(root.path()).err(),
+            Some(DesktopRuntimeError::InvalidArtifactPath)
+        );
+    }
+
+    #[test]
+    fn parses_only_full_sha256_values() {
+        assert_eq!(
+            parse_hash("not-a-hash"),
+            Err(DesktopRuntimeError::InvalidArtifactHash)
+        );
+        assert_eq!(parse_hash(&"f".repeat(64)), Ok([0xff; 32]));
+    }
+
+    #[test]
+    fn desktop_contract_exposes_instances_without_controller_tokens_or_paths() {
+        let root = tempdir().expect("desktop data");
+        let executable = root.path().join("MotionCanvas.exe");
+        fs::write(&executable, b"synthetic executable").expect("selected executable");
+        let mut backend = DesktopBackend::open(root.path().join("data")).expect("desktop backend");
+        let snapshot = backend
+            .add_software(ExecutableSelection::new(executable))
+            .expect("registered executable");
+        let application_id = snapshot.software()[0].id();
+        let spec = backend
+            .runtime_spec(application_id)
+            .expect("generic runtime spec");
+
+        let runtime_library = root.path().join("runtime.dll");
+        fs::write(&runtime_library, b"synthetic runtime").expect("runtime artifact");
+        let artifacts =
+            TargetArtifactCatalog::new(RuntimeArtifact::new(&runtime_library, [0; 32]), [])
+                .expect("artifact catalog");
+        let mut ledger = NonceLedger::new();
+        let runtime = DesktopRuntime::connect(
+            InventoryController,
+            application_id.into(),
+            Vec::new(),
+            spec.publication().clone(),
+            AdapterRegistry::new(AdapterTrustPolicy::new([], [])),
+            artifacts,
+            ProtocolVersion::new(1, 0),
+            ControllerNonce::new([7; 32]),
+            &mut ledger,
+        )
+        .expect("desktop runtime discovery");
+
+        assert_eq!(runtime.application_id(), application_id);
+        assert_eq!(
+            runtime
+                .targets()
+                .map(|target| (target.id(), target.display_name()))
+                .collect::<Vec<_>>(),
+            vec![(1, "MotionCanvas — 主窗口")]
+        );
+        assert!(!runtime.is_active());
+        assert!(!runtime.supports(Feature::TextReplace));
+    }
+}

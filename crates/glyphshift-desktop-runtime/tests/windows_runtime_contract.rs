@@ -1,0 +1,376 @@
+#![cfg(windows)]
+
+use glyphshift_desktop_backend::{
+    DesktopBackend, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
+    DictionaryView, ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
+};
+use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
+use glyphshift_domain::Feature;
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use tempfile::tempdir;
+
+struct TargetProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl TargetProcess {
+    fn spawn(executable: &Path) -> Self {
+        use std::os::windows::process::CommandExt;
+
+        let mut child = Command::new(executable)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .expect("isolated target should start");
+        let stdin = child.stdin.take().expect("target stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("target stdout"));
+        Self {
+            child,
+            stdin,
+            stdout,
+        }
+    }
+
+    fn render(&mut self) -> String {
+        writeln!(self.stdin, "render").expect("render command");
+        self.stdin.flush().expect("flush render command");
+        let mut evidence = String::new();
+        self.stdout
+            .read_line(&mut evidence)
+            .expect("read target evidence");
+        assert!(!evidence.is_empty(), "target should return pixel evidence");
+        evidence.trim().to_owned()
+    }
+
+    fn stop(&mut self) {
+        let _ = writeln!(self.stdin, "exit");
+        let _ = self.stdin.flush();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for TargetProcess {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+fn create_text_workflow(
+    backend: &mut DesktopBackend,
+    software_id: &str,
+    dictionary_id: &str,
+    workflow_id: &str,
+    source: &str,
+    translation: &str,
+) -> (DictionaryView, DesktopRuntimeSpec) {
+    let dictionary = backend
+        .create_dictionary(
+            DictionaryCreate::new(dictionary_id, dictionary_id, "zh-CN").with_entries([
+                DictionaryRuleCreate::replace("main-ui", source, translation),
+            ]),
+        )
+        .expect("create Runtime dictionary");
+    backend
+        .create_workflow(
+            WorkflowCreate::new(workflow_id, workflow_id)
+                .with_targets([WorkflowTargetCreate::new(software_id, [dictionary_id])]),
+        )
+        .expect("create Runtime workflow");
+    let spec = backend
+        .workflow_runtime_spec(workflow_id, software_id)
+        .expect("compiled workflow Runtime spec");
+    (dictionary, spec)
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
+fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let mut target = TargetProcess::spawn(&target_executable);
+    let baseline = target.render();
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register target executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let (dictionary, spec) = create_text_workflow(
+        &mut backend,
+        &application_id,
+        "dictionary.runtime-update",
+        "workflow.runtime-update",
+        "Open",
+        "First translated label",
+    );
+
+    let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut runtime = bundle
+        .discover(application_id.clone(), &spec)
+        .expect("target discovery");
+    let target_id = runtime
+        .targets()
+        .next()
+        .expect("isolated target instance")
+        .id();
+    runtime
+        .start(target_id, [Feature::TextReplace])
+        .expect("target Runtime activation");
+    assert!(runtime.is_feature_active(Feature::TextReplace));
+    assert!(!runtime.is_feature_active(Feature::FontSubstitute));
+    let translated = target.render();
+    assert_ne!(translated, baseline, "desktop Runtime should replace text");
+
+    backend
+        .update_dictionary(
+            DictionaryEdit::new(
+                dictionary.id(),
+                dictionary.name(),
+                dictionary.locale(),
+                dictionary.revision(),
+            )
+            .with_entries([DictionaryRuleCreate::replace(
+                "main-ui",
+                "Open",
+                "Second translated label",
+            )]),
+        )
+        .expect("second translation");
+    let second_spec = backend
+        .workflow_runtime_spec("workflow.runtime-update", &application_id)
+        .expect("updated Runtime spec");
+    runtime
+        .publish(second_spec.publication().clone())
+        .expect("Runtime publication update");
+    let updated = target.render();
+    assert_ne!(
+        updated, translated,
+        "target should apply the next generation"
+    );
+
+    runtime.stop().expect("Runtime pass-through");
+    assert!(!runtime.is_feature_active(Feature::TextReplace));
+    assert_eq!(
+        target.render(),
+        baseline,
+        "stop should restore pass-through"
+    );
+
+    let spec = backend
+        .workflow_runtime_spec("workflow.runtime-update", &application_id)
+        .expect("restart Runtime spec");
+    let mut restarted = bundle
+        .discover(application_id, &spec)
+        .expect("restart target discovery");
+    let restarted_target_id = restarted
+        .targets()
+        .next()
+        .expect("restart target instance")
+        .id();
+    restarted
+        .start(restarted_target_id, [Feature::TextReplace])
+        .expect("target Runtime reactivation after pass-through");
+    assert_ne!(
+        target.render(),
+        baseline,
+        "restarting should reactivate visible replacement"
+    );
+    restarted.stop().expect("second Runtime pass-through");
+    assert_eq!(
+        target.render(),
+        baseline,
+        "second stop should restore pass-through"
+    );
+    target.stop();
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
+fn desktop_runtime_refresh_reconnects_requested_features_after_target_restart() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let mut target = TargetProcess::spawn(&target_executable);
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register target executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let (_, spec) = create_text_workflow(
+        &mut backend,
+        &application_id,
+        "dictionary.runtime-reconnect",
+        "workflow.runtime-reconnect",
+        "Open",
+        "Reconnected label",
+    );
+    let bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut pool = DesktopRuntimePool::new(bundle);
+    let active = pool
+        .set_features(application_id.clone(), &spec, None, [Feature::TextReplace])
+        .expect("initial activation");
+    assert!(active.is_feature_requested(Feature::TextReplace));
+    assert!(active.is_feature_active(Feature::TextReplace));
+
+    target.stop();
+    let mut restarted_target = TargetProcess::spawn(&target_executable);
+    let restarted_baseline = restarted_target.render();
+    let refreshed = pool
+        .refresh(application_id.clone(), &spec)
+        .expect("refresh after target restart");
+    assert!(refreshed.is_feature_requested(Feature::TextReplace));
+    assert!(refreshed.is_feature_active(Feature::TextReplace));
+    assert_ne!(
+        restarted_target.render(),
+        restarted_baseline,
+        "refresh must reapply the previously requested translation feature"
+    );
+
+    pool.set_features(application_id, &spec, None, [])
+        .expect("stop refreshed Runtime");
+    restarted_target.stop();
+}
+
+#[test]
+#[ignore = "requires an explicitly authorized, already-running Windows host"]
+fn desktop_runtime_activates_in_an_authorized_real_host() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let host_executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
+        .map(std::path::PathBuf::from)
+        .expect("authorized host executable path");
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&host_executable))
+        .expect("register authorized host executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let (_, spec) = create_text_workflow(
+        &mut backend,
+        &application_id,
+        "dictionary.real-host",
+        "workflow.real-host",
+        "File",
+        "文件",
+    );
+
+    let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut runtime = bundle
+        .discover(application_id, &spec)
+        .expect("authorized host discovery");
+    let target_id = runtime
+        .targets()
+        .next()
+        .expect("authorized host must already be running")
+        .id();
+    runtime
+        .start(target_id, [Feature::TextReplace])
+        .expect("authorized host Runtime activation");
+    assert!(runtime.is_feature_active(Feature::TextReplace));
+    if let Some(hold_ms) = std::env::var_os("GLYPHSHIFT_REAL_HOST_HOLD_MS")
+        .and_then(|value| value.to_string_lossy().parse::<u64>().ok())
+    {
+        println!("authorized host Runtime is active");
+        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+    }
+    runtime.stop().expect("authorized host pass-through");
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
+fn desktop_runtime_pool_keeps_two_software_active_and_isolates_stop() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let source_target = runtime_root.join("test-target.exe");
+    let targets = tempdir().expect("isolated target executables");
+    let alpha_executable = targets.path().join("AlphaCanvas.exe");
+    let beta_executable = targets.path().join("BetaCanvas.exe");
+    std::fs::copy(&source_target, &alpha_executable).expect("alpha target executable");
+    std::fs::copy(&source_target, &beta_executable).expect("beta target executable");
+    let mut alpha_target = TargetProcess::spawn(&alpha_executable);
+    let mut beta_target = TargetProcess::spawn(&beta_executable);
+    let alpha_baseline = alpha_target.render();
+    let beta_baseline = beta_target.render();
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = DesktopBackend::open(data.path()).expect("desktop backend");
+    let alpha_added = backend
+        .add_software(ExecutableSelection::new(&alpha_executable))
+        .expect("register alpha software");
+    let alpha_id = alpha_added
+        .selected_software_id()
+        .expect("selected alpha software")
+        .to_owned();
+    let (_, alpha_spec) = create_text_workflow(
+        &mut backend,
+        &alpha_id,
+        "dictionary.alpha",
+        "workflow.alpha",
+        "Open",
+        "Alpha translated label",
+    );
+    let beta_added = backend
+        .add_software(ExecutableSelection::new(&beta_executable))
+        .expect("register beta software");
+    let beta_id = beta_added
+        .selected_software_id()
+        .expect("selected beta software")
+        .to_owned();
+    let (_, beta_spec) = create_text_workflow(
+        &mut backend,
+        &beta_id,
+        "dictionary.beta",
+        "workflow.beta",
+        "Open",
+        "Beta translated label",
+    );
+
+    let mut pool = DesktopRuntimePool::new(
+        RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle"),
+    );
+    let alpha = pool
+        .set_features(alpha_id.clone(), &alpha_spec, None, [Feature::TextReplace])
+        .expect("activate alpha Runtime");
+    let beta = pool
+        .set_features(beta_id.clone(), &beta_spec, None, [Feature::TextReplace])
+        .expect("activate beta Runtime");
+    assert!(alpha.is_active());
+    assert!(beta.is_active());
+    assert_ne!(alpha_target.render(), alpha_baseline);
+    assert_ne!(beta_target.render(), beta_baseline);
+
+    pool.set_features(alpha_id.clone(), &alpha_spec, None, std::iter::empty())
+        .expect("stop alpha Runtime");
+    assert_eq!(alpha_target.render(), alpha_baseline);
+    assert_ne!(beta_target.render(), beta_baseline);
+    assert!(!pool
+        .status(&alpha_id)
+        .is_some_and(|status| status.is_active()));
+    assert!(pool
+        .status(&beta_id)
+        .is_some_and(|status| status.is_active()));
+
+    pool.set_features(beta_id, &beta_spec, None, std::iter::empty())
+        .expect("stop beta Runtime");
+    assert_eq!(beta_target.render(), beta_baseline);
+    alpha_target.stop();
+    beta_target.stop();
+}

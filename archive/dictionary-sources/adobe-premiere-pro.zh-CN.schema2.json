@@ -1,0 +1,13 @@
+{
+  "domains": {
+    "adobe.premiere-pro/app": {
+      "剪辑": "xxxx",
+      "文件": "文件测试",
+      "窗口": "win"
+    },
+    "adobe.premiere-pro/menu": {
+      "文件": "文件夹"
+    }
+  },
+  "schema": 2
+}

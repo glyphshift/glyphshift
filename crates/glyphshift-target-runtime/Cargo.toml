@@ -1,0 +1,37 @@
+[package]
+name = "glyphshift-target-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../glyphshift-adapter-native-abi" }
+glyphshift-adapter-native-host = { path = "../glyphshift-adapter-native-host" }
+glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
+glyphshift-domain = { path = "../glyphshift-domain" }
+glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }
+glyphshift-runtime-kernel = { path = "../glyphshift-runtime-kernel" }
+glyphshift-target-runtime-contract = { path = "../glyphshift-target-runtime-contract" }
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
+glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
+glyphshift-adapter-sdk = { path = "../glyphshift-adapter-sdk" }
+glyphshift-translation = { path = "../glyphshift-translation" }
+glyphshift-windows-host = { path = "../../test-support/windows-host" }
+
+[lints.rust]
+unsafe_code = "allow"

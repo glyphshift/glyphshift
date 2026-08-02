@@ -1,0 +1,15 @@
+[package]
+name = "glyphshift-test-controller-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "glyphshift-test-controller-plugin"
+path = "src/main.rs"
+
+[dependencies]
+glyphshift-controller-sdk = { path = "../../crates/glyphshift-controller-sdk" }
+
+[lints]
+workspace = true

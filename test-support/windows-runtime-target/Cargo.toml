@@ -1,0 +1,15 @@
+[package]
+name = "glyphshift-windows-runtime-target"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "glyphshift-windows-runtime-target"
+path = "src/main.rs"
+
+[dependencies]
+glyphshift-windows-host = { path = "../windows-host" }
+
+[lints.rust]
+unsafe_code = "forbid"

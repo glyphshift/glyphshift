@@ -1,0 +1,43 @@
+[workspace]
+members = [
+    "apps/glyphshift-desktop/src-tauri",
+    "apps/glyphshift-service",
+    "crates/glyphshift-adapter-registry",
+    "crates/glyphshift-adapter-gdi",
+    "crates/glyphshift-adapter-gdi-native",
+    "crates/glyphshift-adapter-gdiplus",
+    "crates/glyphshift-adapter-gdiplus-native",
+    "crates/glyphshift-adapter-native-abi",
+    "crates/glyphshift-adapter-native-host",
+    "crates/glyphshift-adapter-sdk",
+    "crates/glyphshift-controller-sdk",
+    "crates/glyphshift-controller-host",
+    "crates/glyphshift-controller-windows",
+    "crates/glyphshift-decision",
+    "crates/glyphshift-desktop-backend",
+    "crates/glyphshift-desktop-runtime",
+    "crates/glyphshift-domain",
+    "crates/glyphshift-extension",
+    "crates/glyphshift-protocol",
+    "crates/glyphshift-runtime-contract",
+    "crates/glyphshift-runtime-kernel",
+    "crates/glyphshift-session",
+    "crates/glyphshift-target-runtime-contract",
+    "crates/glyphshift-target-process-host",
+    "crates/glyphshift-target-runtime",
+    "crates/glyphshift-translation",
+    "crates/glyphshift-workflow",
+    "test-support/reference-adapters",
+    "test-support/controller-plugin",
+    "test-support/windows-host",
+    "test-support/windows-runtime-target",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

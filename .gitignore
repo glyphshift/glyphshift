@@ -1,0 +1,19 @@
+# Rust and local verification
+/target
+**/target
+
+# Node / Vite
+node_modules
+apps/glyphshift-desktop/dist
+apps/glyphshift-desktop/playwright-report
+apps/glyphshift-desktop/test-results
+apps/glyphshift-desktop/src-tauri/gen
+
+# Local design material
+.impeccable
+
+# Miscellaneous generated files
+*.tmp
+
+# Local visual evidence is never a repository resource.
+/flightdeck/work/**/references/**/*.png
