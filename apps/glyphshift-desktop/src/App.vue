@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import DictionaryLibrary from './components/DictionaryLibrary.vue'
 import DictionaryProof from './components/DictionaryProof.vue'
 import FontProfileLibrary from './components/FontProfileLibrary.vue'
+import CaptureView from './components/CaptureView.vue'
 import HelpView from './components/HelpView.vue'
 import SettingsView from './components/SettingsView.vue'
 import SoftwareTable from './components/SoftwareTable.vue'
@@ -15,8 +16,8 @@ import { useAppSettings } from './appSettings'
 import type { FontProfileDetail, WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
-type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'help' | 'settings'
-const desktopApiVersion = 8
+type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'capture' | 'help' | 'settings'
+const desktopApiVersion = 9
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -149,6 +150,17 @@ onMounted(() => {
         @create="workspace.createFontProfile"
         @save="saveFontProfile"
         @remove="workspace.removeFontProfiles"
+      />
+      <CaptureView
+        v-else-if="view === 'capture'"
+        :software="workspace.model.value.software"
+        :adapters="workspace.model.value.adapters"
+        :capture="workspace.model.value.capture"
+        :result="workspace.captureResult.value"
+        :busy="workspace.captureBusy.value"
+        :message="workspace.messages.value.capture ?? ''"
+        @start="workspace.startCapture"
+        @stop="workspace.stopCapture"
       />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />

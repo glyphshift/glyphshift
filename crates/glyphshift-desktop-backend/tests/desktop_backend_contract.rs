@@ -1,6 +1,6 @@
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
-    BackendError, DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryRuleCreate,
+    BackendError, DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEntryCreate,
     FontProfileBinding, FontProfileCreate, WorkflowCreate, WorkflowTargetCreate,
 };
 use glyphshift_domain::{AdapterId, Feature};
@@ -12,10 +12,50 @@ fn environment() -> DesktopEnvironment {
         [AdapterRequirement::new(
             AdapterId::new("adapter-gdi"),
             AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
-            [Feature::TextReplace, Feature::FontSubstitute],
+            [
+                Feature::TextObserve,
+                Feature::TextReplace,
+                Feature::FontSubstitute,
+            ],
         )],
         ["Available Sans"],
     )
+}
+
+#[test]
+fn capture_spec_uses_only_explicit_observable_adapters_and_an_empty_publication() {
+    let root = tempdir().expect("capture product data");
+    let executable = root.path().join("SyntheticCaptureHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open capture product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            executable,
+        ))
+        .expect("register capture target")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+
+    let spec = backend
+        .capture_runtime_spec(&software_id, &[Box::<str>::from("adapter-gdi")])
+        .expect("compile capture spec");
+
+    assert_eq!(spec.requirements().len(), 1);
+    assert_eq!(
+        spec.requirements()[0].features().collect::<Vec<_>>(),
+        vec![Feature::TextObserve]
+    );
+    let mut translations = 0;
+    spec.publication()
+        .snapshot()
+        .visit_entries(|_, _, _| translations += 1);
+    let mut fonts = 0;
+    spec.publication()
+        .font_policy()
+        .visit_locations(|_, _| fonts += 1);
+    assert_eq!((translations, fonts), (0, 0));
 }
 
 #[test]
@@ -36,7 +76,7 @@ fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictio
     backend
         .create_dictionary(
             DictionaryCreate::new("dictionary-ui", "UI", "en-US", "zh-CN")
-                .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
         )
         .expect("create pure dictionary");
     backend
@@ -101,7 +141,7 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
                 .with_description("用于创作软件界面汉化")
                 .with_release_version("0.1.0")
                 .with_tags(["menu", "ui"])
-                .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
         )
         .expect("create a pure dictionary");
     backend
@@ -143,7 +183,7 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
             "zh-CN",
             "0.1.0",
             &[Box::<str>::from("menu"), Box::<str>::from("ui")][..],
-            Some("打开"),
+            "打开",
             "简体中文界面",
             &[
                 Box::<str>::from("Unavailable Sans"),

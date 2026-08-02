@@ -12,11 +12,12 @@ mod windows {
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
         CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject,
-        ExtTextOutW, GetGlyphIndicesW, SelectObject, SetBkMode, SetTextColor, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, GGI_MARK_NONEXISTING_GLYPHS, HBITMAP, HDC,
-        HGDIOBJ, LOGFONTW, TRANSPARENT,
+        DrawTextW, ExtTextOutW, GetGlyphIndicesW, SelectObject, SetBkMode, SetTextColor, TextOutW,
+        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, DT_LEFT, DT_SINGLELINE,
+        GGI_MARK_NONEXISTING_GLYPHS, HBITMAP, HDC, HGDIOBJ, LOGFONTW, TRANSPARENT,
     };
     use windows_sys::Win32::Graphics::GdiPlus::{
         GdipCreateFont, GdipCreateFontFamilyFromName, GdipCreateFromHDC, GdipCreateSolidFill,
@@ -296,6 +297,55 @@ mod windows {
         Ok(canvas.evidence())
     }
 
+    pub fn render_raw_text_out(text: &str) -> Result<PixelEvidence, String> {
+        let mut canvas = DibCanvas::new()?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        with_selected_gdi_font(&mut canvas, &GdiFont::new("Segoe UI", -30, 400), |canvas| {
+            unsafe {
+                SetBkMode(canvas.hdc, TRANSPARENT as i32);
+                SetTextColor(canvas.hdc, 0);
+            }
+            if unsafe { TextOutW(canvas.hdc, 12, 18, units.as_ptr(), units.len() as i32) } == 0 {
+                Err("TextOutW failed".into())
+            } else {
+                Ok(())
+            }
+        })?;
+        Ok(canvas.evidence())
+    }
+
+    pub fn render_raw_draw_text(text: &str) -> Result<PixelEvidence, String> {
+        let mut canvas = DibCanvas::new()?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        with_selected_gdi_font(&mut canvas, &GdiFont::new("Segoe UI", -30, 400), |canvas| {
+            unsafe {
+                SetBkMode(canvas.hdc, TRANSPARENT as i32);
+                SetTextColor(canvas.hdc, 0);
+            }
+            let mut rect = RECT {
+                left: 12,
+                top: 18,
+                right: WIDTH - 12,
+                bottom: HEIGHT - 12,
+            };
+            if unsafe {
+                DrawTextW(
+                    canvas.hdc,
+                    units.as_ptr(),
+                    units.len() as i32,
+                    &mut rect,
+                    DT_LEFT | DT_SINGLELINE,
+                )
+            } == 0
+            {
+                Err("DrawTextW failed".into())
+            } else {
+                Ok(())
+            }
+        })?;
+        Ok(canvas.evidence())
+    }
+
     pub fn render_gdi_glyph_indices(decision: RenderDecision) -> Result<PixelEvidence, String> {
         let mut canvas = DibCanvas::new()?;
         let (call, map) = glyph_call(&mut canvas, "Open", GdiFont::new("Segoe UI", -30, 400))?;
@@ -473,5 +523,5 @@ mod windows {
 #[cfg(windows)]
 pub use windows::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
-    render_raw_gdi_unicode, PixelEvidence,
+    render_raw_draw_text, render_raw_gdi_unicode, render_raw_text_out, PixelEvidence,
 };

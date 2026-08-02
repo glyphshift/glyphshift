@@ -8,6 +8,7 @@ use glyphshift_adapter_registry::{
     AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement, AdapterTrustPolicy,
     AdapterVersionRequirement, ArtifactHash, PackageArtifactId, SignerId,
 };
+use glyphshift_capture::CaptureConfiguration;
 use glyphshift_controller_host::{
     ControllerStartupConfig, ControllerTrustPolicy, ProcessControllerTransport,
     VerifiedControllerArtifact,
@@ -387,6 +388,12 @@ trait ManagedRuntime: Send {
         target_id: u64,
         requested_features: &BTreeSet<Feature>,
     ) -> Result<(), DesktopRuntimeError>;
+    fn start_capture(
+        &mut self,
+        target_id: u64,
+        requested_features: &BTreeSet<Feature>,
+        capture: CaptureConfiguration,
+    ) -> Result<(), DesktopRuntimeError>;
     fn publish(
         &mut self,
         publication: glyphshift_runtime_contract::RuntimePublication,
@@ -433,6 +440,15 @@ impl ManagedRuntime for WindowsDesktopRuntime {
         requested_features: &BTreeSet<Feature>,
     ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntime::start(self, target_id, requested_features.iter().copied())
+    }
+
+    fn start_capture(
+        &mut self,
+        target_id: u64,
+        requested_features: &BTreeSet<Feature>,
+        capture: CaptureConfiguration,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::start_capture(self, target_id, requested_features.iter().copied(), capture)
     }
 
     fn publish(
@@ -568,6 +584,7 @@ pub struct DesktopRuntimePool {
     sessions: BTreeMap<Box<str>, Box<dyn ManagedRuntime>>,
     requested_features: BTreeMap<Box<str>, BTreeSet<Feature>>,
     workflow_targets: BTreeMap<Box<str>, BTreeSet<Box<str>>>,
+    capture_targets: BTreeSet<Box<str>>,
 }
 
 impl DesktopRuntimePool {
@@ -582,6 +599,7 @@ impl DesktopRuntimePool {
             sessions: BTreeMap::new(),
             requested_features: BTreeMap::new(),
             workflow_targets: BTreeMap::new(),
+            capture_targets: BTreeSet::new(),
         }
     }
 
@@ -694,6 +712,12 @@ impl DesktopRuntimePool {
             .iter()
             .map(|target| Box::<str>::from(target.software_id()))
             .collect::<BTreeSet<_>>();
+        if target_ids
+            .iter()
+            .any(|software_id| self.capture_targets.contains(software_id))
+        {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
         if self.workflow_targets.iter().any(|(workflow_id, owned)| {
             workflow_id.as_ref() != intent.workflow_id()
                 && owned
@@ -827,6 +851,52 @@ impl DesktopRuntimePool {
         Ok(runtime_status(runtime.as_ref(), BTreeSet::new()))
     }
 
+    pub fn start_capture(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        target_id: Option<u64>,
+        capture: CaptureConfiguration,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        if self.capture_targets.contains(application_id.as_ref())
+            || self
+                .workflow_targets
+                .values()
+                .any(|targets| targets.contains(application_id.as_ref()))
+        {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        let status = self.discover(application_id.clone(), spec)?;
+        if !status.supports(Feature::TextObserve) || status.is_active() {
+            return Err(DesktopRuntimeError::SessionRejected);
+        }
+        let runtime = self
+            .sessions
+            .get_mut(application_id.as_ref())
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        let target_id = target_id
+            .or_else(|| runtime.targets().first().map(RuntimeTarget::id))
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        let requested_features = BTreeSet::from([Feature::TextObserve]);
+        runtime.start_capture(target_id, &requested_features, capture)?;
+        self.requested_features
+            .insert(application_id.clone(), requested_features.clone());
+        self.capture_targets.insert(application_id.clone());
+        Ok(runtime_status(runtime.as_ref(), requested_features))
+    }
+
+    pub fn stop_capture(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let application_id = application_id.into();
+        if !self.capture_targets.remove(application_id.as_ref()) {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        self.stop_application(application_id)
+    }
+
     pub fn refresh(
         &mut self,
         application_id: impl Into<Box<str>>,
@@ -912,6 +982,7 @@ impl DesktopRuntimePool {
             }
         }
         self.requested_features.remove(application_id);
+        self.capture_targets.remove(application_id);
         Ok(())
     }
 }
@@ -1042,6 +1113,24 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         target_id: u64,
         requested_features: impl IntoIterator<Item = Feature>,
     ) -> Result<(), DesktopRuntimeError> {
+        self.start_inner(target_id, requested_features, None)
+    }
+
+    pub fn start_capture(
+        &mut self,
+        target_id: u64,
+        requested_features: impl IntoIterator<Item = Feature>,
+        capture: CaptureConfiguration,
+    ) -> Result<(), DesktopRuntimeError> {
+        self.start_inner(target_id, requested_features, Some(capture))
+    }
+
+    fn start_inner(
+        &mut self,
+        target_id: u64,
+        requested_features: impl IntoIterator<Item = Feature>,
+        capture: Option<CaptureConfiguration>,
+    ) -> Result<(), DesktopRuntimeError> {
         let requested_features = requested_features.into_iter().collect::<Vec<_>>();
         if requested_features.is_empty()
             || requested_features
@@ -1069,6 +1158,9 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         let target_instance_id = TargetInstanceId::new(format!("target-{target_id}"));
         let target_instance = TargetInstance::new(target_instance_id.clone(), target.facts);
         let mut host = TargetProcessHost::new(connection, self.artifacts.clone());
+        if let Some(capture) = capture {
+            host = host.with_capture(capture);
+        }
         host.register_target(target_instance_id, target.controller_id);
         let mut manager = SessionManager::new(
             self.registry.clone(),
@@ -1251,8 +1343,8 @@ fn next_nonce(sequence: u64) -> ControllerNonce {
 mod tests {
     use super::*;
     use glyphshift_desktop_backend::{
-        DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEdit, DictionaryRuleCreate,
-        ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
+        DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEdit,
+        DictionaryEntryCreate, ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
     };
     use glyphshift_protocol::{
         ControllerHello, ControllerInventory, ControllerTarget, ControllerTargetToken,
@@ -1271,7 +1363,11 @@ mod tests {
                     AdapterVersionRequirement::Exact(
                         glyphshift_adapter_registry::AdapterVersion::new(1, 0, 0),
                     ),
-                    [Feature::TextReplace, Feature::FontSubstitute],
+                    [
+                        Feature::TextObserve,
+                        Feature::TextReplace,
+                        Feature::FontSubstitute,
+                    ],
                 )],
                 Vec::<Box<str>>::new(),
             ),
@@ -1318,9 +1414,13 @@ mod tests {
         }
 
         fn supported_features(&self) -> BTreeSet<Feature> {
-            [Feature::TextReplace, Feature::FontSubstitute]
-                .into_iter()
-                .collect()
+            [
+                Feature::TextObserve,
+                Feature::TextReplace,
+                Feature::FontSubstitute,
+            ]
+            .into_iter()
+            .collect()
         }
 
         fn active_features(&self) -> BTreeSet<Feature> {
@@ -1339,6 +1439,16 @@ mod tests {
             &mut self,
             _target_id: u64,
             requested_features: &BTreeSet<Feature>,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.active_features = requested_features.clone();
+            Ok(())
+        }
+
+        fn start_capture(
+            &mut self,
+            _target_id: u64,
+            requested_features: &BTreeSet<Feature>,
+            _capture: CaptureConfiguration,
         ) -> Result<(), DesktopRuntimeError> {
             self.active_features = requested_features.clone();
             Ok(())
@@ -1382,7 +1492,7 @@ mod tests {
         backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.shared", "共享词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
             )
             .expect("shared dictionary");
         backend
@@ -1445,6 +1555,67 @@ mod tests {
     }
 
     #[test]
+    fn capture_owns_one_software_and_cannot_overlap_a_translation_workflow() {
+        let root = tempdir().expect("capture Runtime data");
+        let executable = root.path().join("CaptureHost.exe");
+        fs::write(&executable, b"synthetic executable").expect("selected executable");
+        let mut backend = open_test_backend(root.path().join("data"));
+        let software_id = backend
+            .add_software(ExecutableSelection::new(executable))
+            .expect("registered executable")
+            .selected_software_id()
+            .expect("selected software")
+            .to_owned();
+        backend
+            .create_dictionary(
+                DictionaryCreate::new("dictionary.capture", "捕获冲突词典", "en-US", "zh-CN")
+                    .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
+            )
+            .expect("capture conflict dictionary");
+        backend
+            .create_workflow(
+                WorkflowCreate::new("workflow.capture", "捕获冲突工作流").with_targets([
+                    WorkflowTargetCreate::new(
+                        software_id.clone(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.capture"],
+                    ),
+                ]),
+            )
+            .expect("capture conflict workflow");
+        let spec = backend
+            .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+            .expect("capture spec");
+        let intent = backend
+            .effective_workflow_intent("workflow.capture")
+            .expect("workflow intent");
+        let configuration = CaptureConfiguration::new(
+            glyphshift_capture::CaptureSessionId::new("capture-test").expect("session id"),
+            root.path().join("capture.json"),
+            100,
+        )
+        .expect("capture configuration");
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+
+        let active = pool
+            .start_capture(software_id.as_str(), &spec, None, configuration)
+            .expect("start capture");
+        assert!(active.is_feature_active(Feature::TextObserve));
+        assert_eq!(
+            pool.reconcile_workflow(&intent),
+            Err(DesktopRuntimeError::InvalidState)
+        );
+
+        pool.stop_capture(software_id.as_str())
+            .expect("stop capture");
+        assert!(pool
+            .reconcile_workflow(&intent)
+            .expect("start workflow after capture")
+            .errors()
+            .is_empty());
+    }
+
+    #[test]
     fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target() {
         let root = tempdir().expect("workflow Runtime data");
         let mut backend = open_test_backend(root.path().join("data"));
@@ -1465,7 +1636,7 @@ mod tests {
         let dictionary = backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.hot", "共享热更新词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "第一次")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "第一次")]),
             )
             .expect("shared dictionary");
         backend
@@ -1500,11 +1671,7 @@ mod tests {
                     dictionary.metadata().target_locale(),
                     dictionary.revision(),
                 )
-                .with_entries([DictionaryRuleCreate::replace(
-                    "main-ui",
-                    "Open",
-                    "第二次",
-                )]),
+                .with_entries([DictionaryEntryCreate::new("Open", "第二次")]),
             )
             .expect("update shared dictionary");
         let next = backend
@@ -1541,7 +1708,7 @@ mod tests {
         backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.replace", "替换词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
             )
             .expect("replacement dictionary");
         backend
@@ -1608,7 +1775,7 @@ mod tests {
         backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.restart", "重启词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "重连")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "重连")]),
             )
             .expect("restart dictionary");
         backend
@@ -1660,7 +1827,7 @@ mod tests {
         backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.stop", "停止词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "停止")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "停止")]),
             )
             .expect("stop dictionary");
         backend

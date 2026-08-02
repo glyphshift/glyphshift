@@ -1,6 +1,6 @@
 //! Native `ExtTextOutW` package for the first-party GDI Adapter.
 
-use glyphshift_adapter_gdi::ADAPTER_ID;
+use glyphshift_adapter_gdi::EXT_TEXT_OUT_ADAPTER_ID;
 use glyphshift_adapter_native_abi::{
     DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
     NativeNegotiationV1, NativeRuntimeHostV1, SourceCharactersUtf16V1, ARCH_X86, ARCH_X86_64,
@@ -335,7 +335,7 @@ pub extern "C" fn glyphshift_adapter_entry_v1() -> NativeAdapterApiV1 {
     NativeAdapterApiV1 {
         struct_size: std::mem::size_of::<NativeAdapterApiV1>() as u32,
         descriptor: NativeAdapterDescriptorV1::inline_target(
-            ADAPTER_ID,
+            EXT_TEXT_OUT_ADAPTER_ID,
             (1, 0, 0),
             SUPPORTED_FEATURES,
             PLATFORM_WINDOWS,

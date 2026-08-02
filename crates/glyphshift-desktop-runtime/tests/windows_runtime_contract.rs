@@ -2,7 +2,7 @@
 
 use glyphshift_desktop_backend::{
     DesktopBackend, DesktopEnvironment, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit,
-    DictionaryRuleCreate, DictionaryView, ExecutableSelection, WorkflowCreate,
+    DictionaryEntryCreate, DictionaryView, ExecutableSelection, WorkflowCreate,
     WorkflowTargetCreate,
 };
 use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
@@ -89,9 +89,8 @@ fn create_text_workflow(
 ) -> (DictionaryView, DesktopRuntimeSpec) {
     let dictionary = backend
         .create_dictionary(
-            DictionaryCreate::new(dictionary_id, dictionary_id, "en-US", "zh-CN").with_entries([
-                DictionaryRuleCreate::replace("main-ui", source, translation),
-            ]),
+            DictionaryCreate::new(dictionary_id, dictionary_id, "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new(source, translation)]),
         )
         .expect("create Runtime dictionary");
     backend
@@ -156,8 +155,7 @@ fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
                 dictionary.metadata().target_locale(),
                 dictionary.revision(),
             )
-            .with_entries([DictionaryRuleCreate::replace(
-                "main-ui",
+            .with_entries([DictionaryEntryCreate::new(
                 "Open",
                 "Second translated label",
             )]),

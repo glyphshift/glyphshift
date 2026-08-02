@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-protocol = { path = "../glyphshift-protocol" }
 glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }

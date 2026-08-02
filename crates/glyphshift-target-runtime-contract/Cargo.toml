@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
 glyphshift-adapter-sdk = { path = "../glyphshift-adapter-sdk" }
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }
 serde = { version = "1", features = ["derive"] }

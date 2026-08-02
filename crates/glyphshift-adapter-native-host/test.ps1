@@ -6,7 +6,9 @@ $workspaceManifest = Join-Path $PSScriptRoot '..\..\Cargo.toml'
 
 & cargo build `
     --manifest-path $workspaceManifest `
+    -p glyphshift-adapter-draw-text-native `
     -p glyphshift-adapter-gdi-native `
+    -p glyphshift-adapter-gdi-text-out-native `
     -p glyphshift-adapter-gdiplus-native
 if ($LASTEXITCODE -ne 0) {
     throw "native Adapter package build failed with exit code $LASTEXITCODE"

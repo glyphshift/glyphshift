@@ -11,6 +11,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    CaptureView: typeof import('./src/components/CaptureView.vue')['default']
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']

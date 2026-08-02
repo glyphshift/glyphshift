@@ -1,6 +1,7 @@
 //! Desktop-facing product model for software, dictionaries, and workflows.
 
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
+use glyphshift_dictionary_package as dictionary_package;
 use glyphshift_domain::{AdapterId, Feature, Generation, RouteLimits, RouteOperator, RouteProgram};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
@@ -19,7 +20,6 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 const EXTENSION_SCHEMA: &str = "glyphshift.extension/1";
-const DICTIONARY_SCHEMA: &str = "glyphshift.dictionary/2";
 const FONT_PROFILE_SCHEMA: &str = "glyphshift.font-profile/1";
 const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/2";
 const WORKFLOW_STATE_SCHEMA: &str = "glyphshift.workflow-state/1";
@@ -36,6 +36,7 @@ pub enum BackendError {
     UnknownSoftware(Box<str>),
     UnknownDictionary(Box<str>),
     UnknownFontProfile(Box<str>),
+    UnknownAdapter(Box<str>),
     DuplicateWorkflow(Box<str>),
     UnknownWorkflow(Box<str>),
     WorkflowRejected(ResolveError),
@@ -391,96 +392,24 @@ impl ExecutableSelection {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct DictionaryRuleCreate {
-    location: Box<str>,
-    context: Option<DictionaryRuleContext>,
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DictionaryEntryCreate {
     source: Box<str>,
-    translation: Option<Box<str>>,
+    translation: Box<str>,
 }
 
-impl DictionaryRuleCreate {
+impl DictionaryEntryCreate {
     #[must_use]
-    pub fn replace(
-        location: impl Into<Box<str>>,
-        source: impl Into<Box<str>>,
-        translation: impl Into<Box<str>>,
-    ) -> Self {
+    pub fn new(source: impl Into<Box<str>>, translation: impl Into<Box<str>>) -> Self {
         Self {
-            location: location.into(),
-            context: None,
             source: source.into(),
-            translation: Some(translation.into()),
+            translation: translation.into(),
         }
-    }
-
-    #[must_use]
-    pub fn keep(location: impl Into<Box<str>>, source: impl Into<Box<str>>) -> Self {
-        Self {
-            location: location.into(),
-            context: None,
-            source: source.into(),
-            translation: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, kind: impl Into<Box<str>>, key: impl Into<Box<str>>) -> Self {
-        self.context = Some(DictionaryRuleContext {
-            kind: kind.into(),
-            key: key.into(),
-        });
-        self
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DictionaryRuleContext {
-    kind: Box<str>,
-    key: Box<str>,
-}
-
-impl DictionaryRuleContext {
-    #[must_use]
-    pub fn kind(&self) -> &str {
-        &self.kind
-    }
-
-    #[must_use]
-    pub fn key(&self) -> &str {
-        &self.key
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DictionaryRuleKey {
-    location: Box<str>,
-    context: Option<DictionaryRuleContext>,
-    source: Box<str>,
-}
-
-impl DictionaryRuleKey {
-    #[must_use]
-    pub fn new(location: impl Into<Box<str>>, source: impl Into<Box<str>>) -> Self {
-        Self {
-            location: location.into(),
-            context: None,
-            source: source.into(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, kind: impl Into<Box<str>>, key: impl Into<Box<str>>) -> Self {
-        self.context = Some(DictionaryRuleContext {
-            kind: kind.into(),
-            key: key.into(),
-        });
-        self
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DictionaryMetadata {
     id: Box<str>,
     release_version: Box<str>,
@@ -538,10 +467,10 @@ impl DictionaryMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DictionaryCreate {
     metadata: DictionaryMetadata,
-    entries: Vec<DictionaryRuleCreate>,
+    entries: Vec<DictionaryEntryCreate>,
 }
 
 impl DictionaryCreate {
@@ -606,18 +535,21 @@ impl DictionaryCreate {
     }
 
     #[must_use]
-    pub fn with_entries(mut self, entries: impl IntoIterator<Item = DictionaryRuleCreate>) -> Self {
+    pub fn with_entries(
+        mut self,
+        entries: impl IntoIterator<Item = DictionaryEntryCreate>,
+    ) -> Self {
         self.entries = entries.into_iter().collect();
         self
     }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DictionaryEdit {
     metadata: DictionaryMetadata,
     base_revision: u64,
-    entries: Vec<DictionaryRuleCreate>,
+    entries: Vec<DictionaryEntryCreate>,
 }
 
 impl DictionaryEdit {
@@ -674,7 +606,10 @@ impl DictionaryEdit {
     }
 
     #[must_use]
-    pub fn with_entries(mut self, entries: impl IntoIterator<Item = DictionaryRuleCreate>) -> Self {
+    pub fn with_entries(
+        mut self,
+        entries: impl IntoIterator<Item = DictionaryEntryCreate>,
+    ) -> Self {
         self.entries = entries.into_iter().collect();
         self
     }
@@ -682,32 +617,20 @@ impl DictionaryEdit {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct DictionaryRuleView {
-    location: Box<str>,
-    context: Option<DictionaryRuleContext>,
+pub struct DictionaryEntryView {
     source: Box<str>,
-    translation: Option<Box<str>>,
+    translation: Box<str>,
 }
 
-impl DictionaryRuleView {
-    #[must_use]
-    pub fn location(&self) -> &str {
-        &self.location
-    }
-
-    #[must_use]
-    pub const fn context(&self) -> Option<&DictionaryRuleContext> {
-        self.context.as_ref()
-    }
-
+impl DictionaryEntryView {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
     }
 
     #[must_use]
-    pub fn translation(&self) -> Option<&str> {
-        self.translation.as_deref()
+    pub fn translation(&self) -> &str {
+        &self.translation
     }
 }
 
@@ -716,7 +639,7 @@ impl DictionaryRuleView {
 pub struct DictionaryView {
     metadata: DictionaryMetadata,
     revision: u64,
-    entries: Vec<DictionaryRuleView>,
+    entries: Vec<DictionaryEntryView>,
 }
 
 impl DictionaryView {
@@ -736,7 +659,7 @@ impl DictionaryView {
     }
 
     #[must_use]
-    pub fn entries(&self) -> &[DictionaryRuleView] {
+    pub fn entries(&self) -> &[DictionaryEntryView] {
         &self.entries
     }
 }
@@ -1168,32 +1091,6 @@ struct ContextSchemaArtifact {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DictionaryArtifact {
-    schema: Box<str>,
-    revision: u64,
-    metadata: DictionaryMetadata,
-    entries: Vec<DictionaryRuleArtifact>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DictionaryRuleArtifact {
-    location: Box<str>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    context: Option<DictionaryRuleContext>,
-    source: Box<str>,
-    text: DictionaryTextArtifact,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum DictionaryTextArtifact {
-    Keep,
-    Replace { text: Box<str> },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct FontProfileArtifact {
     schema: Box<str>,
     revision: u64,
@@ -1496,17 +1393,18 @@ impl DesktopBackend {
         &mut self,
         create: DictionaryCreate,
     ) -> Result<DictionaryView, BackendError> {
-        if self.dictionaries.contains_key(&create.metadata.id) {
-            return Err(BackendError::DuplicateDictionary(create.metadata.id));
+        let dictionary_id = create.metadata.id.clone();
+        if self.dictionaries.contains_key(&dictionary_id) {
+            return Err(BackendError::DuplicateDictionary(dictionary_id));
         }
         let artifact = dictionary_artifact(create)?;
-        let serialized = serde_json::to_string(&artifact)
+        let serialized = artifact
+            .encode_json()
             .map_err(|_| BackendError::InvalidArtifact("serialize-dictionary"))?;
-        let path = dictionary_path(&self.root, artifact.metadata.id())?;
+        let path = dictionary_path(&self.root, artifact.id())?;
         write_atomic(&path, &serialized)?;
         let view = dictionary_view(&artifact);
-        self.dictionaries
-            .insert(artifact.metadata.id.clone(), view.clone());
+        self.dictionaries.insert(artifact.id().into(), view.clone());
         Ok(view)
     }
 
@@ -1537,25 +1435,25 @@ impl DesktopBackend {
                 target
                     .dictionary_ids
                     .iter()
-                    .any(|dictionary_id| dictionary_id == &artifact.metadata.id)
+                    .any(|dictionary_id| dictionary_id.as_ref() == artifact.id())
             }) {
                 self.resolve_workflow_artifact_with_dictionary(workflow, Some(&view))?;
             }
         }
-        let serialized = serde_json::to_string(&artifact)
+        let serialized = artifact
+            .encode_json()
             .map_err(|_| BackendError::InvalidArtifact("serialize-dictionary"))?;
-        let path = dictionary_path(&self.root, artifact.metadata.id())?;
+        let path = dictionary_path(&self.root, artifact.id())?;
         write_atomic(&path, &serialized)?;
-        self.dictionaries
-            .insert(artifact.metadata.id.clone(), view.clone());
+        self.dictionaries.insert(artifact.id().into(), view.clone());
         Ok(view)
     }
 
-    pub fn upsert_dictionary_rule(
+    pub fn upsert_dictionary_entry(
         &mut self,
         dictionary_id: &str,
-        rule: DictionaryRuleCreate,
-        replacing: Option<DictionaryRuleKey>,
+        entry: DictionaryEntryCreate,
+        replacing_source: Option<&str>,
         base_revision: u64,
     ) -> Result<DictionaryView, BackendError> {
         let current = self
@@ -1571,26 +1469,30 @@ impl DesktopBackend {
         let mut entries = current
             .entries
             .iter()
-            .map(dictionary_rule_create)
+            .map(dictionary_entry_create)
             .collect::<Vec<_>>();
-        let next_key = dictionary_rule_key(&rule);
-        let index = replacing.as_ref().and_then(|key| {
+        let next_source = entry.source.clone();
+        let index = replacing_source.and_then(|source| {
             entries
                 .iter()
-                .position(|entry| dictionary_rule_key(entry) == *key)
+                .position(|entry| entry.source.as_ref() == source)
         });
-        if replacing.is_some() && index.is_none() {
-            return Err(BackendError::InvalidInput("dictionary-rule"));
+        if replacing_source.is_some() && index.is_none() {
+            return Err(BackendError::InvalidInput("dictionary-entry"));
         }
-        if entries.iter().enumerate().any(|(candidate_index, entry)| {
-            Some(candidate_index) != index && dictionary_rule_key(entry) == next_key
-        }) {
-            return Err(BackendError::InvalidInput("dictionary-rule-duplicate"));
+        if entries
+            .iter()
+            .enumerate()
+            .any(|(candidate_index, candidate)| {
+                Some(candidate_index) != index && candidate.source == next_source
+            })
+        {
+            return Err(BackendError::InvalidInput("dictionary-entry-duplicate"));
         }
         if let Some(index) = index {
-            entries[index] = rule;
+            entries[index] = entry;
         } else {
-            entries.push(rule);
+            entries.push(entry);
         }
         self.update_dictionary(DictionaryEdit {
             metadata: current.metadata,
@@ -1599,10 +1501,10 @@ impl DesktopBackend {
         })
     }
 
-    pub fn delete_dictionary_rules(
+    pub fn delete_dictionary_entries(
         &mut self,
         dictionary_id: &str,
-        rule_keys: impl IntoIterator<Item = DictionaryRuleKey>,
+        sources: impl IntoIterator<Item = impl Into<Box<str>>>,
         base_revision: u64,
     ) -> Result<DictionaryView, BackendError> {
         let current = self
@@ -1615,20 +1517,20 @@ impl DesktopBackend {
                 current: current.revision,
             });
         }
-        let rule_keys = rule_keys.into_iter().collect::<BTreeSet<_>>();
+        let sources = sources.into_iter().map(Into::into).collect::<BTreeSet<_>>();
         let existing_keys = current
             .entries
             .iter()
-            .map(dictionary_rule_view_key)
+            .map(|entry| entry.source.clone())
             .collect::<BTreeSet<_>>();
-        if rule_keys.is_empty() || !rule_keys.is_subset(&existing_keys) {
-            return Err(BackendError::InvalidInput("dictionary-rule"));
+        if sources.is_empty() || !sources.is_subset(&existing_keys) {
+            return Err(BackendError::InvalidInput("dictionary-entry"));
         }
         let entries = current
             .entries
             .iter()
-            .filter(|entry| !rule_keys.contains(&dictionary_rule_view_key(entry)))
-            .map(dictionary_rule_create)
+            .filter(|entry| !sources.contains(&entry.source))
+            .map(dictionary_entry_create)
             .collect::<Vec<_>>();
         self.update_dictionary(DictionaryEdit {
             metadata: current.metadata,
@@ -2273,6 +2175,44 @@ impl DesktopBackend {
         })
     }
 
+    pub fn capture_runtime_spec(
+        &self,
+        extension_id: &str,
+        adapter_ids: &[Box<str>],
+    ) -> Result<DesktopRuntimeSpec, BackendError> {
+        if adapter_ids.is_empty() {
+            return Err(BackendError::InvalidInput("capture-adapter-empty"));
+        }
+        let unique = adapter_ids.iter().collect::<BTreeSet<_>>();
+        if unique.len() != adapter_ids.len() {
+            return Err(BackendError::InvalidInput("capture-adapter-duplicate"));
+        }
+        let requirements = adapter_ids
+            .iter()
+            .map(|adapter_id| {
+                let requirement = self
+                    .environment
+                    .adapter_requirements
+                    .get(adapter_id.as_ref())
+                    .ok_or_else(|| BackendError::UnknownAdapter(adapter_id.clone()))?;
+                if !requirement
+                    .features()
+                    .any(|feature| feature == Feature::TextObserve)
+                {
+                    return Err(BackendError::InvalidInput("capture-adapter-cannot-observe"));
+                }
+                Ok(AdapterRequirement::new(
+                    requirement.adapter_id().clone(),
+                    requirement.version_requirement(),
+                    [Feature::TextObserve],
+                ))
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?;
+        let mut spec = self.runtime_spec(extension_id)?;
+        spec.requirements = requirements;
+        Ok(spec)
+    }
+
     fn target_requirements(
         &self,
         target: &glyphshift_workflow::CompiledTarget,
@@ -2695,100 +2635,97 @@ fn software_view(
     }
 }
 
+type DictionaryArtifact = dictionary_package::DictionaryPackage;
+
 fn dictionary_artifact(create: DictionaryCreate) -> Result<DictionaryArtifact, BackendError> {
-    dictionary_artifact_at_revision(create, 1)
+    dictionary_package::DictionaryPackage::create(package_dictionary_create(create))
+        .map_err(|_| BackendError::InvalidArtifact("dictionary-contract"))
 }
 
 fn dictionary_artifact_at_revision(
     create: DictionaryCreate,
     revision: u64,
 ) -> Result<DictionaryArtifact, BackendError> {
-    let artifact = DictionaryArtifact {
-        schema: DICTIONARY_SCHEMA.into(),
-        revision,
-        metadata: create.metadata,
-        entries: create
-            .entries
-            .into_iter()
-            .map(|entry| DictionaryRuleArtifact {
-                location: entry.location,
-                context: entry.context,
-                source: entry.source,
-                text: entry
-                    .translation
-                    .map_or(DictionaryTextArtifact::Keep, |text| {
-                        DictionaryTextArtifact::Replace { text }
-                    }),
-            })
-            .collect(),
-    };
-    validate_dictionary(&artifact, None)?;
-    Ok(artifact)
+    dictionary_package::DictionaryPackage::at_revision(package_dictionary_create(create), revision)
+        .map_err(|_| BackendError::InvalidArtifact("dictionary-contract"))
+}
+
+fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::DictionaryCreate {
+    let DictionaryCreate { metadata, entries } = create;
+    let DictionaryMetadata {
+        id,
+        release_version,
+        name,
+        description,
+        source_locale,
+        target_locale,
+        authors,
+        license,
+        homepage,
+        tags,
+    } = metadata;
+    let mut packaged =
+        dictionary_package::DictionaryCreate::new(id, name, source_locale, target_locale)
+            .with_release_version(release_version)
+            .with_description(description)
+            .with_authors(authors)
+            .with_tags(tags)
+            .with_entries(entries.into_iter().map(package_dictionary_entry));
+    if let Some(license) = license {
+        packaged = packaged.with_license(license);
+    }
+    if let Some(homepage) = homepage {
+        packaged = packaged.with_homepage(homepage);
+    }
+    packaged
+}
+
+fn package_dictionary_entry(
+    entry: DictionaryEntryCreate,
+) -> dictionary_package::DictionaryEntryCreate {
+    dictionary_package::DictionaryEntryCreate::new(entry.source, entry.translation)
 }
 
 fn dictionary_view(artifact: &DictionaryArtifact) -> DictionaryView {
+    let packaged = artifact.view();
+    let metadata = packaged.metadata();
     DictionaryView {
-        metadata: artifact.metadata.clone(),
-        revision: artifact.revision,
-        entries: artifact
-            .entries
+        metadata: DictionaryMetadata {
+            id: metadata.id().into(),
+            release_version: metadata.release_version().into(),
+            name: metadata.name().into(),
+            description: metadata.description().into(),
+            source_locale: metadata.source_locale().into(),
+            target_locale: metadata.target_locale().into(),
+            authors: metadata.authors().to_vec(),
+            license: metadata.license().map(Into::into),
+            homepage: metadata.homepage().map(Into::into),
+            tags: metadata.tags().to_vec(),
+        },
+        revision: packaged.revision(),
+        entries: packaged
+            .entries()
             .iter()
-            .map(|entry| DictionaryRuleView {
-                location: entry.location.clone(),
-                context: entry.context.clone(),
-                source: entry.source.clone(),
-                translation: match &entry.text {
-                    DictionaryTextArtifact::Keep => None,
-                    DictionaryTextArtifact::Replace { text } => Some(text.clone()),
-                },
+            .map(|entry| DictionaryEntryView {
+                source: entry.source().into(),
+                translation: entry.translation().into(),
             })
             .collect(),
     }
 }
 
-fn dictionary_rule_key(rule: &DictionaryRuleCreate) -> DictionaryRuleKey {
-    DictionaryRuleKey {
-        location: rule.location.clone(),
-        context: rule.context.clone(),
-        source: rule.source.clone(),
-    }
-}
-
-fn dictionary_rule_view_key(rule: &DictionaryRuleView) -> DictionaryRuleKey {
-    DictionaryRuleKey {
-        location: rule.location.clone(),
-        context: rule.context.clone(),
-        source: rule.source.clone(),
-    }
-}
-
-fn dictionary_rule_create(rule: &DictionaryRuleView) -> DictionaryRuleCreate {
-    DictionaryRuleCreate {
-        location: rule.location.clone(),
-        context: rule.context.clone(),
-        source: rule.source.clone(),
-        translation: rule.translation.clone(),
+fn dictionary_entry_create(entry: &DictionaryEntryView) -> DictionaryEntryCreate {
+    DictionaryEntryCreate {
+        source: entry.source.clone(),
+        translation: entry.translation.clone(),
     }
 }
 
 fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDictionary {
-    let entries = dictionary.entries.iter().map(|entry| {
-        let rule = entry.translation.as_ref().map_or_else(
-            || WorkflowDictionaryEntry::keep(entry.location.clone(), entry.source.clone()),
-            |translation| {
-                WorkflowDictionaryEntry::replace(
-                    entry.location.clone(),
-                    entry.source.clone(),
-                    translation.clone(),
-                )
-            },
-        );
-        if let Some(context) = &entry.context {
-            rule.with_context(context.kind.clone(), context.key.clone())
-        } else {
-            rule
-        }
-    });
+    let entries = dictionary
+        .entries
+        .iter()
+        .map(|entry| WorkflowDictionaryEntry::new(entry.source.clone(), entry.translation.clone()));
     WorkflowDictionary::new(
         dictionary.id(),
         dictionary.metadata.target_locale.clone(),
@@ -2965,81 +2902,6 @@ fn write_workflow_state(
     write_atomic(&root.join("workflow-state.json"), &serialized)
 }
 
-fn validate_dictionary(
-    artifact: &DictionaryArtifact,
-    path: Option<&Path>,
-) -> Result<(), BackendError> {
-    let valid_entries = artifact.entries.iter().all(|entry| {
-        let valid_text = match &entry.text {
-            DictionaryTextArtifact::Keep => true,
-            DictionaryTextArtifact::Replace { .. } => true,
-        };
-        safe_identifier(&entry.location)
-            && entry.context.as_ref().is_none_or(|context| {
-                safe_identifier(&context.kind) && !context.key.trim().is_empty()
-            })
-            && !entry.source.trim().is_empty()
-            && valid_text
-    });
-    let unique_entries = artifact
-        .entries
-        .iter()
-        .map(|entry| (&entry.location, &entry.context, &entry.source))
-        .collect::<BTreeSet<_>>()
-        .len()
-        == artifact.entries.len();
-    if artifact.schema.as_ref() != DICTIONARY_SCHEMA
-        || !safe_identifier(artifact.metadata.id())
-        || !safe_identifier(artifact.metadata.source_locale())
-        || !safe_identifier(artifact.metadata.target_locale())
-        || artifact.metadata.release_version().trim().is_empty()
-        || artifact.metadata.name().trim().is_empty()
-        || artifact.metadata.name().chars().count() > 128
-        || artifact.metadata.description().chars().count() > 512
-        || artifact
-            .metadata
-            .authors()
-            .iter()
-            .any(|author| author.trim().is_empty())
-        || artifact
-            .metadata
-            .authors()
-            .iter()
-            .collect::<BTreeSet<_>>()
-            .len()
-            != artifact.metadata.authors().len()
-        || artifact
-            .metadata
-            .license()
-            .is_some_and(|license| license.trim().is_empty())
-        || artifact
-            .metadata
-            .homepage()
-            .is_some_and(|homepage| homepage.trim().is_empty())
-        || artifact
-            .metadata
-            .tags()
-            .iter()
-            .any(|tag| tag.trim().is_empty())
-        || artifact
-            .metadata
-            .tags()
-            .iter()
-            .collect::<BTreeSet<_>>()
-            .len()
-            != artifact.metadata.tags().len()
-        || artifact.revision == 0
-        || path.is_some_and(|path| {
-            path.file_stem().and_then(|value| value.to_str()) != Some(artifact.metadata.id())
-        })
-        || !valid_entries
-        || !unique_entries
-    {
-        return Err(BackendError::InvalidArtifact("dictionary-contract"));
-    }
-    Ok(())
-}
-
 fn read_dictionaries(root: &Path) -> Result<BTreeMap<Box<str>, DictionaryView>, BackendError> {
     let directory = root.join("dictionaries");
     let mut paths = fs::read_dir(&directory)
@@ -3051,9 +2913,16 @@ fn read_dictionaries(root: &Path) -> Result<BTreeMap<Box<str>, DictionaryView>, 
     paths.sort();
     let mut dictionaries = BTreeMap::new();
     for path in paths {
-        let artifact: DictionaryArtifact = read_json(&path, "dictionary-json")?;
-        validate_dictionary(&artifact, Some(&path))?;
-        let dictionary_id = artifact.metadata.id.clone();
+        let source =
+            fs::read_to_string(&path).map_err(|_| BackendError::Storage("dictionary-json"))?;
+        let expected_id = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .ok_or(BackendError::InvalidArtifact("dictionary-json"))?;
+        let artifact =
+            dictionary_package::DictionaryPackage::decode_json(&source, Some(expected_id))
+                .map_err(|_| BackendError::InvalidArtifact("dictionary-json"))?;
+        let dictionary_id: Box<str> = artifact.id().into();
         if dictionaries
             .insert(dictionary_id.clone(), dictionary_view(&artifact))
             .is_some()

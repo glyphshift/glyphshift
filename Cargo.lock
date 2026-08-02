@@ -1117,6 +1117,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "glyphshift-adapter-draw-text-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-gdi",
+ "glyphshift-adapter-gdi-native-support",
+ "glyphshift-adapter-native-abi",
+ "retour",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "glyphshift-adapter-gdi"
 version = "0.1.0"
 dependencies = [
@@ -1129,6 +1140,25 @@ name = "glyphshift-adapter-gdi-native"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-gdi",
+ "glyphshift-adapter-native-abi",
+ "retour",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "glyphshift-adapter-gdi-native-support"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "glyphshift-adapter-gdi-text-out-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-gdi",
+ "glyphshift-adapter-gdi-native-support",
  "glyphshift-adapter-native-abi",
  "retour",
  "windows 0.58.0",
@@ -1189,6 +1219,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-capture"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "glyphshift-controller-host"
 version = "0.1.0"
 dependencies = [
@@ -1238,6 +1277,7 @@ name = "glyphshift-desktop-backend"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
+ "glyphshift-dictionary-package",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
  "glyphshift-translation",
@@ -1253,6 +1293,7 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-native-host",
  "glyphshift-adapter-registry",
+ "glyphshift-capture",
  "glyphshift-controller-host",
  "glyphshift-desktop-backend",
  "glyphshift-domain",
@@ -1272,6 +1313,7 @@ name = "glyphshift-desktop-shell"
 version = "0.2.0"
 dependencies = [
  "glyphshift-adapter-registry",
+ "glyphshift-capture",
  "glyphshift-desktop-backend",
  "glyphshift-desktop-runtime",
  "glyphshift-domain",
@@ -1283,6 +1325,25 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "winreg",
+]
+
+[[package]]
+name = "glyphshift-dictionary-distribution"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-dictionary-package",
+ "semver",
+ "sha2",
+ "subtle",
+ "url",
+]
+
+[[package]]
+name = "glyphshift-dictionary-package"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1367,6 +1428,7 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-adapter-sdk",
+ "glyphshift-capture",
  "glyphshift-domain",
  "glyphshift-extension",
  "glyphshift-protocol",
@@ -1386,6 +1448,7 @@ dependencies = [
  "glyphshift-adapter-native-host",
  "glyphshift-adapter-registry",
  "glyphshift-adapter-sdk",
+ "glyphshift-capture",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
  "glyphshift-runtime-kernel",
@@ -1402,6 +1465,7 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-adapter-sdk",
+ "glyphshift-capture",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
  "glyphshift-translation",
@@ -3264,6 +3328,12 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "subtle"
+version = "2.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "swift-rs"

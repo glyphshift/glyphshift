@@ -6,6 +6,7 @@ use glyphshift_adapter_native_abi::{
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::AdapterBinding;
+use glyphshift_capture::FileCaptureSink;
 use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
@@ -13,10 +14,10 @@ use glyphshift_target_runtime_contract::{
     RuntimeCommandV1, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
     STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_CHANGED,
     STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED, STATUS_TARGET_RUNTIME_ALREADY_ACTIVE,
-    STATUS_TARGET_RUNTIME_INVALID_COMMAND, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
-    STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_OK,
-    STATUS_TARGET_RUNTIME_UNAVAILABLE, STATUS_TARGET_RUNTIME_UPDATE_FAILED,
-    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    STATUS_TARGET_RUNTIME_CAPTURE_FAILED, STATUS_TARGET_RUNTIME_INVALID_COMMAND,
+    STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT, STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED,
+    STATUS_TARGET_RUNTIME_OK, STATUS_TARGET_RUNTIME_UNAVAILABLE,
+    STATUS_TARGET_RUNTIME_UPDATE_FAILED, STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -36,6 +37,7 @@ pub enum TargetRuntimeError {
     AdapterActivation,
     RuntimeUnavailable,
     UpdateRejected,
+    Capture,
 }
 
 struct RuntimeState {
@@ -45,6 +47,7 @@ struct RuntimeState {
     adapter_libraries: Vec<PathBuf>,
     adapters: Vec<Arc<LoadedNativeAdapter>>,
     native_hosts: Vec<usize>,
+    capture: Option<FileCaptureSink>,
     active: bool,
 }
 
@@ -70,6 +73,12 @@ fn native_host(adapter_id: &str) -> usize {
 }
 
 pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), TargetRuntimeError> {
+    let capture = deployment
+        .capture()
+        .cloned()
+        .map(FileCaptureSink::start)
+        .transpose()
+        .map_err(|_| TargetRuntimeError::Capture)?;
     let bindings = deployment
         .adapters()
         .iter()
@@ -106,6 +115,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
             runtime.kernel = kernel;
             runtime.publication = publication;
             runtime.bindings = bindings;
+            runtime.capture = capture;
             (runtime.adapters.clone(), runtime.native_hosts.clone())
         } else {
             let adapters = deployment
@@ -128,6 +138,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 adapter_libraries,
                 adapters: adapters.clone(),
                 native_hosts: native_hosts.clone(),
+                capture,
                 active: false,
             });
             (adapters, native_hosts)
@@ -149,6 +160,13 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
     if !all_active {
         for adapter in &adapters {
             let _ = adapter.deactivate();
+        }
+        let capture = runtime_state()
+            .lock()
+            .ok()
+            .and_then(|mut state| state.as_mut().and_then(|runtime| runtime.capture.take()));
+        if let Some(capture) = capture {
+            let _ = capture.finish();
         }
         return Err(TargetRuntimeError::AdapterActivation);
     }
@@ -206,7 +224,7 @@ pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetR
 }
 
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
-    {
+    let capture = {
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
@@ -225,6 +243,10 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         } else {
             return Err(TargetRuntimeError::AdapterActivation);
         }
+        runtime.capture.take()
+    };
+    if let Some(capture) = capture {
+        capture.finish().map_err(|_| TargetRuntimeError::Capture)?;
     }
     request_current_process_redraw();
     Ok(())
@@ -298,6 +320,9 @@ extern "C" fn decide_utf16(
         return decision_error(STATUS_OUTPUT_TOO_SMALL);
     }
     let context = unsafe { &*context.cast::<NativeDecisionContext>() };
+    if let Some(capture) = &runtime.capture {
+        capture.observe(context.adapter_id.clone(), source.clone());
+    }
     let decision = runtime.kernel.decide(&TextObservation::new(
         context.adapter_id.clone(),
         source,
@@ -396,6 +421,7 @@ fn activation_status(error: TargetRuntimeError) -> u32 {
         TargetRuntimeError::AdapterActivation => STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
         TargetRuntimeError::RuntimeUnavailable => STATUS_TARGET_RUNTIME_UNAVAILABLE,
         TargetRuntimeError::UpdateRejected => STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+        TargetRuntimeError::Capture => STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
     }
 }
 

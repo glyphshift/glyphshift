@@ -1,0 +1,30 @@
+[
+  {
+    "id": "windows.gdi.ext-text-out",
+    "name": "ExtTextOutW",
+    "summary": "拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制",
+    "technology": "GDI",
+    "technicalTarget": "gdi32.dll!ExtTextOutW"
+  },
+  {
+    "id": "windows.gdi.text-out",
+    "name": "TextOutW",
+    "summary": "拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面",
+    "technology": "GDI",
+    "technicalTarget": "gdi32.dll!TextOutW"
+  },
+  {
+    "id": "windows.user32.draw-text",
+    "name": "DrawTextW / DrawTextExW",
+    "summary": "拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面",
+    "technology": "USER32 / GDI",
+    "technicalTarget": "user32.dll!DrawTextW + DrawTextExW"
+  },
+  {
+    "id": "windows.gdiplus.draw-string",
+    "name": "GdipDrawString",
+    "summary": "拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面",
+    "technology": "GDI+",
+    "technicalTarget": "gdiplus.dll!GdipDrawString"
+  }
+]

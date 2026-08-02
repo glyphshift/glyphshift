@@ -1,6 +1,7 @@
 //! Production Adapter Host for injected target-process Runtime instances.
 
 use glyphshift_adapter_registry::{AdapterBinding, AdapterHostBinding, PackageArtifactId};
+use glyphshift_capture::CaptureConfiguration;
 use glyphshift_protocol::{
     ControllerConnection, ControllerHealth, ControllerRuntimeDeployment, ControllerTransport,
     OpaqueTargetId,
@@ -76,6 +77,7 @@ pub struct TargetProcessHost<T> {
     connection: ControllerConnection<T>,
     artifacts: TargetArtifactCatalog,
     targets: BTreeMap<TargetInstanceId, OpaqueTargetId>,
+    capture: Option<CaptureConfiguration>,
 }
 
 impl<T> TargetProcessHost<T> {
@@ -85,7 +87,14 @@ impl<T> TargetProcessHost<T> {
             connection,
             artifacts,
             targets: BTreeMap::new(),
+            capture: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_capture(mut self, capture: CaptureConfiguration) -> Self {
+        self.capture = Some(capture);
+        self
     }
 
     pub fn register_target(
@@ -168,8 +177,11 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
         publication: &RuntimePublication,
     ) -> Result<HostActivation, HostFailure> {
         let target_id = self.target_id(target)?;
-        let deployment =
+        let mut deployment =
             TargetRuntimeDeployment::new(publication.clone(), self.target_deployments(bindings)?);
+        if let Some(capture) = self.capture.clone() {
+            deployment = deployment.with_capture(capture);
+        }
         let deployment_json = deployment
             .encode_json()
             .map_err(|_| HostFailure::HandshakeRejected)?;

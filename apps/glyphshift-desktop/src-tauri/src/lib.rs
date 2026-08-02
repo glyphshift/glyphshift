@@ -2,6 +2,10 @@ mod command_error;
 mod settings;
 
 use command_error::CommandError;
+use glyphshift_capture::{
+    unix_time_millis, CaptureCatalog, CaptureConfiguration, CaptureSessionId, DictionaryDraft,
+    DEFAULT_MAX_ENTRIES,
+};
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
     DictionaryEdit, DictionaryView, EffectiveWorkflowIntent, ExecutableSelection,
@@ -21,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 8;
+const DESKTOP_API_VERSION: u16 = 9;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
@@ -70,6 +74,24 @@ fn workflow_activation_command_error(error: BackendError) -> CommandError {
             .with_arg("workflowId", workflow_id.to_string()),
         BackendError::Storage(_) => CommandError::new("storage.write_failed"),
         _ => CommandError::new("workflow.invalid"),
+    }
+}
+
+fn capture_backend_error(error: BackendError) -> CommandError {
+    match error {
+        BackendError::UnknownSoftware(id) => {
+            CommandError::new("capture.unknown_software").with_arg("softwareId", id.to_string())
+        }
+        BackendError::UnknownAdapter(id) => {
+            CommandError::new("capture.unknown_adapter").with_arg("adapterId", id.to_string())
+        }
+        BackendError::InvalidInput("capture-adapter-empty") => {
+            CommandError::new("capture.adapters_required")
+        }
+        BackendError::InvalidInput("capture-adapter-cannot-observe") => {
+            CommandError::new("capture.adapter_cannot_observe")
+        }
+        _ => CommandError::new("capture.invalid_configuration"),
     }
 }
 
@@ -139,6 +161,30 @@ struct DesktopProductSnapshot {
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
+    capture: Option<CaptureSummaryView>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct CaptureSummaryView {
+    session_id: Box<str>,
+    software_id: Box<str>,
+    adapter_ids: Vec<Box<str>>,
+    status: &'static str,
+    entry_count: usize,
+    dropped_observations: u64,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct CaptureResultView {
+    catalog: CaptureCatalog,
+    dictionary_draft: DictionaryDraft,
+}
+
+struct CaptureState {
+    summary: CaptureSummaryView,
+    output_path: PathBuf,
 }
 
 trait WorkflowRuntimeService: Send {
@@ -153,6 +199,15 @@ trait WorkflowRuntimeService: Send {
     fn refresh_workflow(&mut self, intent: &EffectiveWorkflowIntent) -> WorkflowRuntimeView;
 
     fn remove_software(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
+
+    fn start_capture(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        configuration: CaptureConfiguration,
+    ) -> Result<(), DesktopRuntimeError>;
+
+    fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
@@ -182,6 +237,19 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
     fn remove_software(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         self.remove(software_id)
     }
+
+    fn start_capture(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        configuration: CaptureConfiguration,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::start_capture(self, software_id, spec, None, configuration).map(|_| ())
+    }
+
+    fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::stop_capture(self, software_id).map(|_| ())
+    }
 }
 
 struct DesktopApplication {
@@ -190,10 +258,14 @@ struct DesktopApplication {
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
+    capture_root: PathBuf,
+    capture: Option<CaptureState>,
 }
 
 impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
+        let capture_root = data_root.join("captures");
+        std::fs::create_dir_all(&capture_root).map_err(|error| error.to_string())?;
         let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
         let adapters = runtime_bundle
             .as_ref()
@@ -237,6 +309,8 @@ impl DesktopApplication {
             workflow_runtime_status: BTreeMap::new(),
             adapters,
             font_families,
+            capture_root,
+            capture: None,
         };
         application
             .restore_enabled_workflows()
@@ -277,7 +351,109 @@ impl DesktopApplication {
             workflow_runtime_status,
             adapters: self.adapters.clone(),
             font_families: self.font_families.clone(),
+            capture: self.capture.as_ref().map(|capture| capture.summary.clone()),
         }
+    }
+
+    fn start_capture(
+        &mut self,
+        software_id: &str,
+        adapter_ids: Vec<Box<str>>,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
+        if self
+            .capture
+            .as_ref()
+            .is_some_and(|capture| capture.summary.status == "active")
+        {
+            return Err(CommandError::new("capture.already_active"));
+        }
+        let spec = self
+            .backend
+            .capture_runtime_spec(software_id, &adapter_ids)
+            .map_err(capture_backend_error)?;
+        let runtimes = self
+            .runtimes
+            .as_mut()
+            .ok_or_else(|| CommandError::new("runtime.unavailable"))?;
+        let timestamp = unix_time_millis();
+        let mut suffix = 0_u32;
+        let (session_id, output_path) = loop {
+            let id = if suffix == 0 {
+                format!("capture-{timestamp}")
+            } else {
+                format!("capture-{timestamp}-{suffix}")
+            };
+            let path = self.capture_root.join(format!("{id}.json"));
+            if !path.exists() {
+                break (id, path);
+            }
+            suffix = suffix.saturating_add(1);
+        };
+        let configuration = CaptureConfiguration::new(
+            CaptureSessionId::new(session_id.clone())
+                .map_err(|_| CommandError::new("capture.invalid_configuration"))?,
+            output_path.clone(),
+            DEFAULT_MAX_ENTRIES,
+        )
+        .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
+        runtimes
+            .start_capture(software_id, &spec, configuration)
+            .map_err(|error| runtime_command_error(error, true))?;
+        self.capture = Some(CaptureState {
+            summary: CaptureSummaryView {
+                session_id: session_id.into(),
+                software_id: software_id.into(),
+                adapter_ids,
+                status: "active",
+                entry_count: 0,
+                dropped_observations: 0,
+            },
+            output_path,
+        });
+        Ok(self.snapshot())
+    }
+
+    fn stop_capture(&mut self) -> Result<DesktopProductSnapshot, CommandError> {
+        let capture = self
+            .capture
+            .as_mut()
+            .filter(|capture| capture.summary.status == "active")
+            .ok_or_else(|| CommandError::new("capture.not_active"))?;
+        self.runtimes
+            .as_mut()
+            .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+            .stop_capture(&capture.summary.software_id)
+            .map_err(|error| runtime_command_error(error, false))?;
+        let catalog = CaptureCatalog::read(&capture.output_path)
+            .map_err(|_| CommandError::new("capture.read_failed"))?;
+        let draft = catalog.dictionary_draft();
+        let draft_path = capture.output_path.with_extension("dictionary-draft.json");
+        std::fs::write(
+            draft_path,
+            draft
+                .encode_json()
+                .map_err(|_| CommandError::new("capture.write_failed"))?,
+        )
+        .map_err(|_| CommandError::new("capture.write_failed"))?;
+        capture.summary.status = "completed";
+        capture.summary.entry_count = catalog.entries().len();
+        capture.summary.dropped_observations = catalog.dropped_observations();
+        Ok(self.snapshot())
+    }
+
+    fn capture_result(&self) -> Result<CaptureResultView, CommandError> {
+        let capture = self
+            .capture
+            .as_ref()
+            .filter(|capture| capture.summary.status == "completed")
+            .ok_or_else(|| CommandError::new("capture.not_completed"))?;
+        let catalog = CaptureCatalog::read(&capture.output_path)
+            .map_err(|_| CommandError::new("capture.read_failed"))?;
+        let dictionary_draft = catalog.dictionary_draft();
+        Ok(CaptureResultView {
+            catalog,
+            dictionary_draft,
+        })
     }
 
     fn dictionary_detail(&self, dictionary_id: &str) -> Result<DictionaryView, CommandError> {
@@ -852,6 +1028,41 @@ fn desktop_snapshot(
 }
 
 #[tauri::command]
+fn desktop_start_capture(
+    software_id: String,
+    adapter_ids: Vec<String>,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .start_capture(
+            &software_id,
+            adapter_ids.into_iter().map(Box::<str>::from).collect(),
+        )
+}
+
+#[tauri::command]
+fn desktop_stop_capture(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .stop_capture()
+}
+
+#[tauri::command]
+fn desktop_capture_result(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<CaptureResultView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .capture_result()
+}
+
+#[tauri::command]
 fn desktop_dictionary(
     dictionary_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
@@ -1120,6 +1331,9 @@ pub fn run() {
             desktop_settings,
             desktop_update_settings,
             desktop_snapshot,
+            desktop_start_capture,
+            desktop_stop_capture,
+            desktop_capture_result,
             desktop_dictionary,
             desktop_create_dictionary,
             desktop_update_dictionary,
@@ -1152,7 +1366,7 @@ mod tests {
         AdapterRequirement, AdapterVersion, AdapterVersionRequirement,
     };
     use glyphshift_desktop_backend::{
-        DictionaryCreate, DictionaryEdit, DictionaryRuleCreate, WorkflowCreate, WorkflowEdit,
+        DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, WorkflowCreate, WorkflowEdit,
         WorkflowTargetCreate,
     };
     use std::fs;
@@ -1166,6 +1380,8 @@ mod tests {
         enabled: Vec<(Box<str>, bool, Vec<Box<str>>)>,
         disabled: Vec<Box<str>>,
         refreshed: Vec<Box<str>>,
+        captures_started: Vec<Box<str>>,
+        captures_stopped: Vec<Box<str>>,
     }
 
     struct RecordingWorkflowRuntime {
@@ -1254,6 +1470,32 @@ mod tests {
         fn remove_software(&mut self, _software_id: &str) -> Result<(), DesktopRuntimeError> {
             Ok(())
         }
+
+        fn start_capture(
+            &mut self,
+            software_id: &str,
+            _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+            configuration: CaptureConfiguration,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.calls
+                .lock()
+                .expect("runtime call log")
+                .captures_started
+                .push(software_id.into());
+            glyphshift_capture::FileCaptureSink::start(configuration)
+                .and_then(glyphshift_capture::FileCaptureSink::finish)
+                .map(|_| ())
+                .map_err(|_| DesktopRuntimeError::SessionRejected)
+        }
+
+        fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
+            self.calls
+                .lock()
+                .expect("runtime call log")
+                .captures_stopped
+                .push(software_id.into());
+            Ok(())
+        }
     }
 
     fn workflow_application() -> (
@@ -1271,7 +1513,11 @@ mod tests {
                 [AdapterRequirement::new(
                     glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
                     AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
-                    [Feature::TextReplace, Feature::FontSubstitute],
+                    [
+                        Feature::TextObserve,
+                        Feature::TextReplace,
+                        Feature::FontSubstitute,
+                    ],
                 )],
                 Vec::<Box<str>>::new(),
             ),
@@ -1286,7 +1532,7 @@ mod tests {
         backend
             .create_dictionary(
                 DictionaryCreate::new("dictionary.product", "产品词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "打开")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
             )
             .expect("create dictionary");
         backend
@@ -1311,6 +1557,8 @@ mod tests {
                 workflow_runtime_status: BTreeMap::new(),
                 adapters: Vec::new(),
                 font_families: Vec::new(),
+                capture_root: data_root.path().join("captures"),
+                capture: None,
             },
             calls,
             software_id,
@@ -1523,6 +1771,37 @@ mod tests {
     }
 
     #[test]
+    fn capture_commands_generate_a_private_catalog_and_a_pure_dictionary_draft() {
+        let (mut application, calls, software_id, _data_root) = workflow_application();
+
+        let started = application
+            .start_capture(&software_id, vec![TEST_ADAPTER_ID.into()])
+            .expect("start product capture");
+        let capture = started.capture.expect("active capture summary");
+        assert_eq!(capture.status, "active");
+        assert_eq!(capture.software_id, software_id);
+
+        let stopped = application.stop_capture().expect("stop product capture");
+        assert_eq!(
+            stopped.capture.as_ref().map(|capture| capture.status),
+            Some("completed")
+        );
+        let result = application.capture_result().expect("capture result");
+        assert!(result.catalog.entries().is_empty());
+        assert!(result.dictionary_draft.entries().is_empty());
+        let serialized = serde_json::to_value(stopped).expect("serialize capture snapshot");
+        assert!(serialized.get("outputPath").is_none());
+        assert_eq!(
+            calls.lock().expect("runtime call log").captures_started,
+            vec![software_id.clone()]
+        );
+        assert_eq!(
+            calls.lock().expect("runtime call log").captures_stopped,
+            vec![software_id]
+        );
+    }
+
+    #[test]
     fn dictionary_and_workflow_details_are_loaded_by_product_id() {
         let (application, _calls, software_id, _data_root) = workflow_application();
 
@@ -1535,7 +1814,7 @@ mod tests {
 
         assert_eq!(dictionary.id(), "dictionary.product");
         assert_eq!(dictionary.entries()[0].source(), "Open");
-        assert_eq!(dictionary.entries()[0].translation(), Some("打开"));
+        assert_eq!(dictionary.entries()[0].translation(), "打开");
         assert_eq!(workflow.id(), "workflow.product");
         assert_eq!(workflow.targets()[0].software_id(), software_id.as_ref());
         assert_eq!(
@@ -1650,7 +1929,7 @@ mod tests {
         let created = application
             .create_dictionary(
                 DictionaryCreate::new("dictionary.secondary", "备用词典", "en-US", "zh-CN")
-                    .with_entries([DictionaryRuleCreate::keep("main-ui", "Close")]),
+                    .with_entries([DictionaryEntryCreate::new("Close", "关闭")]),
             )
             .expect("create dictionary");
         assert_eq!(
@@ -1672,7 +1951,7 @@ mod tests {
         let updated = application
             .update_dictionary(
                 DictionaryEdit::new("dictionary.product", "产品词典 2", "en-US", "zh-CN", 1)
-                    .with_entries([DictionaryRuleCreate::replace("main-ui", "Open", "开启")]),
+                    .with_entries([DictionaryEntryCreate::new("Open", "开启")]),
             )
             .expect("update active dictionary");
 
@@ -1718,7 +1997,11 @@ mod tests {
                 [AdapterRequirement::new(
                     glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
                     AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
-                    [Feature::TextReplace, Feature::FontSubstitute],
+                    [
+                        Feature::TextObserve,
+                        Feature::TextReplace,
+                        Feature::FontSubstitute,
+                    ],
                 )],
                 Vec::<Box<str>>::new(),
             ),
@@ -1734,6 +2017,8 @@ mod tests {
             workflow_runtime_status: BTreeMap::new(),
             adapters: Vec::new(),
             font_families: Vec::new(),
+            capture_root: data_root.path().join("captures"),
+            capture: None,
         };
 
         reopened

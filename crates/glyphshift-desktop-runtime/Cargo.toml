@@ -11,6 +11,7 @@ path = "src/lib.rs"
 glyphshift-adapter-native-host = { path = "../glyphshift-adapter-native-host" }
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
 glyphshift-controller-host = { path = "../glyphshift-controller-host" }
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-desktop-backend = { path = "../glyphshift-desktop-backend" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-extension = { path = "../glyphshift-extension" }

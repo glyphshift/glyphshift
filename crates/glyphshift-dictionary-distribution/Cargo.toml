@@ -1,0 +1,15 @@
+[package]
+name = "glyphshift-dictionary-distribution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+glyphshift-dictionary-package = { path = "../glyphshift-dictionary-package" }
+semver = "1"
+sha2 = "0.10"
+subtle = "2.6"
+url = "2.5"
+
+[lints]
+workspace = true

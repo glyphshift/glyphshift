@@ -11,22 +11,46 @@ Glyphshift 是通用运行时界面替换工具。当前交付面向 Windows，�
 **软件（Software）**：用户登记的目标应用身份，包括名称、说明和程序绑定。软件不拥有本次
 运行要使用的词典或字体策略。
 
-**词典（Dictionary）**：可独立编辑、安装、发布和复用的语言资产，承载便携元数据与文字规则。
-词典不拥有字体、Platform、Technology、Adapter 或 Hook。
+**词典（Dictionary）**：可独立编辑、安装、发布和复用的纯翻译资产，承载便携元数据以及唯一的
+`source → translation` 映射。词典不拥有位置、语境、字体、Platform、Technology、Adapter、Hook
+或保护原文策略。
 
 **字典元数据（Dictionary Metadata）**：词典自身的身份、发布版本、语言、作者、许可、主页与
 标签。下载来源、内容摘要、签名、安装状态和运行配置不属于字典元数据。
 
+**字典发布（Dictionary Release）**：以 Dictionary ID 与 release version 唯一标识的一次不可变
+词典内容发布。_Avoid_: 本地 revision、Catalog 条目、安装状态。
+
+**字典目录（Dictionary Catalog）**：供用户发现和解析 Dictionary Release 的远端产品索引，
+拥有查询展示与 Artifact Descriptor，但不拥有已安装词典或 Runtime 状态。_Avoid_: Dictionary Library。
+
+**制品展示（Artifact Presentation）**：Catalog 按 locale 提供的名称、摘要、说明与标签，只影响
+发现和展示；缺少目标 locale 时回退到发布声明的默认展示。_Avoid_: UI Locale、Dictionary Metadata。
+
+**字典安装（Dictionary Installation）**：本机 Dictionary 资产与一个已验证 Dictionary Release
+之间的来源关联；本地内容改变后关联仍保留，但状态变为 modified。_Avoid_: 下载任务、工作流启用。
+
+**发布者身份（Publisher Identity）**：信任验证确认的发布主体，而不是 payload 或 Catalog 自报的
+普通文字字段。_Avoid_: author、vendor display name。
+
 **字体方案（Font Profile）**：可独立命名和复用的有序字体候选。字体方案不拥有词典或 Adapter；
 工作流目标决定其语义适用范围。
 
-**替换规则（Replacement Rule）**：按位置、可选语境与原文匹配，决定文字保持或替换的语言规则。
+**翻译词条（Translation Entry）**：由非空原文和非空译文构成的唯一映射。同一词典内原文唯一；
+空译文和“保持原文”不属于翻译词条。_Avoid_: Replacement Rule、Keep Rule。
+
+**保护策略（Protection Policy）**：显式阻止某段原文被后续翻译命中的独立策略。它不伪装成空
+译文，也不进入 Dictionary；需要真实产品用例后再建立持久合同。_Avoid_: Keep Translation。
 
 **工作流目标（Workflow Target）**：工作流中针对一个软件的组合根，分别包含 Adapter Plan、
 有序词典绑定和字体方案绑定。所需能力从组合结果推导，不由软件行开关配置。
 
 **字体方案绑定（Font Profile Binding）**：工作流目标对字体方案及其全部或指定 Location
 适用范围的引用。_Avoid_: Dictionary default font、逐词条字体。
+
+**区域绑定（Region Binding）**：工作流目标把一个 Dictionary 与可被 Runtime 真实识别的区域
+选择器组合起来的运行配置。当前 Adapter 没有稳定区域信号，因此首版只有 `all`，不得用猜测的
+Location 冒充区域。_Avoid_: Dictionary Location、逐词条 Region。
 
 ## Runtime
 
@@ -49,6 +73,15 @@ Technology 多选只筛选 Catalog，Adapter 多选才改变执行计划。
 **文字观测（Text Observation）**：从宿主绘制或协议事件解码出的文字出现事实。观察本身不
 代表替换成功。
 
+**捕获会话（Capture Session）**：对一个已授权目标进程和一组 Adapter 的有界观察运行，只收集
+文字事实，不承诺可写回或可翻译。_Avoid_: Translation Session、自动 Hook 扫描。
+
+**捕获目录（Capture Catalog）**：捕获会话输出的去重技术记录，关联原文、Adapter、出现次数与
+时间等观测事实；它不是 Dictionary。_Avoid_: Technical Dictionary、翻译词典。
+
+**字典草稿（Dictionary Draft）**：从 Capture Catalog 派生的纯翻译编辑输入，只保留原文和待填
+译文；Adapter 等来源证据仍留在 Capture Catalog。
+
 **替换决策（Replacement Decision）**：对一次观测产生 Pass、Text-only、Font-only 或
 Text+Font 的结果。所有失败路径必须 fail-open。
 
@@ -59,10 +92,6 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 执行结果，不是持久配置。
 
 ## Translation
-
-**位置（Location）**：软件 Extension 声明的稳定用户界面区域标识。
-
-**翻译语境（Translation Context）**：区分同一原文在不同位置或状态下含义的信息。
 
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
 
@@ -87,7 +116,11 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 - Core、Desktop 和 GUI 不按软件品牌、Adapter ID 或可执行文件名分支。
 - 新增只使用既有能力的软件，只增加 Extension/配置，不修改通用 Module。
 - 工作流期望、软件身份、词典内容、字体方案、Adapter Catalog 和 Runtime 实际状态必须分开。
-- Dictionary metadata 与 entry 都不能携带字体、Platform、Technology、Adapter、Hook 或执行配置。
+- Dictionary metadata 与 entry 都不能携带 Location、Context、字体、Platform、Technology、Adapter、
+  Hook 或执行配置；entry 只能是非空 `source + translation`。
+- 只有 Adapter 或专用 Detector 实际提供稳定区域信号时，Region Binding 才能增加 `all` 以外的
+  选择器；UI 标签、窗口猜测和硬编码路由不构成区域事实。
+- Capture Catalog 与 Dictionary Draft 分开保存；技术来源不能随草稿进入 Dictionary payload。
 - Presentation 不能改变 Registry 使用的 Platform、Architecture、ABI、Feature 或执行入口事实。
 - 当前未发布结构直接使用 Dictionary `/2`、Font Profile `/1`、Workflow `/2` 与 Target Runtime
   Deployment `/2`；不保留旧结构的兼容读取、迁移或双写。

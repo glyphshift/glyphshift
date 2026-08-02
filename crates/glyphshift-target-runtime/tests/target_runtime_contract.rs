@@ -3,6 +3,7 @@
 use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
+use glyphshift_capture::{CaptureCatalog, CaptureConfiguration, CaptureSessionId};
 use glyphshift_domain::{
     Feature, FontDecision, Generation, RenderDecision, RouteProgram, TextDecision,
 };
@@ -141,6 +142,48 @@ fn scoped_source_publication(
         ),
         FontPolicy::empty(),
     )
+}
+
+#[test]
+#[ignore = "requires the native GDI Adapter DLL built before the capture contract"]
+fn trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog() {
+    let native_package = native_package();
+    let native_hash = artifact_hash(&native_package);
+    let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/local-test/target-runtime-contract");
+    std::fs::create_dir_all(&local_test).expect("local test directory");
+    let output_path = local_test.join("capture-native-contract.json");
+    let _ = std::fs::remove_file(&output_path);
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("capture-native-contract").expect("capture session id"),
+        output_path.clone(),
+        100,
+    )
+    .expect("capture configuration");
+    let deployment = TargetRuntimeDeployment::new(
+        RuntimePublication::new(
+            RouteProgram::direct("menu"),
+            TranslationSnapshot::empty(Generation::new(1)),
+            FontPolicy::empty(),
+        ),
+        [NativeAdapterDeployment::new(
+            native_package,
+            binding(native_hash, [Feature::TextObserve]),
+        )
+        .expect("GDI capture deployment")],
+    )
+    .with_capture(capture);
+
+    activate_deployment(deployment).expect("activate capture deployment");
+    render_raw_gdi_unicode("Captured label").expect("render observed text");
+    deactivate_runtime().expect("finish capture deployment");
+
+    let catalog = CaptureCatalog::read(&output_path).expect("capture catalog");
+    assert!(catalog.entries().iter().any(|entry| {
+        entry.source() == "Captured label"
+            && entry.adapter_id() == glyphshift_adapter_gdi::ADAPTER_ID
+            && entry.count() >= 1
+    }));
 }
 
 fn artifact_hash(path: &Path) -> ArtifactHash {

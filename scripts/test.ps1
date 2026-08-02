@@ -9,7 +9,9 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 # `cargo test --workspace` does not guarantee that those artifacts are emitted first.
 & cargo build `
     --manifest-path $manifestPath `
+    -p glyphshift-adapter-draw-text-native `
     -p glyphshift-adapter-gdi-native `
+    -p glyphshift-adapter-gdi-text-out-native `
     -p glyphshift-adapter-gdiplus-native `
     -p glyphshift-target-runtime `
     -p glyphshift-test-controller-plugin `

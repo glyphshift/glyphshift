@@ -35,8 +35,9 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **工作流：** 默认页。展示名称、说明、软件和词典摘要、期望/实际状态、启用、编辑、复制和
   删除；支持搜索、筛选、显示列、多选、分页与批量操作。
 - **软件：** 只管理名称、用途说明和完整程序路径；不展示或配置文字/字体能力。
-- **词典：** 独立资产表展示名称、说明、源/目标语言、发布版本、标签、规则数与修订。编辑器
-  分为 metadata 与纯文字规则，不出现字体、Hook 或 Adapter。
+- **词典：** 独立资产表展示名称、说明、源/目标语言、发布版本、标签、规则数与修订。详情页只用
+  标题摘要展示语言方向、版本、规则数与修订，主表只展示原文和译文；低频 metadata 进入词典设置
+  Modal，不出现字体、Hook、Adapter 或内部匹配键。
 - **字体：** 独立字体方案表展示名称、说明、有序候选、当前机器命中结果与引用状态。
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
   Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
@@ -61,11 +62,14 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 
 - 工作流启用状态表示持久期望；Runtime actual state 与错误单独展示。
 - 创建和编辑资产复用同一 Nuxt UI Modal；Modal 和 Select 浮层必须高于 sticky 表头。
+- Dictionary 设置与翻译词条编辑采用单列 Modal；矮窗口中 body 独立滚动，header/footer 固定。
+- Dictionary entry 只有非空原文与非空译文，同一 Dictionary 内原文唯一；Location、Context、
+  keep 和逐词条字体都不属于 Dictionary。未来区域限制由 Workflow 的 Region Binding 组合。
 - 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。
 - Dictionary 创建和编辑不出现 Hook、Adapter 或字体字段。
 - Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Profile；不同 Target 不共享
   隐式选择状态。
-- 原文和译文输入使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。
+- 原文和译文各占一行并使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。
 - 图标按钮必须有可访问名称；状态不能只依赖颜色。
 - 顶部主题按钮在深色时切到浅色、在浅色时切到深色；若原偏好为跟随系统，点击后落为相反的
   固定主题，避免系统设置立即覆盖用户动作。

@@ -2,6 +2,7 @@ use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
+use glyphshift_capture::{CaptureConfiguration, CaptureSessionId};
 use glyphshift_domain::{
     AbiVersion, AdapterId, ApplyModel, Feature, Generation, Placement, RouteProgram,
 };
@@ -42,6 +43,14 @@ fn trc_001_round_trips_verified_binding_evidence_and_publication() {
             NativeAdapterDeployment::new("artifacts/adapter.dll", binding)
                 .expect("target-process deployment"),
         ],
+    )
+    .with_capture(
+        CaptureConfiguration::new(
+            CaptureSessionId::new("capture-contract").expect("capture id"),
+            synthetic_capture_path(),
+            500,
+        )
+        .expect("capture configuration"),
     );
 
     let encoded = deployment.encode_json().expect("deployment encode");
@@ -50,8 +59,20 @@ fn trc_001_round_trips_verified_binding_evidence_and_publication() {
     assert_eq!(decoded, deployment);
     assert!(encoded.contains("glyphshift.target-runtime/2"));
     assert!(encoded.contains("windows"));
+    assert!(encoded.contains("capture-contract"));
     assert!(!encoded.contains("process_id"));
     assert!(!encoded.contains("driver"));
+}
+
+fn synthetic_capture_path() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        std::path::PathBuf::from(r"X:\SyntheticFixtures\capture.json")
+    }
+    #[cfg(not(windows))]
+    {
+        std::path::PathBuf::from("/synthetic-fixtures/capture.json")
+    }
 }
 
 #[test]

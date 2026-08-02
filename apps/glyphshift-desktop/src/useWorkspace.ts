@@ -7,6 +7,7 @@ import {
   STORAGE_KEY,
   type DesktopModel,
   type DesktopSnapshot,
+  type CaptureResult,
   type DictionaryDetail,
   type DictionaryMetadata,
   type FontProfileDetail,
@@ -54,6 +55,8 @@ const messages = ref<Record<string, string>>({})
 const dictionaryDetail = ref<DictionaryDetail | null>(null)
 const fontProfileDetail = ref<FontProfileDetail | null>(null)
 const workflowDetail = ref<WorkflowDetail | null>(null)
+const captureResult = ref<CaptureResult | null>(null)
+const captureBusy = ref(false)
 
 watch(model, (value) => {
   if (!hasDesktopRuntime()) localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
@@ -86,7 +89,93 @@ export function useWorkspace() {
   async function connectDesktopBackend() {
     if (!hasDesktopRuntime()) return false
     applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_snapshot'))
+    if (model.value.capture?.status === 'completed') await loadCaptureResult()
     return true
+  }
+
+  async function loadCaptureResult() {
+    if (model.value.capture?.status !== 'completed') {
+      captureResult.value = null
+      return null
+    }
+    if (!hasDesktopRuntime()) return captureResult.value
+    try {
+      captureResult.value = await invoke<CaptureResult>('desktop_capture_result')
+      return captureResult.value
+    }
+    catch (error) {
+      setMessage('capture', errorMessage(error))
+      return null
+    }
+  }
+
+  async function startCapture(softwareId: string, adapterIds: string[]) {
+    if (captureBusy.value) return false
+    captureBusy.value = true
+    setMessage('capture', '')
+    try {
+      if (hasDesktopRuntime()) {
+        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_start_capture', { softwareId, adapterIds }))
+      }
+      else {
+        model.value.capture = {
+          sessionId: `capture-${Date.now()}`,
+          softwareId,
+          adapterIds: [...adapterIds],
+          status: 'active',
+          entryCount: 0,
+          droppedObservations: 0,
+        }
+      }
+      captureResult.value = null
+      return true
+    }
+    catch (error) {
+      setMessage('capture', errorMessage(error))
+      return false
+    }
+    finally {
+      captureBusy.value = false
+    }
+  }
+
+  async function stopCapture() {
+    if (captureBusy.value || model.value.capture?.status !== 'active') return false
+    captureBusy.value = true
+    setMessage('capture', '')
+    try {
+      if (hasDesktopRuntime()) {
+        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_stop_capture'))
+        await loadCaptureResult()
+      }
+      else if (model.value.capture) {
+        const now = Date.now()
+        model.value.capture.status = 'completed'
+        captureResult.value = {
+          catalog: {
+            schema: 'glyphshift.capture-catalog/1',
+            sessionId: model.value.capture.sessionId,
+            startedAtMs: now,
+            stoppedAtMs: now,
+            droppedObservations: 0,
+            entries: [],
+          },
+          dictionaryDraft: {
+            schema: 'glyphshift.dictionary-draft/1',
+            sourceSessionId: model.value.capture.sessionId,
+            entries: [],
+          },
+        }
+      }
+      return true
+    }
+    catch (error) {
+      setMessage('capture', errorMessage(error))
+      return false
+    }
+    finally {
+      captureBusy.value = false
+    }
   }
 
   async function setWorkflowEnabled(id: string, enabled: boolean, replaceConflicts = false) {
@@ -635,6 +724,8 @@ export function useWorkspace() {
     dictionaryDetail,
     fontProfileDetail,
     workflowDetail,
+    captureResult,
+    captureBusy,
     softwareBusy,
     workspaceBusy,
     refreshing,
@@ -661,5 +752,8 @@ export function useWorkspace() {
     updateSoftware,
     removeSoftware,
     runtimeStatus,
+    startCapture,
+    stopCapture,
+    loadCaptureResult,
   }
 }

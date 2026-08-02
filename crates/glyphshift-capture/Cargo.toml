@@ -1,0 +1,18 @@
+[package]
+name = "glyphshift-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

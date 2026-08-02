@@ -29,6 +29,7 @@ const widthClass = computed(() => ({
   lg: 'max-w-[640px]',
   xl: 'max-w-[760px]',
 })[props.width])
+const contentClass = computed(() => `${widthClass.value} flex max-h-[calc(100dvh-32px)] flex-col`)
 </script>
 
 <template>
@@ -38,12 +39,12 @@ const widthClass = computed(() => ({
     :description="description"
     :dismissible="!busy"
     :ui="{
-      content: widthClass,
-      header: 'min-h-0 px-5 py-4',
+      content: contentClass,
+      header: 'min-h-0 shrink-0 px-5 py-4',
       title: 'text-[15px]',
       description: 'mt-1 text-[10px] leading-4',
-      body: 'px-5 py-4',
-      footer: 'px-5 py-4',
+      body: 'min-h-0 overflow-y-auto px-5 py-4',
+      footer: 'shrink-0 px-5 py-4',
     }"
     @update:open="emit('update:open', $event)"
   >

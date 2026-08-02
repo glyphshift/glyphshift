@@ -57,6 +57,16 @@ const messageKeys: Record<string, string> = {
   'runtime.activation_failed': 'errors.runtime.activationFailed',
   'runtime.stop_unconfirmed': 'errors.runtime.stopUnconfirmed',
   'runtime.unavailable': 'errors.runtime.unavailable',
+  'capture.already_active': 'errors.capture.alreadyActive',
+  'capture.not_active': 'errors.capture.notActive',
+  'capture.not_completed': 'errors.capture.notCompleted',
+  'capture.unknown_software': 'errors.capture.unknownSoftware',
+  'capture.unknown_adapter': 'errors.capture.unknownAdapter',
+  'capture.adapters_required': 'errors.capture.adaptersRequired',
+  'capture.adapter_cannot_observe': 'errors.capture.adapterCannotObserve',
+  'capture.invalid_configuration': 'errors.capture.invalidConfiguration',
+  'capture.read_failed': 'errors.capture.readFailed',
+  'capture.write_failed': 'errors.capture.writeFailed',
 }
 
 function isCommandError(value: unknown): value is CommandError {

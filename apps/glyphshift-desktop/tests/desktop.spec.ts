@@ -36,10 +36,16 @@ const model = {
     resolvedFamily: 'Synthetic Sans',
   }],
   adapters: [{
-    id: 'synthetic.ext-text-out', name: 'ExtTextOutW', summary: '拦截 GDI 文字绘制并执行文字与字体决策',
+    id: 'synthetic.ext-text-out', name: 'ExtTextOutW', summary: '拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制',
     version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!ExtTextOutW', configuration: 'none',
   }, {
-    id: 'synthetic.gdip-draw-string', name: 'GdipDrawString', summary: '拦截 GDI+ 文字绘制并执行文字与字体决策',
+    id: 'synthetic.text-out', name: 'TextOutW', summary: '拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面',
+    version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!TextOutW', configuration: 'none',
+  }, {
+    id: 'synthetic.draw-text', name: 'DrawTextW / DrawTextExW', summary: '拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面',
+    version: '1.0.0', platforms: ['windows'], technologies: ['USER32 / GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'user32.dll!DrawTextW + DrawTextExW', configuration: 'none',
+  }, {
+    id: 'synthetic.gdip-draw-string', name: 'GdipDrawString', summary: '拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面',
     version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', configuration: 'none',
   }],
   workflows: [{
@@ -62,8 +68,8 @@ const model = {
       },
       revision: 3,
       entries: [
-        { location: 'main-ui', context: null, source: 'Open', translation: '打开' },
-        { location: 'dialogs', context: { kind: 'dialog', key: 'save-as' }, source: 'Save As…', translation: '另存为…' },
+        { source: 'Open', translation: '打开' },
+        { source: 'Save As…', translation: '另存为…' },
       ],
     },
   },
@@ -87,6 +93,7 @@ const model = {
     },
   },
   fontFamilies: ['Synthetic Sans', 'Synthetic Serif', 'Synthetic Mono'],
+  capture: null,
 }
 
 function expandedModel() {
@@ -113,7 +120,7 @@ function expandedModel() {
   next.dictionaryDetails['dictionary-effects'] = {
     metadata: { ...next.dictionaries[1].metadata },
     revision: 1,
-    entries: [{ location: 'main-ui', context: null, source: 'Effect', translation: '效果' }],
+    entries: [{ source: 'Effect', translation: '效果' }],
   }
   next.fontProfiles.push({
     metadata: { id: 'font-profile-secondary', name: '备用中文字体', description: '用于对话框' },
@@ -162,15 +169,34 @@ test('independent asset navigation exposes dictionaries and font profiles', asyn
   await expect(page.getByText('被 1 个工作流引用')).toBeVisible()
 })
 
+test('capture probe selects observable adapters and generates both result views', async ({ page }) => {
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: '文字探针' })).toBeVisible()
+  await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toBeVisible()
+  await expect(page.getByText('user32.dll!DrawTextW + DrawTextExW', { exact: true })).toBeVisible()
+  await expect(page.getByText(/位置|语境/)).toHaveCount(0)
+
+  await page.getByRole('button', { name: '开始监听' }).click()
+  await expect(page.getByRole('heading', { name: '正在监听 Vector Studio' })).toBeVisible()
+  await page.getByRole('button', { name: '停止并生成' }).click()
+
+  await expect(page.getByRole('button', { name: '技术目录' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '字典草稿' })).toBeVisible()
+  await expect(page.getByText('没有捕获到文字')).toBeVisible()
+})
+
 test('help exposes adapter information without internal targets', async ({ page }) => {
   await page.getByRole('button', { name: '帮助' }).click()
 
   await expect(page.getByRole('heading', { name: '帮助' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '当前适配器' })).toBeVisible()
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
+  await expect(page.getByText('TextOutW', { exact: true })).toBeVisible()
+  await expect(page.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(page.getByText('GdipDrawString', { exact: true })).toBeVisible()
   await expect(page.getByText('Windows', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('GDI', { exact: true })).toBeVisible()
+  await expect(page.getByText('GDI', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('GDI+', { exact: true })).toBeVisible()
   await expect(page.getByText('文字观察', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('文字替换', { exact: true }).first()).toBeVisible()
@@ -249,8 +275,20 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
   await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
   await expect(page.getByText('en-US → zh-CN')).toBeVisible()
   await expect(page.getByText('另存为…')).toBeVisible()
-  await expect(page.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
-  await expect(page.getByRole('textbox', { name: '作者' })).toHaveValue('Glyphshift')
+  await expect(page.getByRole('columnheader', { name: '位置', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '语境', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '词典设置' }).click()
+  const settings = page.getByRole('dialog', { name: '词典设置' })
+  await expect(settings.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
+  await expect(settings.getByRole('textbox', { name: '作者' })).toHaveValue('Glyphshift')
+  await settings.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '添加词条' }).click()
+  const ruleEditor = page.getByRole('dialog', { name: '添加翻译词条' })
+  await expect(ruleEditor.getByRole('textbox', { name: '原文' })).toBeVisible()
+  await expect(ruleEditor.getByRole('textbox', { name: '译文' })).toBeVisible()
+  await expect(ruleEditor.getByText('语义位置')).toHaveCount(0)
+  await expect(ruleEditor.getByText('限定语境')).toHaveCount(0)
+  await ruleEditor.getByRole('button', { name: '取消' }).click()
   await expect(page.getByText('默认字体')).toHaveCount(0)
   await expect(page.getByText(/Hook/)).toHaveCount(0)
 })
@@ -261,6 +299,8 @@ test('workflow target independently selects adapters dictionaries and font scope
   await expect(page.getByText('windows · GDI', { exact: true })).toBeVisible()
   const dialog = page.getByRole('dialog', { name: '编辑工作流' })
   await expect(dialog.getByText('ExtTextOutW', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('TextOutW', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('GdipDrawString', { exact: true })).toBeVisible()
   await expect(dialog.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(dialog.getByText('界面基础词典', { exact: true }).first()).toBeVisible()
@@ -328,20 +368,44 @@ test('pending font selection does not leak between software targets', async ({ p
 test('dictionary editor saves the complete portable metadata set', async ({ page }) => {
   await page.getByRole('button', { name: '词典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await page.getByRole('textbox', { name: '源语言' }).fill('fr-FR')
-  await page.getByRole('textbox', { name: '目标语言' }).fill('de-DE')
-  await page.getByRole('textbox', { name: '发布版本' }).fill('2.0.0')
-  await page.getByRole('textbox', { name: '作者' }).fill('Alice, Bob')
-  await page.getByRole('textbox', { name: '许可证' }).fill('Apache-2.0')
-  await page.getByRole('textbox', { name: '主页' }).fill('https://example.invalid/dictionary')
+  await page.getByRole('button', { name: '词典设置' }).click()
+  let settings = page.getByRole('dialog', { name: '词典设置' })
+  await settings.getByRole('textbox', { name: '源语言' }).fill('fr-FR')
+  await settings.getByRole('textbox', { name: '目标语言' }).fill('de-DE')
+  await settings.getByRole('textbox', { name: '发布版本' }).fill('2.0.0')
+  await settings.getByRole('textbox', { name: '作者' }).fill('Alice, Bob')
+  await settings.getByRole('textbox', { name: '许可证' }).fill('Apache-2.0')
+  await settings.getByRole('textbox', { name: '主页' }).fill('https://example.invalid/dictionary')
+  await settings.getByRole('button', { name: '应用设置' }).click()
   await page.getByRole('button', { name: '保存词典' }).click()
   await page.getByRole('button', { name: '返回词典列表' }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await expect(page.getByRole('textbox', { name: '源语言' })).toHaveValue('fr-FR')
-  await expect(page.getByRole('textbox', { name: '目标语言' })).toHaveValue('de-DE')
-  await expect(page.getByRole('textbox', { name: '作者' })).toHaveValue('Alice, Bob')
-  await expect(page.getByRole('textbox', { name: '许可证' })).toHaveValue('Apache-2.0')
-  await expect(page.getByRole('textbox', { name: '主页' })).toHaveValue('https://example.invalid/dictionary')
+  await page.getByRole('button', { name: '词典设置' }).click()
+  settings = page.getByRole('dialog', { name: '词典设置' })
+  await expect(settings.getByRole('textbox', { name: '源语言' })).toHaveValue('fr-FR')
+  await expect(settings.getByRole('textbox', { name: '目标语言' })).toHaveValue('de-DE')
+  await expect(settings.getByRole('textbox', { name: '作者' })).toHaveValue('Alice, Bob')
+  await expect(settings.getByRole('textbox', { name: '许可证' })).toHaveValue('Apache-2.0')
+  await expect(settings.getByRole('textbox', { name: '主页' })).toHaveValue('https://example.invalid/dictionary')
+})
+
+test('dictionary text editing saves only source and translation', async ({ page }) => {
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
+  await page.getByRole('button', { name: '编辑 Save As…' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑翻译词条' })
+  await editor.getByRole('textbox', { name: '译文' }).fill('另存一个副本…')
+  await editor.getByRole('button', { name: '保存词条' }).click()
+  await page.getByRole('button', { name: '保存词典' }).click()
+
+  const saved = await page.evaluate(() => {
+    const model = JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v2') ?? '{}')
+    return model.dictionaryDetails?.['dictionary-proof']?.entries?.[1]
+  })
+  expect(saved).toEqual({
+    source: 'Save As…',
+    translation: '另存一个副本…',
+  })
 })
 
 test('font profile editor preserves candidate order', async ({ page }) => {

@@ -11,12 +11,29 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub const ETO_GLYPH_INDEX: u32 = 0x0010;
 const MAX_TEXT_UNITS: usize = 16_384;
-pub const ADAPTER_ID: &str = "windows.gdi.ext-text-out";
+pub const EXT_TEXT_OUT_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
+pub const TEXT_OUT_ADAPTER_ID: &str = "windows.gdi.text-out";
+pub const DRAW_TEXT_ADAPTER_ID: &str = "windows.user32.draw-text";
+pub const ADAPTER_ID: &str = EXT_TEXT_OUT_ADAPTER_ID;
 
 #[must_use]
 pub fn descriptor() -> AdapterDescriptor {
+    descriptor_for(EXT_TEXT_OUT_ADAPTER_ID)
+}
+
+#[must_use]
+pub fn text_out_descriptor() -> AdapterDescriptor {
+    descriptor_for(TEXT_OUT_ADAPTER_ID)
+}
+
+#[must_use]
+pub fn draw_text_descriptor() -> AdapterDescriptor {
+    descriptor_for(DRAW_TEXT_ADAPTER_ID)
+}
+
+fn descriptor_for(adapter_id: &'static str) -> AdapterDescriptor {
     AdapterDescriptor::new(
-        AdapterId::new(ADAPTER_ID),
+        AdapterId::new(adapter_id),
         AdapterVersion::new(1, 0, 0),
         ApplyModel::InlineRender,
         Placement::TargetProcess,

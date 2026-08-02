@@ -4,6 +4,7 @@ use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
+use glyphshift_capture::{CaptureConfiguration, CaptureSessionId};
 use glyphshift_domain::{AbiVersion, AdapterId, ApplyModel, Feature, Placement};
 use glyphshift_runtime_contract::{RuntimePublication, RuntimeWireError};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ pub const STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED: u32 = 13;
 pub const STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED: u32 = 14;
 pub const STATUS_TARGET_RUNTIME_UNAVAILABLE: u32 = 15;
 pub const STATUS_TARGET_RUNTIME_UPDATE_REJECTED: u32 = 16;
+pub const STATUS_TARGET_RUNTIME_CAPTURE_FAILED: u32 = 17;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -66,6 +68,7 @@ impl NativeAdapterDeployment {
 pub struct TargetRuntimeDeployment {
     publication: RuntimePublication,
     adapters: Vec<NativeAdapterDeployment>,
+    capture: Option<CaptureConfiguration>,
 }
 
 impl TargetRuntimeDeployment {
@@ -77,7 +80,14 @@ impl TargetRuntimeDeployment {
         Self {
             publication,
             adapters: adapters.into_iter().collect(),
+            capture: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_capture(mut self, capture: CaptureConfiguration) -> Self {
+        self.capture = Some(capture);
+        self
     }
 
     #[must_use]
@@ -88,6 +98,11 @@ impl TargetRuntimeDeployment {
     #[must_use]
     pub fn adapters(&self) -> &[NativeAdapterDeployment] {
         &self.adapters
+    }
+
+    #[must_use]
+    pub const fn capture(&self) -> Option<&CaptureConfiguration> {
+        self.capture.as_ref()
     }
 
     pub fn encode_json(&self) -> Result<String, DeploymentError> {
@@ -104,6 +119,11 @@ impl TargetRuntimeDeployment {
             schema: DEPLOYMENT_SCHEMA.into(),
             publication,
             adapters,
+            capture: self.capture.as_ref().map(|capture| WireCapture {
+                session_id: capture.session_id().as_str().into(),
+                output_path: capture.output_path().to_path_buf(),
+                max_entries: capture.max_entries(),
+            }),
         })
         .map_err(|_| DeploymentError::InvalidJson)
     }
@@ -121,7 +141,19 @@ impl TargetRuntimeDeployment {
             .into_iter()
             .map(WireAdapterDeployment::into_deployment)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self::new(publication, adapters))
+        let mut deployment = Self::new(publication, adapters);
+        if let Some(capture) = wire.capture {
+            deployment = deployment.with_capture(
+                CaptureConfiguration::new(
+                    CaptureSessionId::new(capture.session_id)
+                        .map_err(|_| DeploymentError::InvalidCapture)?,
+                    capture.output_path,
+                    capture.max_entries,
+                )
+                .map_err(|_| DeploymentError::InvalidCapture)?,
+            );
+        }
+        Ok(deployment)
     }
 }
 
@@ -131,6 +163,7 @@ pub enum DeploymentError {
     UnsupportedSchema,
     UnsupportedBinding,
     InvalidDescriptor,
+    InvalidCapture,
     Runtime(RuntimeWireError),
 }
 
@@ -139,6 +172,15 @@ struct WireDeployment {
     schema: Box<str>,
     publication: String,
     adapters: Vec<WireAdapterDeployment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    capture: Option<WireCapture>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WireCapture {
+    session_id: Box<str>,
+    output_path: PathBuf,
+    max_entries: u32,
 }
 
 #[derive(Serialize, Deserialize)]

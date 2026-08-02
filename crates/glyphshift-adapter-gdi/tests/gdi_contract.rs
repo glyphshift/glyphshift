@@ -1,5 +1,6 @@
 use glyphshift_adapter_gdi::{
-    descriptor, GdiCall, GdiFont, GdiGlyphMap, GdiInlineAdapter, ADAPTER_ID, ETO_GLYPH_INDEX,
+    descriptor, draw_text_descriptor, text_out_descriptor, GdiCall, GdiFont, GdiGlyphMap,
+    GdiInlineAdapter, ADAPTER_ID, DRAW_TEXT_ADAPTER_ID, ETO_GLYPH_INDEX, TEXT_OUT_ADAPTER_ID,
 };
 use glyphshift_adapter_sdk::{ActivationGrant, AdapterError, AdapterVersion};
 use glyphshift_domain::{
@@ -179,5 +180,28 @@ fn gdi_006_descriptor_and_activation_keep_text_and_font_capabilities_independent
         );
         assert_eq!(output.text(), Some(expected_text));
         assert_eq!(output.font().family(), expected_font);
+    }
+}
+
+#[test]
+fn gdi_007_declares_each_win32_text_seam_as_a_distinct_adapter() {
+    assert_eq!(
+        text_out_descriptor().adapter_id().as_str(),
+        TEXT_OUT_ADAPTER_ID
+    );
+    assert_eq!(
+        draw_text_descriptor().adapter_id().as_str(),
+        DRAW_TEXT_ADAPTER_ID
+    );
+    for descriptor in [text_out_descriptor(), draw_text_descriptor()] {
+        assert_eq!(descriptor.apply_model(), ApplyModel::InlineRender);
+        assert_eq!(
+            descriptor.features().collect::<Vec<_>>(),
+            [
+                Feature::TextObserve,
+                Feature::TextReplace,
+                Feature::FontSubstitute
+            ]
+        );
     }
 }

@@ -21,12 +21,12 @@ fn wf_001_composes_text_fonts_and_parallel_adapters_as_independent_assets() {
         "zh-CN",
         Generation::new(7),
         RouteProgram::direct("menu"),
-        ["menu"],
+        ["menu", "dialog"],
     )];
     let dictionaries = [Dictionary::new(
         "dictionary-zh-cn",
         "zh-CN",
-        [DictionaryEntry::replace("menu", "File", "文件")],
+        [DictionaryEntry::new("File", "文件")],
     )];
     let font_profiles = [FontProfile::new(
         "font-profile-cjk",
@@ -45,7 +45,6 @@ fn wf_001_composes_text_fonts_and_parallel_adapters_as_independent_assets() {
         ],
         ["Available Sans"],
     );
-
     let compiled = resolve(
         &workflow,
         &software,
@@ -55,6 +54,15 @@ fn wf_001_composes_text_fonts_and_parallel_adapters_as_independent_assets() {
     )
     .expect("independent assets should compose into one complete target intent");
     let target = &compiled.targets()[0];
+
+    assert_eq!(
+        target
+            .snapshot()
+            .lookup_for_adapter("dialog", "adapter-gdi", "File")
+            .as_deref(),
+        Some("文件"),
+        "a pure dictionary applies to every internal route until Region Binding exists",
+    );
 
     assert_eq!(
         (
@@ -141,7 +149,7 @@ fn wf_005_composes_required_features_across_multiple_adapters() {
         &[Dictionary::new(
             "dictionary-zh-cn",
             "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "文件")],
+            [DictionaryEntry::new("File", "文件")],
         )],
         &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
         &CompositionEnvironment::new(
@@ -182,12 +190,12 @@ fn wf_006_reports_dictionary_precedence_without_exposing_adapter_identity() {
             Dictionary::new(
                 "dictionary-first",
                 "zh-CN",
-                [DictionaryEntry::replace("menu", "File", "文件")],
+                [DictionaryEntry::new("File", "文件")],
             ),
             Dictionary::new(
                 "dictionary-second",
                 "zh-CN",
-                [DictionaryEntry::replace("menu", "File", "档案")],
+                [DictionaryEntry::new("File", "档案")],
             ),
         ],
         &[],
@@ -200,11 +208,8 @@ fn wf_006_reports_dictionary_precedence_without_exposing_adapter_identity() {
 
     assert_eq!(
         compiled.diagnostics(),
-        &[CompositionDiagnostic::RuleConflict {
+        &[CompositionDiagnostic::EntryConflict {
             software_id: "software-editor".into(),
-            location: "menu".into(),
-            context_kind: None,
-            context_key: None,
             source: "File".into(),
             winning_dictionary_id: "dictionary-first".into(),
             shadowed_dictionary_id: "dictionary-second".into(),
@@ -233,7 +238,7 @@ fn wf_007_rejects_a_dictionary_target_locale_mismatch() {
         &[Dictionary::new(
             "dictionary-ja-jp",
             "ja-JP",
-            [DictionaryEntry::replace("menu", "File", "ファイル")],
+            [DictionaryEntry::new("File", "ファイル")],
         )],
         &[],
         &CompositionEnvironment::new(
@@ -273,7 +278,7 @@ fn wf_002_rejects_duplicate_adapter_bindings_before_compilation() {
         &[Dictionary::new(
             "dictionary-zh-cn",
             "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "文件")],
+            [DictionaryEntry::new("File", "文件")],
         )],
         &[],
         &CompositionEnvironment::new(
@@ -317,7 +322,7 @@ fn wf_003_rejects_an_empty_font_location_scope() {
         &[Dictionary::new(
             "dictionary-zh-cn",
             "zh-CN",
-            [DictionaryEntry::replace("menu", "File", "文件")],
+            [DictionaryEntry::new("File", "文件")],
         )],
         &[FontProfile::new("font-profile-cjk", ["Available Sans"])],
         &CompositionEnvironment::new(

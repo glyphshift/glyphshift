@@ -119,56 +119,17 @@ impl Dictionary {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DictionaryEntry {
-    location: Box<str>,
-    context: Option<EntryContext>,
     source: Box<str>,
-    text: EntryTextBehavior,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum EntryTextBehavior {
-    Keep,
-    Replace(Box<str>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct EntryContext {
-    kind: Box<str>,
-    key: Box<str>,
+    translation: Box<str>,
 }
 
 impl DictionaryEntry {
     #[must_use]
-    pub fn replace(
-        location: impl Into<Box<str>>,
-        source: impl Into<Box<str>>,
-        translation: impl Into<Box<str>>,
-    ) -> Self {
+    pub fn new(source: impl Into<Box<str>>, translation: impl Into<Box<str>>) -> Self {
         Self {
-            location: location.into(),
-            context: None,
             source: source.into(),
-            text: EntryTextBehavior::Replace(translation.into()),
+            translation: translation.into(),
         }
-    }
-
-    #[must_use]
-    pub fn keep(location: impl Into<Box<str>>, source: impl Into<Box<str>>) -> Self {
-        Self {
-            location: location.into(),
-            context: None,
-            source: source.into(),
-            text: EntryTextBehavior::Keep,
-        }
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, kind: impl Into<Box<str>>, key: impl Into<Box<str>>) -> Self {
-        self.context = Some(EntryContext {
-            kind: kind.into(),
-            key: key.into(),
-        });
-        self
     }
 }
 
@@ -288,11 +249,8 @@ impl CompiledWorkflow {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompositionDiagnostic {
-    RuleConflict {
+    EntryConflict {
         software_id: Box<str>,
-        location: Box<str>,
-        context_kind: Option<Box<str>>,
-        context_key: Option<Box<str>>,
         source: Box<str>,
         winning_dictionary_id: Box<str>,
         shadowed_dictionary_id: Box<str>,
@@ -447,8 +405,7 @@ pub fn resolve(
         let mut font_policy = FontPolicy::empty();
         let mut has_text_replacement = false;
         let mut has_font_substitution = false;
-        let mut winning_dictionaries =
-            BTreeMap::<(Box<str>, Option<EntryContext>, Box<str>), Box<str>>::new();
+        let mut winning_dictionaries = BTreeMap::<Box<str>, Box<str>>::new();
 
         for dictionary_id in &target.dictionary_ids {
             let dictionary = dictionaries_by_id
@@ -462,48 +419,24 @@ pub fn resolve(
                 });
             }
             for entry in &dictionary.entries {
-                if !software.locations.contains(&entry.location) {
-                    return Err(ResolveError::UnknownLocation {
+                if let Some(winner) = winning_dictionaries.get(&entry.source) {
+                    diagnostics.push(CompositionDiagnostic::EntryConflict {
                         software_id: software.id.clone(),
-                        asset_id: dictionary.id.clone(),
-                        location: entry.location.clone(),
-                    });
-                }
-                let key = (
-                    entry.location.clone(),
-                    entry.context.clone(),
-                    entry.source.clone(),
-                );
-                if let Some(winner) = winning_dictionaries.get(&key) {
-                    diagnostics.push(CompositionDiagnostic::RuleConflict {
-                        software_id: software.id.clone(),
-                        location: entry.location.clone(),
-                        context_kind: entry.context.as_ref().map(|context| context.kind.clone()),
-                        context_key: entry.context.as_ref().map(|context| context.key.clone()),
                         source: entry.source.clone(),
                         winning_dictionary_id: winner.clone(),
                         shadowed_dictionary_id: dictionary.id.clone(),
                     });
                     continue;
                 }
-                winning_dictionaries.insert(key, dictionary.id.clone());
-                if let EntryTextBehavior::Replace(translation) = &entry.text {
-                    snapshot = match &entry.context {
-                        None => snapshot.with_entry(
-                            entry.location.clone(),
-                            entry.source.clone(),
-                            translation.clone(),
-                        ),
-                        Some(context) => snapshot.with_context_entry(
-                            entry.location.clone(),
-                            context.kind.clone(),
-                            context.key.clone(),
-                            entry.source.clone(),
-                            translation.clone(),
-                        ),
-                    };
-                    has_text_replacement = true;
+                winning_dictionaries.insert(entry.source.clone(), dictionary.id.clone());
+                for location in &software.locations {
+                    snapshot = snapshot.with_entry(
+                        location.clone(),
+                        entry.source.clone(),
+                        entry.translation.clone(),
+                    );
                 }
+                has_text_replacement = true;
             }
         }
 

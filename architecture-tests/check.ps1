@@ -74,6 +74,27 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdi-native' `
     -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-gdi-native-support' `
+    -Expected @('glyphshift-adapter-native-abi', 'windows')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-gdi-text-out-native' `
+    -Expected @(
+        'glyphshift-adapter-gdi',
+        'glyphshift-adapter-gdi-native-support',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-draw-text-native' `
+    -Expected @(
+        'glyphshift-adapter-gdi',
+        'glyphshift-adapter-gdi-native-support',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdiplus' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -132,6 +153,7 @@ Assert-Dependencies `
     -Expected @(
         'glyphshift-adapter-registry',
         'glyphshift-adapter-sdk',
+        'glyphshift-capture',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
         'serde',
@@ -143,6 +165,7 @@ Assert-Dependencies `
         'glyphshift-adapter-native-abi',
         'glyphshift-adapter-native-host',
         'glyphshift-adapter-registry',
+        'glyphshift-capture',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
         'glyphshift-runtime-kernel',
@@ -154,6 +177,7 @@ Assert-Dependencies `
     -PackageName 'glyphshift-target-process-host' `
     -Expected @(
         'glyphshift-adapter-registry',
+        'glyphshift-capture',
         'glyphshift-domain',
         'glyphshift-protocol',
         'glyphshift-runtime-contract',
@@ -189,9 +213,19 @@ Assert-Dependencies `
     -PackageName 'glyphshift-test-controller-plugin' `
     -Expected @('glyphshift-controller-sdk')
 Assert-Dependencies `
+    -PackageName 'glyphshift-dictionary-package' `
+    -Expected @('serde', 'serde_json')
+Assert-Dependencies `
+    -PackageName 'glyphshift-dictionary-distribution' `
+    -Expected @('glyphshift-dictionary-package', 'semver', 'sha2', 'subtle', 'url')
+Assert-Dependencies `
+    -PackageName 'glyphshift-capture' `
+    -Expected @('serde', 'serde_json')
+Assert-Dependencies `
     -PackageName 'glyphshift-desktop-backend' `
     -Expected @(
         'glyphshift-adapter-registry',
+        'glyphshift-dictionary-package',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
         'glyphshift-translation',
@@ -205,6 +239,7 @@ Assert-Dependencies `
     -Expected @(
         'glyphshift-adapter-native-host',
         'glyphshift-adapter-registry',
+        'glyphshift-capture',
         'glyphshift-controller-host',
         'glyphshift-desktop-backend',
         'glyphshift-domain',
@@ -220,13 +255,16 @@ Assert-Dependencies `
 Assert-Dependencies `
     -PackageName 'glyphshift-desktop-shell' `
     -Expected @(
+        'glyphshift-capture',
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
         'glyphshift-domain',
         'glyphshift-workflow',
         'serde',
+        'serde_json',
         'tauri',
         'tauri-plugin-dialog',
+        'tempfile',
         'winreg'
     )
 
@@ -238,6 +276,7 @@ $productionSourceRoots = @(
     'crates/glyphshift-controller-sdk/src',
     'crates/glyphshift-controller-host/src',
     'crates/glyphshift-controller-windows/src',
+    'crates/glyphshift-capture/src',
     'crates/glyphshift-desktop-backend/src',
     'crates/glyphshift-desktop-runtime/src',
     'crates/glyphshift-domain/src',

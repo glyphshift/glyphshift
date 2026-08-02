@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
+glyphshift-capture = { path = "../../../crates/glyphshift-capture" }
 glyphshift-desktop-backend = { path = "../../../crates/glyphshift-desktop-backend" }
 glyphshift-desktop-runtime = { path = "../../../crates/glyphshift-desktop-runtime" }
 glyphshift-domain = { path = "../../../crates/glyphshift-domain" }

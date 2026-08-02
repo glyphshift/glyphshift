@@ -118,7 +118,9 @@ Write-Output 'Building the local target-process Runtime bundle...'
     --manifest-path (Join-Path $repoRoot 'Cargo.toml') `
     -p glyphshift-controller-windows `
     -p glyphshift-target-runtime `
+    -p glyphshift-adapter-draw-text-native `
     -p glyphshift-adapter-gdi-native `
+    -p glyphshift-adapter-gdi-text-out-native `
     -p glyphshift-adapter-gdiplus-native `
     -p glyphshift-windows-runtime-target
 if ($LASTEXITCODE -ne 0) {
@@ -154,12 +156,34 @@ $runtimeBundle = Copy-VersionedBundleArtifact `
     'glyphshift_target_runtime.dll' 'runtime' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdi_native.dll' 'adapter-gdi' 'dll'
+$textOutBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_gdi_text_out_native.dll' 'adapter-gdi-text-out' 'dll'
+$drawTextBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text' 'dll'
 $gdiPlusBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdiplus_native.dll' 'adapter-gdiplus' 'dll'
 Copy-Item `
     -LiteralPath (Join-Path $cargoTargetDir 'debug\glyphshift-windows-runtime-target.exe') `
     -Destination (Join-Path $runtimeBundleRoot 'test-target.exe') `
     -Force
+
+$adapterPresentationPath = Join-Path $PSScriptRoot 'runtime-bundle-adapters.zh-CN.json'
+$adapterPresentationJson = [System.IO.File]::ReadAllText(
+    $adapterPresentationPath,
+    [System.Text.Encoding]::UTF8
+)
+$adapterPresentation = $adapterPresentationJson | ConvertFrom-Json
+function Get-AdapterPresentation([string]$AdapterId) {
+    $presentation = $adapterPresentation | Where-Object { $_.id -eq $AdapterId } | Select-Object -First 1
+    if ($null -eq $presentation) {
+        throw "Missing Runtime Adapter presentation for $AdapterId"
+    }
+    return $presentation
+}
+$extTextOutPresentation = Get-AdapterPresentation 'windows.gdi.ext-text-out'
+$textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
+$drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
+$gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/1'
@@ -178,18 +202,34 @@ $runtimeManifest = [ordered]@{
         [ordered]@{
             file = $gdiBundle.file
             sha256 = $gdiBundle.sha256
-            name = 'ExtTextOutW'
-            summary = '拦截 GDI ExtTextOutW 绘制并执行文字与字体决策'
-            technology = 'GDI'
-            technicalTarget = 'gdi32.dll!ExtTextOutW'
+            name = $extTextOutPresentation.name
+            summary = $extTextOutPresentation.summary
+            technology = $extTextOutPresentation.technology
+            technicalTarget = $extTextOutPresentation.technicalTarget
+        },
+        [ordered]@{
+            file = $textOutBundle.file
+            sha256 = $textOutBundle.sha256
+            name = $textOutPresentation.name
+            summary = $textOutPresentation.summary
+            technology = $textOutPresentation.technology
+            technicalTarget = $textOutPresentation.technicalTarget
+        },
+        [ordered]@{
+            file = $drawTextBundle.file
+            sha256 = $drawTextBundle.sha256
+            name = $drawTextPresentation.name
+            summary = $drawTextPresentation.summary
+            technology = $drawTextPresentation.technology
+            technicalTarget = $drawTextPresentation.technicalTarget
         },
         [ordered]@{
             file = $gdiPlusBundle.file
             sha256 = $gdiPlusBundle.sha256
-            name = 'GdipDrawString'
-            summary = '拦截 GDI+ GdipDrawString 绘制并执行文字与字体决策'
-            technology = 'GDI+'
-            technicalTarget = 'gdiplus.dll!GdipDrawString'
+            name = $gdiPlusPresentation.name
+            summary = $gdiPlusPresentation.summary
+            technology = $gdiPlusPresentation.technology
+            technicalTarget = $gdiPlusPresentation.technicalTarget
         }
     )
 }
@@ -200,16 +240,22 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 $env:GLYPHSHIFT_RUNTIME_ROOT = $runtimeBundleRoot
 
 Write-Output 'Verifying the desktop Runtime against isolated target processes...'
-& cargo test `
-    --manifest-path (Join-Path $repoRoot 'Cargo.toml') `
-    -p glyphshift-target-runtime `
-    --test target_runtime_contract `
-    trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop `
-    -- `
-    --ignored `
-    --exact
-if ($LASTEXITCODE -ne 0) {
-    throw 'The target-process Runtime contract failed.'
+$targetRuntimeContracts = @(
+    'trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop',
+    'trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog'
+)
+foreach ($targetRuntimeContract in $targetRuntimeContracts) {
+    & cargo test `
+        --manifest-path (Join-Path $repoRoot 'Cargo.toml') `
+        -p glyphshift-target-runtime `
+        --test target_runtime_contract `
+        $targetRuntimeContract `
+        -- `
+        --ignored `
+        --exact
+    if ($LASTEXITCODE -ne 0) {
+        throw "The target-process Runtime contract failed: $targetRuntimeContract"
+    }
 }
 $runtimeContracts = @(
     'desktop_runtime_changes_pixels_updates_and_restores_pass_through',

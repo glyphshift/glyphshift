@@ -46,22 +46,15 @@ export interface DictionarySummary {
   entryCount: number
 }
 
-export interface DictionaryRuleContext {
-  kind: string
-  key: string
-}
-
-export interface DictionaryRule {
-  location: string
-  context: DictionaryRuleContext | null
+export interface DictionaryEntry {
   source: string
-  translation: string | null
+  translation: string
 }
 
 export interface DictionaryDetail {
   metadata: DictionaryMetadata
   revision: number
-  entries: DictionaryRule[]
+  entries: DictionaryEntry[]
 }
 
 export interface FontProfileMetadata {
@@ -89,6 +82,39 @@ export interface AdapterOption {
   features: string[]
   technicalTarget: string
   configuration: 'none'
+}
+
+export interface CaptureSummary {
+  sessionId: string
+  softwareId: string
+  adapterIds: string[]
+  status: 'active' | 'completed' | 'failed'
+  entryCount: number
+  droppedObservations: number
+}
+
+export interface CaptureCatalogEntry {
+  source: string
+  adapterId: string
+  count: number
+  firstSeenMs: number
+  lastSeenMs: number
+}
+
+export interface CaptureResult {
+  catalog: {
+    schema: 'glyphshift.capture-catalog/1'
+    sessionId: string
+    startedAtMs: number
+    stoppedAtMs: number
+    droppedObservations: number
+    entries: CaptureCatalogEntry[]
+  }
+  dictionaryDraft: {
+    schema: 'glyphshift.dictionary-draft/1'
+    sourceSessionId: string
+    entries: DictionaryEntry[]
+  }
 }
 
 export interface WorkflowAdapterPlan {
@@ -162,6 +188,7 @@ export interface DesktopSnapshot {
   workflowRuntimeStatus: Record<string, WorkflowRuntimeStatus>
   adapters: AdapterOption[]
   fontFamilies: string[]
+  capture: CaptureSummary | null
 }
 
 export interface WorkflowCommandResult {
@@ -189,6 +216,7 @@ export function emptyModel(): DesktopModel {
     workflowRuntimeStatus: {},
     adapters: [],
     fontFamilies: [],
+    capture: null,
     dictionaryDetails: {},
     fontProfileDetails: {},
     workflowDetails: {},
