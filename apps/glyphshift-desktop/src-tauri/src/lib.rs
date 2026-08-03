@@ -16,6 +16,13 @@ use glyphshift_desktop_runtime::{
     DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, HostOperationFailure,
     RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord, WorkflowReconcileReport,
 };
+use glyphshift_dictionary_distribution::{
+    ArtifactStatement, ArtifactTrustVerifier, CatalogPage, CatalogPortError, CatalogQuery,
+    CatalogRelease, CatalogSourcePage, DictionaryDistribution, DictionaryDistributionError,
+    DictionaryDistributionPort, DictionaryReleaseKey, DictionaryReplacementPolicy,
+    FileDictionaryInstallStore, InstallRequest, PublisherIdentity, SignatureEnvelope,
+    SystemInstallationClock, TrustVerifierError,
+};
 use glyphshift_domain::{Feature, Generation, RouteOperator};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
@@ -27,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 13;
+const DESKTOP_API_VERSION: u16 = 14;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
@@ -113,6 +120,75 @@ fn probe_run_error(error: ProbeRunError) -> CommandError {
     CommandError::new(code)
 }
 
+fn dictionary_distribution_error(error: DictionaryDistributionError) -> CommandError {
+    let code = match error {
+        DictionaryDistributionError::InvalidCatalog => "dictionary.catalog_invalid",
+        DictionaryDistributionError::CatalogUnavailable => "dictionary.catalog_unavailable",
+        DictionaryDistributionError::ReleaseMissing => "dictionary.release_missing",
+        DictionaryDistributionError::ArtifactTooLarge => "dictionary.artifact_too_large",
+        DictionaryDistributionError::SizeMismatch => "dictionary.artifact_size_mismatch",
+        DictionaryDistributionError::DigestMismatch => "dictionary.artifact_digest_mismatch",
+        DictionaryDistributionError::InvalidSignature => "dictionary.signature_invalid",
+        DictionaryDistributionError::UntrustedPublisher => "dictionary.publisher_untrusted",
+        DictionaryDistributionError::PublisherIdentityMismatch => {
+            "dictionary.publisher_identity_mismatch"
+        }
+        DictionaryDistributionError::TrustUnavailable => "dictionary.trust_unavailable",
+        DictionaryDistributionError::InvalidPayload => "dictionary.payload_invalid",
+        DictionaryDistributionError::ReleaseIdentityMismatch => {
+            "dictionary.release_identity_mismatch"
+        }
+        DictionaryDistributionError::LocalChangesConflict => "dictionary.local_changes_conflict",
+        DictionaryDistributionError::StorageFailure => "dictionary.installation_storage_failure",
+    };
+    CommandError::new(code)
+}
+
+struct OfflineDictionaryCatalog;
+
+impl DictionaryDistributionPort for OfflineDictionaryCatalog {
+    fn query(&mut self, _query: &CatalogQuery) -> Result<CatalogSourcePage, CatalogPortError> {
+        Err(CatalogPortError::Unavailable)
+    }
+
+    fn release(&mut self, _key: &DictionaryReleaseKey) -> Result<CatalogRelease, CatalogPortError> {
+        Err(CatalogPortError::Unavailable)
+    }
+
+    fn fetch(
+        &mut self,
+        _download_url: &str,
+        _byte_limit: u64,
+    ) -> Result<Vec<u8>, CatalogPortError> {
+        Err(CatalogPortError::Unavailable)
+    }
+}
+
+struct OfflineArtifactTrustVerifier;
+
+impl ArtifactTrustVerifier for OfflineArtifactTrustVerifier {
+    fn verify(
+        &mut self,
+        _statement: &ArtifactStatement,
+        _signature: &SignatureEnvelope,
+    ) -> Result<PublisherIdentity, TrustVerifierError> {
+        Err(TrustVerifierError::Unavailable)
+    }
+}
+
+fn offline_dictionary_distribution(
+    data_root: &std::path::Path,
+) -> Result<DictionaryDistribution, String> {
+    let store = FileDictionaryInstallStore::open(data_root)
+        .map_err(|error| format!("dictionary installation startup: {error:?}"))?;
+    Ok(DictionaryDistribution::new(
+        Box::new(OfflineDictionaryCatalog),
+        Box::new(OfflineArtifactTrustVerifier),
+        Box::new(store),
+        Box::new(SystemInstallationClock),
+    ))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProbeRunCreateRequest {
@@ -148,6 +224,8 @@ enum ProbeDictionaryBindingRequest {
 struct ProbeRunQueryRequest {
     run_id: Box<str>,
     search: Box<str>,
+    #[serde(default)]
+    adapter_ids: Vec<Box<str>>,
     page: usize,
     page_size: usize,
 }
@@ -166,6 +244,90 @@ struct ProbeBulkRequest {
     run_id: Box<str>,
     sources: Vec<Box<str>>,
     action: Box<str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DictionaryCatalogQueryRequest {
+    text: Box<str>,
+    source_locale: Option<Box<str>>,
+    target_locale: Option<Box<str>>,
+    cursor: Option<Box<str>>,
+    page_size: Option<u16>,
+    requested_presentation_locale: Box<str>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct DictionaryCatalogReleaseView {
+    catalog_id: Box<str>,
+    dictionary_id: Box<str>,
+    release_version: Box<str>,
+    source_locale: Box<str>,
+    target_locale: Box<str>,
+    effective_presentation_locale: Box<str>,
+    name: Box<str>,
+    summary: Box<str>,
+    tags: Vec<Box<str>>,
+    publisher_identity: Box<str>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct DictionaryCatalogPageView {
+    releases: Vec<DictionaryCatalogReleaseView>,
+    next_cursor: Option<Box<str>>,
+}
+
+impl From<CatalogPage> for DictionaryCatalogPageView {
+    fn from(page: CatalogPage) -> Self {
+        Self {
+            releases: page
+                .releases()
+                .iter()
+                .map(|release| DictionaryCatalogReleaseView {
+                    catalog_id: release.key().catalog_id().into(),
+                    dictionary_id: release.key().dictionary_id().into(),
+                    release_version: release.key().release_version().into(),
+                    source_locale: release.source_locale().into(),
+                    target_locale: release.target_locale().into(),
+                    effective_presentation_locale: release.effective_presentation_locale().into(),
+                    name: release.presentation().name().into(),
+                    summary: release.presentation().summary().into(),
+                    tags: release.presentation().tags().to_vec(),
+                    publisher_identity: release.publisher_identity().as_str().into(),
+                })
+                .collect(),
+            next_cursor: page.next_cursor().map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DictionaryReplacementRequest {
+    RejectExisting,
+    ReplaceVerified,
+    ReplaceAny,
+}
+
+impl From<DictionaryReplacementRequest> for DictionaryReplacementPolicy {
+    fn from(value: DictionaryReplacementRequest) -> Self {
+        match value {
+            DictionaryReplacementRequest::RejectExisting => Self::RejectExisting,
+            DictionaryReplacementRequest::ReplaceVerified => Self::ReplaceVerified,
+            DictionaryReplacementRequest::ReplaceAny => Self::ReplaceAny,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DictionaryCatalogInstallRequest {
+    catalog_id: Box<str>,
+    dictionary_id: Box<str>,
+    release_version: Box<str>,
+    replacement: DictionaryReplacementRequest,
 }
 
 #[derive(Deserialize)]
@@ -398,6 +560,7 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
 
 struct DesktopApplication {
     backend: DesktopBackend,
+    dictionary_distribution: DictionaryDistribution,
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
@@ -410,6 +573,7 @@ impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
         let probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
+        let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
         let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
         let adapters = runtime_bundle
             .as_ref()
@@ -447,6 +611,7 @@ impl DesktopApplication {
             .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
             backend,
+            dictionary_distribution,
             runtimes: runtime_bundle.map(|bundle| {
                 Box::new(DesktopRuntimePool::new(bundle)) as Box<dyn WorkflowRuntimeService>
             }),
@@ -699,6 +864,7 @@ impl DesktopApplication {
         request: ProbeRunQueryRequest,
     ) -> Result<ProbeEntryPage, CommandError> {
         let query = ProbeQuery::new(request.search, request.page, request.page_size)
+            .and_then(|query| query.with_adapter_ids(request.adapter_ids))
             .map_err(probe_run_error)?;
         let summary = self
             .probe_runs
@@ -915,6 +1081,49 @@ impl DesktopApplication {
             .map_err(|_| {
                 CommandError::new("dictionary.not_found").with_arg("dictionaryId", dictionary_id)
             })
+    }
+
+    fn query_dictionary_catalog(
+        &mut self,
+        request: DictionaryCatalogQueryRequest,
+    ) -> Result<DictionaryCatalogPageView, CommandError> {
+        let mut query = CatalogQuery::new(request.text);
+        if let Some(source_locale) = request.source_locale {
+            query = query.with_source_locale(source_locale);
+        }
+        if let Some(target_locale) = request.target_locale {
+            query = query.with_target_locale(target_locale);
+        }
+        if let Some(cursor) = request.cursor {
+            query = query.with_cursor(cursor);
+        }
+        if let Some(page_size) = request.page_size {
+            query = query.with_page_size(page_size);
+        }
+        self.dictionary_distribution
+            .query(&query, &request.requested_presentation_locale)
+            .map(DictionaryCatalogPageView::from)
+            .map_err(dictionary_distribution_error)
+    }
+
+    fn install_dictionary_release(
+        &mut self,
+        request: DictionaryCatalogInstallRequest,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
+        let release = DictionaryReleaseKey::new(
+            request.catalog_id,
+            request.dictionary_id,
+            request.release_version,
+        )
+        .map_err(|_| CommandError::new("dictionary.catalog_invalid"))?;
+        self.dictionary_distribution
+            .install(&InstallRequest::new(release, request.replacement.into()))
+            .map_err(dictionary_distribution_error)?;
+        self.backend.reload_dictionaries().map_err(|_| {
+            dictionary_distribution_error(DictionaryDistributionError::StorageFailure)
+        })?;
+        self.reconcile_enabled_workflows()?;
+        Ok(self.snapshot())
     }
 
     fn create_dictionary(
@@ -1749,6 +1958,28 @@ fn desktop_dictionary(
 }
 
 #[tauri::command]
+fn desktop_query_dictionary_catalog(
+    request: DictionaryCatalogQueryRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DictionaryCatalogPageView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .query_dictionary_catalog(request)
+}
+
+#[tauri::command]
+fn desktop_install_dictionary_release(
+    request: DictionaryCatalogInstallRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .install_dictionary_release(request)
+}
+
+#[tauri::command]
 fn desktop_create_dictionary(
     create: DictionaryCreate,
     application: State<'_, Mutex<DesktopApplication>>,
@@ -1993,6 +2224,8 @@ pub fn run() {
             desktop_bulk_probe_entries,
             desktop_export_probe_run,
             desktop_dictionary,
+            desktop_query_dictionary_catalog,
+            desktop_install_dictionary_release,
             desktop_create_dictionary,
             desktop_update_dictionary,
             desktop_delete_dictionaries,
@@ -2025,11 +2258,186 @@ mod tests {
         DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, WorkflowCreate, WorkflowEdit,
         WorkflowTargetCreate,
     };
+    use glyphshift_dictionary_distribution::{
+        ArtifactPresentation, DictionaryArtifactDescriptor, FixedInstallationClock,
+        InMemoryDictionaryCatalog, InMemoryTrustVerifier, Sha256Digest,
+    };
+    use sha2::{Digest, Sha256};
     use std::fs;
     use std::sync::{Arc, Mutex as StdMutex};
     use tempfile::tempdir;
 
     const TEST_ADAPTER_ID: &str = "test.inline";
+    const TEST_DICTIONARY_URL: &str = "https://catalog.example/dictionary.json";
+
+    fn fixture_dictionary_distribution(data_root: &std::path::Path) -> DictionaryDistribution {
+        let payload = glyphshift_dictionary_package::DictionaryPackage::create(
+            glyphshift_dictionary_package::DictionaryCreate::new(
+                "dictionary.catalog",
+                "Catalog Dictionary",
+                "en-US",
+                "zh-CN",
+            )
+            .with_release_version("1.2.0")
+            .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::new(
+                "Open", "打开",
+            )]),
+        )
+        .expect("dictionary package")
+        .encode_json()
+        .expect("encode dictionary")
+        .into_bytes();
+        let digest: [u8; 32] = Sha256::digest(&payload).into();
+        let publisher = PublisherIdentity::new("publisher.example").expect("publisher");
+        let signature =
+            SignatureEnvelope::new("fixture", "test-key", "signed-statement").expect("signature");
+        let release = CatalogRelease::new(
+            DictionaryReleaseKey::new("glyphshift.official", "dictionary.catalog", "1.2.0")
+                .expect("release key"),
+            "en-US",
+            "zh-CN",
+            "en-US",
+            vec![
+                ArtifactPresentation::new("en-US", "Catalog Dictionary", "Menu translations")
+                    .expect("English presentation"),
+                ArtifactPresentation::new("zh-CN", "目录词典", "菜单翻译")
+                    .expect("Chinese presentation"),
+            ],
+            DictionaryArtifactDescriptor::new(
+                payload.len() as u64,
+                Sha256Digest::new(digest),
+                [TEST_DICTIONARY_URL],
+                publisher.clone(),
+                signature.clone(),
+            )
+            .expect("artifact descriptor"),
+        )
+        .expect("catalog release");
+        DictionaryDistribution::new(
+            Box::new(
+                InMemoryDictionaryCatalog::new()
+                    .with_release(release.clone())
+                    .with_artifact(TEST_DICTIONARY_URL, payload),
+            ),
+            Box::new(InMemoryTrustVerifier::new().with_trusted_artifact(
+                ArtifactStatement::for_release(&release),
+                signature,
+                publisher,
+            )),
+            Box::new(
+                FileDictionaryInstallStore::open(data_root).expect("dictionary install store"),
+            ),
+            Box::new(FixedInstallationClock::new(1_700_000_000_000)),
+        )
+    }
+
+    #[test]
+    fn dictionary_distribution_errors_keep_stable_product_codes() {
+        let cases = [
+            (
+                DictionaryDistributionError::CatalogUnavailable,
+                "dictionary.catalog_unavailable",
+            ),
+            (
+                DictionaryDistributionError::ReleaseMissing,
+                "dictionary.release_missing",
+            ),
+            (
+                DictionaryDistributionError::DigestMismatch,
+                "dictionary.artifact_digest_mismatch",
+            ),
+            (
+                DictionaryDistributionError::InvalidSignature,
+                "dictionary.signature_invalid",
+            ),
+            (
+                DictionaryDistributionError::UntrustedPublisher,
+                "dictionary.publisher_untrusted",
+            ),
+            (
+                DictionaryDistributionError::InvalidPayload,
+                "dictionary.payload_invalid",
+            ),
+            (
+                DictionaryDistributionError::LocalChangesConflict,
+                "dictionary.local_changes_conflict",
+            ),
+            (
+                DictionaryDistributionError::StorageFailure,
+                "dictionary.installation_storage_failure",
+            ),
+        ];
+        for (error, expected_code) in cases {
+            let value = serde_json::to_value(dictionary_distribution_error(error))
+                .expect("serialize command error");
+            assert_eq!(value["schemaVersion"], 1);
+            assert_eq!(value["code"], expected_code);
+        }
+    }
+
+    #[test]
+    fn unconfigured_catalog_reports_offline_without_affecting_the_local_library() {
+        let (mut application, _calls, _software_id, _data_root) = workflow_application();
+        let before = application.snapshot().configuration.dictionaries().to_vec();
+
+        let error = application
+            .query_dictionary_catalog(DictionaryCatalogQueryRequest {
+                text: "menu".into(),
+                source_locale: Some("en-US".into()),
+                target_locale: Some("zh-CN".into()),
+                cursor: None,
+                page_size: Some(20),
+                requested_presentation_locale: "zh-CN".into(),
+            })
+            .expect_err("catalog remains explicitly offline without configuration");
+        let value = serde_json::to_value(error).expect("serialize command error");
+
+        assert_eq!(value["code"], "dictionary.catalog_unavailable");
+        assert_eq!(application.snapshot().configuration.dictionaries(), before);
+    }
+
+    #[test]
+    fn catalog_query_and_install_return_presentation_and_refreshed_installation_summary() {
+        let (mut application, _calls, _software_id, data_root) = workflow_application();
+        application.dictionary_distribution = fixture_dictionary_distribution(data_root.path());
+
+        let page = application
+            .query_dictionary_catalog(DictionaryCatalogQueryRequest {
+                text: "Catalog".into(),
+                source_locale: Some("en-US".into()),
+                target_locale: Some("zh-CN".into()),
+                cursor: None,
+                page_size: Some(20),
+                requested_presentation_locale: "zh-CN".into(),
+            })
+            .expect("query configured catalog");
+        assert_eq!(page.releases.len(), 1);
+        assert_eq!(page.releases[0].name.as_ref(), "目录词典");
+        assert_eq!(
+            page.releases[0].effective_presentation_locale.as_ref(),
+            "zh-CN"
+        );
+
+        let snapshot = application
+            .install_dictionary_release(DictionaryCatalogInstallRequest {
+                catalog_id: "glyphshift.official".into(),
+                dictionary_id: "dictionary.catalog".into(),
+                release_version: "1.2.0".into(),
+                replacement: DictionaryReplacementRequest::RejectExisting,
+            })
+            .expect("install catalog release");
+        let dictionary = snapshot
+            .configuration
+            .dictionaries()
+            .iter()
+            .find(|dictionary| dictionary.id() == "dictionary.catalog")
+            .expect("installed dictionary summary");
+        assert_eq!(dictionary.installation().state(), "verified");
+        assert_eq!(
+            dictionary.installation().verified_publisher(),
+            Some("publisher.example")
+        );
+    }
 
     #[derive(Default)]
     struct WorkflowRuntimeCalls {
@@ -2257,6 +2665,8 @@ mod tests {
         (
             DesktopApplication {
                 backend,
+                dictionary_distribution: offline_dictionary_distribution(data_root.path())
+                    .expect("offline dictionary distribution"),
                 runtimes: Some(runtimes),
                 workflow_runtime_status: BTreeMap::new(),
                 adapters: Vec::new(),
@@ -2517,6 +2927,17 @@ mod tests {
             json["dictionaries"][0]["metadata"]["id"],
             "dictionary.product"
         );
+        assert_eq!(
+            json["dictionaries"][0]["installation"],
+            serde_json::json!({
+                "state": "unmanaged",
+                "installedRelease": null,
+                "verifiedPublisher": null,
+                "updateRelease": null,
+            })
+        );
+        assert!(json["dictionaries"][0].get("digest").is_none());
+        assert!(json["dictionaries"][0].get("signature").is_none());
         assert_eq!(
             json["activations"][0],
             serde_json::json!({
@@ -2817,6 +3238,8 @@ mod tests {
         });
         let mut reopened = DesktopApplication {
             backend,
+            dictionary_distribution: offline_dictionary_distribution(data_root.path())
+                .expect("offline dictionary distribution"),
             runtimes: Some(runtimes),
             workflow_runtime_status: BTreeMap::new(),
             adapters: Vec::new(),

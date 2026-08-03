@@ -31,6 +31,10 @@ const props = withDefaults(defineProps<{
   pageSize: number
   total: number
   itemLabel: string
+  paginationMode?: 'offset' | 'cursor'
+  cursorPage?: number
+  hasNextPage?: boolean
+  footerSummary?: string
 }>(), {
   filterLabel: '',
   filterAriaLabel: '',
@@ -40,6 +44,10 @@ const props = withDefaults(defineProps<{
   columnOptions: () => [],
   selectedCount: 0,
   selectedLabel: '',
+  paginationMode: 'offset',
+  cursorPage: 1,
+  hasNextPage: false,
+  footerSummary: '',
 })
 
 const { t } = useI18n()
@@ -50,6 +58,9 @@ const emit = defineEmits<{
   'update:page': [value: number]
   'update:pageSize': [value: number]
   'toggleColumn': [key: string, visible: boolean]
+  search: []
+  previousPage: []
+  nextPage: []
 }>()
 
 const filterItems = computed(() => props.filterOptions.map(option => ({
@@ -99,6 +110,7 @@ function updatePageSize(value: unknown) {
         :placeholder="searchPlaceholder"
         :aria-label="searchLabel"
         @update:model-value="emit('update:query', String($event ?? ''))"
+        @keyup.enter="emit('search')"
       />
 
       <UDropdownMenu v-if="filterOptions.length" :items="filterItems" :content="{ align: 'end' }">
@@ -152,9 +164,10 @@ function updatePageSize(value: unknown) {
     </div>
 
     <footer class="flex h-14 shrink-0 items-center border-t border-[var(--border)] px-3 text-[10px] text-[var(--text-muted)]">
-      <span>{{ t('table.range', { start: rangeStart, end: rangeEnd, total, items: itemLabel }) }}</span>
+      <span>{{ footerSummary || t('table.range', { start: rangeStart, end: rangeEnd, total, items: itemLabel }) }}</span>
       <div class="ml-auto flex items-center gap-3">
         <UPagination
+          v-if="paginationMode === 'offset'"
           :page="page"
           :total="total"
           :items-per-page="pageSize"
@@ -181,6 +194,27 @@ function updatePageSize(value: unknown) {
             <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-right" :aria-label="t('table.lastPage')" />
           </template>
         </UPagination>
+        <div v-else class="flex items-center gap-1">
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-tabler-chevron-left"
+            :disabled="cursorPage <= 1"
+            :aria-label="t('table.previousPage')"
+            @click="emit('previousPage')"
+          />
+          <span class="min-w-14 text-center text-[10px] text-[var(--text-secondary)]">{{ t('table.pageNumber', { page: cursorPage }) }}</span>
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            icon="i-tabler-chevron-right"
+            :disabled="!hasNextPage"
+            :aria-label="t('table.nextPage')"
+            @click="emit('nextPage')"
+          />
+        </div>
         <span class="whitespace-nowrap">{{ t('table.perPage') }}</span>
         <USelect
           :model-value="pageSize"

@@ -224,7 +224,16 @@ Assert-Dependencies `
     -Expected @('serde', 'serde_json')
 Assert-Dependencies `
     -PackageName 'glyphshift-dictionary-distribution' `
-    -Expected @('glyphshift-dictionary-package', 'semver', 'sha2', 'subtle', 'url')
+    -Expected @(
+        'glyphshift-dictionary-package',
+        'semver',
+        'serde',
+        'serde_json',
+        'sha2',
+        'subtle',
+        'tempfile',
+        'url'
+    )
 Assert-Dependencies `
     -PackageName 'glyphshift-capture' `
     -Expected @('serde', 'serde_json')
@@ -232,6 +241,7 @@ Assert-Dependencies `
     -PackageName 'glyphshift-desktop-backend' `
     -Expected @(
         'glyphshift-adapter-registry',
+        'glyphshift-dictionary-distribution',
         'glyphshift-dictionary-package',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
@@ -265,6 +275,7 @@ Assert-Dependencies `
         'glyphshift-capture',
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
+        'glyphshift-dictionary-distribution',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
         'glyphshift-translation',

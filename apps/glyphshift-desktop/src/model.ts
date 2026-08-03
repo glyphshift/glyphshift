@@ -43,6 +43,50 @@ export interface DictionarySummary {
   metadata: DictionaryMetadata
   revision: number
   entryCount: number
+  installation: DictionaryInstallationSummary
+}
+
+export type DictionaryInstallationState = 'verified' | 'modified' | 'missing' | 'unmanaged'
+
+export interface DictionaryInstallationSummary {
+  state: DictionaryInstallationState
+  installedRelease: string | null
+  verifiedPublisher: string | null
+  updateRelease: string | null
+}
+
+export interface DictionaryCatalogRelease {
+  catalogId: string
+  dictionaryId: string
+  releaseVersion: string
+  sourceLocale: string
+  targetLocale: string
+  effectivePresentationLocale: string
+  name: string
+  summary: string
+  tags: string[]
+  publisherIdentity: string
+}
+
+export interface DictionaryCatalogPage {
+  releases: DictionaryCatalogRelease[]
+  nextCursor: string | null
+}
+
+export interface DictionaryCatalogQueryRequest {
+  text: string
+  sourceLocale: string | null
+  targetLocale: string | null
+  cursor: string | null
+  pageSize: number
+  requestedPresentationLocale: string
+}
+
+export interface DictionaryCatalogInstallRequest {
+  catalogId: string
+  dictionaryId: string
+  releaseVersion: string
+  replacement: 'reject_existing' | 'replace_verified' | 'replace_any'
 }
 
 export interface DictionaryEntry {

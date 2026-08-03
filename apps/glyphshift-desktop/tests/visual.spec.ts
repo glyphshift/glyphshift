@@ -114,6 +114,22 @@ test('capture distilled dictionary editor and its focused modals', async ({ page
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-rule-modal-compact.png' })
 })
 
+test('capture local dictionary provenance and offline catalog modes', async ({ page }) => {
+  await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
+  await page.goto('/')
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-library-local.png' })
+
+  await page.getByRole('button', { name: '在线目录', exact: true }).click()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-library-catalog-offline.png' })
+
+  await page.setViewportSize({ width: 960, height: 640 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-library-catalog-offline-compact.png' })
+})
+
 test('capture help and settings surfaces', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
   await page.setViewportSize({ width: 1440, height: 900 })

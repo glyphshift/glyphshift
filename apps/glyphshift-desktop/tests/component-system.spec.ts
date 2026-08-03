@@ -71,6 +71,8 @@ test('probe run keeps the 5000-entry path behind backend paging and revision pol
   expect(captureView).toContain(':data="entryPage.rows"')
   expect(probeRuns).toContain("'desktop_probe_run_entries'")
   expect(probeRuns).toContain('pageSize: input.pageSize')
+  expect(captureView).toContain('adapterIds: [...adapterFilterIds.value]')
+  expect(captureView).toContain('glyphshift.probe.view.${runId}')
   expect(captureView).not.toContain('catalogPage')
   expect(captureView).not.toContain('draftPage')
   expect(captureView).not.toContain('useVirtualList')

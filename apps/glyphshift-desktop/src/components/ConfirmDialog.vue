@@ -6,9 +6,11 @@ withDefaults(defineProps<{
   title: string
   description: string
   confirmLabel?: string
+  confirmColor?: 'error' | 'warning' | 'primary'
   busy?: boolean
 }>(), {
   confirmLabel: '',
+  confirmColor: 'error',
   busy: false,
 })
 
@@ -46,7 +48,7 @@ const emit = defineEmits<{
         @click="emit('update:open', false)"
       />
       <UButton
-        color="error"
+        :color="confirmColor"
         variant="soft"
         size="sm"
         :label="confirmLabel || t('common.confirmDelete')"

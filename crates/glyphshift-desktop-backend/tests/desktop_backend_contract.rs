@@ -1,9 +1,16 @@
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
-    BackendError, DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEntryCreate,
-    FontCoverage, WorkflowCreate, WorkflowFontPolicy, WorkflowTargetCreate,
+    BackendError, DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEdit,
+    DictionaryEntryCreate, FontCoverage, WorkflowCreate, WorkflowFontPolicy, WorkflowTargetCreate,
+};
+use glyphshift_dictionary_distribution::{
+    ArtifactPresentation, ArtifactStatement, CatalogRelease, DictionaryArtifactDescriptor,
+    DictionaryDistribution, DictionaryReleaseKey, DictionaryReplacementPolicy,
+    FileDictionaryInstallStore, FixedInstallationClock, InMemoryDictionaryCatalog,
+    InMemoryTrustVerifier, InstallRequest, PublisherIdentity, Sha256Digest, SignatureEnvelope,
 };
 use glyphshift_domain::{AdapterId, Feature};
+use sha2::{Digest, Sha256};
 use std::fs;
 use tempfile::tempdir;
 
@@ -20,6 +27,110 @@ fn environment() -> DesktopEnvironment {
         )],
         ["Available Sans"],
     )
+}
+
+#[test]
+fn desktop_summary_derives_verified_then_modified_without_polluting_dictionary_content() {
+    const ARTIFACT_URL: &str = "https://catalog.example/dictionary.json";
+    let root = tempdir().expect("isolated product data");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    let payload = glyphshift_dictionary_package::DictionaryPackage::create(
+        glyphshift_dictionary_package::DictionaryCreate::new(
+            "dictionary.catalog",
+            "Catalog Dictionary",
+            "en-US",
+            "zh-CN",
+        )
+        .with_release_version("1.2.0")
+        .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::new(
+            "Open", "打开",
+        )]),
+    )
+    .expect("dictionary package")
+    .encode_json()
+    .expect("encode dictionary")
+    .into_bytes();
+    let digest: [u8; 32] = Sha256::digest(&payload).into();
+    let publisher = PublisherIdentity::new("publisher.example").expect("publisher");
+    let signature =
+        SignatureEnvelope::new("fixture", "test-key", "signed-statement").expect("signature");
+    let release = CatalogRelease::new(
+        DictionaryReleaseKey::new("glyphshift.official", "dictionary.catalog", "1.2.0")
+            .expect("release key"),
+        "en-US",
+        "zh-CN",
+        "en-US",
+        vec![
+            ArtifactPresentation::new("en-US", "Catalog Dictionary", "Test release")
+                .expect("presentation"),
+        ],
+        DictionaryArtifactDescriptor::new(
+            payload.len() as u64,
+            Sha256Digest::new(digest),
+            [ARTIFACT_URL],
+            publisher.clone(),
+            signature.clone(),
+        )
+        .expect("artifact descriptor"),
+    )
+    .expect("catalog release");
+    let mut distribution = DictionaryDistribution::new(
+        Box::new(
+            InMemoryDictionaryCatalog::new()
+                .with_release(release.clone())
+                .with_artifact(ARTIFACT_URL, payload),
+        ),
+        Box::new(InMemoryTrustVerifier::new().with_trusted_artifact(
+            ArtifactStatement::for_release(&release),
+            signature,
+            publisher,
+        )),
+        Box::new(FileDictionaryInstallStore::open(root.path()).expect("file install store")),
+        Box::new(FixedInstallationClock::new(1_700_000_000_000)),
+    );
+    distribution
+        .install(&InstallRequest::new(
+            release.key().clone(),
+            DictionaryReplacementPolicy::RejectExisting,
+        ))
+        .expect("install release");
+
+    backend
+        .reload_dictionaries()
+        .expect("reload active dictionaries");
+    let snapshot = backend.snapshot();
+    let installed = &snapshot.dictionaries()[0];
+    assert_eq!(installed.installation().state(), "verified");
+    assert_eq!(installed.installation().installed_release(), Some("1.2.0"));
+    assert_eq!(
+        installed.installation().verified_publisher(),
+        Some("publisher.example")
+    );
+
+    backend
+        .update_dictionary(
+            DictionaryEdit::new(
+                "dictionary.catalog",
+                "Catalog Dictionary",
+                "en-US",
+                "zh-CN",
+                1,
+            )
+            .with_release_version("1.2.0")
+            .with_entries([DictionaryEntryCreate::new("Open", "开启")]),
+        )
+        .expect("edit installed dictionary");
+    assert_eq!(
+        backend.snapshot().dictionaries()[0].installation().state(),
+        "modified"
+    );
+    let dictionary_json =
+        fs::read_to_string(root.path().join("dictionaries/dictionary.catalog.json"))
+            .expect("active dictionary");
+    assert!(!dictionary_json.contains("installation"));
+    assert!(!dictionary_json.contains("publisher"));
+    assert!(!dictionary_json.contains("digest"));
 }
 
 #[test]

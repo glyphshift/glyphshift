@@ -26,6 +26,7 @@ export interface ProbeRunCreateInput {
 export interface ProbeRunQueryInput {
   runId: string
   search: string
+  adapterIds: string[]
   page: number
   pageSize: number
 }

@@ -35,9 +35,10 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **工作流：** 默认页。展示名称、说明、软件和词典摘要、期望/实际状态、启用、编辑、复制和
   删除；支持搜索、筛选、显示列、多选、分页与批量操作。
 - **软件：** 只管理名称、用途说明和完整程序路径；不展示或配置文字/字体能力。
-- **词典：** 独立资产表展示名称、说明、源/目标语言、发布版本、标签、规则数与修订。详情页只用
-  标题摘要展示语言方向、版本、规则数与修订，主表只展示原文和译文；低频 metadata 进入词典设置
-  Modal，不出现字体、Hook、Adapter 或内部匹配键。
+- **词典：** 同一页面以紧凑模式切换本地 Library 与在线 Catalog，不新增一级导航。本地表展示
+  名称、说明、语言、版本、规则数及 verified/modified/unmanaged 来源状态；低频 metadata 进入
+  词典设置 Modal。Catalog 表展示本地化 presentation、语言、版本、发布者与标签，并使用后端
+  cursor 分页。详情页主表只展示原文和译文，不出现字体、Hook、Adapter 或内部匹配键。
 - **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组 Adapter；详情用一张
   联合表展示原文、译文、状态与技术证据，译文编辑直接修改绑定词典。
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
@@ -70,6 +71,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   keep 和逐词条字体都不属于 Dictionary。未来区域限制由 Workflow 的 Region Binding 组合。
 - 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。
 - Dictionary 创建和编辑不出现 Hook、Adapter 或字体字段。
+- Catalog 未配置时在 Catalog 模式内显示明确离线空态，本地 Library 继续可用；覆盖 modified 或
+  unmanaged Dictionary 必须二次确认。普通界面不展示 digest、signature bytes、key ID 或路径。
 - Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Policy；不同 Target 不共享
   隐式选择状态。Font Policy 不成为独立资产，不出现 Location、`main-ui`、全部位置或指定位置。
 - Probe Run 必须且只绑定一个 Dictionary；观测次数、Adapter 和时间属于内部 Observation Index，

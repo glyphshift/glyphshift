@@ -26,6 +26,7 @@ const props = defineProps<{
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
 const query = ref('')
+const adapterFilterIds = ref<string[]>([])
 const page = ref(1)
 const pageSize = ref(50)
 const entryPage = ref({
@@ -68,6 +69,15 @@ const observableAdapters = computed(() => props.adapters.filter(adapter => adapt
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
+const selectedRunAdapters = computed(() => (selectedRun.value?.adapterIds ?? []).map(id => ({
+  id,
+  name: adapterName(id),
+})))
+const adapterFilterLabel = computed(() => {
+  if (!adapterFilterIds.value.length) return t('capture.adapterFilterAll')
+  if (adapterFilterIds.value.length === 1) return adapterName(adapterFilterIds.value[0]!)
+  return t('capture.adapterFilterSelected', { count: adapterFilterIds.value.length })
+})
 const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
@@ -139,6 +149,21 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [[
   { label: t('capture.exportObservationsCsv'), icon: 'i-tabler-file-type-csv', onSelect: () => void chooseExport('observations_csv') },
   { label: t('capture.exportObservationsJson'), icon: 'i-tabler-braces', onSelect: () => void chooseExport('observations_json') },
 ]])
+const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
+  selectedRunAdapters.value.map(adapter => ({
+    type: 'checkbox' as const,
+    label: adapter.name,
+    checked: adapterFilterIds.value.includes(adapter.id),
+    onSelect: event => event.preventDefault(),
+    onUpdateChecked: checked => toggleAdapterFilter(adapter.id, checked),
+  })),
+  [{
+    label: t('capture.clearAdapterFilter'),
+    icon: 'i-tabler-filter-off',
+    disabled: !adapterFilterIds.value.length,
+    onSelect: () => { adapterFilterIds.value = [] },
+  }],
+])
 
 watch(createAdapterIds, () => {
   createLivePreview.value = createPreviewAvailable.value
@@ -165,6 +190,13 @@ watch(query, () => {
     await loadPage()
   }, 250)
 })
+
+watch(adapterFilterIds, async () => {
+  page.value = 1
+  selected.value = new Set()
+  persistViewState()
+  await loadPage()
+}, { deep: true })
 
 watch([listQuery, listPageSize], () => {
   listPage.value = 1
@@ -212,6 +244,7 @@ async function loadPage() {
     entryPage.value = await probe.queryEntries({
       runId,
       search: query.value,
+      adapterIds: [...adapterFilterIds.value],
       page: page.value,
       pageSize: pageSize.value,
     })
@@ -293,6 +326,14 @@ function toggleCreateAdapter(id: string, checked: boolean | 'indeterminate') {
   createAdapterIds.value = [...next]
 }
 
+function toggleAdapterFilter(id: string, checked: boolean) {
+  const available = selectedRun.value?.adapterIds ?? []
+  const next = new Set(adapterFilterIds.value)
+  if (checked) next.add(id)
+  else next.delete(id)
+  adapterFilterIds.value = available.filter(adapterId => next.has(adapterId))
+}
+
 function toggleSelection(source: string) {
   const next = new Set(selected.value)
   next.has(source) ? next.delete(source) : next.add(source)
@@ -372,15 +413,21 @@ function restoreViewState(runId: string) {
   try {
     const value = JSON.parse(localStorage.getItem(`glyphshift.probe.view.${runId}`) ?? '{}') as {
       query?: string
+      adapterIds?: string[]
       page?: number
       pageSize?: number
     }
+    const available = new Set(probe.runs.value.find(run => run.id === runId)?.adapterIds ?? [])
     query.value = value.query ?? ''
+    adapterFilterIds.value = Array.isArray(value.adapterIds)
+      ? [...new Set(value.adapterIds.filter(id => typeof id === 'string' && available.has(id)))]
+      : []
     page.value = Math.max(1, value.page ?? 1)
     pageSize.value = [20, 50, 100].includes(value.pageSize ?? 0) ? value.pageSize! : 50
   }
   catch {
     query.value = ''
+    adapterFilterIds.value = []
     page.value = 1
     pageSize.value = 50
   }
@@ -391,6 +438,7 @@ function persistViewState() {
   if (!runId) return
   localStorage.setItem(`glyphshift.probe.view.${runId}`, JSON.stringify({
     query: query.value,
+    adapterIds: adapterFilterIds.value,
     page: page.value,
     pageSize: pageSize.value,
   }))
@@ -536,6 +584,11 @@ async function confirmRemoval() {
       </div>
 
       <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')">
+        <template #toolbar-actions>
+          <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
+            <UButton data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
+          </UDropdownMenu>
+        </template>
         <template #bulk-actions>
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye-off" :label="t('capture.bulkIgnore')" :disabled="!selectedRows.some(row => row.count > 0 && row.state !== 'ignored')" @click="bulk('ignore')" />
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye" :label="t('capture.bulkRestore')" :disabled="!selectedRows.some(row => row.state === 'ignored')" @click="bulk('restore')" />
@@ -560,7 +613,7 @@ async function confirmRemoval() {
             </template>
             <template #count-cell="{ row }"><div class="text-right tabular-nums">{{ row.original.count || '—' }}</div></template>
             <template #lastSeenMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.lastSeenMs) }}</span></template>
-            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query ? t('capture.noMatch') : t('capture.noRecords')" :description="query ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
+            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
           </UTable>
 
           <div v-if="scrollThumbHeight" data-testid="capture-scrollbar" aria-hidden="true" class="absolute inset-y-2 right-1 z-20 w-2 cursor-pointer rounded-full bg-[var(--surface-subtle)] ring-1 ring-inset ring-[var(--border)]" @pointerdown="jumpScrollbar">

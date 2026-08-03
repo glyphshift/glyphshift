@@ -1,6 +1,9 @@
 //! Desktop-facing product model for software, dictionaries, and workflows.
 
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
+use glyphshift_dictionary_distribution::{
+    DictionaryInstallStore, DictionaryInstallationState, FileDictionaryInstallStore,
+};
 use glyphshift_dictionary_package as dictionary_package;
 use glyphshift_domain::{AdapterId, Feature, Generation, RouteLimits, RouteOperator, RouteProgram};
 use glyphshift_runtime_contract::RuntimePublication;
@@ -197,6 +200,7 @@ pub struct DictionarySummaryView {
     metadata: DictionaryMetadata,
     revision: u64,
     entry_count: usize,
+    installation: DictionaryInstallationSummaryView,
 }
 
 impl DictionarySummaryView {
@@ -228,6 +232,51 @@ impl DictionarySummaryView {
     #[must_use]
     pub const fn entry_count(&self) -> usize {
         self.entry_count
+    }
+
+    #[must_use]
+    pub const fn installation(&self) -> &DictionaryInstallationSummaryView {
+        &self.installation
+    }
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DictionaryInstallationSummaryView {
+    state: &'static str,
+    installed_release: Option<Box<str>>,
+    verified_publisher: Option<Box<str>>,
+    update_release: Option<Box<str>>,
+}
+
+impl DictionaryInstallationSummaryView {
+    fn unmanaged() -> Self {
+        Self {
+            state: "unmanaged",
+            installed_release: None,
+            verified_publisher: None,
+            update_release: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> &str {
+        self.state
+    }
+
+    #[must_use]
+    pub fn installed_release(&self) -> Option<&str> {
+        self.installed_release.as_deref()
+    }
+
+    #[must_use]
+    pub fn verified_publisher(&self) -> Option<&str> {
+        self.verified_publisher.as_deref()
+    }
+
+    #[must_use]
+    pub fn update_release(&self) -> Option<&str> {
+        self.update_release.as_deref()
     }
 }
 
@@ -1011,6 +1060,7 @@ pub struct DesktopBackend {
     software: BTreeMap<Box<str>, SoftwareState>,
     local_software: BTreeMap<Box<str>, DesktopSoftwareArtifact>,
     dictionaries: BTreeMap<Box<str>, DictionaryView>,
+    dictionary_installations: BTreeMap<Box<str>, DictionaryInstallationSummaryView>,
     workflows: BTreeMap<Box<str>, WorkflowArtifact>,
     enabled_workflows: BTreeMap<Box<str>, u64>,
     enabled_workflow_ids: Vec<Box<str>>,
@@ -1152,6 +1202,7 @@ impl DesktopBackend {
             .filter(|(extension_id, _)| software.contains_key(extension_id))
             .collect();
         let dictionaries = read_dictionaries(&root)?;
+        let dictionary_installations = read_dictionary_installations(&root)?;
         let workflows = read_workflows(&root)?;
         let enabled_workflows = read_workflow_state(&root, &workflows)?;
         let enabled_workflow_ids = enabled_workflows.keys().cloned().collect();
@@ -1162,6 +1213,7 @@ impl DesktopBackend {
             software,
             local_software,
             dictionaries,
+            dictionary_installations,
             workflows,
             enabled_workflows,
             enabled_workflow_ids,
@@ -1209,6 +1261,7 @@ impl DesktopBackend {
         write_atomic(&path, &serialized)?;
         let view = dictionary_view(&artifact);
         self.dictionaries.insert(artifact.id().into(), view.clone());
+        self.refresh_dictionary_installations()?;
         Ok(view)
     }
 
@@ -1250,6 +1303,7 @@ impl DesktopBackend {
         let path = dictionary_path(&self.root, artifact.id())?;
         write_atomic(&path, &serialized)?;
         self.dictionaries.insert(artifact.id().into(), view.clone());
+        self.refresh_dictionary_installations()?;
         Ok(view)
     }
 
@@ -1377,6 +1431,17 @@ impl DesktopBackend {
             fs::remove_file(path).map_err(|_| BackendError::Storage("remove-dictionary"))?;
             self.dictionaries.remove(dictionary_id);
         }
+        self.refresh_dictionary_installations()?;
+        Ok(())
+    }
+
+    pub fn reload_dictionaries(&mut self) -> Result<(), BackendError> {
+        self.dictionaries = read_dictionaries(&self.root)?;
+        self.refresh_dictionary_installations()
+    }
+
+    fn refresh_dictionary_installations(&mut self) -> Result<(), BackendError> {
+        self.dictionary_installations = read_dictionary_installations(&self.root)?;
         Ok(())
     }
 
@@ -1934,6 +1999,11 @@ impl DesktopBackend {
                     metadata: dictionary.metadata.clone(),
                     revision: dictionary.revision,
                     entry_count: dictionary.entries.len(),
+                    installation: self
+                        .dictionary_installations
+                        .get(dictionary.id())
+                        .cloned()
+                        .unwrap_or_else(DictionaryInstallationSummaryView::unmanaged),
                 })
                 .collect(),
             workflows: self
@@ -2548,6 +2618,35 @@ fn read_dictionaries(root: &Path) -> Result<BTreeMap<Box<str>, DictionaryView>, 
         }
     }
     Ok(dictionaries)
+}
+
+fn read_dictionary_installations(
+    root: &Path,
+) -> Result<BTreeMap<Box<str>, DictionaryInstallationSummaryView>, BackendError> {
+    let mut store = FileDictionaryInstallStore::open(root)
+        .map_err(|_| BackendError::Storage("open-dictionary-installations"))?;
+    let summaries = store
+        .installations()
+        .map_err(|_| BackendError::Storage("read-dictionary-installations"))?
+        .into_iter()
+        .map(|view| {
+            let source = view.source();
+            let summary = DictionaryInstallationSummaryView {
+                state: match view.state() {
+                    DictionaryInstallationState::Verified => "verified",
+                    DictionaryInstallationState::Modified => "modified",
+                    DictionaryInstallationState::Missing => "missing",
+                    DictionaryInstallationState::Unmanaged => "unmanaged",
+                },
+                installed_release: source.map(|source| source.release().release_version().into()),
+                verified_publisher: source
+                    .map(|source| source.publisher_identity().as_str().into()),
+                update_release: None,
+            };
+            (Box::<str>::from(view.dictionary_id()), summary)
+        })
+        .collect::<BTreeMap<_, _>>();
+    Ok(summaries)
 }
 
 fn safe_identifier(value: &str) -> bool {

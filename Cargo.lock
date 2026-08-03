@@ -1278,6 +1278,7 @@ name = "glyphshift-desktop-backend"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
+ "glyphshift-dictionary-distribution",
  "glyphshift-dictionary-package",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
@@ -1285,6 +1286,7 @@ dependencies = [
  "glyphshift-workflow",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -1317,12 +1319,15 @@ dependencies = [
  "glyphshift-capture",
  "glyphshift-desktop-backend",
  "glyphshift-desktop-runtime",
+ "glyphshift-dictionary-distribution",
+ "glyphshift-dictionary-package",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
  "glyphshift-translation",
  "glyphshift-workflow",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1336,8 +1341,11 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-dictionary-package",
  "semver",
+ "serde",
+ "serde_json",
  "sha2",
  "subtle",
+ "tempfile",
  "url",
 ]
 

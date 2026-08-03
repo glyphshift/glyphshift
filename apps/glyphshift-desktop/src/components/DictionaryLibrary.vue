@@ -2,26 +2,45 @@
 import { computed, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
-import type { DictionaryMetadata, DictionarySummary } from '../model'
+import type {
+  DictionaryCatalogInstallRequest,
+  DictionaryCatalogPage,
+  DictionaryCatalogQueryRequest,
+  DictionaryCatalogRelease,
+  DictionaryMetadata,
+  DictionarySummary,
+} from '../model'
 
 const props = defineProps<{
   items: DictionarySummary[]
   busy: boolean
   messages: Record<string, string>
+  catalogPage: DictionaryCatalogPage
+  catalogBusy: boolean
+  catalogError: string
+  presentationLocale: string
 }>()
 const emit = defineEmits<{
   open: [id: string]
   create: [metadata: Omit<DictionaryMetadata, 'id'>]
   remove: [ids: string[]]
+  queryCatalog: [request: DictionaryCatalogQueryRequest]
+  installCatalog: [request: DictionaryCatalogInstallRequest]
 }>()
 const { t } = useI18n()
 
+const mode = ref<'local' | 'catalog'>('local')
 const query = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const selected = ref(new Set<string>())
 const creating = ref(false)
 const pendingRemoval = ref<DictionarySummary[]>([])
+const pendingInstall = ref<DictionaryCatalogRelease | null>(null)
+const catalogQuery = ref('')
+const catalogPageNumber = ref(1)
+const catalogPageSize = ref(20)
+const catalogCursors = ref<(string | null)[]>([null])
 const name = ref('')
 const description = ref('')
 const sourceLocale = ref('en-US')
@@ -44,18 +63,45 @@ const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSiz
 const pageSelected = computed(() => Boolean(pageItems.value.length) && pageItems.value.every(item => selected.value.has(item.metadata.id)))
 const tableColumns = computed<TableColumn<DictionarySummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[28%]', td: 'w-[28%]' } } },
+  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[32%]', td: 'w-[32%]' } } },
   { id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } },
   { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } },
-  { id: 'tags', header: t('dictionaries.columns.tags') },
+  { id: 'installation', header: t('dictionaries.columns.installation'), meta: { class: { th: 'w-40', td: 'w-40' } } },
   { id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
   { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+])
+const catalogColumns = computed<TableColumn<DictionaryCatalogRelease>[]>(() => [
+  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[36%]', td: 'w-[36%]' } } },
+  { id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } },
+  { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-40', td: 'w-40' } } },
+  { id: 'tags', header: t('dictionaries.columns.tags') },
+  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
 ])
 const removalDescription = computed(() => pendingRemoval.value.length === 1
   ? t('dictionaries.deleteOne', { name: pendingRemoval.value[0]?.metadata.name ?? '' })
   : t('dictionaries.deleteMany', { count: pendingRemoval.value.length }))
+const replacementDescription = computed(() => {
+  const release = pendingInstall.value
+  if (!release) return ''
+  const current = localDictionary(release.dictionaryId)
+  return current?.installation.state === 'modified'
+    ? t('dictionaries.catalog.replaceModifiedDescription', { name: current.metadata.name, version: release.releaseVersion })
+    : t('dictionaries.catalog.replaceLocalDescription', { name: current?.metadata.name ?? release.name, version: release.releaseVersion })
+})
 
 watch([query, pageSize], () => { page.value = 1 })
+watch(pageCount, count => { page.value = Math.min(page.value, count) })
+watch(catalogPageSize, () => {
+  if (mode.value === 'catalog') requestCatalog(true)
+})
+watch(() => props.presentationLocale, () => {
+  if (mode.value === 'catalog') requestCatalog(true)
+})
+
+function setMode(next: 'local' | 'catalog') {
+  mode.value = next
+  if (next === 'catalog') requestCatalog(true)
+}
 
 function toggleSelection(id: string) {
   const next = new Set(selected.value)
@@ -105,24 +151,139 @@ function confirmRemoval() {
   selected.value = new Set([...selected.value].filter(id => !ids.includes(id)))
   pendingRemoval.value = []
 }
+
+function requestCatalog(reset = false) {
+  if (reset) {
+    catalogPageNumber.value = 1
+    catalogCursors.value = [null]
+  }
+  emit('queryCatalog', {
+    text: catalogQuery.value.trim(),
+    sourceLocale: null,
+    targetLocale: null,
+    cursor: catalogCursors.value[catalogCursors.value.length - 1] ?? null,
+    pageSize: catalogPageSize.value,
+    requestedPresentationLocale: props.presentationLocale,
+  })
+}
+
+function previousCatalogPage() {
+  if (catalogPageNumber.value <= 1) return
+  catalogCursors.value = catalogCursors.value.slice(0, -1)
+  catalogPageNumber.value -= 1
+  requestCatalog()
+}
+
+function nextCatalogPage() {
+  if (!props.catalogPage.nextCursor) return
+  catalogCursors.value = [...catalogCursors.value, props.catalogPage.nextCursor]
+  catalogPageNumber.value += 1
+  requestCatalog()
+}
+
+function localDictionary(dictionaryId: string) {
+  return props.items.find(item => item.metadata.id === dictionaryId)
+}
+
+function installationLabel(item: DictionarySummary) {
+  return t(`dictionaries.installation.${item.installation.state}`)
+}
+
+function installationColor(item: DictionarySummary) {
+  if (item.installation.state === 'verified') return 'success' as const
+  if (item.installation.state === 'modified' || item.installation.state === 'missing') return 'warning' as const
+  return 'neutral' as const
+}
+
+function installationDetail(item: DictionarySummary) {
+  if (item.installation.verifiedPublisher) return item.installation.verifiedPublisher
+  return t('dictionaries.installation.localOnly')
+}
+
+function installButtonLabel(release: DictionaryCatalogRelease) {
+  const current = localDictionary(release.dictionaryId)
+  if (!current) return t('dictionaries.catalog.install')
+  if (current.installation.state === 'verified'
+    && current.installation.installedRelease === release.releaseVersion) return t('dictionaries.catalog.installed')
+  return t('dictionaries.catalog.update')
+}
+
+function beginInstall(release: DictionaryCatalogRelease) {
+  const current = localDictionary(release.dictionaryId)
+  if (current && current.installation.state !== 'verified') {
+    pendingInstall.value = release
+    return
+  }
+  emitInstall(release, current ? 'replace_verified' : 'reject_existing')
+}
+
+function emitInstall(
+  release: DictionaryCatalogRelease,
+  replacement: DictionaryCatalogInstallRequest['replacement'],
+) {
+  emit('installCatalog', {
+    catalogId: release.catalogId,
+    dictionaryId: release.dictionaryId,
+    releaseVersion: release.releaseVersion,
+    replacement,
+  })
+}
+
+function confirmInstall() {
+  if (pendingInstall.value) emitInstall(pendingInstall.value, 'replace_any')
+  pendingInstall.value = null
+}
 </script>
 
 <template>
   <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="dictionary-library-title">
+    <!--
+      THESIS: 本地资产与可信目录是同一词典任务的两种明确模式，不新增一级导航或混合两套状态。
+      OWN-WORLD: 继承 Glyphshift 紧凑管理表、薄边界、近黑表面和单一 emerald 操作色。
+      STORY: 用户先识别当前模式，再搜索、检查来源状态，并创建、安装或更新词典。
+      FIRST VIEWPORT: 标题右侧是双模式切换；其下始终是一张满高搜索表和固定分页。
+      FORM: 既有 Operate 表格体系的局部扩展；本地表显示 provenance，目录表使用游标分页。
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
     <ManagementPageHeader
       title-id="dictionary-library-title"
       :title="t('dictionaries.title')"
-      :description="t('dictionaries.description')"
+      :description="mode === 'local' ? t('dictionaries.description') : t('dictionaries.catalog.description')"
       icon="i-tabler-language"
     >
       <template #actions>
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="creating = true" />
+        <div class="flex items-center gap-2">
+          <div class="flex items-center rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-0.5" role="group" :aria-label="t('dictionaries.modeLabel')">
+            <UButton
+              color="neutral"
+              :variant="mode === 'local' ? 'soft' : 'ghost'"
+              size="sm"
+              icon="i-tabler-books"
+              :aria-pressed="mode === 'local'"
+              @click="setMode('local')"
+            >
+              <span>{{ t('dictionaries.localMode') }}</span>
+              <UBadge color="neutral" variant="soft" size="sm" :label="String(items.length)" />
+            </UButton>
+            <UButton
+              color="neutral"
+              :variant="mode === 'catalog' ? 'soft' : 'ghost'"
+              size="sm"
+              icon="i-tabler-world-search"
+              :aria-pressed="mode === 'catalog'"
+              :label="t('dictionaries.catalogMode')"
+              @click="setMode('catalog')"
+            />
+          </div>
+          <UButton v-if="mode === 'local'" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="creating = true" />
+        </div>
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
+    <UAlert v-if="mode === 'local' && messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
 
     <ManagementTableFrame
+      v-if="mode === 'local'"
       v-model:query="query"
       v-model:page="page"
       v-model:page-size="pageSize"
@@ -151,19 +312,19 @@ function confirmRemoval() {
           </UButton>
         </template>
         <template #languages-cell="{ row }">
-          <span>{{ row.original.metadata.sourceLocale }}</span>
-          <UIcon name="i-tabler-arrow-right" class="mx-1 align-[-2px] text-[var(--text-muted)]" />
-          <span>{{ row.original.metadata.targetLocale }}</span>
+          <div class="flex items-center whitespace-nowrap">
+            <span>{{ row.original.metadata.sourceLocale }}</span>
+            <UIcon name="i-tabler-arrow-right" class="mx-1 shrink-0 text-[var(--text-muted)]" />
+            <span>{{ row.original.metadata.targetLocale }}</span>
+          </div>
         </template>
         <template #release-cell="{ row }">
           <div>v{{ row.original.metadata.releaseVersion }}</div>
           <div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('dictionaries.localRevision', { revision: row.original.revision }) }}</div>
         </template>
-        <template #tags-cell="{ row }">
-          <div class="flex flex-wrap gap-1">
-            <UBadge v-for="tag in row.original.metadata.tags.slice(0, 3)" :key="tag" color="neutral" variant="soft" size="sm" :label="tag" />
-            <span v-if="!row.original.metadata.tags.length" class="text-[var(--text-muted)]">—</span>
-          </div>
+        <template #installation-cell="{ row }">
+          <UBadge :color="installationColor(row.original)" variant="soft" size="sm" :label="installationLabel(row.original)" />
+          <div class="mt-1 max-w-36 truncate text-[9px] text-[var(--text-muted)]">{{ installationDetail(row.original) }}</div>
         </template>
         <template #rules-cell="{ row }">{{ row.original.entryCount }}</template>
         <template #actions-cell="{ row }">
@@ -174,6 +335,78 @@ function confirmRemoval() {
         </template>
         <template #empty>
           <UEmpty icon="i-tabler-language" :title="items.length ? t('dictionaries.noMatch') : t('dictionaries.empty')" :description="items.length ? t('dictionaries.adjustSearch') : t('dictionaries.emptyDescription')" />
+        </template>
+      </UTable>
+    </ManagementTableFrame>
+
+    <ManagementTableFrame
+      v-else
+      v-model:query="catalogQuery"
+      v-model:page-size="catalogPageSize"
+      :page="catalogPageNumber"
+      :search-placeholder="t('dictionaries.catalog.searchPlaceholder')"
+      :search-label="t('dictionaries.catalog.searchLabel')"
+      :total="catalogPage.releases.length"
+      :item-label="t('dictionaries.catalog.itemLabel')"
+      pagination-mode="cursor"
+      :cursor-page="catalogPageNumber"
+      :has-next-page="Boolean(catalogPage.nextCursor)"
+      :footer-summary="t('dictionaries.catalog.pageSummary', { page: catalogPageNumber, count: catalogPage.releases.length })"
+      @search="requestCatalog(true)"
+      @previous-page="previousCatalogPage"
+      @next-page="nextCatalogPage"
+    >
+      <template #toolbar-actions>
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-search" :label="t('dictionaries.catalog.searchAction')" :loading="catalogBusy" @click="requestCatalog(true)" />
+      </template>
+
+      <UTable :data="catalogPage.releases" :columns="catalogColumns" :loading="catalogBusy" sticky :ui="{ base: 'min-w-[860px]' }">
+        <template #dictionary-cell="{ row }">
+          <div class="min-w-0">
+            <div class="truncate font-semibold text-[var(--text)]">{{ row.original.name }}</div>
+            <div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.summary || t('common.noDescription') }}</div>
+          </div>
+        </template>
+        <template #languages-cell="{ row }">
+          <div class="flex items-center whitespace-nowrap">
+            <span>{{ row.original.sourceLocale }}</span>
+            <UIcon name="i-tabler-arrow-right" class="mx-1 shrink-0 text-[var(--text-muted)]" />
+            <span>{{ row.original.targetLocale }}</span>
+          </div>
+        </template>
+        <template #release-cell="{ row }">
+          <div>v{{ row.original.releaseVersion }}</div>
+          <div class="mt-0.5 max-w-36 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.publisherIdentity }}</div>
+        </template>
+        <template #tags-cell="{ row }">
+          <div class="flex flex-wrap gap-1">
+            <UBadge v-for="tag in row.original.tags.slice(0, 3)" :key="tag" color="neutral" variant="soft" size="sm" :label="tag" />
+            <span v-if="!row.original.tags.length" class="text-[var(--text-muted)]">—</span>
+          </div>
+        </template>
+        <template #actions-cell="{ row }">
+          <div class="flex justify-center">
+            <UButton
+              color="primary"
+              :variant="localDictionary(row.original.dictionaryId) ? 'soft' : 'solid'"
+              size="xs"
+              :icon="localDictionary(row.original.dictionaryId) ? 'i-tabler-refresh' : 'i-tabler-download'"
+              :label="installButtonLabel(row.original)"
+              :disabled="catalogBusy || (localDictionary(row.original.dictionaryId)?.installation.state === 'verified' && localDictionary(row.original.dictionaryId)?.installation.installedRelease === row.original.releaseVersion)"
+              @click="beginInstall(row.original)"
+            />
+          </div>
+        </template>
+        <template #empty>
+          <UEmpty
+            :icon="catalogError ? 'i-tabler-cloud-off' : 'i-tabler-world-search'"
+            :title="catalogError ? t('dictionaries.catalog.unavailable') : t('dictionaries.catalog.empty')"
+            :description="catalogError || t('dictionaries.catalog.emptyDescription')"
+          >
+            <template #actions>
+              <UButton v-if="catalogError" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('common.retry')" :loading="catalogBusy" @click="requestCatalog()" />
+            </template>
+          </UEmpty>
         </template>
       </UTable>
     </ManagementTableFrame>
@@ -209,6 +442,17 @@ function confirmRemoval() {
       :busy="busy"
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"
+    />
+
+    <ConfirmDialog
+      :open="Boolean(pendingInstall)"
+      :title="t('dictionaries.catalog.replaceTitle')"
+      :description="replacementDescription"
+      :busy="catalogBusy"
+      confirm-color="warning"
+      :confirm-label="t('dictionaries.catalog.replaceConfirm')"
+      @update:open="$event || (pendingInstall = null)"
+      @confirm="confirmInstall"
     />
   </section>
 </template>

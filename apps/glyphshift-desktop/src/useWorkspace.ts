@@ -8,6 +8,10 @@ import {
   type DesktopModel,
   type DesktopSnapshot,
   type DictionaryDetail,
+  type DictionaryCatalogInstallRequest,
+  type DictionaryCatalogPage,
+  type DictionaryCatalogQueryRequest,
+  type DictionaryInstallationSummary,
   type DictionaryMetadata,
   type SoftwareRecord,
   type WorkflowCommandResult,
@@ -28,6 +32,25 @@ function errorMessage(error: unknown) {
   return translateCommandError(error)
 }
 
+function unmanagedInstallation(): DictionaryInstallationSummary {
+  return {
+    state: 'unmanaged',
+    installedRelease: null,
+    verifiedPublisher: null,
+    updateRelease: null,
+  }
+}
+
+function normalizeDictionaryInstallations(model: DesktopModel): DesktopModel {
+  return {
+    ...model,
+    dictionaries: model.dictionaries.map(dictionary => ({
+      ...dictionary,
+      installation: dictionary.installation ?? unmanagedInstallation(),
+    })),
+  }
+}
+
 function readModel(): DesktopModel {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return emptyModel()
@@ -37,7 +60,7 @@ function readModel(): DesktopModel {
       || !Array.isArray(value.workflows)
       || !Array.isArray(value.dictionaries)
       || !Array.isArray(value.adapters)) return emptyModel()
-    return { ...emptyModel(), ...value }
+    return normalizeDictionaryInstallations({ ...emptyModel(), ...value })
   }
   catch {
     return emptyModel()
@@ -51,6 +74,9 @@ const refreshing = ref(false)
 const messages = ref<Record<string, string>>({})
 const dictionaryDetail = ref<DictionaryDetail | null>(null)
 const workflowDetail = ref<WorkflowDetail | null>(null)
+const dictionaryCatalog = ref<DictionaryCatalogPage>({ releases: [], nextCursor: null })
+const dictionaryCatalogBusy = ref(false)
+const dictionaryCatalogError = ref('')
 
 watch(model, (value) => {
   if (!hasDesktopRuntime()) localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
@@ -60,7 +86,7 @@ export function useWorkspace() {
   const activationIds = computed(() => new Set(model.value.activations.map(item => item.workflowId)))
 
   function applyDesktopSnapshot(snapshot: DesktopSnapshot) {
-    model.value = { ...model.value, ...snapshot }
+    model.value = normalizeDictionaryInstallations({ ...model.value, ...snapshot })
   }
 
   function setMessage(id: string, message: string) {
@@ -359,6 +385,7 @@ export function useWorkspace() {
           metadata: detail.metadata,
           revision: 1,
           entryCount: 0,
+          installation: unmanagedInstallation(),
         }].sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
       }
       return true
@@ -368,6 +395,52 @@ export function useWorkspace() {
       return false
     }
     finally {
+      workspaceBusy.value = false
+    }
+  }
+
+  async function queryDictionaryCatalog(request: DictionaryCatalogQueryRequest) {
+    if (dictionaryCatalogBusy.value) return false
+    dictionaryCatalogBusy.value = true
+    dictionaryCatalogError.value = ''
+    try {
+      if (!hasDesktopRuntime()) {
+        dictionaryCatalog.value = { releases: [], nextCursor: null }
+        dictionaryCatalogError.value = i18n.global.t('errors.dictionary.catalogUnavailable')
+        return false
+      }
+      dictionaryCatalog.value = await invoke<DictionaryCatalogPage>('desktop_query_dictionary_catalog', { request })
+      return true
+    }
+    catch (error) {
+      dictionaryCatalog.value = { releases: [], nextCursor: null }
+      dictionaryCatalogError.value = errorMessage(error)
+      return false
+    }
+    finally {
+      dictionaryCatalogBusy.value = false
+    }
+  }
+
+  async function installDictionaryRelease(request: DictionaryCatalogInstallRequest) {
+    if (dictionaryCatalogBusy.value || workspaceBusy.value) return false
+    dictionaryCatalogBusy.value = true
+    workspaceBusy.value = true
+    dictionaryCatalogError.value = ''
+    try {
+      if (!hasDesktopRuntime()) {
+        dictionaryCatalogError.value = i18n.global.t('errors.dictionary.catalogUnavailable')
+        return false
+      }
+      applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_install_dictionary_release', { request }))
+      return true
+    }
+    catch (error) {
+      dictionaryCatalogError.value = errorMessage(error)
+      return false
+    }
+    finally {
+      dictionaryCatalogBusy.value = false
       workspaceBusy.value = false
     }
   }
@@ -406,6 +479,7 @@ export function useWorkspace() {
       metadata: next.metadata,
       revision: next.revision,
       entryCount: next.entries.length,
+      installation: item.installation ?? unmanagedInstallation(),
     } : item)
     return model.value
   }
@@ -522,6 +596,9 @@ export function useWorkspace() {
     activationIds,
     dictionaryDetail,
     workflowDetail,
+    dictionaryCatalog,
+    dictionaryCatalogBusy,
+    dictionaryCatalogError,
     softwareBusy,
     workspaceBusy,
     refreshing,
@@ -538,6 +615,8 @@ export function useWorkspace() {
     saveWorkflow,
     saveDictionary,
     createDictionary,
+    queryDictionaryCatalog,
+    installDictionaryRelease,
     removeDictionaries,
     selectSoftware,
     addSoftware,

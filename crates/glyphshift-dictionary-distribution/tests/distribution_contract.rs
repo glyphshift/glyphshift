@@ -1,9 +1,10 @@
 use glyphshift_dictionary_distribution::{
     ArtifactPresentation, ArtifactStatement, CatalogQuery, CatalogRelease,
     DictionaryArtifactDescriptor, DictionaryDistribution, DictionaryDistributionError,
-    DictionaryInstallationState, DictionaryReleaseKey, DictionaryReplacementPolicy,
-    FixedInstallationClock, InMemoryDictionaryCatalog, InMemoryDictionaryInstallStore,
-    InMemoryTrustVerifier, InstallRequest, PublisherIdentity, Sha256Digest, SignatureEnvelope,
+    DictionaryInstallStore, DictionaryInstallationState, DictionaryReleaseKey,
+    DictionaryReplacementPolicy, FileDictionaryInstallStore, FixedInstallationClock,
+    InMemoryDictionaryCatalog, InMemoryDictionaryInstallStore, InMemoryTrustVerifier,
+    InstallRequest, PublisherIdentity, Sha256Digest, SignatureEnvelope,
 };
 use glyphshift_dictionary_package::{DictionaryCreate, DictionaryEntryCreate, DictionaryPackage};
 use sha2::{Digest, Sha256};
@@ -270,6 +271,61 @@ fn modified_installation_requires_an_explicit_replacement_policy() {
             .expect("active payload"),
         Some(next_payload)
     );
+}
+
+#[test]
+fn file_install_store_persists_verified_provenance_and_active_content() {
+    let directory = tempfile::tempdir().expect("temporary installation root");
+    let payload = dictionary_payload("dictionary.ui", "1.2.0");
+    let release = release(&payload, [PRIMARY_URL], "publisher.example");
+    let mut distribution = DictionaryDistribution::new(
+        Box::new(
+            InMemoryDictionaryCatalog::new()
+                .with_release(release.clone())
+                .with_artifact(PRIMARY_URL, payload.clone()),
+        ),
+        Box::new(trusted_verifier(&release, "publisher.example")),
+        Box::new(FileDictionaryInstallStore::open(directory.path()).expect("open file store")),
+        Box::new(FixedInstallationClock::new(1_700_000_000_000)),
+    );
+
+    distribution
+        .install(&InstallRequest::new(
+            release.key().clone(),
+            DictionaryReplacementPolicy::RejectExisting,
+        ))
+        .expect("install verified release");
+    drop(distribution);
+
+    let mut reopened =
+        FileDictionaryInstallStore::open(directory.path()).expect("reopen file store");
+    let views = reopened.installations().expect("installation views");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].state(), DictionaryInstallationState::Verified);
+    assert_eq!(
+        views[0]
+            .source()
+            .expect("installation source")
+            .release()
+            .release_version(),
+        "1.2.0"
+    );
+    assert_eq!(
+        std::fs::read(directory.path().join("dictionaries/dictionary.ui.json"))
+            .expect("active dictionary"),
+        payload
+    );
+    assert!(directory
+        .path()
+        .join("dictionary-installations/dictionary.ui.json")
+        .is_file());
+    assert!(directory
+        .path()
+        .join(format!(
+            "dictionary-artifacts/sha256/{}.json",
+            release.artifact().digest().to_hex()
+        ))
+        .is_file());
 }
 
 fn distribution(

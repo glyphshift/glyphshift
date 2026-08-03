@@ -200,6 +200,7 @@ impl ProbeDictionarySnapshot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProbeQuery {
     search: Box<str>,
+    adapter_ids: Vec<Box<str>>,
     page: usize,
     page_size: usize,
 }
@@ -215,9 +216,25 @@ impl ProbeQuery {
         }
         Ok(Self {
             search: search.into(),
+            adapter_ids: Vec::new(),
             page,
             page_size,
         })
+    }
+
+    pub fn with_adapter_ids(
+        mut self,
+        adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Result<Self, ProbeRunError> {
+        let mut adapter_ids = adapter_ids.into_iter().map(Into::into).collect::<Vec<_>>();
+        if adapter_ids.iter().any(|id| !safe_identifier(id))
+            || adapter_ids.iter().collect::<BTreeSet<_>>().len() != adapter_ids.len()
+        {
+            return Err(ProbeRunError::InvalidInput);
+        }
+        adapter_ids.sort();
+        self.adapter_ids = adapter_ids;
+        Ok(self)
     }
 }
 
@@ -418,18 +435,32 @@ impl ProbeRunStore {
         dictionary: &ProbeDictionarySnapshot,
     ) -> Result<ProbeEntryPage, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
+        if query
+            .adapter_ids
+            .iter()
+            .any(|id| !document.summary.adapter_ids.contains(id))
+        {
+            return Err(ProbeRunError::InvalidInput);
+        }
         let needle = query.search.trim().to_lowercase();
+        let adapter_filter = query.adapter_ids.iter().collect::<BTreeSet<_>>();
         let mut rows = self
             .combined_rows(&document, dictionary)?
             .into_iter()
             .filter(|row| {
-                needle.is_empty()
+                let matches_adapter = adapter_filter.is_empty()
+                    || row
+                        .adapter_ids
+                        .iter()
+                        .any(|adapter| adapter_filter.contains(adapter));
+                let matches_search = needle.is_empty()
                     || row.source.to_lowercase().contains(&needle)
                     || row.translation.to_lowercase().contains(&needle)
                     || row
                         .adapter_ids
                         .iter()
-                        .any(|adapter| adapter.to_lowercase().contains(&needle))
+                        .any(|adapter| adapter.to_lowercase().contains(&needle));
+                matches_adapter && matches_search
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| {
@@ -862,6 +893,19 @@ mod tests {
     fn run_recovers_interrupted_state_and_ignore_keeps_dictionary_unchanged() {
         let (root, mut store) = run_store();
         let summary = create_run(&mut store);
+        let paused_summary = store
+            .create(
+                ProbeRunCreate::new(
+                    "probe-paused",
+                    "Paused probe",
+                    "software-two",
+                    "dictionary-two",
+                    ["windows.gdi.text-out"],
+                    false,
+                )
+                .expect("paused probe create"),
+            )
+            .expect("create paused run");
         let sink = FileCaptureSink::start(
             store
                 .capture_configuration(summary.id(), 10)
@@ -873,6 +917,9 @@ mod tests {
         store
             .set_status(summary.id(), ProbeRunStatus::Running)
             .expect("mark running");
+        store
+            .set_status(paused_summary.id(), ProbeRunStatus::Paused)
+            .expect("mark paused");
         store
             .set_ignored(summary.id(), &[Box::<str>::from("Open")], true)
             .expect("ignore observed source");
@@ -894,6 +941,10 @@ mod tests {
         let mut reopened = ProbeRunStore::open(root.path()).expect("reopen store");
         let recovered = reopened.summary(summary.id()).expect("summary");
         assert_eq!(recovered.status(), ProbeRunStatus::Interrupted);
+        let recovered_paused = reopened
+            .summary(paused_summary.id())
+            .expect("paused summary");
+        assert_eq!(recovered_paused.status(), ProbeRunStatus::Interrupted);
         let page = reopened
             .query_entries(
                 summary.id(),
@@ -903,5 +954,100 @@ mod tests {
             .expect("joined page");
         assert_eq!(page.rows[0].state, ProbeEntryState::Ignored);
         assert_eq!(page.rows[0].translation.as_ref(), "打开");
+    }
+
+    #[test]
+    fn query_filters_joined_rows_by_run_adapter_without_changing_full_exports() {
+        let (_root, mut store) = run_store();
+        let summary = store
+            .create(
+                ProbeRunCreate::new(
+                    "probe-filter",
+                    "Filter probe",
+                    "software-one",
+                    "dictionary-one",
+                    ["synthetic.adapter-one", "synthetic.adapter-two"],
+                    false,
+                )
+                .expect("probe create"),
+            )
+            .expect("create run");
+        let sink = FileCaptureSink::start(
+            store
+                .capture_configuration(summary.id(), 100)
+                .expect("capture config"),
+        )
+        .expect("capture sink");
+        sink.observe("synthetic.adapter-one", "Open");
+        sink.observe("synthetic.adapter-one", "Open");
+        sink.observe("synthetic.adapter-two", "Open");
+        sink.observe("synthetic.adapter-two", "Save");
+        sink.finish().expect("finish capture");
+        let dictionary = ProbeDictionarySnapshot::new(
+            2,
+            [
+                ProbeDictionaryEntry::new("Open", "打开"),
+                ProbeDictionaryEntry::new("Imported", "已导入"),
+            ],
+        )
+        .expect("dictionary snapshot");
+        let dictionary_before = dictionary.clone();
+        let observations_before =
+            CaptureCatalog::read_current(&store.observation_path(summary.id()))
+                .expect("observation index before filtering");
+
+        let gdi_page = store
+            .query_entries(
+                summary.id(),
+                &ProbeQuery::new("", 1, 20)
+                    .expect("query")
+                    .with_adapter_ids(["synthetic.adapter-one"])
+                    .expect("adapter filter"),
+                &dictionary,
+            )
+            .expect("filtered page");
+        assert_eq!(gdi_page.total, 1);
+        assert_eq!(gdi_page.rows[0].source.as_ref(), "Open");
+        assert_eq!(gdi_page.rows[0].count, 3);
+
+        let gdiplus_page = store
+            .query_entries(
+                summary.id(),
+                &ProbeQuery::new("", 1, 20)
+                    .expect("query")
+                    .with_adapter_ids(["synthetic.adapter-two"])
+                    .expect("adapter filter"),
+                &dictionary,
+            )
+            .expect("filtered page");
+        assert_eq!(gdiplus_page.total, 2);
+        assert!(gdiplus_page
+            .rows
+            .iter()
+            .all(|row| row.source.as_ref() != "Imported"));
+
+        let unknown_filter = ProbeQuery::new("", 1, 20)
+            .expect("query")
+            .with_adapter_ids(["synthetic.adapter-unknown"])
+            .expect("well-formed unknown adapter");
+        assert_eq!(
+            store.query_entries(summary.id(), &unknown_filter, &dictionary),
+            Err(ProbeRunError::InvalidInput)
+        );
+
+        let exported = String::from_utf8(
+            store
+                .export(summary.id(), ProbeExportFormat::EntriesCsv, &dictionary)
+                .expect("full joined export"),
+        )
+        .expect("utf-8 export");
+        assert!(exported.contains("Imported"));
+        assert!(exported.contains("Save"));
+        assert_eq!(dictionary, dictionary_before);
+        assert_eq!(
+            CaptureCatalog::read_current(&store.observation_path(summary.id()))
+                .expect("observation index after filtering"),
+            observations_before
+        );
     }
 }

@@ -733,6 +733,17 @@ pub struct DictionaryInstallationSource {
     payload_revision: u64,
 }
 
+pub(crate) struct DictionaryInstallationSourceParts {
+    pub release: DictionaryReleaseKey,
+    pub media_type: Box<str>,
+    pub size: u64,
+    pub digest: Sha256Digest,
+    pub publisher_identity: PublisherIdentity,
+    pub signature: SignatureEnvelope,
+    pub installed_at_unix_ms: u64,
+    pub payload_revision: u64,
+}
+
 impl DictionaryInstallationSource {
     pub(crate) fn from_verified(artifact: &VerifiedDictionaryArtifact) -> Self {
         Self {
@@ -745,6 +756,27 @@ impl DictionaryInstallationSource {
             installed_at_unix_ms: artifact.installed_at_unix_ms,
             payload_revision: artifact.package.revision(),
         }
+    }
+
+    pub(crate) fn restore(
+        parts: DictionaryInstallationSourceParts,
+    ) -> Result<Self, CatalogContractError> {
+        if parts.media_type.as_ref() != DICTIONARY_MEDIA_TYPE
+            || parts.size == 0
+            || parts.payload_revision == 0
+        {
+            return Err(CatalogContractError::InvalidArtifact);
+        }
+        Ok(Self {
+            release: parts.release,
+            media_type: parts.media_type,
+            size: parts.size,
+            digest: parts.digest,
+            publisher_identity: parts.publisher_identity,
+            signature: parts.signature,
+            installed_at_unix_ms: parts.installed_at_unix_ms,
+            payload_revision: parts.payload_revision,
+        })
     }
 
     #[must_use]

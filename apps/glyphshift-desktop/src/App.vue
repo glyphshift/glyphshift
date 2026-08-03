@@ -16,7 +16,7 @@ import type { WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
-const desktopApiVersion = 13
+const desktopApiVersion = 14
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -118,9 +118,15 @@ onMounted(() => {
         :items="workspace.model.value.dictionaries"
         :busy="workspace.workspaceBusy.value"
         :messages="workspace.messages.value"
+        :catalog-page="workspace.dictionaryCatalog.value"
+        :catalog-busy="workspace.dictionaryCatalogBusy.value"
+        :catalog-error="workspace.dictionaryCatalogError.value"
+        :presentation-locale="appSettings.effectiveLocale.value"
         @open="openDictionary"
         @create="workspace.createDictionary"
         @remove="workspace.removeDictionaries"
+        @query-catalog="workspace.queryDictionaryCatalog"
+        @install-catalog="workspace.installDictionaryRelease"
       />
       <DictionaryProof
         v-else-if="view === 'dictionary-editor' && workspace.dictionaryDetail.value"

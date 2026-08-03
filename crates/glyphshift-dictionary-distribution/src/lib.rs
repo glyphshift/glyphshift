@@ -1,10 +1,12 @@
 //! Verified discovery and installation of portable Dictionary packages.
 
+mod file_store;
 mod memory;
 mod model;
 mod ports;
 mod service;
 
+pub use file_store::FileDictionaryInstallStore;
 pub use memory::{
     FixedInstallationClock, InMemoryDictionaryCatalog, InMemoryDictionaryInstallStore,
     InMemoryTrustVerifier,
