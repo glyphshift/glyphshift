@@ -16,7 +16,7 @@ import type { WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
-const desktopApiVersion = 14
+const desktopApiVersion = 15
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -124,6 +124,8 @@ onMounted(() => {
         :presentation-locale="appSettings.effectiveLocale.value"
         @open="openDictionary"
         @create="workspace.createDictionary"
+        @import-dictionary="workspace.importDictionary"
+        @export-dictionary="workspace.exportDictionary"
         @remove="workspace.removeDictionaries"
         @query-catalog="workspace.queryDictionaryCatalog"
         @install-catalog="workspace.installDictionaryRelease"

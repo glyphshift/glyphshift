@@ -43,6 +43,32 @@ fn distribution_query_selects_parent_then_declared_default_presentation() {
 }
 
 #[test]
+fn distribution_query_matches_presentation_tags_and_filters_one_exact_tag() {
+    let payload = dictionary_payload("dictionary.ui", "1.2.0");
+    let release = release(&payload, [PRIMARY_URL], "publisher.example");
+    let mut distribution = distribution(
+        InMemoryDictionaryCatalog::new().with_release(release),
+        InMemoryTrustVerifier::new(),
+        InMemoryDictionaryInstallStore::new(),
+    );
+
+    let text_match = distribution
+        .query(&CatalogQuery::new("desktop"), "en-US")
+        .expect("query tag as text");
+    assert_eq!(text_match.releases().len(), 1);
+
+    let exact_match = distribution
+        .query(&CatalogQuery::new("").with_tag("menus"), "en-US")
+        .expect("filter exact tag");
+    assert_eq!(exact_match.releases().len(), 1);
+
+    let no_match = distribution
+        .query(&CatalogQuery::new("").with_tag("effects"), "en-US")
+        .expect("filter missing tag");
+    assert!(no_match.releases().is_empty());
+}
+
+#[test]
 fn distribution_install_verifies_and_is_idempotent_with_mirror_fallback() {
     let payload = dictionary_payload("dictionary.ui", "1.2.0");
     let release = release(
@@ -383,9 +409,13 @@ fn release(
         "en-US",
         vec![
             ArtifactPresentation::new("en-US", "Menu English", "menu strings")
-                .expect("English presentation"),
+                .expect("English presentation")
+                .with_tags(["menus", "desktop"])
+                .expect("English tags"),
             ArtifactPresentation::new("zh-Hans", "菜单中文", "menu strings")
-                .expect("Chinese presentation"),
+                .expect("Chinese presentation")
+                .with_tags(["菜单", "桌面"])
+                .expect("Chinese tags"),
         ],
         descriptor,
     )

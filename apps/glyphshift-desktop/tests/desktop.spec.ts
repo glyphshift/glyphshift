@@ -211,16 +211,90 @@ test('navigation keeps fonts inside workflow targets instead of a separate asset
 test('dictionary library separates local provenance from the offline catalog mode', async ({ page }) => {
   await page.getByRole('button', { name: '词典', exact: true }).click()
 
+  const localMode = page.getByRole('button', { name: /本地词典/ })
+  const catalogMode = page.getByRole('button', { name: '在线目录', exact: true })
+  await expect(localMode).toHaveAttribute('aria-pressed', 'true')
+  await expect(localMode).toHaveClass(/text-primary/)
   await expect(page.getByRole('columnheader', { name: '来源状态' })).toBeVisible()
   await expect(page.getByText('本地创建', { exact: true })).toBeVisible()
   await expect(page.getByText('未关联在线发布', { exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: '在线目录', exact: true }).click()
+  await catalogMode.click()
+  await expect(catalogMode).toHaveAttribute('aria-pressed', 'true')
+  await expect(catalogMode).toHaveClass(/text-primary/)
+  await expect(localMode).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByText('在线目录不可用', { exact: true })).toBeVisible()
   await expect(page.getByText('在线词典目录尚未配置或暂时不可用，本地词典不受影响。')).toBeVisible()
   await expect(page.getByText('第 1 页，本页 0 个版本')).toBeVisible()
   await expect(page.getByRole('button', { name: '新建词典' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+})
+
+test('dictionary library imports and exports one portable JSON file', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.dictionaries[0].installation = {
+    state: 'unmanaged', installedRelease: null, verifiedPublisher: null, updateRelease: null,
+  }
+  const importedSnapshot = JSON.parse(JSON.stringify(snapshot))
+  importedSnapshot.dictionaries.push({
+    metadata: {
+      ...snapshot.dictionaries[0].metadata,
+      id: 'dictionary-imported',
+      name: '导入词典',
+      description: '标准 Dictionary /2 文件',
+      releaseVersion: '1.0.0',
+    },
+    revision: 1,
+    entryCount: 1,
+    installation: {
+      state: 'unmanaged', installedRelease: null, verifiedPublisher: null, updateRelease: null,
+    },
+  })
+  await page.addInitScript(({ current, imported }) => {
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_snapshot') return current
+        if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
+        if (command === 'desktop_import_dictionary') {
+          ;(window as unknown as { __dictionaryImport?: unknown }).__dictionaryImport = args
+          return imported
+        }
+        if (command === 'plugin:dialog|save') {
+          ;(window as unknown as { __dictionarySaveDialog?: unknown }).__dictionarySaveDialog = args
+          return 'X:\\SyntheticFixtures\\dictionary-imported.published.json'
+        }
+        if (command === 'desktop_export_dictionary') {
+          ;(window as unknown as { __dictionaryExport?: unknown }).__dictionaryExport = args
+          return null
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { current: snapshot, imported: importedSnapshot })
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '导入', exact: true }).click()
+  await expect(page.getByText('导入词典', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __dictionaryImport?: { inputPath?: string } }).__dictionaryImport
+  ))).toEqual(expect.objectContaining({ inputPath: 'X:\\SyntheticFixtures\\dictionary-imported.json' }))
+
+  await page.getByRole('button', { name: '导出发布文件 导入词典' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __dictionaryExport?: { dictionaryId?: string, outputPath?: string } }).__dictionaryExport
+  ))).toEqual(expect.objectContaining({
+    dictionaryId: 'dictionary-imported',
+    outputPath: 'X:\\SyntheticFixtures\\dictionary-imported.published.json',
+  }))
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __dictionarySaveDialog?: { options?: { defaultPath?: string } } }).__dictionarySaveDialog
+  ))).toEqual(expect.objectContaining({
+    options: expect.objectContaining({ defaultPath: 'dictionary-imported.json' }),
+  }))
 })
 
 test('configured dictionary catalog queries and installs through the desktop seam', async ({ page }) => {
@@ -246,7 +320,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -274,6 +348,14 @@ test('configured dictionary catalog queries and installs through the desktop sea
   await page.getByRole('button', { name: '在线目录', exact: true }).click()
   await expect(page.getByText('目录词典', { exact: true })).toBeVisible()
   await expect(page.getByText('publisher.example', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '按标签筛选 菜单' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __catalogQuery?: { tag?: string | null } }).__catalogQuery
+  ))).toEqual(expect.objectContaining({ tag: '菜单' }))
+  await page.getByRole('button', { name: '清除标签筛选 菜单' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __catalogQuery?: { tag?: string | null } }).__catalogQuery
+  ))).toEqual(expect.objectContaining({ tag: null }))
   await page.getByRole('button', { name: '安装', exact: true }).click()
   await expect(page.getByRole('button', { name: '已安装', exact: true })).toBeDisabled()
   await expect.poll(() => page.evaluate(() => (
@@ -294,7 +376,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -338,7 +420,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale
@@ -386,7 +468,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -468,7 +550,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -594,7 +676,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 14 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary

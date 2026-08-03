@@ -38,7 +38,10 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **词典：** 同一页面以紧凑模式切换本地 Library 与在线 Catalog，不新增一级导航。本地表展示
   名称、说明、语言、版本、规则数及 verified/modified/unmanaged 来源状态；低频 metadata 进入
   词典设置 Modal。Catalog 表展示本地化 presentation、语言、版本、发布者与标签，并使用后端
-  cursor 分页。详情页主表只展示原文和译文，不出现字体、Hook、Adapter 或内部匹配键。
+  cursor 分页；现有 metadata tags 同时作为可点击的精确筛选条件，不另建重复的分类模型。本地与
+  Catalog 当前模式使用明确的主色选中态。标准 Dictionary `/2` JSON 通过本地页头导入、逐行导出，
+  不增加发布中心或向导。
+  详情页主表只展示原文和译文，不出现字体、Hook、Adapter 或内部匹配键。
 - **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组 Adapter；详情用一张
   联合表展示原文、译文、状态与技术证据，译文编辑直接修改绑定词典。
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体

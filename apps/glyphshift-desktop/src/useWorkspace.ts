@@ -399,6 +399,40 @@ export function useWorkspace() {
     }
   }
 
+  async function importDictionary(inputPath: string) {
+    if (workspaceBusy.value || !hasDesktopRuntime()) return false
+    workspaceBusy.value = true
+    setMessage('dictionaries', '')
+    try {
+      applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_import_dictionary', { inputPath }))
+      return true
+    }
+    catch (error) {
+      setMessage('dictionaries', errorMessage(error))
+      return false
+    }
+    finally {
+      workspaceBusy.value = false
+    }
+  }
+
+  async function exportDictionary(dictionaryId: string, outputPath: string) {
+    if (workspaceBusy.value || !hasDesktopRuntime()) return false
+    workspaceBusy.value = true
+    setMessage('dictionaries', '')
+    try {
+      await invoke('desktop_export_dictionary', { dictionaryId, outputPath })
+      return true
+    }
+    catch (error) {
+      setMessage('dictionaries', errorMessage(error))
+      return false
+    }
+    finally {
+      workspaceBusy.value = false
+    }
+  }
+
   async function queryDictionaryCatalog(request: DictionaryCatalogQueryRequest) {
     if (dictionaryCatalogBusy.value) return false
     dictionaryCatalogBusy.value = true
@@ -615,6 +649,8 @@ export function useWorkspace() {
     saveWorkflow,
     saveDictionary,
     createDictionary,
+    importDictionary,
+    exportDictionary,
     queryDictionaryCatalog,
     installDictionaryRelease,
     removeDictionaries,

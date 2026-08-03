@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
 import type {
@@ -23,6 +24,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   open: [id: string]
   create: [metadata: Omit<DictionaryMetadata, 'id'>]
+  importDictionary: [inputPath: string]
+  exportDictionary: [dictionaryId: string, outputPath: string]
   remove: [ids: string[]]
   queryCatalog: [request: DictionaryCatalogQueryRequest]
   installCatalog: [request: DictionaryCatalogInstallRequest]
@@ -38,6 +41,7 @@ const creating = ref(false)
 const pendingRemoval = ref<DictionarySummary[]>([])
 const pendingInstall = ref<DictionaryCatalogRelease | null>(null)
 const catalogQuery = ref('')
+const catalogTag = ref('')
 const catalogPageNumber = ref(1)
 const catalogPageSize = ref(20)
 const catalogCursors = ref<(string | null)[]>([null])
@@ -68,7 +72,7 @@ const tableColumns = computed<TableColumn<DictionarySummary>[]>(() => [
   { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } },
   { id: 'installation', header: t('dictionaries.columns.installation'), meta: { class: { th: 'w-40', td: 'w-40' } } },
   { id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
-  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
 ])
 const catalogColumns = computed<TableColumn<DictionaryCatalogRelease>[]>(() => [
   { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[36%]', td: 'w-[36%]' } } },
@@ -161,10 +165,23 @@ function requestCatalog(reset = false) {
     text: catalogQuery.value.trim(),
     sourceLocale: null,
     targetLocale: null,
+    tag: catalogTag.value || null,
     cursor: catalogCursors.value[catalogCursors.value.length - 1] ?? null,
     pageSize: catalogPageSize.value,
     requestedPresentationLocale: props.presentationLocale,
   })
+}
+
+function filterCatalogByTag(tag: string) {
+  if (catalogTag.value === tag) return
+  catalogTag.value = tag
+  requestCatalog(true)
+}
+
+function clearCatalogTag() {
+  if (!catalogTag.value) return
+  catalogTag.value = ''
+  requestCatalog(true)
 }
 
 function previousCatalogPage() {
@@ -233,6 +250,27 @@ function confirmInstall() {
   if (pendingInstall.value) emitInstall(pendingInstall.value, 'replace_any')
   pendingInstall.value = null
 }
+
+async function chooseImport() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  const inputPath = await open({
+    directory: false,
+    multiple: false,
+    title: t('dictionaries.importDialogTitle'),
+    filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
+  })
+  if (typeof inputPath === 'string') emit('importDictionary', inputPath)
+}
+
+async function chooseExport(item: DictionarySummary) {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  const outputPath = await save({
+    title: t('dictionaries.exportDialogTitle'),
+    defaultPath: `${item.metadata.id}.json`,
+    filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
+  })
+  if (outputPath) emit('exportDictionary', item.metadata.id, outputPath)
+}
 </script>
 
 <template>
@@ -255,7 +293,7 @@ function confirmInstall() {
         <div class="flex items-center gap-2">
           <div class="flex items-center rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] p-0.5" role="group" :aria-label="t('dictionaries.modeLabel')">
             <UButton
-              color="neutral"
+              :color="mode === 'local' ? 'primary' : 'neutral'"
               :variant="mode === 'local' ? 'soft' : 'ghost'"
               size="sm"
               icon="i-tabler-books"
@@ -263,10 +301,10 @@ function confirmInstall() {
               @click="setMode('local')"
             >
               <span>{{ t('dictionaries.localMode') }}</span>
-              <UBadge color="neutral" variant="soft" size="sm" :label="String(items.length)" />
+              <UBadge :color="mode === 'local' ? 'primary' : 'neutral'" variant="soft" size="sm" :label="String(items.length)" />
             </UButton>
             <UButton
-              color="neutral"
+              :color="mode === 'catalog' ? 'primary' : 'neutral'"
               :variant="mode === 'catalog' ? 'soft' : 'ghost'"
               size="sm"
               icon="i-tabler-world-search"
@@ -275,6 +313,7 @@ function confirmInstall() {
               @click="setMode('catalog')"
             />
           </div>
+          <UButton v-if="mode === 'local'" color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :disabled="busy" @click="chooseImport" />
           <UButton v-if="mode === 'local'" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="creating = true" />
         </div>
       </template>
@@ -330,6 +369,7 @@ function confirmInstall() {
         <template #actions-cell="{ row }">
           <div class="flex justify-center gap-0.5">
             <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.metadata.name })" @click="emit('open', row.original.metadata.id)" />
+            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-file-export" :aria-label="t('dictionaries.exportNamed', { name: row.original.metadata.name })" :disabled="busy" @click="chooseExport(row.original)" />
             <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.metadata.name })" :disabled="busy" @click="pendingRemoval = [row.original]" />
           </div>
         </template>
@@ -357,6 +397,17 @@ function confirmInstall() {
       @next-page="nextCatalogPage"
     >
       <template #toolbar-actions>
+        <UButton
+          v-if="catalogTag"
+          color="primary"
+          variant="soft"
+          size="sm"
+          icon="i-tabler-tag"
+          trailing-icon="i-tabler-x"
+          :label="t('dictionaries.catalog.activeTag', { tag: catalogTag })"
+          :aria-label="t('dictionaries.catalog.clearTag', { tag: catalogTag })"
+          @click="clearCatalogTag"
+        />
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-search" :label="t('dictionaries.catalog.searchAction')" :loading="catalogBusy" @click="requestCatalog(true)" />
       </template>
 
@@ -380,7 +431,16 @@ function confirmInstall() {
         </template>
         <template #tags-cell="{ row }">
           <div class="flex flex-wrap gap-1">
-            <UBadge v-for="tag in row.original.tags.slice(0, 3)" :key="tag" color="neutral" variant="soft" size="sm" :label="tag" />
+            <UButton
+              v-for="tag in row.original.tags.slice(0, 3)"
+              :key="tag"
+              :color="catalogTag === tag ? 'primary' : 'neutral'"
+              variant="soft"
+              size="xs"
+              :label="tag"
+              :aria-label="t('dictionaries.catalog.filterTag', { tag })"
+              @click="filterCatalogByTag(tag)"
+            />
             <span v-if="!row.original.tags.length" class="text-[var(--text-muted)]">—</span>
           </div>
         </template>

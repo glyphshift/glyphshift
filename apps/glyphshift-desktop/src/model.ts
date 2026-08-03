@@ -77,6 +77,7 @@ export interface DictionaryCatalogQueryRequest {
   text: string
   sourceLocale: string | null
   targetLocale: string | null
+  tag: string | null
   cursor: string | null
   pageSize: number
   requestedPresentationLocale: string

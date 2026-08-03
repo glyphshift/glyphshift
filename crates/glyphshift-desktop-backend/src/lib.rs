@@ -27,6 +27,7 @@ const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/3";
 const WORKFLOW_STATE_SCHEMA: &str = "glyphshift.workflow-state/1";
 const DESKTOP_STATE_SCHEMA: &str = "glyphshift.desktop-state/1";
 const DEFAULT_LOCALE: &str = "zh-CN";
+const MAX_DICTIONARY_IMPORT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendError {
@@ -1243,6 +1244,50 @@ impl DesktopBackend {
         self.dictionary(dictionary_id)?;
         fs::read(dictionary_path(&self.root, dictionary_id)?)
             .map_err(|_| BackendError::Storage("read-dictionary"))
+    }
+
+    pub fn import_dictionary_file(
+        &mut self,
+        input_path: impl AsRef<Path>,
+    ) -> Result<DictionaryView, BackendError> {
+        let input_path = input_path.as_ref();
+        if !input_path.is_absolute() {
+            return Err(BackendError::InvalidInput("dictionary-import-path"));
+        }
+        let metadata = fs::metadata(input_path)
+            .map_err(|_| BackendError::Storage("read-dictionary-import"))?;
+        if !metadata.is_file() || metadata.len() > MAX_DICTIONARY_IMPORT_BYTES {
+            return Err(BackendError::InvalidInput("dictionary-import-file"));
+        }
+        let source = fs::read_to_string(input_path)
+            .map_err(|_| BackendError::InvalidArtifact("dictionary-import-json"))?;
+        let artifact = dictionary_package::DictionaryPackage::decode_json(&source, None)
+            .map_err(|_| BackendError::InvalidArtifact("dictionary-import-json"))?;
+        if self.dictionaries.contains_key(artifact.id()) {
+            return Err(BackendError::DuplicateDictionary(artifact.id().into()));
+        }
+        let serialized = artifact
+            .encode_json()
+            .map_err(|_| BackendError::InvalidArtifact("serialize-dictionary"))?;
+        write_atomic(&dictionary_path(&self.root, artifact.id())?, &serialized)?;
+        let view = dictionary_view(&artifact);
+        self.dictionaries.insert(artifact.id().into(), view.clone());
+        self.refresh_dictionary_installations()?;
+        Ok(view)
+    }
+
+    pub fn export_dictionary_file(
+        &self,
+        dictionary_id: &str,
+        output_path: impl AsRef<Path>,
+    ) -> Result<(), BackendError> {
+        let output_path = output_path.as_ref();
+        if !output_path.is_absolute() {
+            return Err(BackendError::InvalidInput("dictionary-export-path"));
+        }
+        let source = String::from_utf8(self.dictionary_json(dictionary_id)?)
+            .map_err(|_| BackendError::InvalidArtifact("dictionary-json"))?;
+        write_atomic(output_path, &source)
     }
 
     pub fn create_dictionary(

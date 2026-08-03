@@ -64,6 +64,7 @@ pub struct CatalogQuery {
     text: Box<str>,
     source_locale: Option<Box<str>>,
     target_locale: Option<Box<str>>,
+    tag: Option<Box<str>>,
     cursor: Option<Box<str>>,
     page_size: u16,
 }
@@ -75,6 +76,7 @@ impl CatalogQuery {
             text: text.into(),
             source_locale: None,
             target_locale: None,
+            tag: None,
             cursor: None,
             page_size: 50,
         }
@@ -89,6 +91,12 @@ impl CatalogQuery {
     #[must_use]
     pub fn with_target_locale(mut self, locale: impl Into<Box<str>>) -> Self {
         self.target_locale = Some(locale.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_tag(mut self, tag: impl Into<Box<str>>) -> Self {
+        self.tag = Some(tag.into());
         self
     }
 
@@ -120,6 +128,11 @@ impl CatalogQuery {
     }
 
     #[must_use]
+    pub fn tag(&self) -> Option<&str> {
+        self.tag.as_deref()
+    }
+
+    #[must_use]
     pub fn cursor(&self) -> Option<&str> {
         self.cursor.as_deref()
     }
@@ -141,6 +154,10 @@ impl CatalogQuery {
                 .target_locale
                 .as_deref()
                 .is_some_and(|locale| !valid_locale(locale))
+            || self
+                .tag
+                .as_deref()
+                .is_some_and(|tag| tag.trim().is_empty() || tag.chars().count() > 32)
             || self
                 .cursor
                 .as_deref()

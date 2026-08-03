@@ -76,6 +76,10 @@ impl DictionaryDistributionPort for InMemoryDictionaryCatalog {
                     || release.presentations().iter().any(|presentation| {
                         presentation.name().to_ascii_lowercase().contains(&text)
                             || presentation.summary().to_ascii_lowercase().contains(&text)
+                            || presentation
+                                .tags()
+                                .iter()
+                                .any(|tag| tag.to_ascii_lowercase().contains(&text))
                     }))
                     && query
                         .source_locale()
@@ -83,6 +87,14 @@ impl DictionaryDistributionPort for InMemoryDictionaryCatalog {
                     && query
                         .target_locale()
                         .is_none_or(|locale| release.target_locale().eq_ignore_ascii_case(locale))
+                    && query.tag().is_none_or(|expected| {
+                        release.presentations().iter().any(|presentation| {
+                            presentation
+                                .tags()
+                                .iter()
+                                .any(|tag| tag.eq_ignore_ascii_case(expected))
+                        })
+                    })
             })
             .cloned()
             .collect::<Vec<_>>();

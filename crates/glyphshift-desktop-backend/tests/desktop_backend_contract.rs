@@ -134,6 +134,97 @@ fn desktop_summary_derives_verified_then_modified_without_polluting_dictionary_c
 }
 
 #[test]
+fn desktop_imports_and_exports_one_portable_dictionary_v2_file() {
+    let root = tempdir().expect("temporary product data");
+    let exchange = tempdir().expect("temporary exchange data");
+    let input = exchange.path().join("portable-dictionary.json");
+    let output = exchange.path().join("published-dictionary.json");
+    let package = glyphshift_dictionary_package::DictionaryPackage::create(
+        glyphshift_dictionary_package::DictionaryCreate::new(
+            "dictionary.portable",
+            "Portable Dictionary",
+            "en-US",
+            "zh-CN",
+        )
+        .with_release_version("1.0.0")
+        .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::new(
+            "Open", "打开",
+        )]),
+    )
+    .expect("portable dictionary package");
+    fs::write(
+        &input,
+        package.encode_json().expect("encode portable dictionary"),
+    )
+    .expect("write import fixture");
+
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    let imported = backend
+        .import_dictionary_file(&input)
+        .expect("import portable dictionary");
+    assert_eq!(imported.id(), "dictionary.portable");
+    assert_eq!(
+        backend.snapshot().dictionaries()[0].installation().state(),
+        "unmanaged"
+    );
+
+    backend
+        .export_dictionary_file("dictionary.portable", &output)
+        .expect("export portable dictionary");
+    let exported = fs::read_to_string(output).expect("read exported dictionary");
+    let reopened = glyphshift_dictionary_package::DictionaryPackage::decode_json(
+        &exported,
+        Some("dictionary.portable"),
+    )
+    .expect("export remains a valid dictionary package");
+    assert_eq!(reopened.revision(), package.revision());
+    assert_eq!(reopened.view().entries()[0].translation(), "打开");
+}
+
+#[test]
+fn desktop_rejects_invalid_or_duplicate_dictionary_imports_without_overwriting() {
+    let root = tempdir().expect("temporary product data");
+    let exchange = tempdir().expect("temporary exchange data");
+    let valid = exchange.path().join("valid.json");
+    let invalid = exchange.path().join("invalid.json");
+    let package = glyphshift_dictionary_package::DictionaryPackage::create(
+        glyphshift_dictionary_package::DictionaryCreate::new(
+            "dictionary.duplicate",
+            "Original",
+            "en-US",
+            "zh-CN",
+        ),
+    )
+    .expect("dictionary package");
+    fs::write(&valid, package.encode_json().expect("encode dictionary"))
+        .expect("write valid fixture");
+    fs::write(&invalid, "{not-json").expect("write invalid fixture");
+
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    backend
+        .import_dictionary_file(&valid)
+        .expect("first import succeeds");
+    assert!(matches!(
+        backend.import_dictionary_file(&valid),
+        Err(BackendError::DuplicateDictionary(id)) if id.as_ref() == "dictionary.duplicate"
+    ));
+    assert!(matches!(
+        backend.import_dictionary_file(&invalid),
+        Err(BackendError::InvalidArtifact("dictionary-import-json"))
+    ));
+    assert_eq!(
+        backend
+            .dictionary("dictionary.duplicate")
+            .unwrap()
+            .metadata()
+            .name(),
+        "Original"
+    );
+}
+
+#[test]
 fn capture_spec_uses_only_explicit_observable_adapters_and_an_empty_publication() {
     let root = tempdir().expect("capture product data");
     let executable = root.path().join("SyntheticCaptureHost.exe");

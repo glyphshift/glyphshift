@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 14;
+const DESKTOP_API_VERSION: u16 = 15;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
@@ -142,6 +142,27 @@ fn dictionary_distribution_error(error: DictionaryDistributionError) -> CommandE
         DictionaryDistributionError::StorageFailure => "dictionary.installation_storage_failure",
     };
     CommandError::new(code)
+}
+
+fn dictionary_import_error(error: BackendError) -> CommandError {
+    match error {
+        BackendError::DuplicateDictionary(id) => CommandError::new("dictionary.import_duplicate")
+            .with_arg("dictionaryId", id.to_string()),
+        BackendError::InvalidInput(_) | BackendError::InvalidArtifact(_) => {
+            CommandError::new("dictionary.import_invalid")
+        }
+        BackendError::Storage(_) => CommandError::new("dictionary.import_failed"),
+        _ => CommandError::new("dictionary.import_failed"),
+    }
+}
+
+fn dictionary_export_error(error: BackendError) -> CommandError {
+    match error {
+        BackendError::UnknownDictionary(id) => {
+            CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string())
+        }
+        _ => CommandError::new("dictionary.export_failed"),
+    }
 }
 
 struct OfflineDictionaryCatalog;
@@ -252,6 +273,7 @@ struct DictionaryCatalogQueryRequest {
     text: Box<str>,
     source_locale: Option<Box<str>>,
     target_locale: Option<Box<str>>,
+    tag: Option<Box<str>>,
     cursor: Option<Box<str>>,
     page_size: Option<u16>,
     requested_presentation_locale: Box<str>,
@@ -1094,6 +1116,9 @@ impl DesktopApplication {
         if let Some(target_locale) = request.target_locale {
             query = query.with_target_locale(target_locale);
         }
+        if let Some(tag) = request.tag {
+            query = query.with_tag(tag);
+        }
         if let Some(cursor) = request.cursor {
             query = query.with_cursor(cursor);
         }
@@ -1134,6 +1159,26 @@ impl DesktopApplication {
             .create_dictionary(create)
             .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
         Ok(self.snapshot())
+    }
+
+    fn import_dictionary_file(
+        &mut self,
+        input_path: PathBuf,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
+        self.backend
+            .import_dictionary_file(input_path)
+            .map_err(dictionary_import_error)?;
+        Ok(self.snapshot())
+    }
+
+    fn export_dictionary_file(
+        &self,
+        dictionary_id: &str,
+        output_path: PathBuf,
+    ) -> Result<(), CommandError> {
+        self.backend
+            .export_dictionary_file(dictionary_id, output_path)
+            .map_err(dictionary_export_error)
     }
 
     fn update_dictionary(
@@ -1991,6 +2036,29 @@ fn desktop_create_dictionary(
 }
 
 #[tauri::command]
+fn desktop_import_dictionary(
+    input_path: PathBuf,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .import_dictionary_file(input_path)
+}
+
+#[tauri::command]
+fn desktop_export_dictionary(
+    dictionary_id: String,
+    output_path: PathBuf,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .export_dictionary_file(&dictionary_id, output_path)
+}
+
+#[tauri::command]
 fn desktop_update_dictionary(
     edit: DictionaryEdit,
     application: State<'_, Mutex<DesktopApplication>>,
@@ -2227,6 +2295,8 @@ pub fn run() {
             desktop_query_dictionary_catalog,
             desktop_install_dictionary_release,
             desktop_create_dictionary,
+            desktop_import_dictionary,
+            desktop_export_dictionary,
             desktop_update_dictionary,
             desktop_delete_dictionaries,
             desktop_workflow,
@@ -2299,9 +2369,13 @@ mod tests {
             "en-US",
             vec![
                 ArtifactPresentation::new("en-US", "Catalog Dictionary", "Menu translations")
-                    .expect("English presentation"),
+                    .expect("English presentation")
+                    .with_tags(["menus", "desktop"])
+                    .expect("English presentation tags"),
                 ArtifactPresentation::new("zh-CN", "目录词典", "菜单翻译")
-                    .expect("Chinese presentation"),
+                    .expect("Chinese presentation")
+                    .with_tags(["菜单", "桌面"])
+                    .expect("Chinese presentation tags"),
             ],
             DictionaryArtifactDescriptor::new(
                 payload.len() as u64,
@@ -2385,6 +2459,7 @@ mod tests {
                 text: "menu".into(),
                 source_locale: Some("en-US".into()),
                 target_locale: Some("zh-CN".into()),
+                tag: None,
                 cursor: None,
                 page_size: Some(20),
                 requested_presentation_locale: "zh-CN".into(),
@@ -2406,6 +2481,7 @@ mod tests {
                 text: "Catalog".into(),
                 source_locale: Some("en-US".into()),
                 target_locale: Some("zh-CN".into()),
+                tag: Some("menus".into()),
                 cursor: None,
                 page_size: Some(20),
                 requested_presentation_locale: "zh-CN".into(),
@@ -2437,6 +2513,68 @@ mod tests {
             dictionary.installation().verified_publisher(),
             Some("publisher.example")
         );
+    }
+
+    #[test]
+    fn dictionary_file_exchange_uses_one_portable_json_without_a_publish_service() {
+        let (mut application, _calls, _software_id, data_root) = workflow_application();
+        let input = data_root.path().join("portable-import.json");
+        let output = data_root.path().join("portable-export.json");
+        let package = glyphshift_dictionary_package::DictionaryPackage::create(
+            glyphshift_dictionary_package::DictionaryCreate::new(
+                "dictionary.exchange",
+                "Exchange Dictionary",
+                "en-US",
+                "zh-CN",
+            )
+            .with_release_version("1.0.0")
+            .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::new(
+                "Save", "保存",
+            )]),
+        )
+        .expect("dictionary package");
+        fs::write(&input, package.encode_json().expect("encode dictionary"))
+            .expect("write import fixture");
+
+        let snapshot = application
+            .import_dictionary_file(input)
+            .expect("import dictionary file");
+        assert!(snapshot
+            .configuration
+            .dictionaries()
+            .iter()
+            .any(|dictionary| dictionary.id() == "dictionary.exchange"));
+        application
+            .export_dictionary_file("dictionary.exchange", output.clone())
+            .expect("export dictionary file");
+        let exported = fs::read_to_string(output).expect("read export");
+        let reopened = glyphshift_dictionary_package::DictionaryPackage::decode_json(
+            &exported,
+            Some("dictionary.exchange"),
+        )
+        .expect("portable export");
+        assert_eq!(reopened.view().entries()[0].translation(), "保存");
+    }
+
+    #[test]
+    fn dictionary_file_exchange_errors_keep_stable_product_codes() {
+        let duplicate = serde_json::to_value(dictionary_import_error(
+            BackendError::DuplicateDictionary("dictionary.duplicate".into()),
+        ))
+        .expect("serialize duplicate error");
+        let invalid = serde_json::to_value(dictionary_import_error(BackendError::InvalidArtifact(
+            "dictionary-import-json",
+        )))
+        .expect("serialize invalid error");
+        let missing = serde_json::to_value(dictionary_export_error(
+            BackendError::UnknownDictionary("dictionary.missing".into()),
+        ))
+        .expect("serialize missing error");
+
+        assert_eq!(duplicate["code"], "dictionary.import_duplicate");
+        assert_eq!(duplicate["args"]["dictionaryId"], "dictionary.duplicate");
+        assert_eq!(invalid["code"], "dictionary.import_invalid");
+        assert_eq!(missing["code"], "dictionary.not_found");
     }
 
     #[derive(Default)]
