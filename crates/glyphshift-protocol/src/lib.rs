@@ -447,6 +447,14 @@ pub trait ControllerTransport {
         Err(TransportFailure::MalformedMessage)
     }
 
+    fn control_capture(
+        &mut self,
+        _target: &ControllerTargetToken,
+        _paused: bool,
+    ) -> Result<(), TransportFailure> {
+        Err(TransportFailure::MalformedMessage)
+    }
+
     fn deactivate_runtime(
         &mut self,
         _target: &ControllerTargetToken,
@@ -727,6 +735,21 @@ impl<T: ControllerTransport> ControllerConnection<T> {
             .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
         self.transport
             .update_runtime(&target, publication_json, generation)
+            .map_err(|failure| self.handle_transport_failure(failure))
+    }
+
+    pub fn control_capture(
+        &mut self,
+        target_id: OpaqueTargetId,
+        paused: bool,
+    ) -> Result<(), ControllerProtocolError> {
+        let target = self
+            .target_tokens
+            .get(&target_id)
+            .cloned()
+            .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
+        self.transport
+            .control_capture(&target, paused)
             .map_err(|failure| self.handle_transport_failure(failure))
     }
 

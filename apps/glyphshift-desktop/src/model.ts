@@ -24,7 +24,6 @@ export interface SoftwareRecord {
   translation: CapabilityEvidence
   font: CapabilityEvidence
   observe: CapabilityEvidence
-  locations: Array<{ id: string; label: string }>
 }
 
 export interface DictionaryMetadata {
@@ -57,21 +56,6 @@ export interface DictionaryDetail {
   entries: DictionaryEntry[]
 }
 
-export interface FontProfileMetadata {
-  id: string
-  name: string
-  description: string
-}
-
-export interface FontProfileSummary {
-  metadata: FontProfileMetadata
-  revision: number
-  families: string[]
-  resolvedFamily: string | null
-}
-
-export interface FontProfileDetail extends FontProfileSummary {}
-
 export interface AdapterOption {
   id: string
   name: string
@@ -84,58 +68,69 @@ export interface AdapterOption {
   configuration: 'none'
 }
 
-export interface CaptureSummary {
-  sessionId: string
+export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
+
+export interface ProbeRunSummary {
+  id: string
+  name: string
   softwareId: string
+  dictionaryId: string
   adapterIds: string[]
-  status: 'active' | 'completed' | 'failed'
-  entryCount: number
+  status: ProbeRunStatus
+  livePreviewEnabled: boolean
+  observationRevision: number
+  observedCount: number
+  ignoredCount: number
   droppedObservations: number
+  previewGeneration: number
+  createdAtMs: number
+  updatedAtMs: number
+  dictionaryRevision: number
+  dictionaryEntryCount: number
 }
 
-export interface CaptureCatalogEntry {
+export interface ProbeEntryRow {
   source: string
-  adapterId: string
+  translation: string
+  state: 'pending' | 'translated' | 'unobserved' | 'ignored'
+  adapterIds: string[]
   count: number
   firstSeenMs: number
   lastSeenMs: number
 }
 
-export interface CaptureResult {
-  catalog: {
-    schema: 'glyphshift.capture-catalog/1'
-    sessionId: string
-    startedAtMs: number
-    stoppedAtMs: number
-    droppedObservations: number
-    entries: CaptureCatalogEntry[]
-  }
-  dictionaryDraft: {
-    schema: 'glyphshift.dictionary-draft/1'
-    sourceSessionId: string
-    entries: DictionaryEntry[]
-  }
+export interface ProbeEntryPage {
+  observationRevision: number
+  dictionaryRevision: number
+  page: number
+  pageSize: number
+  total: number
+  rows: ProbeEntryRow[]
 }
+
+export type ProbeExportFormat
+  = 'observations_json'
+    | 'observations_csv'
+    | 'entries_csv'
+    | 'dictionary_json'
 
 export interface WorkflowAdapterPlan {
   strategy: 'parallel'
   adapterIds: string[]
 }
 
-export type FontProfileScope
-  = { kind: 'all' }
-    | { kind: 'locations'; locationIds: string[] }
+export type FontCoverage = 'dictionary_matches' | 'all_observations'
 
-export interface FontProfileBinding {
-  fontProfileId: string
-  scope: FontProfileScope
+export interface WorkflowFontPolicy {
+  families: string[]
+  coverage: FontCoverage
 }
 
 export interface WorkflowTarget {
   softwareId: string
   adapterPlan: WorkflowAdapterPlan
   dictionaryIds: string[]
-  fontBindings: FontProfileBinding[]
+  fontPolicy: WorkflowFontPolicy | null
 }
 
 export interface WorkflowSummary {
@@ -182,13 +177,11 @@ export interface DesktopSnapshot {
   selectedSoftwareId: string | null
   software: SoftwareRecord[]
   dictionaries: DictionarySummary[]
-  fontProfiles: FontProfileSummary[]
   workflows: WorkflowSummary[]
   activations: WorkflowActivation[]
   workflowRuntimeStatus: Record<string, WorkflowRuntimeStatus>
   adapters: AdapterOption[]
   fontFamilies: string[]
-  capture: CaptureSummary | null
 }
 
 export interface WorkflowCommandResult {
@@ -199,26 +192,22 @@ export interface WorkflowCommandResult {
 
 export interface DesktopModel extends DesktopSnapshot {
   dictionaryDetails: Record<string, DictionaryDetail>
-  fontProfileDetails: Record<string, FontProfileDetail>
   workflowDetails: Record<string, WorkflowDetail>
 }
 
-export const STORAGE_KEY = 'glyphshift.composable-product-model.v2'
+export const STORAGE_KEY = 'glyphshift.composable-product-model.v3'
 
 export function emptyModel(): DesktopModel {
   return {
     selectedSoftwareId: null,
     software: [],
     dictionaries: [],
-    fontProfiles: [],
     workflows: [],
     activations: [],
     workflowRuntimeStatus: {},
     adapters: [],
     fontFamilies: [],
-    capture: null,
     dictionaryDetails: {},
-    fontProfileDetails: {},
     workflowDetails: {},
   }
 }

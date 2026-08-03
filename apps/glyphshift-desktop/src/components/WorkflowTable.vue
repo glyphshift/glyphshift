@@ -5,7 +5,6 @@ import { useI18n } from 'vue-i18n'
 import type {
   AdapterOption,
   DictionarySummary,
-  FontProfileSummary,
   SoftwareRecord,
   WorkflowDetail,
   WorkflowRuntimeStatus,
@@ -17,7 +16,7 @@ const props = defineProps<{
   items: WorkflowSummary[]
   software: SoftwareRecord[]
   dictionaries: DictionarySummary[]
-  fontProfiles: FontProfileSummary[]
+  installedFamilies: string[]
   adapters: AdapterOption[]
   activationIds: Set<string>
   runtimeStatus: Record<string, WorkflowRuntimeStatus>
@@ -40,7 +39,7 @@ const emit = defineEmits<{
   closeEdit: []
   copy: [id: string]
   remove: [ids: string[]]
-  navigate: [view: 'software' | 'dictionaries' | 'fonts']
+  navigate: [view: 'software' | 'dictionaries']
 }>()
 const { t, locale } = useI18n()
 
@@ -56,7 +55,7 @@ const targets = ref<WorkflowTarget[]>([])
 const activeSoftwareId = ref<string | null>(null)
 const softwareQuery = ref('')
 const dictionaryQuery = ref('')
-const fontProfileToAdd = ref('__none__')
+const fontQuery = ref('')
 const pendingRemoval = ref<WorkflowSummary[]>([])
 
 const statusFilterOptions = computed(() => [
@@ -84,6 +83,10 @@ const visibleDictionaries = computed(() => {
   const needle = dictionaryQuery.value.trim().toLocaleLowerCase()
   return props.dictionaries.filter(item => !needle || `${item.metadata.name} ${item.metadata.sourceLocale} ${item.metadata.targetLocale}`.toLocaleLowerCase().includes(needle))
 })
+const visibleFontFamilies = computed(() => {
+  const needle = fontQuery.value.trim().toLocaleLowerCase()
+  return props.installedFamilies.filter(family => !needle || family.toLocaleLowerCase().includes(needle))
+})
 const activeTarget = computed(() => targets.value.find(target => target.softwareId === activeSoftwareId.value) ?? null)
 const activeSoftware = computed(() => props.software.find(item => item.id === activeSoftwareId.value) ?? null)
 const formOpen = computed(() => creating.value || Boolean(props.editing))
@@ -95,17 +98,11 @@ const formProblems = computed(() => {
   for (const target of targets.value) {
     const label = softwareName(target.softwareId)
     if (!target.adapterPlan.adapterIds.length) problems.push(t('workflows.problems.adapter', { name: label }))
-    if (!target.dictionaryIds.length && !target.fontBindings.length) problems.push(t('workflows.problems.asset', { name: label }))
-    const software = props.software.find(item => item.id === target.softwareId)
-    const occupied = new Set<string>()
-    for (const binding of target.fontBindings) {
-      const locations = binding.scope.kind === 'all'
-        ? (software?.locations.map(location => location.id) ?? [])
-        : binding.scope.locationIds
-      if (!locations.length) problems.push(t('workflows.problems.location', { name: label }))
-      for (const location of locations) {
-        if (occupied.has(location)) problems.push(t('workflows.problems.duplicateLocation', { name: label, location }))
-        occupied.add(location)
+    if (!target.dictionaryIds.length && !target.fontPolicy) problems.push(t('workflows.problems.asset', { name: label }))
+    if (target.fontPolicy) {
+      if (!target.fontPolicy.families.length) problems.push(t('workflows.problems.fontFamily', { name: label }))
+      if (target.fontPolicy.coverage === 'dictionary_matches' && !target.dictionaryIds.length) {
+        problems.push(t('workflows.problems.fontDictionary', { name: label }))
       }
     }
   }
@@ -143,7 +140,7 @@ const removalDescription = computed(() => pendingRemoval.value.length === 1
   : t('workflows.deleteMany', { count: pendingRemoval.value.length }))
 
 watch([query, statusFilter, pageSize], () => { page.value = 1 })
-watch(activeSoftwareId, () => { fontProfileToAdd.value = '__none__' })
+watch(activeSoftwareId, () => { fontQuery.value = '' })
 watch(() => props.editing, (detail) => {
   if (!detail) return
   name.value = detail.name
@@ -169,8 +166,8 @@ function adapterNames(item: WorkflowSummary) {
   return ids.map(id => props.adapters.find(adapter => adapter.id === id)?.name ?? id).join(locale.value === 'zh-CN' ? '、' : ', ')
 }
 function fontNames(item: WorkflowSummary) {
-  const ids = [...new Set(item.targets.flatMap(target => target.fontBindings.map(binding => binding.fontProfileId)))]
-  return ids.map(id => props.fontProfiles.find(profile => profile.metadata.id === id)?.metadata.name ?? id).join(locale.value === 'zh-CN' ? '、' : ', ')
+  const families = [...new Set(item.targets.flatMap(target => target.fontPolicy?.families.slice(0, 1) ?? []))]
+  return families.join(locale.value === 'zh-CN' ? '、' : ', ')
 }
 function actualStatus(item: WorkflowSummary): 'disabled' | 'running' | 'attention' | 'waiting' {
   const status = props.runtimeStatus[item.id]
@@ -207,7 +204,7 @@ function resetForm() {
   activeSoftwareId.value = null
   softwareQuery.value = ''
   dictionaryQuery.value = ''
-  fontProfileToAdd.value = '__none__'
+  fontQuery.value = ''
 }
 function startCreate() {
   resetForm()
@@ -229,7 +226,7 @@ function toggleSoftware(id: string) {
     softwareId: id,
     adapterPlan: { strategy: 'parallel', adapterIds: [] },
     dictionaryIds: [],
-    fontBindings: [],
+    fontPolicy: null,
   })
   activeSoftwareId.value = id
 }
@@ -254,28 +251,31 @@ function moveDictionary(id: string, offset: number) {
   ;[next[current], next[destination]] = [next[destination], next[current]]
   activeTarget.value.dictionaryIds = next
 }
-function fontProfileName(id: string) {
-  return props.fontProfiles.find(profile => profile.metadata.id === id)?.metadata.name ?? id
+function setFontPolicyEnabled(enabled: boolean) {
+  if (!activeTarget.value) return
+  activeTarget.value.fontPolicy = enabled
+    ? { families: [], coverage: 'dictionary_matches' }
+    : null
 }
-function addFontBinding() {
-  if (!activeTarget.value || fontProfileToAdd.value === '__none__') return
-  activeTarget.value.fontBindings.push({
-    fontProfileId: fontProfileToAdd.value,
-    scope: activeTarget.value.fontBindings.length ? { kind: 'locations', locationIds: [] } : { kind: 'all' },
-  })
-  fontProfileToAdd.value = '__none__'
+function setFontCoverage(coverage: 'dictionary_matches' | 'all_observations') {
+  if (activeTarget.value?.fontPolicy) activeTarget.value.fontPolicy.coverage = coverage
 }
-function removeFontBinding(index: number) {
-  activeTarget.value?.fontBindings.splice(index, 1)
+function toggleFontFamily(family: string) {
+  const policy = activeTarget.value?.fontPolicy
+  if (!policy) return
+  policy.families = policy.families.includes(family)
+    ? policy.families.filter(candidate => candidate !== family)
+    : [...policy.families, family]
 }
-function setFontScope(binding: WorkflowTarget['fontBindings'][number], kind: string) {
-  binding.scope = kind === 'locations' ? { kind: 'locations', locationIds: [] } : { kind: 'all' }
-}
-function toggleFontLocation(binding: WorkflowTarget['fontBindings'][number], id: string) {
-  if (binding.scope.kind !== 'locations') return
-  binding.scope.locationIds = binding.scope.locationIds.includes(id)
-    ? binding.scope.locationIds.filter(candidate => candidate !== id)
-    : [...binding.scope.locationIds, id]
+function moveFontFamily(family: string, offset: number) {
+  const policy = activeTarget.value?.fontPolicy
+  if (!policy) return
+  const current = policy.families.indexOf(family)
+  const destination = current + offset
+  if (current < 0 || destination < 0 || destination >= policy.families.length) return
+  const next = [...policy.families]
+  ;[next[current], next[destination]] = [next[destination], next[current]]
+  policy.families = next
 }
 function submitForm() {
   if (!formValid.value) return
@@ -347,7 +347,27 @@ function confirmRemoval() {
 
             <div class="grid grid-cols-2 gap-3">
               <section><div class="mb-2 flex items-center justify-between"><h4 class="m-0 text-[10px] font-semibold">{{ t('workflows.orderedDictionaries', { count: activeTarget.dictionaryIds.length }) }}</h4><UButton v-if="!dictionaries.length" color="neutral" variant="ghost" size="xs" :label="t('workflows.goCreate')" @click="closeForm(); emit('navigate', 'dictionaries')" /></div><UInput v-model="dictionaryQuery" icon="i-tabler-search" size="sm" class="mb-1 w-full" :placeholder="t('workflows.searchDictionaries')" :aria-label="t('workflows.searchDictionaries')" /><div class="max-h-28 overflow-auto rounded-[5px] border border-[var(--border)] p-1"><label v-for="item in visibleDictionaries" :key="item.metadata.id" class="flex min-h-8 items-center gap-2 rounded-[4px] px-2 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.dictionaryIds.includes(item.metadata.id)" @update:model-value="toggleDictionary(item.metadata.id)" /><span class="min-w-0"><strong class="block truncate text-[10px]">{{ item.metadata.name }}</strong><span class="block text-[9px] text-[var(--text-muted)]">{{ item.metadata.sourceLocale }} → {{ item.metadata.targetLocale }}</span></span></label></div><div v-if="activeTarget.dictionaryIds.length" class="mt-2"><div class="mb-1 text-[9px] text-[var(--text-muted)]">{{ t('workflows.dictionaryPriorityHint') }}</div><ol class="space-y-1"><li v-for="(id, index) in activeTarget.dictionaryIds" :key="id" class="flex min-h-7 items-center gap-1 rounded-[4px] bg-[var(--surface-subtle)] px-2"><span class="w-4 text-[9px] tabular-nums text-[var(--text-muted)]">{{ index + 1 }}</span><span class="min-w-0 flex-1 truncate text-[9px]">{{ dictionaryName(id) }}</span><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-up" :disabled="index === 0" :aria-label="t('workflows.raiseDictionary', { name: dictionaryName(id) })" @click="moveDictionary(id, -1)" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-down" :disabled="index === activeTarget.dictionaryIds.length - 1" :aria-label="t('workflows.lowerDictionary', { name: dictionaryName(id) })" @click="moveDictionary(id, 1)" /></li></ol></div></section>
-              <section><div class="mb-2 flex items-center justify-between"><h4 class="m-0 text-[10px] font-semibold">{{ t('workflows.fontBindings', { count: activeTarget.fontBindings.length }) }}</h4><UButton v-if="!fontProfiles.length" color="neutral" variant="ghost" size="xs" :label="t('workflows.goCreate')" @click="closeForm(); emit('navigate', 'fonts')" /></div><div class="flex gap-1"><USelect v-model="fontProfileToAdd" :items="[{ value: '__none__', label: t('workflows.chooseFontProfile') }, ...fontProfiles.map(profile => ({ value: profile.metadata.id, label: profile.metadata.name }))]" value-key="value" label-key="label" class="min-w-0 flex-1" :aria-label="t('workflows.chooseFontProfileLabel')" /><UButton color="neutral" variant="outline" size="sm" icon="i-tabler-plus" :label="t('workflows.add')" :disabled="fontProfileToAdd === '__none__'" @click="addFontBinding" /></div><div v-for="(binding, bindingIndex) in activeTarget.fontBindings" :key="`${binding.fontProfileId}-${bindingIndex}`" class="mt-2 rounded-[5px] border border-[var(--border)] p-2" role="group" :aria-label="t('workflows.fontBindingLabel', { name: fontProfileName(binding.fontProfileId) })"><div class="mb-2 flex items-center justify-between gap-2"><strong class="min-w-0 truncate text-[10px]">{{ fontProfileName(binding.fontProfileId) }}</strong><UButton color="error" variant="ghost" size="xs" icon="i-tabler-x" :aria-label="t('workflows.removeFontBinding', { name: fontProfileName(binding.fontProfileId) })" @click="removeFontBinding(bindingIndex)" /></div><div class="mb-2 flex gap-2"><UButton size="xs" :variant="binding.scope.kind === 'all' ? 'solid' : 'outline'" :label="t('workflows.allLocations')" :aria-pressed="binding.scope.kind === 'all'" @click="setFontScope(binding, 'all')" /><UButton size="xs" :variant="binding.scope.kind === 'locations' ? 'solid' : 'outline'" :label="t('workflows.selectedLocations')" :aria-pressed="binding.scope.kind === 'locations'" @click="setFontScope(binding, 'locations')" /></div><div v-if="binding.scope.kind === 'locations'" class="space-y-1"><label v-for="location in activeSoftware?.locations ?? []" :key="location.id" class="flex items-center gap-2"><UCheckbox :model-value="binding.scope.kind === 'locations' && binding.scope.locationIds.includes(location.id)" @update:model-value="toggleFontLocation(binding, location.id)" /><span class="text-[9px]">{{ location.label }}</span></label></div></div></section>
+              <section>
+                <div class="mb-2 flex items-start justify-between gap-3">
+                  <div><h4 class="m-0 text-[10px] font-semibold">{{ t('workflows.fontPolicy') }}</h4><p class="m-0 mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontPolicyHint') }}</p></div>
+                  <USwitch :model-value="Boolean(activeTarget.fontPolicy)" :aria-label="t('workflows.fontPolicyToggle')" @update:model-value="setFontPolicyEnabled(Boolean($event))" />
+                </div>
+                <div v-if="activeTarget.fontPolicy" class="space-y-2">
+                  <div class="grid gap-1" role="group" :aria-label="t('workflows.fontCoverageLabel')">
+                    <UButton size="xs" :variant="activeTarget.fontPolicy.coverage === 'dictionary_matches' ? 'solid' : 'outline'" :label="t('workflows.fontDictionaryMatches')" :aria-pressed="activeTarget.fontPolicy.coverage === 'dictionary_matches'" @click="setFontCoverage('dictionary_matches')" />
+                    <UButton size="xs" :variant="activeTarget.fontPolicy.coverage === 'all_observations' ? 'solid' : 'outline'" :label="t('workflows.fontAllObservations')" :aria-pressed="activeTarget.fontPolicy.coverage === 'all_observations'" @click="setFontCoverage('all_observations')" />
+                  </div>
+                  <p class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ activeTarget.fontPolicy.coverage === 'dictionary_matches' ? t('workflows.fontDictionaryMatchesHint') : t('workflows.fontAllObservationsHint') }}</p>
+                  <UInput v-model="fontQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchFonts')" :aria-label="t('workflows.searchFonts')" />
+                  <div class="max-h-24 overflow-auto rounded-[5px] border border-[var(--border)] p-1">
+                    <label v-for="family in visibleFontFamilies" :key="family" class="flex min-h-7 items-center gap-2 rounded-[4px] px-2 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.fontPolicy.families.includes(family)" @update:model-value="toggleFontFamily(family)" /><span class="min-w-0 truncate text-[9px]">{{ family }}</span></label>
+                    <div v-if="!installedFamilies.length" class="px-2 py-3 text-center text-[9px] text-[var(--text-muted)]">{{ t('workflows.noInstalledFonts') }}</div>
+                  </div>
+                  <ol v-if="activeTarget.fontPolicy.families.length" class="space-y-1" :aria-label="t('workflows.fontPriority')">
+                    <li v-for="(family, index) in activeTarget.fontPolicy.families" :key="family" class="flex min-h-7 items-center gap-1 rounded-[4px] bg-[var(--surface-subtle)] px-2"><span class="w-4 text-[9px] tabular-nums text-[var(--text-muted)]">{{ index + 1 }}</span><span class="min-w-0 flex-1 truncate text-[9px]">{{ family }}</span><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-up" :disabled="index === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="moveFontFamily(family, -1)" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-down" :disabled="index === activeTarget.fontPolicy.families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="moveFontFamily(family, 1)" /></li>
+                  </ol>
+                </div>
+              </section>
             </div>
             <UAlert v-if="formProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="formProblemDescription" class="mt-3" />
           </div>

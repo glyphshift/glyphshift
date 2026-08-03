@@ -6,10 +6,10 @@ import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
 
 defineProps<{
-  current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'capture' | 'help' | 'settings'
+  current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 }>()
 const emit = defineEmits<{
-  navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'fonts' | 'capture' | 'help' | 'settings']
+  navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'help' | 'settings']
 }>()
 
 const { t } = useI18n()
@@ -19,7 +19,6 @@ const nav = computed(() => [
   { id: 'workflows' as const, label: t('titleBar.workflows'), icon: 'i-tabler-git-branch' },
   { id: 'software' as const, label: t('titleBar.software'), icon: 'i-tabler-library' },
   { id: 'dictionaries' as const, label: t('titleBar.dictionaries'), icon: 'i-tabler-book-2' },
-  { id: 'fonts' as const, label: t('titleBar.fonts'), icon: 'i-tabler-typography' },
   { id: 'capture' as const, label: t('titleBar.capture'), icon: 'i-tabler-radar' },
 ])
 const themeToggleLabel = computed(() => appSettings.effectiveTheme.value === 'dark'

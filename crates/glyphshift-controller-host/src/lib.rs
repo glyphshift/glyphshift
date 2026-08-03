@@ -369,6 +369,22 @@ impl ControllerTransport for ProcessControllerTransport {
         }
     }
 
+    fn control_capture(
+        &mut self,
+        target: &ControllerTargetToken,
+        paused: bool,
+    ) -> Result<(), TransportFailure> {
+        match self.round_trip(Request::ControlCapture {
+            target_token: target.as_str().into(),
+            paused,
+        })? {
+            Response::CaptureControlled {
+                paused: acknowledged,
+            } if acknowledged == paused => Ok(()),
+            _ => Err(TransportFailure::MalformedMessage),
+        }
+    }
+
     fn deactivate_runtime(
         &mut self,
         target: &ControllerTargetToken,

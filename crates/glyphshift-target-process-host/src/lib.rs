@@ -234,6 +234,18 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
         ))
     }
 
+    fn control_capture(
+        &mut self,
+        _session_id: SessionId,
+        target: &TargetInstance,
+        paused: bool,
+    ) -> Result<(), HostFailure> {
+        let target_id = self.target_id(target)?;
+        self.connection
+            .control_capture(target_id, paused)
+            .map_err(|_| HostFailure::Unavailable)
+    }
+
     fn health(
         &mut self,
         _session_id: SessionId,

@@ -15,7 +15,6 @@ declare module 'vue' {
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
-    FontProfileLibrary: typeof import('./src/components/FontProfileLibrary.vue')['default']
     HelpView: typeof import('./src/components/HelpView.vue')['default']
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']
     ManagementPageHeader: typeof import('./src/components/ManagementPageHeader.vue')['default']

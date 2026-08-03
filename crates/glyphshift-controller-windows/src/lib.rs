@@ -212,6 +212,19 @@ impl ControllerPlugin for WindowsController {
         Ok(generation)
     }
 
+    fn control_capture(&mut self, target_token: &str, paused: bool) -> Result<(), PluginError> {
+        let target = self
+            .targets
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("unknown_target"))?;
+        let runtime_library = self
+            .runtime_libraries
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("runtime_not_active"))?;
+        remote::control_capture(target.process_id, runtime_library, paused)
+            .map_err(|error| PluginError::new(format!("capture_control_failed:{}", error.code())))
+    }
+
     fn deactivate_runtime(&mut self, target_token: &str) -> Result<(), PluginError> {
         let target = self
             .targets

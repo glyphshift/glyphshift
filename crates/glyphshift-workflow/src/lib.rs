@@ -1,7 +1,7 @@
 //! Pure workflow composition for runtime intents.
 
 use glyphshift_domain::{Feature, Generation, RouteProgram};
-use glyphshift_translation::{FontPolicy, TranslationSnapshot};
+use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,7 +39,7 @@ pub struct WorkflowTarget {
     software_id: Box<str>,
     adapter_plan: AdapterPlan,
     dictionary_ids: Vec<Box<str>>,
-    font_bindings: Vec<FontProfileBinding>,
+    font_policy: Option<TargetFontPolicy>,
 }
 
 impl WorkflowTarget {
@@ -53,16 +53,13 @@ impl WorkflowTarget {
             software_id: software_id.into(),
             adapter_plan,
             dictionary_ids: dictionary_ids.into_iter().map(Into::into).collect(),
-            font_bindings: Vec::new(),
+            font_policy: None,
         }
     }
 
     #[must_use]
-    pub fn with_font_bindings(
-        mut self,
-        bindings: impl IntoIterator<Item = FontProfileBinding>,
-    ) -> Self {
-        self.font_bindings = bindings.into_iter().collect();
+    pub fn with_font_policy(mut self, policy: TargetFontPolicy) -> Self {
+        self.font_policy = Some(policy);
         self
     }
 }
@@ -133,55 +130,38 @@ impl DictionaryEntry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FontProfile {
-    id: Box<str>,
-    families: Vec<Box<str>>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontCoverage {
+    DictionaryMatches,
+    AllObservations,
 }
 
-impl FontProfile {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetFontPolicy {
+    families: Vec<Box<str>>,
+    coverage: FontCoverage,
+}
+
+impl TargetFontPolicy {
     #[must_use]
     pub fn new(
-        id: impl Into<Box<str>>,
         families: impl IntoIterator<Item = impl Into<Box<str>>>,
+        coverage: FontCoverage,
     ) -> Self {
         Self {
-            id: id.into(),
             families: families.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum FontScope {
-    All,
-    Locations(BTreeSet<Box<str>>),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FontProfileBinding {
-    font_profile_id: Box<str>,
-    scope: FontScope,
-}
-
-impl FontProfileBinding {
-    #[must_use]
-    pub fn all(font_profile_id: impl Into<Box<str>>) -> Self {
-        Self {
-            font_profile_id: font_profile_id.into(),
-            scope: FontScope::All,
+            coverage,
         }
     }
 
     #[must_use]
-    pub fn locations(
-        font_profile_id: impl Into<Box<str>>,
-        locations: impl IntoIterator<Item = impl Into<Box<str>>>,
-    ) -> Self {
-        Self {
-            font_profile_id: font_profile_id.into(),
-            scope: FontScope::Locations(locations.into_iter().map(Into::into).collect()),
-        }
+    pub fn families(&self) -> &[Box<str>] {
+        &self.families
+    }
+
+    #[must_use]
+    pub const fn coverage(&self) -> FontCoverage {
+        self.coverage
     }
 }
 
@@ -315,27 +295,16 @@ pub enum ResolveError {
     },
     UnknownSoftware(Box<str>),
     UnknownDictionary(Box<str>),
-    UnknownFontProfile(Box<str>),
     UnknownAdapter(Box<str>),
     LocaleMismatch {
         software_id: Box<str>,
         dictionary_id: Box<str>,
     },
-    UnknownLocation {
-        software_id: Box<str>,
-        asset_id: Box<str>,
-        location: Box<str>,
-    },
     FontUnavailable {
-        font_profile_id: Box<str>,
-    },
-    EmptyFontScope {
         software_id: Box<str>,
-        font_profile_id: Box<str>,
     },
-    FontScopeConflict {
+    EmptyFontFamilies {
         software_id: Box<str>,
-        location: Box<str>,
     },
     FeatureUnavailable {
         software_id: Box<str>,
@@ -350,7 +319,6 @@ pub fn resolve(
     workflow: &Workflow,
     software_inputs: &[SoftwareInput],
     dictionaries: &[Dictionary],
-    font_profiles: &[FontProfile],
     environment: &CompositionEnvironment,
 ) -> Result<CompiledWorkflow, ResolveError> {
     let software_by_id = software_inputs
@@ -361,10 +329,6 @@ pub fn resolve(
         .iter()
         .map(|dictionary| (dictionary.id.as_ref(), dictionary))
         .collect::<BTreeMap<&str, &Dictionary>>();
-    let font_profiles_by_id = font_profiles
-        .iter()
-        .map(|profile| (profile.id.as_ref(), profile))
-        .collect::<BTreeMap<&str, &FontProfile>>();
     let mut compiled_targets = Vec::with_capacity(workflow.targets.len());
     let mut diagnostics = Vec::new();
 
@@ -404,7 +368,6 @@ pub fn resolve(
         let mut snapshot = TranslationSnapshot::empty(software.generation);
         let mut font_policy = FontPolicy::empty();
         let mut has_text_replacement = false;
-        let mut has_font_substitution = false;
         let mut winning_dictionaries = BTreeMap::<Box<str>, Box<str>>::new();
 
         for dictionary_id in &target.dictionary_ids {
@@ -440,48 +403,56 @@ pub fn resolve(
             }
         }
 
-        let mut font_locations = BTreeSet::new();
-        for binding in &target.font_bindings {
-            if matches!(&binding.scope, FontScope::Locations(locations) if locations.is_empty()) {
-                return Err(ResolveError::EmptyFontScope {
+        let has_font_substitution = if let Some(policy) = &target.font_policy {
+            if policy.families.is_empty() {
+                return Err(ResolveError::EmptyFontFamilies {
                     software_id: software.id.clone(),
-                    font_profile_id: binding.font_profile_id.clone(),
                 });
             }
-            let profile = font_profiles_by_id
-                .get(binding.font_profile_id.as_ref())
-                .copied()
-                .ok_or_else(|| ResolveError::UnknownFontProfile(binding.font_profile_id.clone()))?;
-            let family = profile
+            let family = policy
                 .families
                 .iter()
                 .find(|family| environment.font_families.contains(*family))
                 .cloned()
                 .ok_or_else(|| ResolveError::FontUnavailable {
-                    font_profile_id: profile.id.clone(),
+                    software_id: software.id.clone(),
                 })?;
-            let locations = match &binding.scope {
-                FontScope::All => software.locations.clone(),
-                FontScope::Locations(locations) => locations.clone(),
-            };
-            for location in locations {
-                if !software.locations.contains(&location) {
-                    return Err(ResolveError::UnknownLocation {
-                        software_id: software.id.clone(),
-                        asset_id: profile.id.clone(),
-                        location,
-                    });
-                }
-                if !font_locations.insert(location.clone()) {
-                    return Err(ResolveError::FontScopeConflict {
-                        software_id: software.id.clone(),
-                        location,
-                    });
-                }
-                font_policy = font_policy.with_location(location, family.clone());
-                has_font_substitution = true;
+            let font_adapter_ids = selected_adapters
+                .iter()
+                .filter(|adapter| adapter.features.contains(&Feature::FontSubstitute))
+                .map(|adapter| adapter.id.clone())
+                .collect::<Vec<_>>();
+            if font_adapter_ids.is_empty() {
+                return Err(ResolveError::FeatureUnavailable {
+                    software_id: software.id.clone(),
+                    feature: Feature::FontSubstitute,
+                });
             }
-        }
+            for location in &software.locations {
+                match policy.coverage {
+                    FontCoverage::DictionaryMatches => {
+                        for source in winning_dictionaries.keys() {
+                            font_policy = font_policy.with_entry_for_adapters(
+                                location.clone(),
+                                source.clone(),
+                                FontRule::Substitute(family.clone().into()),
+                                font_adapter_ids.iter().cloned(),
+                            );
+                        }
+                    }
+                    FontCoverage::AllObservations => {
+                        font_policy = font_policy.with_location_for_adapters(
+                            location.clone(),
+                            family.clone(),
+                            font_adapter_ids.iter().cloned(),
+                        );
+                    }
+                }
+            }
+            policy.coverage == FontCoverage::AllObservations || !winning_dictionaries.is_empty()
+        } else {
+            false
+        };
 
         let mut requested_features = Vec::with_capacity(2);
         if has_text_replacement {

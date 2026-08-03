@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-const storageKey = 'glyphshift.composable-product-model.v2'
+const storageKey = 'glyphshift.composable-product-model.v3'
 
 const model = {
   selectedSoftwareId: 'software-proof',
@@ -19,7 +19,6 @@ const model = {
     translation: { state: 'unavailable', enabled: false, coverage: 0, detail: '等待运行实例', generation: null },
     font: { state: 'unavailable', enabled: false, coverage: 0, detail: '等待运行实例', generation: null },
     observe: { state: 'unavailable', enabled: false, coverage: 0, detail: '等待运行实例', generation: null },
-    locations: [{ id: 'main-ui', label: '界面文字' }, { id: 'dialogs', label: '对话框' }],
   }],
   dictionaries: [{
     metadata: {
@@ -28,12 +27,6 @@ const model = {
     },
     revision: 3,
     entryCount: 2,
-  }],
-  fontProfiles: [{
-    metadata: { id: 'font-profile-proof', name: '中文界面字体', description: '优先使用可变黑体' },
-    revision: 2,
-    families: ['Synthetic Sans', 'Synthetic Serif'],
-    resolvedFamily: 'Synthetic Sans',
   }],
   adapters: [{
     id: 'synthetic.ext-text-out', name: 'ExtTextOutW', summary: '拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制',
@@ -49,13 +42,13 @@ const model = {
     version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', configuration: 'none',
   }],
   workflows: [{
-    id: 'workflow-proof', name: '默认创作工作流', description: '组合语言与字体资产', revision: 5,
+    id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5,
     softwareIds: ['software-proof'], dictionaryIds: ['dictionary-proof'],
     targets: [{
       softwareId: 'software-proof',
       adapterPlan: { strategy: 'parallel', adapterIds: ['synthetic.ext-text-out'] },
       dictionaryIds: ['dictionary-proof'],
-      fontBindings: [{ fontProfileId: 'font-profile-proof', scope: { kind: 'all' } }],
+      fontPolicy: { families: ['Synthetic Sans', 'Synthetic Serif'], coverage: 'dictionary_matches' },
     }],
   }],
   activations: [],
@@ -73,22 +66,14 @@ const model = {
       ],
     },
   },
-  fontProfileDetails: {
-    'font-profile-proof': {
-      metadata: { id: 'font-profile-proof', name: '中文界面字体', description: '优先使用可变黑体' },
-      revision: 2,
-      families: ['Synthetic Sans', 'Synthetic Serif'],
-      resolvedFamily: 'Synthetic Sans',
-    },
-  },
   workflowDetails: {
     'workflow-proof': {
-      id: 'workflow-proof', name: '默认创作工作流', description: '组合语言与字体资产', revision: 5,
+      id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5,
       targets: [{
         softwareId: 'software-proof',
         adapterPlan: { strategy: 'parallel', adapterIds: ['synthetic.ext-text-out'] },
         dictionaryIds: ['dictionary-proof'],
-        fontBindings: [{ fontProfileId: 'font-profile-proof', scope: { kind: 'all' } }],
+        fontPolicy: { families: ['Synthetic Sans', 'Synthetic Serif'], coverage: 'dictionary_matches' },
       }],
     },
   },
@@ -122,18 +107,11 @@ function expandedModel() {
     revision: 1,
     entries: [{ source: 'Effect', translation: '效果' }],
   }
-  next.fontProfiles.push({
-    metadata: { id: 'font-profile-secondary', name: '备用中文字体', description: '用于对话框' },
-    revision: 1,
-    families: ['Synthetic Serif'],
-    resolvedFamily: 'Synthetic Serif',
-  })
-  next.fontProfileDetails['font-profile-secondary'] = { ...next.fontProfiles[1] }
   const secondaryTarget = {
     softwareId: 'software-secondary',
     adapterPlan: { strategy: 'parallel', adapterIds: ['synthetic.ext-text-out'] },
     dictionaryIds: ['dictionary-proof'],
-    fontBindings: [],
+    fontPolicy: null,
   }
   next.workflows[0].softwareIds.push('software-secondary')
   next.workflows[0].targets.push(secondaryTarget)
@@ -151,7 +129,32 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('independent asset navigation exposes dictionaries and font profiles', async ({ page }) => {
+test('management table body stays continuous for empty and populated states', async ({ page }) => {
+  const emptyModel = JSON.parse(JSON.stringify(model))
+  emptyModel.workflows = []
+  emptyModel.workflowDetails = {}
+  await replaceModel(page, emptyModel)
+
+  const tableBody = page.getByTestId('management-table-body')
+  const emptyState = tableBody.locator('[data-slot="empty"] > [data-slot="root"]')
+  await expect(page.getByText('还没有工作流')).toBeVisible()
+  await expect.poll(async () => {
+    const bodyBox = await tableBody.boundingBox()
+    const emptyBox = await emptyState.boundingBox()
+    if (!bodyBox || !emptyBox) return false
+    return Math.abs(emptyBox.y - (bodyBox.y + 32)) <= 1
+      && Math.abs((emptyBox.y + emptyBox.height) - (bodyBox.y + bodyBox.height)) <= 1
+  }).toBe(true)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-empty-continuous.png' })
+
+  await replaceModel(page, model)
+  const lastRow = page.getByTestId('management-table-body').locator('tbody > tr').last()
+  await expect(lastRow).toBeVisible()
+  await expect.poll(() => lastRow.evaluate(element => getComputedStyle(element).borderBottomWidth)).toBe('1px')
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
+})
+
+test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '工作流' })).toBeVisible()
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('桌面服务已连接')).toHaveCount(0)
@@ -162,28 +165,117 @@ test('independent asset navigation exposes dictionaries and font profiles', asyn
   await expect(page.getByText('en-US')).toBeVisible()
   await expect(page.getByText('v1.2.0')).toBeVisible()
 
-  await page.getByRole('button', { name: '字体', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '字体' })).toBeVisible()
-  await expect(page.getByText('Synthetic Sans', { exact: true })).toBeVisible()
-  await expect(page.getByText('本机命中')).toBeVisible()
-  await expect(page.getByText('被 1 个工作流引用')).toBeVisible()
+  await expect(page.getByRole('button', { name: '字体', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
+  await expect(page.getByText('字体策略：Synthetic Sans')).toBeVisible()
 })
 
-test('capture probe selects observable adapters and generates both result views', async ({ page }) => {
+test('probe run uses the shared searchable selectable paginated table flow', async ({ page }) => {
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: '文字探针' })).toBeVisible()
-  await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toBeVisible()
-  await expect(page.getByText('user32.dll!DrawTextW + DrawTextExW', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
+  await expect(page.getByText('还没有探针任务')).toBeVisible()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  const dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  await expect(dialog.getByText('使用已有词典', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('界面基础词典', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('TextOutW', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('实时预览')).toBeVisible()
+  await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/位置|语境/)).toHaveCount(0)
 
-  await page.getByRole('button', { name: '开始监听' }).click()
-  await expect(page.getByRole('heading', { name: '正在监听 Vector Studio' })).toBeVisible()
-  await page.getByRole('button', { name: '停止并生成' }).click()
+  await dialog.getByRole('button', { name: '创建并连接' }).click()
+  await expect(page.getByRole('heading', { name: 'Vector Studio 探针', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回探针管理' })).toBeVisible()
+  await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toBeVisible()
+  await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)
+  await expect(page.getByText('还没有捕获到文字')).toBeVisible()
+  await expect(page.getByText('每页')).toBeVisible()
+  await expect(page.getByRole('button', { name: /开始监听|停止并生成/ })).toHaveCount(0)
+})
 
-  await expect(page.getByRole('button', { name: '技术目录' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '字典草稿' })).toBeVisible()
-  await expect(page.getByText('没有捕获到文字')).toBeVisible()
+test('probe run renders only one backend page for 5000 joined entries', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const translations: Record<string, string> = {}
+    let summary = {
+      id: 'probe-scale', name: '5000 条性能任务', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'],
+      status: 'running', livePreviewEnabled: true, observationRevision: 12, observedCount: 5000,
+      ignoredCount: 0, droppedObservations: 0, previewGeneration: 8,
+      createdAtMs: 1, updatedAtMs: 2,
+      dictionaryRevision: 8, dictionaryEntryCount: 2500,
+    }
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 12 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_edit_probe_translation') {
+          const request = args?.request as { source: string; translation: string }
+          ;(window as unknown as { __captureEditRequests?: unknown[] }).__captureEditRequests ??= []
+          ;(window as unknown as { __captureEditRequests: unknown[] }).__captureEditRequests.push(request)
+          translations[request.source] = request.translation
+          summary = { ...summary, dictionaryRevision: summary.dictionaryRevision + 1, dictionaryEntryCount: summary.dictionaryEntryCount + 1, previewGeneration: summary.previewGeneration + 1 }
+          return summary
+        }
+        const request = args?.request as { page: number; pageSize: number }
+        if (command === 'desktop_probe_run_entries') {
+          const start = (request.page - 1) * request.pageSize
+          return {
+            observationRevision: 12, dictionaryRevision: summary.dictionaryRevision,
+            page: request.page, pageSize: request.pageSize, total: 5000,
+            rows: Array.from({ length: request.pageSize }, (_, offset) => {
+              const source = `Source ${String(start + offset + 1).padStart(4, '0')}`
+              const translation = translations[source] ?? (offset % 2 ? `译文 ${start + offset + 1}` : '')
+              return {
+                source, translation,
+                state: translation ? 'translated' : 'pending',
+                adapterIds: ['synthetic.text-out'], count: start + offset + 1,
+                firstSeenMs: 1, lastSeenMs: 2,
+              }
+            }),
+          }
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', 'probe-scale')
+  }, { snapshot: model })
+  await page.setViewportSize({ width: 1180, height: 760 })
+  await page.reload()
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  const paginationSummary = page.getByText('显示 1–50，共 5000 条目')
+  await expect(paginationSummary).toBeVisible()
+  await expect(paginationSummary).toBeInViewport()
+  const tableScroller = page.getByTestId('capture-table-scroll')
+  await expect(tableScroller).toBeVisible()
+  await expect.poll(() => tableScroller.evaluate(element => {
+    const style = getComputedStyle(element)
+    return ['auto', 'scroll'].includes(style.overflowY) && element.scrollHeight > element.clientHeight
+  })).toBe(true)
+  await expect.poll(() => tableScroller.evaluate(element => (element as HTMLElement).offsetWidth - element.clientWidth >= 8)).toBe(true)
+  await expect(page.getByTestId('capture-scrollbar')).toBeVisible()
+  const initialThumbTransform = await page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)
+  await expect(page.locator('tbody tr')).toHaveCount(50)
+  await expect(page.locator('tbody input')).toHaveCount(50)
+  const firstTranslation = page.getByLabel('“Source 0001”的译文')
+  await firstTranslation.fill('即时译文')
+  await firstTranslation.blur()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __captureEditRequests?: Array<{ translation: string }> }).__captureEditRequests?.[0]?.translation
+  ))).toBe('即时译文')
+  await expect(page.getByText('预览 G9')).toBeVisible()
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/capture-workspace-live-edit-scroll.png' })
+  await tableScroller.evaluate(element => { element.scrollTop = 600 })
+  await expect.poll(() => page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)).not.toBe(initialThumbTransform)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/capture-workspace-scrollbar-pagination.png' })
+  await page.getByLabel('选择当前页').click()
+  await expect(page.getByText('50 条目已选择')).toBeVisible()
+  await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)
 })
 
 test('help exposes adapter information without internal targets', async ({ page }) => {
@@ -244,8 +336,7 @@ test('settings applies and persists the real locale and theme preferences', asyn
   await expect(page.getByRole('heading', { name: 'Software' })).toBeVisible()
   await page.getByRole('button', { name: 'Dictionaries', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Dictionaries' })).toBeVisible()
-  await page.getByRole('button', { name: 'Fonts', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Fonts' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Fonts', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'Workflows', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Workflows' })).toBeVisible()
 
@@ -293,7 +384,7 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
   await expect(page.getByText(/Hook/)).toHaveCount(0)
 })
 
-test('workflow target independently selects adapters dictionaries and font scope', async ({ page }) => {
+test('workflow target independently selects adapters dictionaries and one font policy', async ({ page }) => {
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   await expect(page.getByText('此处配置仅属于这个软件目标')).toBeVisible()
   await expect(page.getByText('windows · GDI', { exact: true })).toBeVisible()
@@ -304,10 +395,12 @@ test('workflow target independently selects adapters dictionaries and font scope
   await expect(dialog.getByText('GdipDrawString', { exact: true })).toBeVisible()
   await expect(dialog.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(dialog.getByText('界面基础词典', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: '全部位置' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '全部位置' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('switch', { name: '启用字体策略' })).toBeChecked()
+  await expect(dialog.getByRole('button', { name: '仅词典命中' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByRole('button', { name: '提高 界面基础词典 的优先级' })).toBeDisabled()
-  await expect(page.getByRole('combobox', { name: '选择要添加的字体方案' })).toBeVisible()
+  await expect(dialog.getByPlaceholder('搜索本机字体')).toBeVisible()
+  await expect(dialog.getByText(/位置|main-ui/)).toHaveCount(0)
 })
 
 test('workflow saves reordered dictionaries in explicit priority order', async ({ page }) => {
@@ -320,49 +413,46 @@ test('workflow saves reordered dictionaries in explicit priority order', async (
 
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   dialog = page.getByRole('dialog', { name: '编辑工作流' })
-  const priorityItems = dialog.locator('ol > li')
+  const priorityItems = dialog.getByText('有序词典 · 2').locator('xpath=ancestor::section[1]').locator('ol > li')
   await expect(priorityItems).toHaveCount(2)
   await expect(priorityItems.nth(0)).toContainText('效果词典')
   await expect(priorityItems.nth(1)).toContainText('界面基础词典')
 })
 
-test('workflow adds a second font binding and recovers from a location overlap', async ({ page }) => {
+test('workflow saves font coverage and ordered inline candidates', async ({ page }) => {
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   let dialog = page.getByRole('dialog', { name: '编辑工作流' })
-  const primary = dialog.getByRole('group', { name: '字体绑定 中文界面字体' })
-  await primary.getByRole('button', { name: '指定位置' }).click()
-  await primary.getByText('界面文字', { exact: true }).click()
-
-  await dialog.getByRole('combobox', { name: '选择要添加的字体方案' }).click()
-  await page.getByRole('option', { name: '备用中文字体' }).click()
-  await dialog.getByRole('button', { name: '添加', exact: true }).click()
-  await expect(dialog.getByText(/字体绑定需要至少一个位置/)).toBeVisible()
-
-  const secondary = dialog.getByRole('group', { name: '字体绑定 备用中文字体' })
-  await secondary.getByText('界面文字', { exact: true }).click()
-  await expect(dialog.getByText(/字体位置 main-ui 被重复绑定/)).toBeVisible()
-  await secondary.getByText('界面文字', { exact: true }).click()
-  await secondary.getByText('对话框', { exact: true }).click()
-  await expect(dialog.getByText('还不能保存')).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Hook 捕获的全部文字' }).click()
+  await dialog.getByRole('button', { name: '提高 Synthetic Serif 的优先级' }).click()
+  await dialog.getByText('Synthetic Mono', { exact: true }).click()
   await dialog.getByRole('button', { name: '保存工作流' }).click()
 
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   dialog = page.getByRole('dialog', { name: '编辑工作流' })
-  await expect(dialog.getByRole('group', { name: /^字体绑定 / })).toHaveCount(2)
-  await expect(dialog.getByRole('group', { name: '字体绑定 备用中文字体' }).getByText('对话框', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'true')
+  const priorityItems = dialog.getByLabel('字体候选优先级').locator('li')
+  await expect(priorityItems).toHaveCount(3)
+  await expect(priorityItems.nth(0)).toContainText('Synthetic Serif')
+  await expect(priorityItems.nth(1)).toContainText('Synthetic Sans')
+  await expect(priorityItems.nth(2)).toContainText('Synthetic Mono')
 })
 
-test('pending font selection does not leak between software targets', async ({ page }) => {
+test('inline font policy stays isolated between software targets', async ({ page }) => {
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑工作流' })
-  const selector = dialog.getByRole('combobox', { name: '选择要添加的字体方案' })
-  await selector.click()
-  await page.getByRole('option', { name: '备用中文字体' }).click()
-  await expect(selector).toContainText('备用中文字体')
   await dialog.getByRole('button', { name: '切换到 Pixel Studio' }).click()
-  await expect(selector).toContainText('选择字体方案')
+  await expect(dialog.getByRole('switch', { name: '启用字体策略' })).not.toBeChecked()
+  await dialog.getByRole('switch', { name: '启用字体策略' }).click()
+  await dialog.getByRole('button', { name: 'Hook 捕获的全部文字' }).click()
+  await dialog.getByText('Synthetic Mono', { exact: true }).click()
+  await dialog.getByRole('button', { name: '切换到 Vector Studio' }).click()
+  await expect(dialog.getByRole('button', { name: '仅词典命中' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByLabel('字体候选优先级').locator('li')).toHaveCount(2)
+  await dialog.getByRole('button', { name: '切换到 Pixel Studio' }).click()
+  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByLabel('字体候选优先级').locator('li')).toHaveCount(1)
 })
 
 test('dictionary editor saves the complete portable metadata set', async ({ page }) => {
@@ -399,7 +489,7 @@ test('dictionary text editing saves only source and translation', async ({ page 
   await page.getByRole('button', { name: '保存词典' }).click()
 
   const saved = await page.evaluate(() => {
-    const model = JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v2') ?? '{}')
+    const model = JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v3') ?? '{}')
     return model.dictionaryDetails?.['dictionary-proof']?.entries?.[1]
   })
   expect(saved).toEqual({
@@ -408,16 +498,16 @@ test('dictionary text editing saves only source and translation', async ({ page 
   })
 })
 
-test('font profile editor preserves candidate order', async ({ page }) => {
-  await page.getByRole('button', { name: '字体', exact: true }).click()
-  await page.getByRole('button', { name: '编辑 中文界面字体' }).click()
-  await expect(page.getByText('候选优先级 · 2')).toBeVisible()
-  const candidates = page.locator('section').filter({ hasText: '候选优先级 · 2' })
-  await expect(candidates.getByText('Synthetic Sans', { exact: true })).toBeVisible()
-  await expect(candidates.getByText('Synthetic Serif', { exact: true })).toBeVisible()
-  await candidates.getByRole('button', { name: '下移 Synthetic Sans' }).click()
-  await page.getByRole('button', { name: '保存字体方案' }).click()
-  await expect(page.getByText('Synthetic Serif → Synthetic Sans')).toBeVisible()
+test('saved browser model contains inline policy without font assets or locations', async ({ page }) => {
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  await page.getByRole('dialog', { name: '编辑工作流' }).getByRole('button', { name: '保存工作流' }).click()
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v3') ?? '{}'))
+  expect(saved.fontProfiles).toBeUndefined()
+  expect(saved.software[0].locations).toBeUndefined()
+  expect(saved.workflowDetails['workflow-proof'].targets[0].fontPolicy).toEqual({
+    families: ['Synthetic Sans', 'Synthetic Serif'],
+    coverage: 'dictionary_matches',
+  })
 })
 
 test('compact viewport keeps the application shell bounded', async ({ page }) => {

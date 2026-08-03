@@ -145,6 +145,26 @@ pub fn update(
     )
 }
 
+pub fn control_capture(
+    process_id: u32,
+    runtime_library: &Path,
+    paused: bool,
+) -> Result<(), RemoteError> {
+    let command = if paused {
+        r#"{"paused":true}"#
+    } else {
+        r#"{"paused":false}"#
+    };
+    let process = ProcessHandle::open(process_id)?;
+    invoke_json_export(
+        process_id,
+        process.0,
+        runtime_library,
+        "glyphshift_runtime_capture_control_v1",
+        command,
+    )
+}
+
 pub fn deactivate(process_id: u32, runtime_library: &Path) -> Result<(), RemoteError> {
     let process = ProcessHandle::open(process_id)?;
     let function = remote_export(

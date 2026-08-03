@@ -17,6 +17,8 @@ glyphshift-capture = { path = "../../../crates/glyphshift-capture" }
 glyphshift-desktop-backend = { path = "../../../crates/glyphshift-desktop-backend" }
 glyphshift-desktop-runtime = { path = "../../../crates/glyphshift-desktop-runtime" }
 glyphshift-domain = { path = "../../../crates/glyphshift-domain" }
+glyphshift-runtime-contract = { path = "../../../crates/glyphshift-runtime-contract" }
+glyphshift-translation = { path = "../../../crates/glyphshift-translation" }
 glyphshift-workflow = { path = "../../../crates/glyphshift-workflow" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -11,13 +11,14 @@ use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
-    RuntimeCommandV1, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
-    STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_CHANGED,
-    STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED, STATUS_TARGET_RUNTIME_ALREADY_ACTIVE,
-    STATUS_TARGET_RUNTIME_CAPTURE_FAILED, STATUS_TARGET_RUNTIME_INVALID_COMMAND,
-    STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT, STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED,
-    STATUS_TARGET_RUNTIME_OK, STATUS_TARGET_RUNTIME_UNAVAILABLE,
-    STATUS_TARGET_RUNTIME_UPDATE_FAILED, STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    CaptureRuntimeControl, RuntimeCommandV1, TargetRuntimeDeployment,
+    STATUS_TARGET_RUNTIME_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
+    STATUS_TARGET_RUNTIME_ADAPTER_CHANGED, STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
+    STATUS_TARGET_RUNTIME_ALREADY_ACTIVE, STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
+    STATUS_TARGET_RUNTIME_INVALID_COMMAND, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
+    STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_OK,
+    STATUS_TARGET_RUNTIME_UNAVAILABLE, STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -220,6 +221,22 @@ pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetR
         runtime.publication = publication;
     }
     request_current_process_redraw();
+    Ok(())
+}
+
+pub fn control_capture(control: CaptureRuntimeControl) -> Result<(), TargetRuntimeError> {
+    let state = runtime_state()
+        .lock()
+        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+    let runtime = state
+        .as_ref()
+        .filter(|runtime| runtime.active)
+        .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+    let capture = runtime
+        .capture
+        .as_ref()
+        .ok_or(TargetRuntimeError::Capture)?;
+    capture.set_paused(control.paused());
     Ok(())
 }
 
@@ -478,6 +495,28 @@ pub unsafe extern "system" fn glyphshift_runtime_update_v1(
         return STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT;
     };
     match std::panic::catch_unwind(|| update_publication(publication)) {
+        Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
+        Ok(Err(error)) => activation_status(error),
+        Err(_) => STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    }
+}
+
+#[no_mangle]
+/// Pauses or resumes capture without unloading adapters or the active preview publication.
+///
+/// # Safety
+///
+/// `command` and its JSON buffer must remain readable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_capture_control_v1(
+    command: *const RuntimeCommandV1,
+) -> u32 {
+    let Some(json) = command_json(command) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    let Ok(control) = CaptureRuntimeControl::decode_json(json) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    match std::panic::catch_unwind(|| control_capture(control)) {
         Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
         Ok(Err(error)) => activation_status(error),
         Err(_) => STATUS_TARGET_RUNTIME_UPDATE_FAILED,

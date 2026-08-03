@@ -5,7 +5,6 @@ import { en, zh_cn } from '@nuxt/ui/locale'
 import { useI18n } from 'vue-i18n'
 import DictionaryLibrary from './components/DictionaryLibrary.vue'
 import DictionaryProof from './components/DictionaryProof.vue'
-import FontProfileLibrary from './components/FontProfileLibrary.vue'
 import CaptureView from './components/CaptureView.vue'
 import HelpView from './components/HelpView.vue'
 import SettingsView from './components/SettingsView.vue'
@@ -13,11 +12,11 @@ import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
 import { useAppSettings } from './appSettings'
-import type { FontProfileDetail, WorkflowDetail, WorkflowTarget } from './model'
+import type { WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
-type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'fonts' | 'capture' | 'help' | 'settings'
-const desktopApiVersion = 9
+type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
+const desktopApiVersion = 12
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -35,16 +34,8 @@ async function openDictionary(id: string) {
   if (await workspace.loadDictionary(id)) view.value = 'dictionary-editor'
 }
 
-async function openFontProfile(id: string) {
-  await workspace.loadFontProfile(id)
-}
-
 async function createWorkflow(name: string, description: string, targets: WorkflowTarget[]) {
   await workspace.createWorkflow(name, description, targets)
-}
-
-async function saveFontProfile(detail: FontProfileDetail) {
-  if (await workspace.saveFontProfile(detail)) workspace.fontProfileDetail.value = null
 }
 
 async function saveWorkflow(detail: WorkflowDetail) {
@@ -75,9 +66,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <UApp :locale="nuxtLocale" class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
-    <TitleBar :current="view" @navigate="view = $event" />
-    <main class="flex min-h-0 flex-1 overflow-hidden">
+  <UApp :locale="nuxtLocale">
+    <div class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
+      <TitleBar :current="view" @navigate="view = $event" />
+      <main class="flex min-h-0 flex-1 overflow-hidden">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <UAlert
           color="warning"
@@ -93,7 +85,7 @@ onMounted(() => {
         :items="workspace.model.value.workflows"
         :software="workspace.model.value.software"
         :dictionaries="workspace.model.value.dictionaries"
-        :font-profiles="workspace.model.value.fontProfiles"
+        :installed-families="workspace.model.value.fontFamilies"
         :adapters="workspace.model.value.adapters"
         :activation-ids="workspace.activationIds.value"
         :runtime-status="workspace.model.value.workflowRuntimeStatus"
@@ -137,33 +129,15 @@ onMounted(() => {
         @back="view = 'dictionaries'"
         @save="workspace.saveDictionary"
       />
-      <FontProfileLibrary
-        v-else-if="view === 'fonts'"
-        :items="workspace.model.value.fontProfiles"
-        :workflows="workspace.model.value.workflows"
-        :installed-families="workspace.model.value.fontFamilies"
-        :editing="workspace.fontProfileDetail.value"
-        :busy="workspace.workspaceBusy.value"
-        :messages="workspace.messages.value"
-        @open="openFontProfile"
-        @close-edit="workspace.fontProfileDetail.value = null"
-        @create="workspace.createFontProfile"
-        @save="saveFontProfile"
-        @remove="workspace.removeFontProfiles"
-      />
       <CaptureView
         v-else-if="view === 'capture'"
         :software="workspace.model.value.software"
+        :dictionaries="workspace.model.value.dictionaries"
         :adapters="workspace.model.value.adapters"
-        :capture="workspace.model.value.capture"
-        :result="workspace.captureResult.value"
-        :busy="workspace.captureBusy.value"
-        :message="workspace.messages.value.capture ?? ''"
-        @start="workspace.startCapture"
-        @stop="workspace.stopCapture"
       />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />
-    </main>
+      </main>
+    </div>
   </UApp>
 </template>

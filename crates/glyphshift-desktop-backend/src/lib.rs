@@ -8,9 +8,9 @@ use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_workflow::{
     resolve as resolve_workflow, AdapterInput, AdapterPlan, CompiledWorkflow,
     CompositionEnvironment, Dictionary as WorkflowDictionary,
-    DictionaryEntry as WorkflowDictionaryEntry, FontProfile as WorkflowFontProfile,
-    FontProfileBinding as WorkflowFontProfileBinding, ResolveError, SoftwareInput,
-    Workflow as WorkflowDefinition, WorkflowTarget as WorkflowDefinitionTarget,
+    DictionaryEntry as WorkflowDictionaryEntry, FontCoverage as CompiledFontCoverage, ResolveError,
+    SoftwareInput, TargetFontPolicy as CompiledTargetFontPolicy, Workflow as WorkflowDefinition,
+    WorkflowTarget as WorkflowDefinitionTarget,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,8 +20,7 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 const EXTENSION_SCHEMA: &str = "glyphshift.extension/1";
-const FONT_PROFILE_SCHEMA: &str = "glyphshift.font-profile/1";
-const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/2";
+const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/3";
 const WORKFLOW_STATE_SCHEMA: &str = "glyphshift.workflow-state/1";
 const DESKTOP_STATE_SCHEMA: &str = "glyphshift.desktop-state/1";
 const DEFAULT_LOCALE: &str = "zh-CN";
@@ -32,20 +31,14 @@ pub enum BackendError {
     InvalidArtifact(&'static str),
     DuplicateSoftware(Box<str>),
     DuplicateDictionary(Box<str>),
-    DuplicateFontProfile(Box<str>),
     UnknownSoftware(Box<str>),
     UnknownDictionary(Box<str>),
-    UnknownFontProfile(Box<str>),
     UnknownAdapter(Box<str>),
     DuplicateWorkflow(Box<str>),
     UnknownWorkflow(Box<str>),
     WorkflowRejected(ResolveError),
     DictionaryReferenced {
         dictionary_id: Box<str>,
-        workflow_ids: Vec<Box<str>>,
-    },
-    FontProfileReferenced {
-        font_profile_id: Box<str>,
         workflow_ids: Vec<Box<str>>,
     },
     SoftwareReferenced {
@@ -101,13 +94,6 @@ impl CapabilityView {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct LocationView {
-    id: Box<str>,
-    label: Box<str>,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct SoftwareView {
     id: Box<str>,
     name: Box<str>,
@@ -123,7 +109,6 @@ pub struct SoftwareView {
     translation: CapabilityView,
     font: CapabilityView,
     observe: CapabilityView,
-    locations: Vec<LocationView>,
 }
 
 impl SoftwareView {
@@ -168,7 +153,6 @@ pub struct DesktopSnapshot {
     selected_software_id: Option<Box<str>>,
     software: Vec<SoftwareView>,
     dictionaries: Vec<DictionarySummaryView>,
-    font_profiles: Vec<FontProfileSummaryView>,
     workflows: Vec<WorkflowSummaryView>,
     activations: Vec<WorkflowActivationSnapshot>,
 }
@@ -187,11 +171,6 @@ impl DesktopSnapshot {
     #[must_use]
     pub fn dictionaries(&self) -> &[DictionarySummaryView] {
         &self.dictionaries
-    }
-
-    #[must_use]
-    pub fn font_profiles(&self) -> &[FontProfileSummaryView] {
-        &self.font_profiles
     }
 
     #[must_use]
@@ -249,42 +228,6 @@ impl DictionarySummaryView {
     #[must_use]
     pub const fn entry_count(&self) -> usize {
         self.entry_count
-    }
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FontProfileSummaryView {
-    metadata: FontProfileMetadata,
-    revision: u64,
-    families: Vec<Box<str>>,
-    resolved_family: Option<Box<str>>,
-}
-
-impl FontProfileSummaryView {
-    #[must_use]
-    pub fn id(&self) -> &str {
-        self.metadata.id()
-    }
-
-    #[must_use]
-    pub const fn metadata(&self) -> &FontProfileMetadata {
-        &self.metadata
-    }
-
-    #[must_use]
-    pub const fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    #[must_use]
-    pub fn families(&self) -> &[Box<str>] {
-        &self.families
-    }
-
-    #[must_use]
-    pub fn resolved_family(&self) -> Option<&str> {
-        self.resolved_family.as_deref()
     }
 }
 
@@ -664,126 +607,6 @@ impl DictionaryView {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FontProfileMetadata {
-    id: Box<str>,
-    name: Box<str>,
-    description: Box<str>,
-}
-
-impl FontProfileMetadata {
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    #[must_use]
-    pub fn description(&self) -> &str {
-        &self.description
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FontProfileCreate {
-    metadata: FontProfileMetadata,
-    families: Vec<Box<str>>,
-}
-
-impl FontProfileCreate {
-    #[must_use]
-    pub fn new(
-        id: impl Into<Box<str>>,
-        name: impl Into<Box<str>>,
-        families: impl IntoIterator<Item = impl Into<Box<str>>>,
-    ) -> Self {
-        Self {
-            metadata: FontProfileMetadata {
-                id: id.into(),
-                name: name.into(),
-                description: "".into(),
-            },
-            families: families.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<Box<str>>) -> Self {
-        self.metadata.description = description.into();
-        self
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FontProfileEdit {
-    metadata: FontProfileMetadata,
-    base_revision: u64,
-    families: Vec<Box<str>>,
-}
-
-impl FontProfileEdit {
-    #[must_use]
-    pub fn new(
-        id: impl Into<Box<str>>,
-        name: impl Into<Box<str>>,
-        families: impl IntoIterator<Item = impl Into<Box<str>>>,
-        base_revision: u64,
-    ) -> Self {
-        Self {
-            metadata: FontProfileMetadata {
-                id: id.into(),
-                name: name.into(),
-                description: "".into(),
-            },
-            base_revision,
-            families: families.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    #[must_use]
-    pub fn with_description(mut self, description: impl Into<Box<str>>) -> Self {
-        self.metadata.description = description.into();
-        self
-    }
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FontProfileView {
-    metadata: FontProfileMetadata,
-    revision: u64,
-    families: Vec<Box<str>>,
-    resolved_family: Option<Box<str>>,
-}
-
-impl FontProfileView {
-    #[must_use]
-    pub const fn metadata(&self) -> &FontProfileMetadata {
-        &self.metadata
-    }
-    #[must_use]
-    pub fn id(&self) -> &str {
-        self.metadata.id()
-    }
-    #[must_use]
-    pub const fn revision(&self) -> u64 {
-        self.revision
-    }
-    #[must_use]
-    pub fn families(&self) -> &[Box<str>] {
-        &self.families
-    }
-    #[must_use]
-    pub fn resolved_family(&self) -> Option<&str> {
-        self.resolved_family.as_deref()
-    }
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowAdapterStrategy {
@@ -817,54 +640,40 @@ impl WorkflowAdapterPlan {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase"
-)]
-pub enum FontProfileScope {
-    All,
-    Locations { location_ids: Vec<Box<str>> },
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FontCoverage {
+    DictionaryMatches,
+    AllObservations,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct FontProfileBinding {
-    font_profile_id: Box<str>,
-    scope: FontProfileScope,
+pub struct WorkflowFontPolicy {
+    families: Vec<Box<str>>,
+    coverage: FontCoverage,
 }
 
-impl FontProfileBinding {
+impl WorkflowFontPolicy {
     #[must_use]
-    pub fn all(font_profile_id: impl Into<Box<str>>) -> Self {
-        Self {
-            font_profile_id: font_profile_id.into(),
-            scope: FontProfileScope::All,
-        }
-    }
-
-    #[must_use]
-    pub fn locations(
-        font_profile_id: impl Into<Box<str>>,
-        location_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
+    pub fn new(
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+        coverage: FontCoverage,
     ) -> Self {
         Self {
-            font_profile_id: font_profile_id.into(),
-            scope: FontProfileScope::Locations {
-                location_ids: location_ids.into_iter().map(Into::into).collect(),
-            },
+            families: families.into_iter().map(Into::into).collect(),
+            coverage,
         }
     }
 
     #[must_use]
-    pub fn font_profile_id(&self) -> &str {
-        &self.font_profile_id
+    pub fn families(&self) -> &[Box<str>] {
+        &self.families
     }
 
     #[must_use]
-    pub const fn scope(&self) -> &FontProfileScope {
-        &self.scope
+    pub const fn coverage(&self) -> FontCoverage {
+        self.coverage
     }
 }
 
@@ -875,7 +684,7 @@ pub struct WorkflowTargetCreate {
     adapter_plan: WorkflowAdapterPlan,
     dictionary_ids: Vec<Box<str>>,
     #[serde(default)]
-    font_bindings: Vec<FontProfileBinding>,
+    font_policy: Option<WorkflowFontPolicy>,
 }
 
 impl WorkflowTargetCreate {
@@ -889,16 +698,19 @@ impl WorkflowTargetCreate {
             software_id: software_id.into(),
             adapter_plan: WorkflowAdapterPlan::parallel(adapter_ids),
             dictionary_ids: dictionary_ids.into_iter().map(Into::into).collect(),
-            font_bindings: Vec::new(),
+            font_policy: None,
         }
     }
 
     #[must_use]
-    pub fn with_font_bindings(
-        mut self,
-        bindings: impl IntoIterator<Item = FontProfileBinding>,
-    ) -> Self {
-        self.font_bindings = bindings.into_iter().collect();
+    pub fn with_font_policy(mut self, policy: WorkflowFontPolicy) -> Self {
+        self.font_policy = Some(policy);
+        self
+    }
+
+    #[must_use]
+    pub fn with_optional_font_policy(mut self, policy: Option<WorkflowFontPolicy>) -> Self {
+        self.font_policy = policy;
         self
     }
 }
@@ -979,7 +791,7 @@ pub struct WorkflowTargetView {
     software_id: Box<str>,
     adapter_plan: WorkflowAdapterPlan,
     dictionary_ids: Vec<Box<str>>,
-    font_bindings: Vec<FontProfileBinding>,
+    font_policy: Option<WorkflowFontPolicy>,
 }
 
 impl WorkflowTargetView {
@@ -999,8 +811,8 @@ impl WorkflowTargetView {
     }
 
     #[must_use]
-    pub fn font_bindings(&self) -> &[FontProfileBinding] {
-        &self.font_bindings
+    pub const fn font_policy(&self) -> Option<&WorkflowFontPolicy> {
+        self.font_policy.as_ref()
     }
 }
 
@@ -1091,15 +903,6 @@ struct ContextSchemaArtifact {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FontProfileArtifact {
-    schema: Box<str>,
-    revision: u64,
-    metadata: FontProfileMetadata,
-    families: Vec<Box<str>>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct WorkflowArtifact {
     schema: Box<str>,
     id: Box<str>,
@@ -1117,7 +920,7 @@ struct WorkflowTargetArtifact {
     adapter_plan: WorkflowAdapterPlan,
     dictionary_ids: Vec<Box<str>>,
     #[serde(default)]
-    font_bindings: Vec<FontProfileBinding>,
+    font_policy: Option<WorkflowFontPolicy>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1208,7 +1011,6 @@ pub struct DesktopBackend {
     software: BTreeMap<Box<str>, SoftwareState>,
     local_software: BTreeMap<Box<str>, DesktopSoftwareArtifact>,
     dictionaries: BTreeMap<Box<str>, DictionaryView>,
-    font_profiles: BTreeMap<Box<str>, FontProfileView>,
     workflows: BTreeMap<Box<str>, WorkflowArtifact>,
     enabled_workflows: BTreeMap<Box<str>, u64>,
     enabled_workflow_ids: Vec<Box<str>>,
@@ -1301,8 +1103,6 @@ impl DesktopBackend {
             .map_err(|_| BackendError::Storage("create-extension-directory"))?;
         fs::create_dir_all(root.join("dictionaries"))
             .map_err(|_| BackendError::Storage("create-dictionary-directory"))?;
-        fs::create_dir_all(root.join("font-profiles"))
-            .map_err(|_| BackendError::Storage("create-font-profile-directory"))?;
         fs::create_dir_all(root.join("workflows"))
             .map_err(|_| BackendError::Storage("create-workflow-directory"))?;
 
@@ -1352,7 +1152,6 @@ impl DesktopBackend {
             .filter(|(extension_id, _)| software.contains_key(extension_id))
             .collect();
         let dictionaries = read_dictionaries(&root)?;
-        let font_profiles = read_font_profiles(&root, &environment.font_families)?;
         let workflows = read_workflows(&root)?;
         let enabled_workflows = read_workflow_state(&root, &workflows)?;
         let enabled_workflow_ids = enabled_workflows.keys().cloned().collect();
@@ -1363,7 +1162,6 @@ impl DesktopBackend {
             software,
             local_software,
             dictionaries,
-            font_profiles,
             workflows,
             enabled_workflows,
             enabled_workflow_ids,
@@ -1387,6 +1185,12 @@ impl DesktopBackend {
         self.dictionaries
             .get(dictionary_id)
             .ok_or_else(|| BackendError::UnknownDictionary(dictionary_id.into()))
+    }
+
+    pub fn dictionary_json(&self, dictionary_id: &str) -> Result<Vec<u8>, BackendError> {
+        self.dictionary(dictionary_id)?;
+        fs::read(dictionary_path(&self.root, dictionary_id)?)
+            .map_err(|_| BackendError::Storage("read-dictionary"))
     }
 
     pub fn create_dictionary(
@@ -1576,112 +1380,6 @@ impl DesktopBackend {
         Ok(())
     }
 
-    pub fn font_profile(&self, font_profile_id: &str) -> Result<&FontProfileView, BackendError> {
-        self.font_profiles
-            .get(font_profile_id)
-            .ok_or_else(|| BackendError::UnknownFontProfile(font_profile_id.into()))
-    }
-
-    pub fn create_font_profile(
-        &mut self,
-        create: FontProfileCreate,
-    ) -> Result<FontProfileView, BackendError> {
-        if self.font_profiles.contains_key(&create.metadata.id) {
-            return Err(BackendError::DuplicateFontProfile(create.metadata.id));
-        }
-        let artifact = font_profile_artifact(create, 1)?;
-        let serialized = serde_json::to_string(&artifact)
-            .map_err(|_| BackendError::InvalidArtifact("serialize-font-profile"))?;
-        write_atomic(
-            &font_profile_path(&self.root, artifact.metadata.id())?,
-            &serialized,
-        )?;
-        let view = font_profile_view(&artifact, &self.environment.font_families);
-        self.font_profiles
-            .insert(artifact.metadata.id.clone(), view.clone());
-        Ok(view)
-    }
-
-    pub fn update_font_profile(
-        &mut self,
-        edit: FontProfileEdit,
-    ) -> Result<FontProfileView, BackendError> {
-        let current = self
-            .font_profiles
-            .get(edit.metadata.id())
-            .ok_or_else(|| BackendError::UnknownFontProfile(edit.metadata.id.clone()))?;
-        if current.revision != edit.base_revision {
-            return Err(BackendError::RevisionConflict {
-                current: current.revision,
-            });
-        }
-        let artifact = font_profile_artifact(
-            FontProfileCreate {
-                metadata: edit.metadata,
-                families: edit.families,
-            },
-            current.revision + 1,
-        )?;
-        let view = font_profile_view(&artifact, &self.environment.font_families);
-        for workflow_id in self.enabled_workflows.keys() {
-            let workflow = &self.workflows[workflow_id];
-            if workflow.targets.iter().any(|target| {
-                target
-                    .font_bindings
-                    .iter()
-                    .any(|binding| binding.font_profile_id() == view.id())
-            }) {
-                self.resolve_workflow_artifact_with_overrides(workflow, None, Some(&view))?;
-            }
-        }
-        let serialized = serde_json::to_string(&artifact)
-            .map_err(|_| BackendError::InvalidArtifact("serialize-font-profile"))?;
-        write_atomic(
-            &font_profile_path(&self.root, artifact.metadata.id())?,
-            &serialized,
-        )?;
-        self.font_profiles
-            .insert(artifact.metadata.id.clone(), view.clone());
-        Ok(view)
-    }
-
-    pub fn delete_font_profiles<'a>(
-        &mut self,
-        font_profile_ids: impl IntoIterator<Item = &'a str>,
-    ) -> Result<(), BackendError> {
-        let font_profile_ids = font_profile_ids.into_iter().collect::<BTreeSet<_>>();
-        for font_profile_id in &font_profile_ids {
-            if !self.font_profiles.contains_key(*font_profile_id) {
-                return Err(BackendError::UnknownFontProfile((*font_profile_id).into()));
-            }
-            let workflow_ids = self
-                .workflows
-                .values()
-                .filter(|workflow| {
-                    workflow.targets.iter().any(|target| {
-                        target
-                            .font_bindings
-                            .iter()
-                            .any(|binding| binding.font_profile_id() == *font_profile_id)
-                    })
-                })
-                .map(|workflow| workflow.id.clone())
-                .collect::<Vec<_>>();
-            if !workflow_ids.is_empty() {
-                return Err(BackendError::FontProfileReferenced {
-                    font_profile_id: (*font_profile_id).into(),
-                    workflow_ids,
-                });
-            }
-        }
-        for font_profile_id in font_profile_ids {
-            fs::remove_file(font_profile_path(&self.root, font_profile_id)?)
-                .map_err(|_| BackendError::Storage("remove-font-profile"))?;
-            self.font_profiles.remove(font_profile_id);
-        }
-        Ok(())
-    }
-
     pub fn workflow(&self, workflow_id: &str) -> Result<WorkflowView, BackendError> {
         self.workflows
             .get(workflow_id)
@@ -1714,7 +1412,7 @@ impl DesktopBackend {
                     software_id: target.software_id,
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
-                    font_bindings: target.font_bindings,
+                    font_policy: target.font_policy,
                 })
                 .collect(),
         };
@@ -1750,7 +1448,7 @@ impl DesktopBackend {
                     software_id: target.software_id,
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
-                    font_bindings: target.font_bindings,
+                    font_policy: target.font_policy,
                 })
                 .collect(),
         };
@@ -1795,7 +1493,7 @@ impl DesktopBackend {
                     target.adapter_plan.adapter_ids.iter().cloned(),
                     target.dictionary_ids.iter().cloned(),
                 )
-                .with_font_bindings(target.font_bindings.iter().cloned())
+                .with_optional_font_policy(target.font_policy.clone())
             })
             .collect::<Vec<_>>();
         self.create_workflow(WorkflowCreate {
@@ -1891,7 +1589,7 @@ impl DesktopBackend {
         &self,
         artifact: &WorkflowArtifact,
     ) -> Result<CompiledWorkflow, BackendError> {
-        self.resolve_workflow_artifact_with_overrides(artifact, None, None)
+        self.resolve_workflow_artifact_with_dictionary(artifact, None)
     }
 
     fn resolve_workflow_artifact_with_dictionary(
@@ -1899,36 +1597,30 @@ impl DesktopBackend {
         artifact: &WorkflowArtifact,
         dictionary_override: Option<&DictionaryView>,
     ) -> Result<CompiledWorkflow, BackendError> {
-        self.resolve_workflow_artifact_with_overrides(artifact, dictionary_override, None)
-    }
-
-    fn resolve_workflow_artifact_with_overrides(
-        &self,
-        artifact: &WorkflowArtifact,
-        dictionary_override: Option<&DictionaryView>,
-        font_profile_override: Option<&FontProfileView>,
-    ) -> Result<CompiledWorkflow, BackendError> {
         let definition = WorkflowDefinition::new(
             artifact.id.clone(),
             artifact.targets.iter().map(|target| {
-                WorkflowDefinitionTarget::new(
+                let definition_target = WorkflowDefinitionTarget::new(
                     target.software_id.clone(),
                     AdapterPlan::parallel(target.adapter_plan.adapter_ids.iter().cloned()),
                     target.dictionary_ids.iter().cloned(),
-                )
-                .with_font_bindings(target.font_bindings.iter().map(|binding| {
-                    match &binding.scope {
-                        FontProfileScope::All => {
-                            WorkflowFontProfileBinding::all(binding.font_profile_id.clone())
-                        }
-                        FontProfileScope::Locations { location_ids } => {
-                            WorkflowFontProfileBinding::locations(
-                                binding.font_profile_id.clone(),
-                                location_ids.iter().cloned(),
-                            )
-                        }
-                    }
-                }))
+                );
+                target
+                    .font_policy
+                    .as_ref()
+                    .map_or(definition_target.clone(), |policy| {
+                        definition_target.with_font_policy(CompiledTargetFontPolicy::new(
+                            policy.families.iter().cloned(),
+                            match policy.coverage {
+                                FontCoverage::DictionaryMatches => {
+                                    CompiledFontCoverage::DictionaryMatches
+                                }
+                                FontCoverage::AllObservations => {
+                                    CompiledFontCoverage::AllObservations
+                                }
+                            },
+                        ))
+                    })
             }),
         );
         let software = artifact
@@ -1953,30 +1645,16 @@ impl DesktopBackend {
                 Ok(SoftwareInput::new(
                     state.artifact.id.clone(),
                     state.locale.clone(),
-                    glyphshift_domain::Generation::new(target.font_bindings.iter().fold(
-                        target.dictionary_ids.iter().fold(
-                            artifact.revision,
-                            |generation, dictionary_id| {
-                                let revision = dictionary_override
-                                    .filter(|dictionary| dictionary.id() == dictionary_id.as_ref())
-                                    .map(DictionaryView::revision)
-                                    .or_else(|| {
-                                        self.dictionaries
-                                            .get(dictionary_id)
-                                            .map(DictionaryView::revision)
-                                    })
-                                    .unwrap_or(0);
-                                generation.saturating_add(revision)
-                            },
-                        ),
-                        |generation, binding| {
-                            let revision = font_profile_override
-                                .filter(|profile| profile.id() == binding.font_profile_id())
-                                .map(FontProfileView::revision)
+                    glyphshift_domain::Generation::new(target.dictionary_ids.iter().fold(
+                        artifact.revision,
+                        |generation, dictionary_id| {
+                            let revision = dictionary_override
+                                .filter(|dictionary| dictionary.id() == dictionary_id.as_ref())
+                                .map(DictionaryView::revision)
                                 .or_else(|| {
-                                    self.font_profiles
-                                        .get(binding.font_profile_id())
-                                        .map(FontProfileView::revision)
+                                    self.dictionaries
+                                        .get(dictionary_id)
+                                        .map(DictionaryView::revision)
                                 })
                                 .unwrap_or(0);
                             generation.saturating_add(revision)
@@ -2000,20 +1678,10 @@ impl DesktopBackend {
                     .map_or_else(|| dictionary_definition(dictionary), dictionary_definition)
             })
             .collect::<Vec<_>>();
-        let font_profiles = self
-            .font_profiles
-            .values()
-            .map(|profile| {
-                font_profile_override
-                    .filter(|candidate| candidate.id() == profile.id())
-                    .map_or_else(|| font_profile_definition(profile), font_profile_definition)
-            })
-            .collect::<Vec<_>>();
         resolve_workflow(
             &definition,
             &software,
             &dictionaries,
-            &font_profiles,
             &self.environment.composition,
         )
         .map_err(BackendError::WorkflowRejected)
@@ -2201,10 +1869,17 @@ impl DesktopBackend {
                 {
                     return Err(BackendError::InvalidInput("capture-adapter-cannot-observe"));
                 }
+                let mut features = vec![Feature::TextObserve];
+                if requirement
+                    .features()
+                    .any(|feature| feature == Feature::TextReplace)
+                {
+                    features.push(Feature::TextReplace);
+                }
                 Ok(AdapterRequirement::new(
                     requirement.adapter_id().clone(),
                     requirement.version_requirement(),
-                    [Feature::TextObserve],
+                    features,
                 ))
             })
             .collect::<Result<Vec<_>, BackendError>>()?;
@@ -2261,16 +1936,6 @@ impl DesktopBackend {
                     entry_count: dictionary.entries.len(),
                 })
                 .collect(),
-            font_profiles: self
-                .font_profiles
-                .values()
-                .map(|profile| FontProfileSummaryView {
-                    metadata: profile.metadata.clone(),
-                    revision: profile.revision,
-                    families: profile.families.clone(),
-                    resolved_family: profile.resolved_family.clone(),
-                })
-                .collect(),
             workflows: self
                 .workflows
                 .values()
@@ -2298,7 +1963,7 @@ impl DesktopBackend {
                             software_id: target.software_id.clone(),
                             adapter_plan: target.adapter_plan.clone(),
                             dictionary_ids: target.dictionary_ids.clone(),
-                            font_bindings: target.font_bindings.clone(),
+                            font_policy: target.font_policy.clone(),
                         })
                         .collect(),
                 })
@@ -2352,8 +2017,8 @@ impl DesktopBackend {
             executables: vec![executable_name.into()],
             runtime: None,
             locations: vec![ExtensionLocationArtifact {
-                id: "main-ui".into(),
-                label: "main-ui".into(),
+                id: "internal-default".into(),
+                label: "internal-default".into(),
                 context: None,
             }],
         };
@@ -2623,15 +2288,6 @@ fn software_view(
         translation: CapabilityView::unavailable("capability.text-unavailable"),
         font: CapabilityView::unavailable("capability.font-unavailable"),
         observe: CapabilityView::pending_observation(),
-        locations: state
-            .artifact
-            .locations
-            .iter()
-            .map(|location| LocationView {
-                id: location.id.clone(),
-                label: location.label.clone(),
-            })
-            .collect(),
     }
 }
 
@@ -2733,40 +2389,6 @@ fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDictionary {
     )
 }
 
-fn font_profile_artifact(
-    create: FontProfileCreate,
-    revision: u64,
-) -> Result<FontProfileArtifact, BackendError> {
-    let artifact = FontProfileArtifact {
-        schema: FONT_PROFILE_SCHEMA.into(),
-        revision,
-        metadata: create.metadata,
-        families: create.families,
-    };
-    validate_font_profile(&artifact, None)?;
-    Ok(artifact)
-}
-
-fn font_profile_view(
-    artifact: &FontProfileArtifact,
-    installed_families: &BTreeSet<Box<str>>,
-) -> FontProfileView {
-    FontProfileView {
-        metadata: artifact.metadata.clone(),
-        revision: artifact.revision,
-        families: artifact.families.clone(),
-        resolved_family: artifact
-            .families
-            .iter()
-            .find(|family| installed_families.contains(*family))
-            .cloned(),
-    }
-}
-
-fn font_profile_definition(profile: &FontProfileView) -> WorkflowFontProfile {
-    WorkflowFontProfile::new(profile.id(), profile.families.iter().cloned())
-}
-
 fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
     WorkflowView {
         id: artifact.id.clone(),
@@ -2780,7 +2402,7 @@ fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
                 software_id: target.software_id.clone(),
                 adapter_plan: target.adapter_plan.clone(),
                 dictionary_ids: target.dictionary_ids.clone(),
-                font_bindings: target.font_bindings.clone(),
+                font_policy: target.font_policy.clone(),
             })
             .collect(),
     }
@@ -2826,19 +2448,14 @@ fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result
                     .dictionary_ids
                     .iter()
                     .any(|dictionary_id| !safe_identifier(dictionary_id))
-                || target.font_bindings.iter().any(|binding| {
-                    !safe_identifier(binding.font_profile_id())
-                        || match binding.scope() {
-                            FontProfileScope::All => false,
-                            FontProfileScope::Locations { location_ids } => {
-                                location_ids.is_empty()
-                                    || location_ids.iter().collect::<BTreeSet<_>>().len()
-                                        != location_ids.len()
-                                    || location_ids
-                                        .iter()
-                                        .any(|location_id| !safe_identifier(location_id))
-                            }
-                        }
+                || target.font_policy.as_ref().is_some_and(|policy| {
+                    policy.families.is_empty()
+                        || policy
+                            .families
+                            .iter()
+                            .any(|family| family.trim().is_empty())
+                        || policy.families.iter().collect::<BTreeSet<_>>().len()
+                            != policy.families.len()
                 })
         })
     {
@@ -2933,63 +2550,6 @@ fn read_dictionaries(root: &Path) -> Result<BTreeMap<Box<str>, DictionaryView>, 
     Ok(dictionaries)
 }
 
-fn validate_font_profile(
-    artifact: &FontProfileArtifact,
-    path: Option<&Path>,
-) -> Result<(), BackendError> {
-    let unique_families =
-        artifact.families.iter().collect::<BTreeSet<_>>().len() == artifact.families.len();
-    if artifact.schema.as_ref() != FONT_PROFILE_SCHEMA
-        || !safe_identifier(artifact.metadata.id())
-        || artifact.metadata.name().trim().is_empty()
-        || artifact.metadata.name().chars().count() > 128
-        || artifact.metadata.description().chars().count() > 512
-        || artifact.revision == 0
-        || artifact.families.is_empty()
-        || artifact
-            .families
-            .iter()
-            .any(|family| family.trim().is_empty())
-        || !unique_families
-        || path.is_some_and(|path| {
-            path.file_stem().and_then(|value| value.to_str()) != Some(artifact.metadata.id())
-        })
-    {
-        return Err(BackendError::InvalidArtifact("font-profile-contract"));
-    }
-    Ok(())
-}
-
-fn read_font_profiles(
-    root: &Path,
-    installed_families: &BTreeSet<Box<str>>,
-) -> Result<BTreeMap<Box<str>, FontProfileView>, BackendError> {
-    let directory = root.join("font-profiles");
-    let mut paths = fs::read_dir(&directory)
-        .map_err(|_| BackendError::Storage("read-font-profile-directory"))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
-        .collect::<Vec<_>>();
-    paths.sort();
-    let mut profiles = BTreeMap::new();
-    for path in paths {
-        let artifact: FontProfileArtifact = read_json(&path, "font-profile-json")?;
-        validate_font_profile(&artifact, Some(&path))?;
-        let profile_id = artifact.metadata.id.clone();
-        if profiles
-            .insert(
-                profile_id.clone(),
-                font_profile_view(&artifact, installed_families),
-            )
-            .is_some()
-        {
-            return Err(BackendError::DuplicateFontProfile(profile_id));
-        }
-    }
-    Ok(profiles)
-}
-
 fn safe_identifier(value: &str) -> bool {
     !value.is_empty()
         && value != "."
@@ -3078,15 +2638,6 @@ fn dictionary_path(root: &Path, dictionary_id: &str) -> Result<PathBuf, BackendE
     Ok(root
         .join("dictionaries")
         .join(format!("{dictionary_id}.json")))
-}
-
-fn font_profile_path(root: &Path, font_profile_id: &str) -> Result<PathBuf, BackendError> {
-    if !safe_identifier(font_profile_id) {
-        return Err(BackendError::InvalidArtifact("unsafe-artifact-id"));
-    }
-    Ok(root
-        .join("font-profiles")
-        .join(format!("{font_profile_id}.json")))
 }
 
 fn workflow_path(root: &Path, workflow_id: &str) -> Result<PathBuf, BackendError> {

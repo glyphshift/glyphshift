@@ -357,6 +357,15 @@ pub trait AdapterHostPort: Send {
         self.update(session_id, target, bindings, publication.generation())
     }
 
+    fn control_capture(
+        &mut self,
+        _session_id: SessionId,
+        _target: &TargetInstance,
+        _paused: bool,
+    ) -> Result<(), HostFailure> {
+        Err(HostFailure::Unavailable)
+    }
+
     fn health(
         &mut self,
         _session_id: SessionId,
@@ -656,6 +665,21 @@ impl SessionManager {
         publication: &RuntimePublication,
     ) -> Result<SessionStatus, SessionError> {
         self.update_inner(session_id, publication.generation(), Some(publication))
+    }
+
+    pub fn control_capture(
+        &mut self,
+        session_id: SessionId,
+        paused: bool,
+    ) -> Result<(), SessionError> {
+        let record = self
+            .sessions
+            .get(&session_id)
+            .ok_or(SessionError::SessionNotFound(session_id))?;
+        let target = record.target.clone();
+        self.host
+            .control_capture(session_id, &target, paused)
+            .map_err(SessionError::Host)
     }
 
     fn update_inner(

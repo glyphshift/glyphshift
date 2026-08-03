@@ -7,10 +7,8 @@ import {
   STORAGE_KEY,
   type DesktopModel,
   type DesktopSnapshot,
-  type CaptureResult,
   type DictionaryDetail,
   type DictionaryMetadata,
-  type FontProfileDetail,
   type SoftwareRecord,
   type WorkflowCommandResult,
   type WorkflowDetail,
@@ -38,7 +36,6 @@ function readModel(): DesktopModel {
     if (!Array.isArray(value.software)
       || !Array.isArray(value.workflows)
       || !Array.isArray(value.dictionaries)
-      || !Array.isArray(value.fontProfiles)
       || !Array.isArray(value.adapters)) return emptyModel()
     return { ...emptyModel(), ...value }
   }
@@ -53,10 +50,7 @@ const workspaceBusy = ref(false)
 const refreshing = ref(false)
 const messages = ref<Record<string, string>>({})
 const dictionaryDetail = ref<DictionaryDetail | null>(null)
-const fontProfileDetail = ref<FontProfileDetail | null>(null)
 const workflowDetail = ref<WorkflowDetail | null>(null)
-const captureResult = ref<CaptureResult | null>(null)
-const captureBusy = ref(false)
 
 watch(model, (value) => {
   if (!hasDesktopRuntime()) localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
@@ -89,93 +83,7 @@ export function useWorkspace() {
   async function connectDesktopBackend() {
     if (!hasDesktopRuntime()) return false
     applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_snapshot'))
-    if (model.value.capture?.status === 'completed') await loadCaptureResult()
     return true
-  }
-
-  async function loadCaptureResult() {
-    if (model.value.capture?.status !== 'completed') {
-      captureResult.value = null
-      return null
-    }
-    if (!hasDesktopRuntime()) return captureResult.value
-    try {
-      captureResult.value = await invoke<CaptureResult>('desktop_capture_result')
-      return captureResult.value
-    }
-    catch (error) {
-      setMessage('capture', errorMessage(error))
-      return null
-    }
-  }
-
-  async function startCapture(softwareId: string, adapterIds: string[]) {
-    if (captureBusy.value) return false
-    captureBusy.value = true
-    setMessage('capture', '')
-    try {
-      if (hasDesktopRuntime()) {
-        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_start_capture', { softwareId, adapterIds }))
-      }
-      else {
-        model.value.capture = {
-          sessionId: `capture-${Date.now()}`,
-          softwareId,
-          adapterIds: [...adapterIds],
-          status: 'active',
-          entryCount: 0,
-          droppedObservations: 0,
-        }
-      }
-      captureResult.value = null
-      return true
-    }
-    catch (error) {
-      setMessage('capture', errorMessage(error))
-      return false
-    }
-    finally {
-      captureBusy.value = false
-    }
-  }
-
-  async function stopCapture() {
-    if (captureBusy.value || model.value.capture?.status !== 'active') return false
-    captureBusy.value = true
-    setMessage('capture', '')
-    try {
-      if (hasDesktopRuntime()) {
-        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_stop_capture'))
-        await loadCaptureResult()
-      }
-      else if (model.value.capture) {
-        const now = Date.now()
-        model.value.capture.status = 'completed'
-        captureResult.value = {
-          catalog: {
-            schema: 'glyphshift.capture-catalog/1',
-            sessionId: model.value.capture.sessionId,
-            startedAtMs: now,
-            stoppedAtMs: now,
-            droppedObservations: 0,
-            entries: [],
-          },
-          dictionaryDraft: {
-            schema: 'glyphshift.dictionary-draft/1',
-            sourceSessionId: model.value.capture.sessionId,
-            entries: [],
-          },
-        }
-      }
-      return true
-    }
-    catch (error) {
-      setMessage('capture', errorMessage(error))
-      return false
-    }
-    finally {
-      captureBusy.value = false
-    }
   }
 
   async function setWorkflowEnabled(id: string, enabled: boolean, replaceConflicts = false) {
@@ -202,7 +110,7 @@ export function useWorkspace() {
             discovered: false,
             active: false,
             translationRequested: enabled && target.dictionaryIds.length > 0,
-            fontRequested: enabled && target.fontBindings.length > 0,
+            fontRequested: enabled && Boolean(target.fontPolicy),
             translationActive: false,
             fontActive: false,
             appliedGeneration: null,
@@ -255,19 +163,6 @@ export function useWorkspace() {
         ? await invoke<DictionaryDetail>('desktop_dictionary', { dictionaryId: id })
         : model.value.dictionaryDetails[id] ?? null
       return dictionaryDetail.value
-    }
-    catch (error) {
-      setMessage(id, errorMessage(error))
-      return null
-    }
-  }
-
-  async function loadFontProfile(id: string) {
-    try {
-      fontProfileDetail.value = hasDesktopRuntime()
-        ? await invoke<FontProfileDetail>('desktop_font_profile', { fontProfileId: id })
-        : model.value.fontProfileDetails[id] ?? null
-      return fontProfileDetail.value
     }
     catch (error) {
       setMessage(id, errorMessage(error))
@@ -515,101 +410,6 @@ export function useWorkspace() {
     return model.value
   }
 
-  async function createFontProfile(name: string, description: string, families: string[]) {
-    if (workspaceBusy.value) return false
-    workspaceBusy.value = true
-    setMessage('fontProfiles', '')
-    const id = `font-profile-${crypto.randomUUID()}`
-    const detail: FontProfileDetail = {
-      metadata: { id, name: name.trim(), description: description.trim() },
-      revision: 1,
-      families,
-      resolvedFamily: families.find(family => model.value.fontFamilies.includes(family)) ?? null,
-    }
-    try {
-      if (hasDesktopRuntime()) {
-        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_create_font_profile', { create: {
-          metadata: detail.metadata,
-          families: detail.families,
-        } }))
-      }
-      else {
-        model.value.fontProfileDetails[id] = detail
-        model.value.fontProfiles = [...model.value.fontProfiles, detail]
-          .sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
-      }
-      return true
-    }
-    catch (error) {
-      setMessage('fontProfiles', errorMessage(error))
-      return false
-    }
-    finally {
-      workspaceBusy.value = false
-    }
-  }
-
-  async function saveFontProfile(detail: FontProfileDetail) {
-    workspaceBusy.value = true
-    try {
-      const snapshot = hasDesktopRuntime()
-        ? await invoke<DesktopSnapshot>('desktop_update_font_profile', { edit: {
-            metadata: detail.metadata,
-            baseRevision: detail.revision,
-            families: detail.families,
-          } })
-        : localSaveFontProfile(detail)
-      applyDesktopSnapshot(snapshot)
-      await loadFontProfile(detail.metadata.id)
-      return true
-    }
-    catch (error) {
-      setMessage(detail.metadata.id, errorMessage(error))
-      return false
-    }
-    finally {
-      workspaceBusy.value = false
-    }
-  }
-
-  function localSaveFontProfile(detail: FontProfileDetail): DesktopSnapshot {
-    const next = {
-      ...clone(detail),
-      revision: detail.revision + 1,
-      resolvedFamily: detail.families.find(family => model.value.fontFamilies.includes(family)) ?? null,
-    }
-    model.value.fontProfileDetails[next.metadata.id] = next
-    model.value.fontProfiles = model.value.fontProfiles.map(item => item.metadata.id === next.metadata.id ? next : item)
-    return model.value
-  }
-
-  async function removeFontProfiles(ids: string[]) {
-    if (workspaceBusy.value || !ids.length) return false
-    workspaceBusy.value = true
-    setMessage('fontProfiles', '')
-    try {
-      if (hasDesktopRuntime()) {
-        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_delete_font_profiles', { fontProfileIds: ids }))
-      }
-      else {
-        if (ids.some(id => model.value.workflows.some(workflow => workflow.targets.some(target => target.fontBindings.some(binding => binding.fontProfileId === id))))) {
-          throw presentationError(i18n.global.t('workspace.fontProfileReferenced'))
-        }
-        const removed = new Set(ids)
-        model.value.fontProfiles = model.value.fontProfiles.filter(item => !removed.has(item.metadata.id))
-        for (const id of ids) delete model.value.fontProfileDetails[id]
-      }
-      return true
-    }
-    catch (error) {
-      setMessage('fontProfiles', errorMessage(error))
-      return false
-    }
-    finally {
-      workspaceBusy.value = false
-    }
-  }
-
   async function selectSoftware(id: string) {
     model.value.selectedSoftwareId = id
     if (!hasDesktopRuntime()) return
@@ -661,7 +461,6 @@ export function useWorkspace() {
           translation: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.text-unavailable', generation: null },
           font: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.font-unavailable', generation: null },
           observe: { state: 'unavailable', enabled: false, coverage: 0, detail: 'capability.runtime-unavailable', generation: null },
-          locations: [{ id: 'main-ui', label: 'main-ui' }],
         }
         model.value.software = [...model.value.software, record].sort((left, right) => left.name.localeCompare(right.name))
       }
@@ -722,10 +521,7 @@ export function useWorkspace() {
     model,
     activationIds,
     dictionaryDetail,
-    fontProfileDetail,
     workflowDetail,
-    captureResult,
-    captureBusy,
     softwareBusy,
     workspaceBusy,
     refreshing,
@@ -735,7 +531,6 @@ export function useWorkspace() {
     refreshWorkflows,
     loadWorkflow,
     loadDictionary,
-    loadFontProfile,
     createWorkflow,
     copyWorkflow,
     removeWorkflows,
@@ -744,16 +539,10 @@ export function useWorkspace() {
     saveDictionary,
     createDictionary,
     removeDictionaries,
-    createFontProfile,
-    saveFontProfile,
-    removeFontProfiles,
     selectSoftware,
     addSoftware,
     updateSoftware,
     removeSoftware,
     runtimeStatus,
-    startCapture,
-    stopCapture,
-    loadCaptureResult,
   }
 }

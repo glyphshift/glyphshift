@@ -259,6 +259,8 @@ Assert-Dependencies `
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
         'glyphshift-domain',
+        'glyphshift-runtime-contract',
+        'glyphshift-translation',
         'glyphshift-workflow',
         'serde',
         'serde_json',

@@ -50,6 +50,10 @@ pub enum Request {
         publication_json: String,
         generation: u64,
     },
+    ControlCapture {
+        target_token: String,
+        paused: bool,
+    },
     DeactivateRuntime {
         target_token: String,
     },
@@ -95,6 +99,9 @@ pub enum Response {
     },
     RuntimeUpdated {
         generation: u64,
+    },
+    CaptureControlled {
+        paused: bool,
     },
     RuntimeDeactivated,
     Cancelled,
@@ -197,6 +204,10 @@ pub trait ControllerPlugin {
         Err(PluginError::new("runtime_update_unsupported"))
     }
 
+    fn control_capture(&mut self, _target_token: &str, _paused: bool) -> Result<(), PluginError> {
+        Err(PluginError::new("capture_control_unsupported"))
+    }
+
     fn deactivate_runtime(&mut self, _target_token: &str) -> Result<(), PluginError> {
         Err(PluginError::new("runtime_deactivation_unsupported"))
     }
@@ -283,6 +294,13 @@ pub fn serve(
             } => plugin
                 .update_runtime(&target_token, &publication_json, generation)
                 .map(|generation| Response::RuntimeUpdated { generation })
+                .unwrap_or_else(plugin_error),
+            Request::ControlCapture {
+                target_token,
+                paused,
+            } => plugin
+                .control_capture(&target_token, paused)
+                .map(|()| Response::CaptureControlled { paused })
                 .unwrap_or_else(plugin_error),
             Request::DeactivateRuntime { target_token } => plugin
                 .deactivate_runtime(&target_token)

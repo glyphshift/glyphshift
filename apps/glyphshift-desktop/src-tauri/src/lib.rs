@@ -3,29 +3,31 @@ mod settings;
 
 use command_error::CommandError;
 use glyphshift_capture::{
-    unix_time_millis, CaptureCatalog, CaptureConfiguration, CaptureSessionId, DictionaryDraft,
-    DEFAULT_MAX_ENTRIES,
+    CaptureConfiguration, ProbeDictionaryEntry, ProbeDictionarySnapshot, ProbeEntryPage,
+    ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus, ProbeRunStore,
+    ProbeRunSummary, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
-    DictionaryEdit, DictionaryView, EffectiveWorkflowIntent, ExecutableSelection,
-    FontProfileCreate, FontProfileEdit, FontProfileView, SoftwareEdit, WorkflowCreate,
-    WorkflowEdit, WorkflowView,
+    DictionaryEdit, DictionaryEntryCreate, DictionaryView, EffectiveWorkflowIntent,
+    ExecutableSelection, SoftwareEdit, WorkflowCreate, WorkflowEdit, WorkflowView,
 };
 use glyphshift_desktop_runtime::{
     DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, RuntimeBundle,
     WorkflowReconcileReport,
 };
-use glyphshift_domain::Feature;
+use glyphshift_domain::{Feature, Generation, RouteOperator};
+use glyphshift_runtime_contract::RuntimePublication;
+use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_workflow::ResolveError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use settings::{AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 9;
+const DESKTOP_API_VERSION: u16 = 12;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
@@ -44,13 +46,6 @@ fn workflow_activation_command_error(error: BackendError) -> CommandError {
         }) => CommandError::new("workflow.locale_mismatch")
             .with_arg("softwareId", software_id.to_string())
             .with_arg("dictionaryId", dictionary_id.to_string()),
-        BackendError::WorkflowRejected(ResolveError::UnknownLocation {
-            software_id,
-            location,
-            ..
-        }) => CommandError::new("workflow.unknown_location")
-            .with_arg("softwareId", software_id.to_string())
-            .with_arg("location", location.to_string()),
         BackendError::WorkflowRejected(ResolveError::UnknownSoftware(id))
         | BackendError::UnknownSoftware(id) => {
             CommandError::new("workflow.unknown_software").with_arg("softwareId", id.to_string())
@@ -58,14 +53,23 @@ fn workflow_activation_command_error(error: BackendError) -> CommandError {
         BackendError::WorkflowRejected(ResolveError::UnknownDictionary(id))
         | BackendError::UnknownDictionary(id) => CommandError::new("workflow.unknown_dictionary")
             .with_arg("dictionaryId", id.to_string()),
-        BackendError::WorkflowRejected(ResolveError::UnknownFontProfile(id))
-        | BackendError::UnknownFontProfile(id) => {
-            CommandError::new("workflow.unknown_font_profile")
-                .with_arg("fontProfileId", id.to_string())
-        }
         BackendError::WorkflowRejected(ResolveError::UnknownAdapter(id)) => {
             CommandError::new("workflow.unknown_adapter").with_arg("adapterId", id.to_string())
         }
+        BackendError::WorkflowRejected(ResolveError::EmptyFontFamilies { software_id }) => {
+            CommandError::new("workflow.empty_font_families")
+                .with_arg("softwareId", software_id.to_string())
+        }
+        BackendError::WorkflowRejected(ResolveError::FontUnavailable { software_id }) => {
+            CommandError::new("workflow.font_unavailable")
+                .with_arg("softwareId", software_id.to_string())
+        }
+        BackendError::WorkflowRejected(ResolveError::FeatureUnavailable {
+            software_id,
+            feature,
+        }) => CommandError::new("workflow.feature_unavailable")
+            .with_arg("softwareId", software_id.to_string())
+            .with_arg("feature", format!("{feature:?}")),
         BackendError::SoftwareOccupied {
             software_id,
             workflow_id,
@@ -93,6 +97,92 @@ fn capture_backend_error(error: BackendError) -> CommandError {
         }
         _ => CommandError::new("capture.invalid_configuration"),
     }
+}
+
+fn probe_run_error(error: ProbeRunError) -> CommandError {
+    let code = match error {
+        ProbeRunError::InvalidInput => "capture.invalid_configuration",
+        ProbeRunError::NotFound => "capture.workspace_not_found",
+        ProbeRunError::AlreadyExists => "capture.workspace_exists",
+        ProbeRunError::InvalidState => "capture.invalid_state",
+        ProbeRunError::InvalidRun => "capture.invalid_workspace",
+        ProbeRunError::Storage => "capture.write_failed",
+        ProbeRunError::Observation => "capture.read_failed",
+        ProbeRunError::Export => "capture.export_failed",
+    };
+    CommandError::new(code)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeRunCreateRequest {
+    id: Box<str>,
+    name: Box<str>,
+    software_id: Box<str>,
+    adapter_ids: Vec<Box<str>>,
+    live_preview_enabled: bool,
+    dictionary: ProbeDictionaryBindingRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+enum ProbeDictionaryBindingRequest {
+    Existing {
+        dictionary_id: Box<str>,
+    },
+    New {
+        id: Box<str>,
+        name: Box<str>,
+        description: Box<str>,
+        source_locale: Box<str>,
+        target_locale: Box<str>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeRunQueryRequest {
+    run_id: Box<str>,
+    search: Box<str>,
+    page: usize,
+    page_size: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeTranslationEditRequest {
+    run_id: Box<str>,
+    source: Box<str>,
+    translation: Box<str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeBulkRequest {
+    run_id: Box<str>,
+    sources: Vec<Box<str>>,
+    action: Box<str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeExportRequest {
+    run_id: Box<str>,
+    format: ProbeExportFormat,
+    output_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ProbeRunView {
+    #[serde(flatten)]
+    summary: ProbeRunSummary,
+    dictionary_revision: u64,
+    dictionary_entry_count: usize,
 }
 
 #[derive(Serialize)]
@@ -161,30 +251,6 @@ struct DesktopProductSnapshot {
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
-    capture: Option<CaptureSummaryView>,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct CaptureSummaryView {
-    session_id: Box<str>,
-    software_id: Box<str>,
-    adapter_ids: Vec<Box<str>>,
-    status: &'static str,
-    entry_count: usize,
-    dropped_observations: u64,
-}
-
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct CaptureResultView {
-    catalog: CaptureCatalog,
-    dictionary_draft: DictionaryDraft,
-}
-
-struct CaptureState {
-    summary: CaptureSummaryView,
-    output_path: PathBuf,
 }
 
 trait WorkflowRuntimeService: Send {
@@ -208,6 +274,18 @@ trait WorkflowRuntimeService: Send {
     ) -> Result<(), DesktopRuntimeError>;
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
+
+    fn control_capture(
+        &mut self,
+        software_id: &str,
+        paused: bool,
+    ) -> Result<(), DesktopRuntimeError>;
+
+    fn publish_capture(
+        &mut self,
+        software_id: &str,
+        publication: RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError>;
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
@@ -250,6 +328,22 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         DesktopRuntimePool::stop_capture(self, software_id).map(|_| ())
     }
+
+    fn control_capture(
+        &mut self,
+        software_id: &str,
+        paused: bool,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::control_capture(self, software_id, paused)
+    }
+
+    fn publish_capture(
+        &mut self,
+        software_id: &str,
+        publication: RuntimePublication,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::publish(self, software_id, publication)
+    }
 }
 
 struct DesktopApplication {
@@ -258,14 +352,14 @@ struct DesktopApplication {
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
-    capture_root: PathBuf,
-    capture: Option<CaptureState>,
+    probe_runs: ProbeRunStore,
+    active_probe_run_id: Option<Box<str>>,
 }
 
 impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
-        let capture_root = data_root.join("captures");
-        std::fs::create_dir_all(&capture_root).map_err(|error| error.to_string())?;
+        let probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
+            .map_err(|error| format!("probe run startup: {error:?}"))?;
         let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
         let adapters = runtime_bundle
             .as_ref()
@@ -309,8 +403,8 @@ impl DesktopApplication {
             workflow_runtime_status: BTreeMap::new(),
             adapters,
             font_families,
-            capture_root,
-            capture: None,
+            probe_runs,
+            active_probe_run_id: None,
         };
         application
             .restore_enabled_workflows()
@@ -351,109 +445,417 @@ impl DesktopApplication {
             workflow_runtime_status,
             adapters: self.adapters.clone(),
             font_families: self.font_families.clone(),
-            capture: self.capture.as_ref().map(|capture| capture.summary.clone()),
         }
     }
 
-    fn start_capture(
+    fn probe_run_view(&self, summary: ProbeRunSummary) -> Result<ProbeRunView, CommandError> {
+        let dictionary = self
+            .backend
+            .dictionary(summary.dictionary_id())
+            .map_err(|_| {
+                CommandError::new("dictionary.not_found")
+                    .with_arg("dictionaryId", summary.dictionary_id())
+            })?;
+        Ok(ProbeRunView {
+            summary,
+            dictionary_revision: dictionary.revision(),
+            dictionary_entry_count: dictionary.entries().len(),
+        })
+    }
+
+    fn probe_dictionary_snapshot(
+        &self,
+        dictionary_id: &str,
+    ) -> Result<ProbeDictionarySnapshot, CommandError> {
+        let dictionary = self.backend.dictionary(dictionary_id).map_err(|_| {
+            CommandError::new("dictionary.not_found").with_arg("dictionaryId", dictionary_id)
+        })?;
+        ProbeDictionarySnapshot::new(
+            dictionary.revision(),
+            dictionary
+                .entries()
+                .iter()
+                .map(|entry| ProbeDictionaryEntry::new(entry.source(), entry.translation())),
+        )
+        .map_err(probe_run_error)
+    }
+
+    fn probe_run_list(&mut self) -> Result<Vec<ProbeRunView>, CommandError> {
+        let summaries = self.probe_runs.list().map_err(probe_run_error)?;
+        summaries
+            .into_iter()
+            .map(|summary| self.probe_run_view(summary))
+            .collect()
+    }
+
+    fn create_probe_run(
         &mut self,
-        software_id: &str,
-        adapter_ids: Vec<Box<str>>,
-    ) -> Result<DesktopProductSnapshot, CommandError> {
-        if self
-            .capture
-            .as_ref()
-            .is_some_and(|capture| capture.summary.status == "active")
-        {
+        request: ProbeRunCreateRequest,
+    ) -> Result<ProbeRunView, CommandError> {
+        if self.active_probe_run_id.is_some() {
+            return Err(CommandError::new("capture.already_active"));
+        }
+        if request.live_preview_enabled && !self.adapters_support_preview(&request.adapter_ids) {
+            return Err(CommandError::new("capture.preview_unavailable"));
+        }
+        let dictionary_id = match request.dictionary {
+            ProbeDictionaryBindingRequest::Existing { dictionary_id } => {
+                self.backend.dictionary(&dictionary_id).map_err(|_| {
+                    CommandError::new("dictionary.not_found")
+                        .with_arg("dictionaryId", dictionary_id.to_string())
+                })?;
+                dictionary_id
+            }
+            ProbeDictionaryBindingRequest::New {
+                id,
+                name,
+                description,
+                source_locale,
+                target_locale,
+            } => {
+                let create = DictionaryCreate::new(id.clone(), name, source_locale, target_locale)
+                    .with_description(description);
+                self.backend
+                    .create_dictionary(create)
+                    .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
+                id
+            }
+        };
+        let create = ProbeRunCreate::new(
+            request.id,
+            request.name,
+            request.software_id,
+            dictionary_id,
+            request.adapter_ids,
+            request.live_preview_enabled,
+        )
+        .map_err(probe_run_error)?;
+        let summary = self.probe_runs.create(create).map_err(probe_run_error)?;
+        self.start_probe_run_runtime(summary.id())
+    }
+
+    fn delete_probe_runs(&mut self, run_ids: &[Box<str>]) -> Result<(), CommandError> {
+        if run_ids.is_empty() {
+            return Err(CommandError::new("capture.invalid_configuration"));
+        }
+        for run_id in run_ids {
+            if self.active_probe_run_id.as_deref() == Some(run_id) {
+                return Err(CommandError::new("capture.invalid_state"));
+            }
+            self.probe_runs.delete(run_id).map_err(probe_run_error)?;
+        }
+        Ok(())
+    }
+
+    fn resume_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        self.start_probe_run_runtime(run_id)
+    }
+
+    fn start_probe_run_runtime(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        if self.active_probe_run_id.is_some() {
+            return Err(CommandError::new("capture.already_active"));
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if matches!(
+            summary.status(),
+            ProbeRunStatus::Running | ProbeRunStatus::Paused
+        ) {
             return Err(CommandError::new("capture.already_active"));
         }
         let spec = self
             .backend
-            .capture_runtime_spec(software_id, &adapter_ids)
+            .capture_runtime_spec(summary.software_id(), summary.adapter_ids())
             .map_err(capture_backend_error)?;
-        let runtimes = self
-            .runtimes
-            .as_mut()
-            .ok_or_else(|| CommandError::new("runtime.unavailable"))?;
-        let timestamp = unix_time_millis();
-        let mut suffix = 0_u32;
-        let (session_id, output_path) = loop {
-            let id = if suffix == 0 {
-                format!("capture-{timestamp}")
-            } else {
-                format!("capture-{timestamp}-{suffix}")
-            };
-            let path = self.capture_root.join(format!("{id}.json"));
-            if !path.exists() {
-                break (id, path);
-            }
-            suffix = suffix.saturating_add(1);
-        };
-        let configuration = CaptureConfiguration::new(
-            CaptureSessionId::new(session_id.clone())
-                .map_err(|_| CommandError::new("capture.invalid_configuration"))?,
-            output_path.clone(),
-            DEFAULT_MAX_ENTRIES,
-        )
-        .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
-        runtimes
-            .start_capture(software_id, &spec, configuration)
-            .map_err(|error| runtime_command_error(error, true))?;
-        self.capture = Some(CaptureState {
-            summary: CaptureSummaryView {
-                session_id: session_id.into(),
-                software_id: software_id.into(),
-                adapter_ids,
-                status: "active",
-                entry_count: 0,
-                dropped_observations: 0,
-            },
-            output_path,
-        });
-        Ok(self.snapshot())
-    }
-
-    fn stop_capture(&mut self) -> Result<DesktopProductSnapshot, CommandError> {
-        let capture = self
-            .capture
-            .as_mut()
-            .filter(|capture| capture.summary.status == "active")
-            .ok_or_else(|| CommandError::new("capture.not_active"))?;
+        let configuration = self
+            .probe_runs
+            .capture_configuration(run_id, DEFAULT_MAX_ENTRIES)
+            .map_err(probe_run_error)?;
         self.runtimes
             .as_mut()
             .ok_or_else(|| CommandError::new("runtime.unavailable"))?
-            .stop_capture(&capture.summary.software_id)
-            .map_err(|error| runtime_command_error(error, false))?;
-        let catalog = CaptureCatalog::read(&capture.output_path)
-            .map_err(|_| CommandError::new("capture.read_failed"))?;
-        let draft = catalog.dictionary_draft();
-        let draft_path = capture.output_path.with_extension("dictionary-draft.json");
-        std::fs::write(
-            draft_path,
-            draft
-                .encode_json()
-                .map_err(|_| CommandError::new("capture.write_failed"))?,
-        )
-        .map_err(|_| CommandError::new("capture.write_failed"))?;
-        capture.summary.status = "completed";
-        capture.summary.entry_count = catalog.entries().len();
-        capture.summary.dropped_observations = catalog.dropped_observations();
-        Ok(self.snapshot())
+            .start_capture(summary.software_id(), &spec, configuration)
+            .map_err(|error| runtime_command_error(error, true))?;
+        self.active_probe_run_id = Some(run_id.into());
+        self.probe_runs
+            .set_status(run_id, ProbeRunStatus::Running)
+            .map_err(probe_run_error)?;
+        if let Err(error) = self.publish_probe_preview_if_active(run_id) {
+            if let Some(runtimes) = self.runtimes.as_mut() {
+                let _ = runtimes.stop_capture(summary.software_id());
+            }
+            let _ = self
+                .probe_runs
+                .set_status(run_id, ProbeRunStatus::Interrupted);
+            self.active_probe_run_id = None;
+            return Err(error);
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.probe_run_view(summary)
     }
 
-    fn capture_result(&self) -> Result<CaptureResultView, CommandError> {
-        let capture = self
-            .capture
-            .as_ref()
-            .filter(|capture| capture.summary.status == "completed")
-            .ok_or_else(|| CommandError::new("capture.not_completed"))?;
-        let catalog = CaptureCatalog::read(&capture.output_path)
-            .map_err(|_| CommandError::new("capture.read_failed"))?;
-        let dictionary_draft = catalog.dictionary_draft();
-        Ok(CaptureResultView {
-            catalog,
-            dictionary_draft,
-        })
+    fn set_probe_run_paused(
+        &mut self,
+        run_id: &str,
+        paused: bool,
+    ) -> Result<ProbeRunView, CommandError> {
+        if self.active_probe_run_id.as_deref() != Some(run_id) {
+            return Err(CommandError::new("capture.not_active"));
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.runtimes
+            .as_mut()
+            .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+            .control_capture(summary.software_id(), paused)
+            .map_err(|error| runtime_command_error(error, false))?;
+        let summary = self
+            .probe_runs
+            .set_status(
+                run_id,
+                if paused {
+                    ProbeRunStatus::Paused
+                } else {
+                    ProbeRunStatus::Running
+                },
+            )
+            .map_err(probe_run_error)?;
+        self.probe_run_view(summary)
+    }
+
+    fn disconnect_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        if self.active_probe_run_id.as_deref() != Some(run_id) {
+            return Err(CommandError::new("capture.not_active"));
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.runtimes
+            .as_mut()
+            .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+            .stop_capture(summary.software_id())
+            .map_err(|error| runtime_command_error(error, false))?;
+        self.active_probe_run_id = None;
+        let summary = self
+            .probe_runs
+            .set_status(run_id, ProbeRunStatus::Ready)
+            .map_err(probe_run_error)?;
+        self.probe_run_view(summary)
+    }
+
+    fn probe_run_summary(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.probe_run_view(summary)
+    }
+
+    fn probe_run_entries(
+        &mut self,
+        request: ProbeRunQueryRequest,
+    ) -> Result<ProbeEntryPage, CommandError> {
+        let query = ProbeQuery::new(request.search, request.page, request.page_size)
+            .map_err(probe_run_error)?;
+        let summary = self
+            .probe_runs
+            .summary(&request.run_id)
+            .map_err(probe_run_error)?;
+        let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+        self.probe_runs
+            .query_entries(&request.run_id, &query, &dictionary)
+            .map_err(probe_run_error)
+    }
+
+    fn edit_probe_translation(
+        &mut self,
+        request: ProbeTranslationEditRequest,
+    ) -> Result<ProbeRunView, CommandError> {
+        let summary = self
+            .probe_runs
+            .summary(&request.run_id)
+            .map_err(probe_run_error)?;
+        let dictionary = self
+            .backend
+            .dictionary(summary.dictionary_id())
+            .cloned()
+            .map_err(|_| CommandError::new("dictionary.not_found"))?;
+        let existing = dictionary
+            .entries()
+            .iter()
+            .find(|entry| entry.source() == request.source.as_ref());
+        let translation = request.translation.trim();
+        let changed = if translation.is_empty() {
+            if existing.is_some() {
+                self.backend
+                    .delete_dictionary_entries(
+                        dictionary.id(),
+                        [request.source.clone()],
+                        dictionary.revision(),
+                    )
+                    .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+                true
+            } else {
+                false
+            }
+        } else if existing.is_some_and(|entry| entry.translation() == translation) {
+            false
+        } else {
+            self.backend
+                .upsert_dictionary_entry(
+                    dictionary.id(),
+                    DictionaryEntryCreate::new(request.source.clone(), translation),
+                    existing.map(|entry| entry.source()),
+                    dictionary.revision(),
+                )
+                .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+            true
+        };
+        if changed {
+            self.reconcile_enabled_workflows()?;
+        }
+        self.publish_probe_preview_if_active(&request.run_id)?;
+        self.probe_run_summary(&request.run_id)
+    }
+
+    fn bulk_probe_entries(
+        &mut self,
+        request: ProbeBulkRequest,
+    ) -> Result<ProbeRunView, CommandError> {
+        match request.action.as_ref() {
+            "ignore" => {
+                self.probe_runs
+                    .set_ignored(&request.run_id, &request.sources, true)
+                    .map_err(probe_run_error)?;
+            }
+            "restore" => {
+                self.probe_runs
+                    .set_ignored(&request.run_id, &request.sources, false)
+                    .map_err(probe_run_error)?;
+            }
+            "clear_translations" => {
+                let summary = self
+                    .probe_runs
+                    .summary(&request.run_id)
+                    .map_err(probe_run_error)?;
+                let dictionary = self
+                    .backend
+                    .dictionary(summary.dictionary_id())
+                    .cloned()
+                    .map_err(|_| CommandError::new("dictionary.not_found"))?;
+                let existing = dictionary
+                    .entries()
+                    .iter()
+                    .map(|entry| entry.source())
+                    .collect::<BTreeSet<_>>();
+                let sources = request
+                    .sources
+                    .iter()
+                    .filter(|source| existing.contains(source.as_ref()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if !sources.is_empty() {
+                    self.backend
+                        .delete_dictionary_entries(dictionary.id(), sources, dictionary.revision())
+                        .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+                    self.reconcile_enabled_workflows()?;
+                }
+            }
+            _ => return Err(CommandError::new("capture.invalid_configuration")),
+        }
+        self.publish_probe_preview_if_active(&request.run_id)?;
+        self.probe_run_summary(&request.run_id)
+    }
+
+    fn export_probe_run(&mut self, request: ProbeExportRequest) -> Result<(), CommandError> {
+        if !request.output_path.is_absolute() {
+            return Err(CommandError::new("capture.export_failed"));
+        }
+        let summary = self
+            .probe_runs
+            .summary(&request.run_id)
+            .map_err(probe_run_error)?;
+        let content = if request.format == ProbeExportFormat::DictionaryJson {
+            self.backend
+                .dictionary_json(summary.dictionary_id())
+                .map_err(|_| CommandError::new("capture.export_failed"))?
+        } else {
+            let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+            self.probe_runs
+                .export(&request.run_id, request.format, &dictionary)
+                .map_err(probe_run_error)?
+        };
+        std::fs::write(request.output_path, content)
+            .map_err(|_| CommandError::new("capture.export_failed"))
+    }
+
+    fn adapters_support_preview(&self, adapter_ids: &[Box<str>]) -> bool {
+        !adapter_ids.is_empty()
+            && adapter_ids.iter().all(|adapter_id| {
+                self.adapters.iter().any(|adapter| {
+                    adapter.id == *adapter_id
+                        && adapter
+                            .features
+                            .iter()
+                            .any(|feature| feature.as_ref() == "textReplace")
+                })
+            })
+    }
+
+    fn publish_probe_preview_if_active(&mut self, run_id: &str) -> Result<(), CommandError> {
+        if self.active_probe_run_id.as_deref() != Some(run_id) {
+            return Ok(());
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if !summary.live_preview_enabled() {
+            return Ok(());
+        }
+        let spec = self
+            .backend
+            .capture_runtime_spec(summary.software_id(), summary.adapter_ids())
+            .map_err(capture_backend_error)?;
+        let generation = summary.preview_generation().saturating_add(1);
+        let mut locations = BTreeSet::<Box<str>>::new();
+        for operator in spec.publication().route().operators() {
+            match operator {
+                RouteOperator::Direct { location }
+                | RouteOperator::ContextualHeading { location, .. } => {
+                    locations.insert(location.clone());
+                }
+                RouteOperator::Fallback {
+                    locations: fallback,
+                } => {
+                    locations.extend(fallback.iter().cloned());
+                }
+                RouteOperator::Unknown { .. }
+                | RouteOperator::NativeCode
+                | RouteOperator::Script
+                | RouteOperator::Io => {}
+            }
+        }
+        let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+        let entries = self
+            .probe_runs
+            .preview_entries(run_id, &dictionary)
+            .map_err(probe_run_error)?;
+        let mut snapshot = TranslationSnapshot::empty(Generation::new(generation));
+        for location in locations {
+            for entry in &entries {
+                snapshot = snapshot.with_entry_for_adapters(
+                    location.clone(),
+                    entry.source(),
+                    entry.translation(),
+                    summary.adapter_ids().iter().cloned(),
+                );
+            }
+        }
+        let publication = RuntimePublication::new(
+            spec.publication().route().clone(),
+            snapshot,
+            FontPolicy::empty(),
+        );
+        self.runtimes
+            .as_mut()
+            .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+            .publish_capture(summary.software_id(), publication)
+            .map_err(|error| runtime_command_error(error, false))?;
+        self.probe_runs
+            .set_preview_generation(run_id, generation)
+            .map_err(probe_run_error)?;
+        Ok(())
     }
 
     fn dictionary_detail(&self, dictionary_id: &str) -> Result<DictionaryView, CommandError> {
@@ -490,50 +892,22 @@ impl DesktopApplication {
         &mut self,
         dictionary_ids: &[Box<str>],
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        let referenced_by_probe = self
+            .probe_runs
+            .list()
+            .map_err(probe_run_error)?
+            .into_iter()
+            .any(|run| {
+                dictionary_ids
+                    .iter()
+                    .any(|id| id.as_ref() == run.dictionary_id())
+            });
+        if referenced_by_probe {
+            return Err(CommandError::new("dictionary.referenced"));
+        }
         self.backend
             .delete_dictionaries(dictionary_ids.iter().map(AsRef::as_ref))
             .map_err(|_| CommandError::new("dictionary.referenced"))?;
-        Ok(self.snapshot())
-    }
-
-    fn font_profile_detail(&self, font_profile_id: &str) -> Result<FontProfileView, CommandError> {
-        self.backend
-            .font_profile(font_profile_id)
-            .cloned()
-            .map_err(|_| {
-                CommandError::new("font_profile.not_found")
-                    .with_arg("fontProfileId", font_profile_id)
-            })
-    }
-
-    fn create_font_profile(
-        &mut self,
-        create: FontProfileCreate,
-    ) -> Result<DesktopProductSnapshot, CommandError> {
-        self.backend
-            .create_font_profile(create)
-            .map_err(|_| CommandError::new("font_profile.invalid_create"))?;
-        Ok(self.snapshot())
-    }
-
-    fn update_font_profile(
-        &mut self,
-        edit: FontProfileEdit,
-    ) -> Result<DesktopProductSnapshot, CommandError> {
-        self.backend
-            .update_font_profile(edit)
-            .map_err(|_| CommandError::new("font_profile.invalid_update"))?;
-        self.reconcile_enabled_workflows()?;
-        Ok(self.snapshot())
-    }
-
-    fn delete_font_profiles(
-        &mut self,
-        font_profile_ids: &[Box<str>],
-    ) -> Result<DesktopProductSnapshot, CommandError> {
-        self.backend
-            .delete_font_profiles(font_profile_ids.iter().map(AsRef::as_ref))
-            .map_err(|_| CommandError::new("font_profile.referenced"))?;
         Ok(self.snapshot())
     }
 
@@ -1028,38 +1402,128 @@ fn desktop_snapshot(
 }
 
 #[tauri::command]
-fn desktop_start_capture(
-    software_id: String,
-    adapter_ids: Vec<String>,
+fn desktop_probe_runs(
     application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| runtime_unavailable())?
-        .start_capture(
-            &software_id,
-            adapter_ids.into_iter().map(Box::<str>::from).collect(),
-        )
-}
-
-#[tauri::command]
-fn desktop_stop_capture(
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| runtime_unavailable())?
-        .stop_capture()
-}
-
-#[tauri::command]
-fn desktop_capture_result(
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<CaptureResultView, CommandError> {
+) -> Result<Vec<ProbeRunView>, CommandError> {
     application
         .lock()
         .map_err(|_| workspace_unavailable())?
-        .capture_result()
+        .probe_run_list()
+}
+
+#[tauri::command]
+fn desktop_create_probe_run(
+    request: ProbeRunCreateRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .create_probe_run(request)
+}
+
+#[tauri::command]
+fn desktop_delete_probe_runs(
+    run_ids: Vec<String>,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
+    let run_ids = run_ids
+        .into_iter()
+        .map(Box::<str>::from)
+        .collect::<Vec<_>>();
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .delete_probe_runs(&run_ids)
+}
+
+#[tauri::command]
+fn desktop_resume_probe_run(
+    run_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .resume_probe_run(&run_id)
+}
+
+#[tauri::command]
+fn desktop_set_probe_run_paused(
+    run_id: String,
+    paused: bool,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .set_probe_run_paused(&run_id, paused)
+}
+
+#[tauri::command]
+fn desktop_disconnect_probe_run(
+    run_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .disconnect_probe_run(&run_id)
+}
+
+#[tauri::command]
+fn desktop_probe_run_summary(
+    run_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .probe_run_summary(&run_id)
+}
+
+#[tauri::command]
+fn desktop_probe_run_entries(
+    request: ProbeRunQueryRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeEntryPage, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .probe_run_entries(request)
+}
+
+#[tauri::command]
+fn desktop_edit_probe_translation(
+    request: ProbeTranslationEditRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .edit_probe_translation(request)
+}
+
+#[tauri::command]
+fn desktop_bulk_probe_entries(
+    request: ProbeBulkRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .bulk_probe_entries(request)
+}
+
+#[tauri::command]
+fn desktop_export_probe_run(
+    request: ProbeExportRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .export_probe_run(request)
 }
 
 #[tauri::command]
@@ -1108,54 +1572,6 @@ fn desktop_delete_dictionaries(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .delete_dictionaries(&dictionary_ids)
-}
-
-#[tauri::command]
-fn desktop_font_profile(
-    font_profile_id: String,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<FontProfileView, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .font_profile_detail(&font_profile_id)
-}
-
-#[tauri::command]
-fn desktop_create_font_profile(
-    create: FontProfileCreate,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .create_font_profile(create)
-}
-
-#[tauri::command]
-fn desktop_update_font_profile(
-    edit: FontProfileEdit,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .update_font_profile(edit)
-}
-
-#[tauri::command]
-fn desktop_delete_font_profiles(
-    font_profile_ids: Vec<String>,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<DesktopProductSnapshot, CommandError> {
-    let font_profile_ids = font_profile_ids
-        .into_iter()
-        .map(Box::<str>::from)
-        .collect::<Vec<_>>();
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .delete_font_profiles(&font_profile_ids)
 }
 
 #[tauri::command]
@@ -1331,17 +1747,21 @@ pub fn run() {
             desktop_settings,
             desktop_update_settings,
             desktop_snapshot,
-            desktop_start_capture,
-            desktop_stop_capture,
-            desktop_capture_result,
+            desktop_probe_runs,
+            desktop_create_probe_run,
+            desktop_delete_probe_runs,
+            desktop_resume_probe_run,
+            desktop_set_probe_run_paused,
+            desktop_disconnect_probe_run,
+            desktop_probe_run_summary,
+            desktop_probe_run_entries,
+            desktop_edit_probe_translation,
+            desktop_bulk_probe_entries,
+            desktop_export_probe_run,
             desktop_dictionary,
             desktop_create_dictionary,
             desktop_update_dictionary,
             desktop_delete_dictionaries,
-            desktop_font_profile,
-            desktop_create_font_profile,
-            desktop_update_font_profile,
-            desktop_delete_font_profiles,
             desktop_workflow,
             desktop_create_workflow,
             desktop_update_workflow,
@@ -1496,6 +1916,22 @@ mod tests {
                 .push(software_id.into());
             Ok(())
         }
+
+        fn control_capture(
+            &mut self,
+            _software_id: &str,
+            _paused: bool,
+        ) -> Result<(), DesktopRuntimeError> {
+            Ok(())
+        }
+
+        fn publish_capture(
+            &mut self,
+            _software_id: &str,
+            _publication: RuntimePublication,
+        ) -> Result<(), DesktopRuntimeError> {
+            Ok(())
+        }
     }
 
     fn workflow_application() -> (
@@ -1557,8 +1993,9 @@ mod tests {
                 workflow_runtime_status: BTreeMap::new(),
                 adapters: Vec::new(),
                 font_families: Vec::new(),
-                capture_root: data_root.path().join("captures"),
-                capture: None,
+                probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
+                    .expect("probe run store"),
+                active_probe_run_id: None,
             },
             calls,
             software_id,
@@ -1771,33 +2208,73 @@ mod tests {
     }
 
     #[test]
-    fn capture_commands_generate_a_private_catalog_and_a_pure_dictionary_draft() {
-        let (mut application, calls, software_id, _data_root) = workflow_application();
+    fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
+        let (mut application, _calls, software_id, _data_root) = workflow_application();
+        let first = application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-first".into(),
+                name: "First probe".into(),
+                software_id: software_id.clone(),
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("create first probe");
+        assert_eq!(first.summary.status(), ProbeRunStatus::Running);
+        assert_eq!(first.summary.dictionary_id(), "dictionary.product");
 
-        let started = application
-            .start_capture(&software_id, vec![TEST_ADAPTER_ID.into()])
-            .expect("start product capture");
-        let capture = started.capture.expect("active capture summary");
-        assert_eq!(capture.status, "active");
-        assert_eq!(capture.software_id, software_id);
+        let edited = application
+            .edit_probe_translation(ProbeTranslationEditRequest {
+                run_id: first.summary.id().into(),
+                source: "Close".into(),
+                translation: "关闭".into(),
+            })
+            .expect("edit the bound dictionary directly");
+        assert_eq!(edited.dictionary_entry_count, 2);
+        assert_eq!(edited.dictionary_revision, 2);
+        assert!(application
+            .backend
+            .dictionary("dictionary.product")
+            .expect("edited shared dictionary")
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Close" && entry.translation() == "关闭"));
 
-        let stopped = application.stop_capture().expect("stop product capture");
+        let paused = application
+            .set_probe_run_paused(first.summary.id(), true)
+            .expect("pause without ending run");
+        assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
+        let released = application
+            .disconnect_probe_run(first.summary.id())
+            .expect("release runtime");
+        assert_eq!(released.summary.status(), ProbeRunStatus::Ready);
+
+        application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-second".into(),
+                name: "Second probe".into(),
+                software_id,
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("create second probe");
         assert_eq!(
-            stopped.capture.as_ref().map(|capture| capture.status),
-            Some("completed")
+            application.probe_run_list().expect("list probe runs").len(),
+            2
         );
-        let result = application.capture_result().expect("capture result");
-        assert!(result.catalog.entries().is_empty());
-        assert!(result.dictionary_draft.entries().is_empty());
-        let serialized = serde_json::to_value(stopped).expect("serialize capture snapshot");
-        assert!(serialized.get("outputPath").is_none());
         assert_eq!(
-            calls.lock().expect("runtime call log").captures_started,
-            vec![software_id.clone()]
-        );
-        assert_eq!(
-            calls.lock().expect("runtime call log").captures_stopped,
-            vec![software_id]
+            application
+                .backend
+                .dictionary("dictionary.product")
+                .expect("shared dictionary")
+                .entries()
+                .len(),
+            2
         );
     }
 
@@ -2017,8 +2494,9 @@ mod tests {
             workflow_runtime_status: BTreeMap::new(),
             adapters: Vec::new(),
             font_families: Vec::new(),
-            capture_root: data_root.path().join("captures"),
-            capture: None,
+            probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
+                .expect("probe run store"),
+            active_probe_run_id: None,
         };
 
         reopened

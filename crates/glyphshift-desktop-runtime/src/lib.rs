@@ -398,6 +398,7 @@ trait ManagedRuntime: Send {
         &mut self,
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError>;
+    fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError>;
     fn stop(&mut self) -> Result<(), DesktopRuntimeError>;
     fn abandon(&mut self) {}
 
@@ -456,6 +457,10 @@ impl ManagedRuntime for WindowsDesktopRuntime {
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntime::publish(self, publication)
+    }
+
+    fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::control_capture(self, paused)
     }
 
     fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
@@ -878,7 +883,10 @@ impl DesktopRuntimePool {
         let target_id = target_id
             .or_else(|| runtime.targets().first().map(RuntimeTarget::id))
             .ok_or(DesktopRuntimeError::UnknownTarget)?;
-        let requested_features = BTreeSet::from([Feature::TextObserve]);
+        let mut requested_features = BTreeSet::from([Feature::TextObserve]);
+        if status.supports(Feature::TextReplace) {
+            requested_features.insert(Feature::TextReplace);
+        }
         runtime.start_capture(target_id, &requested_features, capture)?;
         self.requested_features
             .insert(application_id.clone(), requested_features.clone());
@@ -895,6 +903,20 @@ impl DesktopRuntimePool {
             return Err(DesktopRuntimeError::InvalidState);
         }
         self.stop_application(application_id)
+    }
+
+    pub fn control_capture(
+        &mut self,
+        application_id: &str,
+        paused: bool,
+    ) -> Result<(), DesktopRuntimeError> {
+        if !self.capture_targets.contains(application_id) {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        self.sessions
+            .get_mut(application_id)
+            .ok_or(DesktopRuntimeError::InvalidState)?
+            .control_capture(paused)
     }
 
     pub fn refresh(
@@ -1200,6 +1222,20 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         Ok(())
     }
 
+    pub fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError> {
+        let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        manager
+            .control_capture(*session_id, paused)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)
+    }
+
     pub fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
             manager,
@@ -1459,6 +1495,10 @@ mod tests {
             publication: glyphshift_runtime_contract::RuntimePublication,
         ) -> Result<(), DesktopRuntimeError> {
             self.generation = publication.generation();
+            Ok(())
+        }
+
+        fn control_capture(&mut self, _paused: bool) -> Result<(), DesktopRuntimeError> {
             Ok(())
         }
 

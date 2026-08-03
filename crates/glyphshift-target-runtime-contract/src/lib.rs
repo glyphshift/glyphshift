@@ -33,6 +33,28 @@ pub struct RuntimeCommandV1 {
     pub json_len: u32,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureRuntimeControl {
+    paused: bool,
+}
+
+impl CaptureRuntimeControl {
+    #[must_use]
+    pub const fn new(paused: bool) -> Self {
+        Self { paused }
+    }
+
+    #[must_use]
+    pub const fn paused(self) -> bool {
+        self.paused
+    }
+
+    pub fn decode_json(json: &str) -> Result<Self, DeploymentError> {
+        serde_json::from_str(json).map_err(|_| DeploymentError::InvalidJson)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeAdapterDeployment {
     library: PathBuf,

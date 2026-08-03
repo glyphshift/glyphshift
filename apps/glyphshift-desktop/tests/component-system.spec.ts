@@ -45,7 +45,7 @@ test('Vue surfaces use Nuxt UI for controls, tables, and overlays', () => {
 })
 
 test('management pages share the project management-page modules', () => {
-  const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'FontProfileLibrary.vue']
+  const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'CaptureView.vue']
 
   for (const page of pages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
@@ -61,4 +61,17 @@ test('modal layers stay above sticky tables and transient menus', () => {
   const viteConfig = readFileSync(join(packageRoot, 'vite.config.ts'), 'utf8')
   expect(viteConfig).toContain("overlay: 'z-[80]")
   expect(viteConfig).toContain("content: 'z-[81]")
+})
+
+test('probe run keeps the 5000-entry path behind backend paging and revision polling', () => {
+  const captureView = readFileSync(join(sourceRoot, 'components', 'CaptureView.vue'), 'utf8')
+  const probeRuns = readFileSync(join(sourceRoot, 'useProbeRuns.ts'), 'utf8')
+
+  expect(captureView).toContain('setInterval(() => void poll(), 1000)')
+  expect(captureView).toContain(':data="entryPage.rows"')
+  expect(probeRuns).toContain("'desktop_probe_run_entries'")
+  expect(probeRuns).toContain('pageSize: input.pageSize')
+  expect(captureView).not.toContain('catalogPage')
+  expect(captureView).not.toContain('draftPage')
+  expect(captureView).not.toContain('useVirtualList')
 })

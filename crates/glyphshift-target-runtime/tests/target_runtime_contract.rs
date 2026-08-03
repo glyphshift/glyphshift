@@ -178,7 +178,7 @@ fn trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog() {
     render_raw_gdi_unicode("Captured label").expect("render observed text");
     deactivate_runtime().expect("finish capture deployment");
 
-    let catalog = CaptureCatalog::read(&output_path).expect("capture catalog");
+    let catalog = CaptureCatalog::read_current(&output_path).expect("capture catalog");
     assert!(catalog.entries().iter().any(|entry| {
         entry.source() == "Captured label"
             && entry.adapter_id() == glyphshift_adapter_gdi::ADAPTER_ID

@@ -1,6 +1,6 @@
 ---
 name: Glyphshift Desktop
-description: A compact workflow, software, dictionary, and font-profile manager for runtime translation.
+description: A compact workflow, software, dictionary, and probe manager for runtime translation.
 colors:
   accent: "Nuxt UI emerald"
   surface: "oklch(23% 0.013 270)"
@@ -23,8 +23,8 @@ geometry:
 
 ## 产品方向
 
-Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流、软件、词典和字体：工作流表达
-持续运行期望，软件只管理身份与程序绑定，词典是可复用语言资产，字体方案是可复用排版资产。
+Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流、软件、词典和探针：工作流表达
+持续运行期望并拥有目标字体策略，软件只管理身份与程序绑定，词典是可复用语言资产。
 启用工作流就是持续期望，没有第二个“开始翻译”动作。
 
 界面采用成熟数据管理器语法：单层标题/导航栏、图标标题与说明、搜索和批量工具栏、满宽表格、
@@ -38,7 +38,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **词典：** 独立资产表展示名称、说明、源/目标语言、发布版本、标签、规则数与修订。详情页只用
   标题摘要展示语言方向、版本、规则数与修订，主表只展示原文和译文；低频 metadata 进入词典设置
   Modal，不出现字体、Hook、Adapter 或内部匹配键。
-- **字体：** 独立字体方案表展示名称、说明、有序候选、当前机器命中结果与引用状态。
+- **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组 Adapter；详情用一张
+  联合表展示原文、译文、状态与技术证据，译文编辑直接修改绑定词典。
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
   Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
 - **帮助：** 由标题栏图标进入，使用紧凑表格展示当前 Runtime Bundle 的 Adapter 名称、说明、
@@ -47,7 +48,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   只展示真实生效的界面语言与主题偏好；语言和主题均立即应用并持久化。
 
 完整软件或词典集合不用普通下拉框承载。Workflow 编辑弹窗使用可搜索、多选的管理列表，并为
-每个目标维护 Adapter Plan、有序词典集合和 Font Profile Bindings。
+每个目标维护 Adapter Plan、有序词典集合和至多一个内联 Font Policy；字体策略直接选择本机字体
+候选优先级，以及“仅词典命中”或“Hook 捕获的全部文字”。
 
 ## 布局与密度
 
@@ -56,6 +58,7 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - 页面外边距 16px；页面标题 20px；普通表格文本 11px，元数据 9–10px。
 - 搜索、筛选、显示列和批量动作共用表格工具栏；选中行时批量动作清楚出现。
 - 表格自己滚动，页面和 `body` 不滚动；960×640 与 1440×900 使用同一结构。
+- 管理表的中间内容区使用连续表面色；空态铺满表头与底部分页之间的空间，最后一行保留底边界。
 - 程序路径只出现在软件资料管理，不进入工作流、词典或 Runtime 状态。
 
 ## 交互合同
@@ -67,8 +70,12 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   keep 和逐词条字体都不属于 Dictionary。未来区域限制由 Workflow 的 Region Binding 组合。
 - 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。
 - Dictionary 创建和编辑不出现 Hook、Adapter 或字体字段。
-- Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Profile；不同 Target 不共享
-  隐式选择状态。
+- Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Policy；不同 Target 不共享
+  隐式选择状态。Font Policy 不成为独立资产，不出现 Location、`main-ui`、全部位置或指定位置。
+- Probe Run 必须且只绑定一个 Dictionary；观测次数、Adapter 和时间属于内部 Observation Index，
+  不进入 Dictionary。暂停不结束任务，重启后可恢复，释放连接后任务和证据仍保留。
+- Probe 详情不分“技术目录”和“字典草稿”；联合表支持后端搜索分页、行内翻译、批量忽略/恢复/
+  清空及导出。5000 条基准下 Vue 只渲染当前页，不叠加虚拟滚动。
 - 原文和译文各占一行并使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。
 - 图标按钮必须有可访问名称；状态不能只依赖颜色。
 - 顶部主题按钮在深色时切到浅色、在浅色时切到深色；若原偏好为跟随系统，点击后落为相反的

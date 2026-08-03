@@ -1,7 +1,7 @@
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEntryCreate,
-    FontProfileBinding, FontProfileCreate, WorkflowCreate, WorkflowTargetCreate,
+    FontCoverage, WorkflowCreate, WorkflowFontPolicy, WorkflowTargetCreate,
 };
 use glyphshift_domain::{AdapterId, Feature};
 use std::fs;
@@ -45,7 +45,7 @@ fn capture_spec_uses_only_explicit_observable_adapters_and_an_empty_publication(
     assert_eq!(spec.requirements().len(), 1);
     assert_eq!(
         spec.requirements()[0].features().collect::<Vec<_>>(),
-        vec![Feature::TextObserve]
+        vec![Feature::TextObserve, Feature::TextReplace]
     );
     let mut translations = 0;
     spec.publication()
@@ -59,7 +59,7 @@ fn capture_spec_uses_only_explicit_observable_adapters_and_an_empty_publication(
 }
 
 #[test]
-fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictionary() {
+fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_dictionary() {
     let root = tempdir().expect("isolated product data");
     let executable = root.path().join("SyntheticEditor.exe");
     fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
@@ -80,20 +80,13 @@ fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictio
         )
         .expect("create pure dictionary");
     backend
-        .create_font_profile(FontProfileCreate::new(
-            "font-profile-ui",
-            "UI Fonts",
-            ["Available Sans"],
-        ))
-        .expect("create font profile");
-    backend
         .create_workflow(
             WorkflowCreate::new("workflow-ui", "UI Workflow").with_targets([
                 WorkflowTargetCreate::new(software_id.clone(), ["adapter-gdi"], ["dictionary-ui"])
-                    .with_font_bindings([FontProfileBinding::locations(
-                        "font-profile-ui",
-                        ["main-ui"],
-                    )]),
+                    .with_font_policy(WorkflowFontPolicy::new(
+                        ["Available Sans"],
+                        FontCoverage::DictionaryMatches,
+                    )),
             ]),
         )
         .expect("create composed workflow");
@@ -105,9 +98,12 @@ fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictio
     assert!(dictionary_json.contains("glyphshift.dictionary/2"));
     assert!(!dictionary_json.contains("adapterPlan"));
     assert!(!dictionary_json.contains("fontProfile"));
-    assert!(workflow_json.contains("glyphshift.workflow/2"));
+    assert!(workflow_json.contains("glyphshift.workflow/3"));
     assert!(workflow_json.contains("adapterPlan"));
-    assert!(workflow_json.contains("fontBindings"));
+    assert!(workflow_json.contains("fontPolicy"));
+    assert!(workflow_json.contains("dictionary_matches"));
+    assert!(!workflow_json.contains("fontBindings"));
+    assert!(!workflow_json.contains("location"));
 
     let reopened = DesktopBackend::open_with_environment(root.path(), environment())
         .expect("reopen composed product data");
@@ -115,9 +111,20 @@ fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictio
     assert_eq!(
         (
             workflow.targets()[0].adapter_plan().adapter_ids(),
-            workflow.targets()[0].font_bindings()[0].font_profile_id(),
+            workflow.targets()[0]
+                .font_policy()
+                .expect("inline font policy")
+                .families(),
+            workflow.targets()[0]
+                .font_policy()
+                .expect("inline font policy")
+                .coverage(),
         ),
-        (&[Box::<str>::from("adapter-gdi")][..], "font-profile-ui")
+        (
+            &[Box::<str>::from("adapter-gdi")][..],
+            &[Box::<str>::from("Available Sans")][..],
+            FontCoverage::DictionaryMatches,
+        )
     );
     assert_eq!(
         reopened
@@ -130,10 +137,20 @@ fn desktop_workflow_v2_persists_adapter_plan_and_font_binding_outside_the_dictio
 }
 
 #[test]
-fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_restart() {
+fn desktop_keeps_dictionary_text_and_workflow_font_policy_independent_across_restart() {
     let root = tempdir().expect("temporary product data");
+    let executable = root.path().join("SyntheticCreativeHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
     let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
         .expect("open empty product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            executable,
+        ))
+        .expect("add synthetic software")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
 
     backend
         .create_dictionary(
@@ -145,15 +162,20 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
         )
         .expect("create a pure dictionary");
     backend
-        .create_font_profile(
-            FontProfileCreate::new(
-                "font-profile.cjk-ui",
-                "简体中文界面",
-                ["Unavailable Sans", "Available Sans"],
-            )
-            .with_description("跨平台中文字体候选"),
+        .create_workflow(
+            WorkflowCreate::new("workflow.cjk-ui", "简体中文界面").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id,
+                    ["adapter-gdi"],
+                    ["dictionary.interface-zh-cn"],
+                )
+                .with_font_policy(WorkflowFontPolicy::new(
+                    ["Unavailable Sans", "Available Sans"],
+                    FontCoverage::AllObservations,
+                )),
+            ]),
         )
-        .expect("create an independent font profile");
+        .expect("create workflow with inline font policy");
     drop(backend);
 
     let reopened = DesktopBackend::open_with_environment(root.path(), environment())
@@ -161,9 +183,12 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
     let dictionary = reopened
         .dictionary("dictionary.interface-zh-cn")
         .expect("read dictionary by id");
-    let font_profile = reopened
-        .font_profile("font-profile.cjk-ui")
-        .expect("read font profile by id");
+    let workflow = reopened
+        .workflow("workflow.cjk-ui")
+        .expect("read workflow by id");
+    let font_policy = workflow.targets()[0]
+        .font_policy()
+        .expect("read inline font policy");
 
     assert_eq!(
         (
@@ -173,9 +198,9 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
             dictionary.metadata().release_version(),
             dictionary.metadata().tags(),
             dictionary.entries()[0].translation(),
-            font_profile.metadata().name(),
-            font_profile.families(),
-            font_profile.resolved_family(),
+            workflow.name(),
+            font_policy.families(),
+            font_policy.coverage(),
         ),
         (
             "界面汉化",
@@ -189,7 +214,7 @@ fn desktop_assets_keep_dictionary_text_and_font_profiles_independent_across_rest
                 Box::<str>::from("Unavailable Sans"),
                 Box::<str>::from("Available Sans"),
             ][..],
-            Some("Available Sans"),
+            FontCoverage::AllObservations,
         )
     );
 }
