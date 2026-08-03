@@ -63,11 +63,6 @@ const activeSoftwareId = ref<string | null>(null)
 const softwareQuery = ref('')
 const dictionaryQuery = ref('')
 const fontQuery = ref('')
-const basicFieldUi = {
-  root: '!grid min-h-[72px] grid-cols-[180px_minmax(0,1fr)] items-start justify-items-stretch gap-6 border-b border-[var(--border)] py-4 last:border-b-0 max-[820px]:grid-cols-1 max-[820px]:gap-2',
-  wrapper: 'min-w-0 pt-1.5 max-[820px]:pt-0',
-  container: 'min-w-0 w-full max-w-[560px]',
-}
 const dictionaryFilter = ref('all')
 const fontFilter = ref('all')
 const activeEditorTab = ref('basic')
@@ -517,17 +512,25 @@ usePageEscape(() => formOpen.value, requestCloseForm)
           <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
         </template>
       </ManagementDetailHeader>
-      <ManagementWorkspaceSurface>
-      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[10px] text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'ml-auto min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--surface)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
+      <ManagementWorkspaceSurface variant="canvas">
+      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[10px] text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'ml-auto min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--app-bg)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
         <template #basic>
-          <section data-testid="workflow-basic-tab" class="max-w-[900px] space-y-4" :aria-label="t('workflows.tabs.basic')">
-            <div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.basicHeading') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.basicHint') }}</p></div>
-            <div class="border-y border-[var(--border)]">
-              <UFormField orientation="horizontal" :label="t('workflows.name')" required :ui="basicFieldUi"><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
-              <UFormField orientation="horizontal" :label="t('workflows.workflowDescription')" :ui="basicFieldUi"><UTextarea v-model="description" :maxlength="512" :rows="4" autoresize :maxrows="6" class="w-full" /></UFormField>
-            </div>
-            <UAlert v-if="basicProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(basicProblems)" />
-          </section>
+          <ManagementFormSection
+            data-testid="workflow-basic-tab"
+            :title="t('workflows.basicHeading')"
+            :description="t('workflows.basicHint')"
+            :heading-level="3"
+          >
+            <ManagementFormRow :label="t('workflows.name')" required>
+              <UInput v-model="name" :maxlength="128" class="w-full" />
+            </ManagementFormRow>
+            <ManagementFormRow :label="t('workflows.workflowDescription')" multiline>
+              <UTextarea v-model="description" :maxlength="512" :rows="3" autoresize :maxrows="6" class="w-full" />
+            </ManagementFormRow>
+            <template #after>
+              <UAlert v-if="basicProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(basicProblems)" />
+            </template>
+          </ManagementFormSection>
         </template>
 
         <template #software>

@@ -56,7 +56,7 @@ test('management pages share the project management-page modules', () => {
   const dictionaryEditor = readFileSync(join(sourceRoot, 'components', 'DictionaryProof.vue'), 'utf8')
   expect(dictionaryEditor, 'DictionaryProof.vue must use the shared table frame.').toContain('<ManagementTableFrame')
 
-  const detailPages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryProof.vue', 'CaptureView.vue']
+  const detailPages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryProof.vue', 'CaptureView.vue', 'SettingsView.vue']
   for (const page of detailPages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared detail header.`).toContain('<ManagementDetailHeader')
@@ -66,7 +66,25 @@ test('management pages share the project management-page modules', () => {
   for (const page of workspacePages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared workspace surface.`).toContain('<ManagementWorkspaceSurface')
+    expect(source, `${basename(page)} must render detail content on the application canvas.`).toContain('variant="canvas"')
+    expect(source, `${basename(page)} must use the shared form section.`).toContain('<ManagementFormSection')
+    expect(source, `${basename(page)} must use the shared form row.`).toContain('<ManagementFormRow')
   }
+
+  const workspaceSurface = readFileSync(join(sourceRoot, 'components', 'ManagementWorkspaceSurface.vue'), 'utf8')
+  const detailHeader = readFileSync(join(sourceRoot, 'components', 'ManagementDetailHeader.vue'), 'utf8')
+  expect(workspaceSurface).toContain("variant?: 'surface' | 'canvas'")
+  expect(workspaceSurface).toContain("bg-[var(--app-bg)]")
+  expect(detailHeader).toContain('backLabel?: string')
+  expect(detailHeader).toContain('v-if="backLabel"')
+
+  const formRow = readFileSync(join(sourceRoot, 'components', 'ManagementFormRow.vue'), 'utf8')
+  const formSection = readFileSync(join(sourceRoot, 'components', 'ManagementFormSection.vue'), 'utf8')
+  expect(formSection).toContain('mx-auto w-full max-w-[980px]')
+  expect(formSection).toContain('rounded-[10px] border border-[var(--border)]')
+  expect(formRow).toContain('grid-cols-[184px_minmax(0,1fr)]')
+  expect(formRow).toContain('justify-self-end')
+  expect(formRow).toContain('@max-[620px]:grid-cols-1')
 
   const themeSource = readFileSync(join(sourceRoot, 'main.css'), 'utf8')
   expect(themeSource).toContain('--surface-inset:')

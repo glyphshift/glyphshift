@@ -3,7 +3,7 @@ defineProps<{
   title: string
   description: string
   titleId: string
-  backLabel: string
+  backLabel?: string
 }>()
 
 defineEmits<{ back: [] }>()
@@ -16,6 +16,7 @@ defineEmits<{ back: [] }>()
   >
     <div class="flex min-w-0 items-center gap-2">
       <UButton
+        v-if="backLabel"
         color="neutral"
         variant="ghost"
         size="sm"

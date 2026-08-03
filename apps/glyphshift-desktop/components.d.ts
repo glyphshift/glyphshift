@@ -18,6 +18,8 @@ declare module 'vue' {
     HelpView: typeof import('./src/components/HelpView.vue')['default']
     ManagementDetailHeader: typeof import('./src/components/ManagementDetailHeader.vue')['default']
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']
+    ManagementFormRow: typeof import('./src/components/ManagementFormRow.vue')['default']
+    ManagementFormSection: typeof import('./src/components/ManagementFormSection.vue')['default']
     ManagementPageHeader: typeof import('./src/components/ManagementPageHeader.vue')['default']
     ManagementTableFrame: typeof import('./src/components/ManagementTableFrame.vue')['default']
     ManagementWorkspaceSurface: typeof import('./src/components/ManagementWorkspaceSurface.vue')['default']

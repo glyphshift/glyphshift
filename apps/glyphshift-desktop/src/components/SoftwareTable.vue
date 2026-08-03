@@ -47,12 +47,6 @@ const addDescription = ref('')
 const addPath = ref('')
 const addSubmitting = ref(false)
 const addStartCount = ref(0)
-const editorFieldUi = {
-  root: '!grid min-h-[72px] grid-cols-[180px_minmax(0,1fr)] items-start justify-items-stretch gap-6 border-b border-[var(--border)] py-4 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-2',
-  wrapper: 'min-w-0 pt-1.5 max-[720px]:pt-0',
-  container: 'min-w-0 w-full max-w-[680px]',
-}
-
 function normalizedPath(path: string) {
   return path.trim().replace(/^\\\\\?\\/, '').replace(/\//g, '\\').toLocaleLowerCase()
 }
@@ -431,19 +425,19 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
           <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('software.saveChanges')" :loading="busy" :disabled="busy || !editName.trim() || !editPath.trim()" @click="saveEdit" />
         </template>
       </ManagementDetailHeader>
-      <ManagementWorkspaceSurface>
+      <ManagementWorkspaceSurface variant="canvas">
         <div class="h-full overflow-y-auto p-5 [scrollbar-gutter:stable]">
-          <div class="mx-auto max-w-[920px] border-y border-[var(--border)]">
-            <UFormField orientation="horizontal" :label="t('software.displayName')" required :ui="editorFieldUi">
+          <ManagementFormSection :title="t('software.informationHeading')" :description="t('software.informationHint')">
+            <ManagementFormRow :label="t('software.displayName')" required>
               <UInput v-model="editName" size="sm" class="w-full" :aria-label="t('software.displayName')" />
-            </UFormField>
-            <UFormField orientation="horizontal" :label="t('software.softwareDescription')" :ui="editorFieldUi">
+            </ManagementFormRow>
+            <ManagementFormRow :label="t('software.softwareDescription')" multiline>
               <UTextarea v-model="editDescription" :maxlength="512" :rows="3" autoresize class="w-full" :aria-label="t('software.softwareDescription')" />
-            </UFormField>
-            <UFormField orientation="horizontal" :label="t('software.executablePath')" required :ui="editorFieldUi">
+            </ManagementFormRow>
+            <ManagementFormRow :label="t('software.executablePath')" required>
               <UInput v-model="editPath" size="sm" class="w-full" :aria-label="t('software.executablePath')" />
-            </UFormField>
-          </div>
+            </ManagementFormRow>
+          </ManagementFormSection>
         </div>
       </ManagementWorkspaceSurface>
     </template>

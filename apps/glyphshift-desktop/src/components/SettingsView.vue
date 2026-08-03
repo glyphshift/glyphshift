@@ -16,14 +16,6 @@ const themeItems = computed(() => [
   { value: 'dark' as const, label: t('settings.themeOption.dark') },
   { value: 'light' as const, label: t('settings.themeOption.light') },
 ])
-const settingsRowUi = {
-  root: '!grid min-h-[76px] grid-cols-[minmax(0,1fr)_220px] items-center justify-items-stretch gap-6 border-b border-[var(--border)] px-4 py-3 last:border-b-0 max-[720px]:grid-cols-1 max-[720px]:gap-2',
-  wrapper: 'min-w-0',
-  label: 'flex items-center gap-2.5 text-[11px] font-semibold',
-  description: 'mt-1 pl-7 text-[10px] leading-4 text-[var(--text-muted)]',
-  container: 'min-w-0 w-full max-[720px]:pl-7',
-}
-
 function updateLocale(value: unknown) {
   void appSettings.setLocalePreference(value as LocalePreference).catch(() => undefined)
 }
@@ -43,11 +35,10 @@ function updateTheme(value: unknown) {
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
   <section class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--app-bg)] p-4" aria-labelledby="settings-title">
-    <ManagementPageHeader
+    <ManagementDetailHeader
       title-id="settings-title"
       :title="t('settings.title')"
       :description="t('settings.description')"
-      icon="i-tabler-settings"
     />
 
     <UAlert
@@ -60,21 +51,15 @@ function updateTheme(value: unknown) {
       class="mb-4 max-w-[760px]"
     />
 
-    <ManagementWorkspaceSurface>
+    <ManagementWorkspaceSurface variant="canvas">
       <div class="h-full overflow-y-auto p-5 [scrollbar-gutter:stable]">
-        <div class="max-w-[920px]">
-          <h2 class="mb-3 mt-0 text-[12px] font-semibold text-[var(--text-secondary)]">{{ t('settings.appearance') }}</h2>
-          <div class="overflow-hidden border-y border-[var(--border)]">
-            <UFormField
-              orientation="horizontal"
-              :label="t('settings.language')"
-              :description="t('settings.languageDescription')"
-              :ui="settingsRowUi"
-            >
-              <template #label>
-                <UIcon name="i-tabler-language" class="size-[18px] text-[var(--accent-strong)]" aria-hidden="true" />
-                <span>{{ t('settings.language') }}</span>
-              </template>
+        <ManagementFormSection :title="t('settings.appearance')" :description="t('settings.appearanceDescription')">
+          <ManagementFormRow
+            :label="t('settings.language')"
+            :description="t('settings.languageDescription')"
+            icon="i-tabler-language"
+            control-width="compact"
+          >
               <USelect
                 :model-value="appSettings.localePreference.value"
                 :items="localeItems"
@@ -85,18 +70,14 @@ function updateTheme(value: unknown) {
                 class="w-full"
                 @update:model-value="updateLocale"
               />
-            </UFormField>
+          </ManagementFormRow>
 
-            <UFormField
-              orientation="horizontal"
-              :label="t('settings.theme')"
-              :description="t('settings.themeDescription')"
-              :ui="settingsRowUi"
-            >
-              <template #label>
-                <UIcon name="i-tabler-sun-moon" class="size-[18px] text-[var(--accent-strong)]" aria-hidden="true" />
-                <span>{{ t('settings.theme') }}</span>
-              </template>
+          <ManagementFormRow
+            :label="t('settings.theme')"
+            :description="t('settings.themeDescription')"
+            icon="i-tabler-sun-moon"
+            control-width="compact"
+          >
               <USelect
                 :model-value="appSettings.themePreference.value"
                 :items="themeItems"
@@ -107,9 +88,8 @@ function updateTheme(value: unknown) {
                 class="w-full"
                 @update:model-value="updateTheme"
               />
-            </UFormField>
-          </div>
-        </div>
+          </ManagementFormRow>
+        </ManagementFormSection>
       </div>
     </ManagementWorkspaceSurface>
   </section>
