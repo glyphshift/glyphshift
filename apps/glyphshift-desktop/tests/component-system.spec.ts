@@ -61,6 +61,16 @@ test('management pages share the project management-page modules', () => {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared detail header.`).toContain('<ManagementDetailHeader')
   }
+
+  const workspacePages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'SettingsView.vue']
+  for (const page of workspacePages) {
+    const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
+    expect(source, `${basename(page)} must use the shared workspace surface.`).toContain('<ManagementWorkspaceSurface')
+  }
+
+  const themeSource = readFileSync(join(sourceRoot, 'main.css'), 'utf8')
+  expect(themeSource).toContain('--surface-inset:')
+  expect(themeSource).toContain('--field-bg:')
 })
 
 test('modal layers stay above sticky tables and transient menus', () => {

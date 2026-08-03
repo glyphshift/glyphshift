@@ -173,6 +173,8 @@ test('capture independent software editor at wide and compact widths', async ({ 
   await page.goto('/')
   await page.evaluate(() => document.fonts.ready)
   await page.getByRole('button', { name: '软件', exact: true }).click()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/software-management.png' })
   await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
   await expect(page.getByTestId('software-editor')).toBeVisible()
   await waitForVisualStability(page)
@@ -216,4 +218,39 @@ test('capture English light settings at wide and compact widths', async ({ page 
   await page.setViewportSize({ width: 960, height: 640 })
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/settings-english-light-compact.png' })
+})
+
+test('capture light workflow and software editor surfaces', async ({ page }) => {
+  await page.addInitScript(({ productModel, appSettings }) => {
+    localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(productModel))
+    localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify(appSettings))
+  }, {
+    productModel: model,
+    appSettings: {
+      settingsSchemaVersion: 1,
+      localePreference: 'zh-CN',
+      themePreference: 'light',
+    },
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/')
+  await page.evaluate(() => document.fonts.ready)
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  await expect(page.getByTestId('workflow-editor')).toBeVisible()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-editor-light.png' })
+  await page.setViewportSize({ width: 960, height: 640 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-editor-light-compact.png' })
+
+  await page.getByRole('button', { name: '返回工作流列表' }).click()
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
+  await expect(page.getByTestId('software-editor')).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/software-editor-light.png' })
+  await page.setViewportSize({ width: 960, height: 640 })
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/software-editor-light-compact.png' })
 })

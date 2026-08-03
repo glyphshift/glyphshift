@@ -10,7 +10,10 @@ defineEmits<{ back: [] }>()
 </script>
 
 <template>
-  <header class="mb-3 flex min-h-10 items-center justify-between gap-4">
+  <header
+    data-testid="management-detail-header"
+    class="-mx-4 -mt-4 mb-4 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--titlebar)] px-4"
+  >
     <div class="flex min-w-0 items-center gap-2">
       <UButton
         color="neutral"
@@ -19,7 +22,7 @@ defineEmits<{ back: [] }>()
         icon="i-tabler-arrow-left"
         :aria-label="backLabel"
         :title="backLabel"
-        class="h-8 w-8 shrink-0 rounded-[6px]"
+        class="-ml-1 h-8 w-8 shrink-0 rounded-[6px]"
         @click="$emit('back')"
       />
       <div class="min-w-0">

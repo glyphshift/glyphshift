@@ -35,7 +35,7 @@ function featureLabel(value: string) {
 <template>
   <!--
     THESIS: 帮助页解释当前真实能力，不堆砌泛用文档或连接状态。
-    OWN-WORLD: 继承近黑 Windows 管理器、薄边界、满宽表格与 emerald 主动作。
+    OWN-WORLD: 继承近黑 Windows 管理器、薄边界、满宽表格与 cobalt 主动作。
     STORY: 用户先理解资产与 Adapter 的边界，再核对本机当前可用适配器。
     FIRST VIEWPORT: 页头、简短模型说明、Adapter 表格及直接工作入口。
     FORM: established Read/Operate surface，结构由当前信息任务直接确定。

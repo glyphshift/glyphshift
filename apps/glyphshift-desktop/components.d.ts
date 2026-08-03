@@ -20,6 +20,7 @@ declare module 'vue' {
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']
     ManagementPageHeader: typeof import('./src/components/ManagementPageHeader.vue')['default']
     ManagementTableFrame: typeof import('./src/components/ManagementTableFrame.vue')['default']
+    ManagementWorkspaceSurface: typeof import('./src/components/ManagementWorkspaceSurface.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RuntimeDiagnosticsModal: typeof import('./src/components/RuntimeDiagnosticsModal.vue')['default']

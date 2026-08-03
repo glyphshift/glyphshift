@@ -9,7 +9,7 @@ export default defineConfig({
     ui({
       ui: {
         colors: {
-          primary: 'emerald',
+          primary: 'blue',
           neutral: 'zinc',
           warning: 'amber',
         },
@@ -24,14 +24,14 @@ export default defineConfig({
           ],
         },
         input: {
-          slots: { base: 'text-[11px]' },
+          slots: { base: 'bg-[var(--field-bg)] text-[11px]' },
         },
         textarea: {
-          slots: { base: 'text-[11px]' },
+          slots: { base: 'bg-[var(--field-bg)] text-[11px]' },
         },
         select: {
           slots: {
-            base: 'text-[11px]',
+            base: 'bg-[var(--field-bg)] text-[11px]',
             content: 'relative z-[90] rounded-[6px]',
           },
         },
@@ -57,6 +57,7 @@ export default defineConfig({
         },
         selectMenu: {
           slots: {
+            base: 'bg-[var(--field-bg)] text-[11px]',
             content: 'relative z-[90] rounded-[6px]',
             viewport: 'overscroll-contain',
           },

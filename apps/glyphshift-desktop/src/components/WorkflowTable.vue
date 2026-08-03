@@ -63,6 +63,11 @@ const activeSoftwareId = ref<string | null>(null)
 const softwareQuery = ref('')
 const dictionaryQuery = ref('')
 const fontQuery = ref('')
+const basicFieldUi = {
+  root: '!grid min-h-[72px] grid-cols-[180px_minmax(0,1fr)] items-start justify-items-stretch gap-6 border-b border-[var(--border)] py-4 last:border-b-0 max-[820px]:grid-cols-1 max-[820px]:gap-2',
+  wrapper: 'min-w-0 pt-1.5 max-[820px]:pt-0',
+  container: 'min-w-0 w-full max-w-[560px]',
+}
 const dictionaryFilter = ref('all')
 const fontFilter = ref('all')
 const activeEditorTab = ref('basic')
@@ -512,13 +517,15 @@ usePageEscape(() => formOpen.value, requestCloseForm)
           <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
         </template>
       </ManagementDetailHeader>
-      <div class="min-h-0 flex-1 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
-      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[10px] text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--surface)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'ml-auto min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 overflow-y-auto rounded-none px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
+      <ManagementWorkspaceSurface>
+      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[10px] text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'ml-auto min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--surface)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
         <template #basic>
-          <section data-testid="workflow-basic-tab" class="max-w-3xl space-y-4" :aria-label="t('workflows.tabs.basic')">
+          <section data-testid="workflow-basic-tab" class="max-w-[900px] space-y-4" :aria-label="t('workflows.tabs.basic')">
             <div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.basicHeading') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.basicHint') }}</p></div>
-            <UFormField :label="t('workflows.name')" required><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
-            <UFormField :label="t('workflows.workflowDescription')"><UTextarea v-model="description" :maxlength="512" :rows="4" autoresize :maxrows="6" class="w-full" /></UFormField>
+            <div class="border-y border-[var(--border)]">
+              <UFormField orientation="horizontal" :label="t('workflows.name')" required :ui="basicFieldUi"><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
+              <UFormField orientation="horizontal" :label="t('workflows.workflowDescription')" :ui="basicFieldUi"><UTextarea v-model="description" :maxlength="512" :rows="4" autoresize :maxrows="6" class="w-full" /></UFormField>
+            </div>
             <UAlert v-if="basicProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(basicProblems)" />
           </section>
         </template>
@@ -528,7 +535,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
             <div class="flex items-end justify-between gap-3"><div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.softwareTargets') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.softwareInterceptionHint') }}</p></div><span class="shrink-0 text-[9px] text-[var(--text-muted)]">{{ t('workflows.targetCount', { count: targets.length }) }}</span></div>
             <UInput v-model="softwareQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchSoftware')" :aria-label="t('workflows.searchSoftware')" />
             <div data-testid="workflow-software-catalog" class="max-h-48 overflow-y-auto rounded-[6px] border border-[var(--border)] [scrollbar-gutter:stable]">
-              <div v-for="item in visibleSoftware" :key="item.id" class="flex min-h-12 items-center border-b border-[var(--border)] last:border-b-0" :class="activeSoftwareId === item.id ? 'bg-[var(--surface-hover)]' : ''">
+              <div v-for="item in visibleSoftware" :key="item.id" class="flex min-h-12 items-center border-b border-[var(--border)] last:border-b-0" :class="activeSoftwareId === item.id ? 'bg-[var(--selection)]' : ''">
                 <UButton color="neutral" variant="ghost" class="flex min-w-0 flex-1 justify-start gap-2 rounded-none px-3 py-2 text-left" :aria-label="targetForSoftware(item.id) ? t('workflows.selectSoftwareTargetNamed', { name: item.name }) : t('workflows.addSoftwareNamed', { name: item.name })" :aria-pressed="Boolean(targetForSoftware(item.id))" @click="targetForSoftware(item.id) ? (activeSoftwareId = item.id) : toggleSoftware(item.id)">
                   <UIcon :name="targetForSoftware(item.id) ? 'i-tabler-square-check-filled' : 'i-tabler-square'" class="size-4 shrink-0" :class="targetForSoftware(item.id) ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'" />
                   <span class="min-w-0 flex-1"><strong class="block truncate text-[10px]">{{ item.name }}</strong><span class="block truncate text-[9px] text-[var(--text-muted)]">{{ targetForSoftware(item.id) ? t('workflows.adapterCount', { count: targetForSoftware(item.id)?.adapterPlan.adapterIds.length ?? 0 }) : item.executableName }}</span></span>
@@ -552,7 +559,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <template #dictionary>
           <section data-testid="workflow-dictionary-tab" class="space-y-4" :aria-label="t('workflows.tabs.dictionary')">
             <template v-if="activeTarget">
-              <div class="rounded-[6px] bg-[var(--surface-subtle)] p-3"><UFormField :label="t('workflows.currentTarget')"><USelectMenu v-model="activeSoftwareId" :items="targetOptions" value-key="value" label-key="label" description-key="description" :search-input="{ placeholder: t('workflows.searchSelectedTargets') }" :aria-label="t('workflows.currentTarget')" class="w-full" :ui="{ content: 'z-[90]' }" /></UFormField><p class="m-0 mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.dictionaryTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
+              <div class="border-y border-[var(--border)] bg-[var(--surface-inset)] px-3 py-3"><UFormField :label="t('workflows.currentTarget')"><USelectMenu v-model="activeSoftwareId" :items="targetOptions" value-key="value" label-key="label" description-key="description" :search-input="{ placeholder: t('workflows.searchSelectedTargets') }" :aria-label="t('workflows.currentTarget')" class="w-full" :ui="{ content: 'z-[90]' }" /></UFormField><p class="m-0 mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.dictionaryTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
               <div class="flex items-end justify-between gap-3"><div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.orderedDictionaries', { count: activeTarget.dictionaryIds.length }) }}</h3><p class="m-0 mt-1 text-[9px] text-[var(--text-muted)]">{{ t('workflows.dictionarySingleListHint') }}</p></div><UButton v-if="!dictionaries.length" color="neutral" variant="ghost" size="xs" :label="t('workflows.goCreate')" @click="closeForm(); emit('navigate', 'dictionaries')" /></div>
               <div class="grid grid-cols-[minmax(0,1fr)_128px] gap-2"><UInput v-model="dictionaryQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchDictionaries')" :aria-label="t('workflows.searchDictionaries')" /><USelect v-model="dictionaryFilter" :items="catalogFilterOptions" value-key="value" label-key="label" :aria-label="t('workflows.dictionaryFilter')" class="w-full" /></div>
               <div data-testid="workflow-dictionary-catalog" class="max-h-80 overflow-y-auto rounded-[6px] border border-[var(--border)] [scrollbar-gutter:stable]">
@@ -568,7 +575,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <template #font>
           <section data-testid="workflow-font-tab" class="space-y-4" :aria-label="t('workflows.tabs.font')">
             <template v-if="activeTarget">
-              <div class="rounded-[6px] bg-[var(--surface-subtle)] p-3"><UFormField :label="t('workflows.currentTarget')"><USelectMenu v-model="activeSoftwareId" :items="targetOptions" value-key="value" label-key="label" description-key="description" :search-input="{ placeholder: t('workflows.searchSelectedTargets') }" :aria-label="t('workflows.currentTarget')" class="w-full" :ui="{ content: 'z-[90]' }" /></UFormField><p class="m-0 mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
+              <div class="border-y border-[var(--border)] bg-[var(--surface-inset)] px-3 py-3"><UFormField :label="t('workflows.currentTarget')"><USelectMenu v-model="activeSoftwareId" :items="targetOptions" value-key="value" label-key="label" description-key="description" :search-input="{ placeholder: t('workflows.searchSelectedTargets') }" :aria-label="t('workflows.currentTarget')" class="w-full" :ui="{ content: 'z-[90]' }" /></UFormField><p class="m-0 mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
               <div class="flex items-start justify-between gap-3"><div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.fontPolicy') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontPolicyHint') }}</p></div><USwitch :model-value="Boolean(activeTarget.fontPolicy)" :aria-label="t('workflows.fontPolicyToggle')" @update:model-value="setFontPolicyEnabled(Boolean($event))" /></div>
               <div v-if="activeTarget.fontPolicy" class="space-y-3">
                 <div class="flex items-start gap-4">
@@ -595,7 +602,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
           </section>
         </template>
       </UTabs>
-      </div>
+      </ManagementWorkspaceSurface>
     </template>
 
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('workflows.deleteTitle')" :description="removalDescription" :busy="busy" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />

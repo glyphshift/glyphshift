@@ -2,11 +2,11 @@
 name: Glyphshift Desktop
 description: A compact workflow, software, dictionary, and probe manager for runtime translation.
 colors:
-  accent: "Nuxt UI emerald"
-  surface: "oklch(23% 0.013 270)"
-  surface-subtle: "oklch(21.5% 0.012 270)"
-  canvas: "oklch(17% 0.012 270)"
-  border: "oklch(29.5% 0.012 270)"
+  accent: "Glyphshift cobalt (#315ff4 light / #6c8cff dark)"
+  surface: "#151a22 dark / #fafbfc light"
+  surface-subtle: "#10141b dark / #e7ebf1 light"
+  canvas: "#0c0f14 dark / #eef1f5 light"
+  border: "#29313f dark / #d8dde6 light"
 typography:
   family: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
   body: "11–12px"
@@ -58,7 +58,12 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 候选优先级，并用紧凑的“应用范围”选择器切换“仅词典命中”或“Hook 捕获的全部文字”。字体
 目录显示缓存数量，重新扫描系统字体只能由相邻的显式刷新动作触发。
 Workflow 的四个配置分区使用窄左侧单层导航，右侧只显示当前分区内容；左栏只负责导航和问题
-提示，不承载软件列表或第二套业务表单。详情头保留返回、标题、未保存状态和主要保存动作。
+提示，不承载软件列表或第二套业务表单。当前项使用低强度 selection 色，不再叠加另一块内容表面。
+详情头横向占满模块，保留返回、标题、未保存状态和主要保存动作；其下只出现一块工作表面。
+
+Software 只有一组资料，不创建单条目的伪侧栏。详情表单按“标签 / 控件”左右对齐，紧凑宽度下
+保持足够的控件宽度。Settings 占满页面剩余空间，内部使用单列设置列表与受限阅读宽度；语言和
+主题继续立即生效，不增加确认动作。
 
 ## 布局与密度
 
@@ -68,6 +73,8 @@ Workflow 的四个配置分区使用窄左侧单层导航，右侧只显示当�
 - 搜索、筛选、显示列和批量动作共用表格工具栏；选中行时批量动作清楚出现。
 - 表格自己滚动，页面和 `body` 不滚动；960×640 与 1440×900 使用同一结构。
 - 管理表的中间内容区使用连续表面色；空态铺满表头与底部分页之间的空间，最后一行保留底边界。
+- 列表页使用“页头 + 满宽数据表面”；详情页使用“全宽详情头 + 单一工作表面”。复杂详情才在
+  工作表面内加入分区栏，简单详情使用对齐表单行，不用卡片或伪导航填补空白。
 - 程序路径只出现在软件资料管理，不进入工作流、词典或 Runtime 状态。
 
 ## 交互合同
@@ -116,9 +123,13 @@ Workflow 的四个配置分区使用窄左侧单层导航，右侧只显示当�
 
 ## 视觉语言
 
-- 默认使用近黑 `oklch` 表面，并提供完整浅色 token；两种主题共享薄灰边界和 Nuxt UI emerald
-  强调色。首次启动为深色，跟随系统只在用户显式选择后生效。
-- primary solid 按钮使用低亮度 contained surface，不使用刺目的高饱和绿色。
+- 默认使用近黑石墨表面，并提供完整浅色 token；两种主题共享薄灰边界和钴蓝强调色。首次启动为
+  深色，跟随系统只在用户显式选择后生效。
+- 应用框架、页面画布、工作表面和 Field/Inset 使用固定语义角色。深色主题逐层轻微变亮；浅色
+  使用冷灰页面框架和纯白 Table 内容面；边界、表头与分页保留浅灰层级。交互 hover/selection
+  不复用静态层级色。
+- 深色 primary solid 按钮使用比导航选中态稍亮的低亮度蓝色 contained surface 和白字，不使用
+  刺目的高饱和实心蓝。
 - `--accent` 只用于当前导航、启用状态、选中页码和主要动作。
 - `--success` 只表示目标 Runtime 已确认；`--warning` 表示可恢复问题；`--danger` 只用于删除
   与明确失败。
@@ -126,8 +137,8 @@ Workflow 的四个配置分区使用窄左侧单层导航，右侧只显示当�
 
 ## 实现规则
 
-- Vue 使用 Nuxt UI 组件与 Tailwind CSS；重复的列表页头、详情页头、表格框架、表单 Modal 和确认 Modal 必须
-  通过共享 Module 复用。
+- Vue 使用 Nuxt UI 组件与 Tailwind CSS；重复的列表页头、详情页头、工作表面、表格框架、表单
+  Modal 和确认 Modal 必须通过共享 Module 复用。
 - 核心产品文案使用 Vue I18n 语义 key；`zh-CN` 是 master schema，`en-US` 必须保持结构完整。
   软件名、词典内容与 Adapter presentation 属于动态数据，不作为核心 UI 文案翻译。
 - `main.css` 只保留 Tailwind/Nuxt UI 引入、语义 token 和根级浏览器规则。

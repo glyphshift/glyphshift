@@ -294,7 +294,7 @@ async function chooseExport(item: DictionarySummary) {
   <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="dictionary-library-title">
     <!--
       THESIS: 本地资产与可信目录是同一词典任务的两种明确模式，不新增一级导航或混合两套状态。
-      OWN-WORLD: 继承 Glyphshift 紧凑管理表、薄边界、近黑表面和单一 emerald 操作色。
+      OWN-WORLD: 继承 Glyphshift 紧凑管理表、薄边界、近黑表面和单一 cobalt 操作色。
       STORY: 用户先识别当前模式，再搜索、检查来源状态，并创建、安装或更新词典。
       FIRST VIEWPORT: 标题右侧是双模式切换；其下始终是一张满高搜索表和固定分页。
       FORM: 既有 Operate 表格体系的局部扩展；本地表显示 provenance，目录表使用游标分页。

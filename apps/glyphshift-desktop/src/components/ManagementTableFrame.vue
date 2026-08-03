@@ -158,7 +158,7 @@ function updatePageSize(value: unknown) {
 
     <div
       data-testid="management-table-body"
-      class="relative min-h-0 flex-1 overflow-hidden bg-[var(--ui-bg)] [&_[data-slot=empty]]:!h-0 [&_[data-slot=empty]>[data-slot=root]]:absolute [&_[data-slot=empty]>[data-slot=root]]:inset-x-0 [&_[data-slot=empty]>[data-slot=root]]:top-8 [&_[data-slot=empty]>[data-slot=root]]:bottom-0 [&_[data-slot=empty]>[data-slot=root]]:!h-auto [&_[data-slot=tbody]>[data-slot=tr]:last-child:not(:has([data-slot=empty]))]:border-b [&_[data-slot=tbody]>[data-slot=tr]:last-child:not(:has([data-slot=empty]))]:border-[var(--border)]"
+      class="relative min-h-0 flex-1 overflow-hidden bg-[var(--surface-inset)] [&_[data-slot=empty]]:!h-0 [&_[data-slot=empty]>[data-slot=root]]:absolute [&_[data-slot=empty]>[data-slot=root]]:inset-x-0 [&_[data-slot=empty]>[data-slot=root]]:top-8 [&_[data-slot=empty]>[data-slot=root]]:bottom-0 [&_[data-slot=empty]>[data-slot=root]]:!h-auto [&_[data-slot=tbody]>[data-slot=tr]:last-child:not(:has([data-slot=empty]))]:border-b [&_[data-slot=tbody]>[data-slot=tr]:last-child:not(:has([data-slot=empty]))]:border-[var(--border)]"
     >
       <slot />
     </div>
