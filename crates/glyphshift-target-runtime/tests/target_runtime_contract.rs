@@ -8,8 +8,15 @@ use glyphshift_domain::{
     Feature, FontDecision, Generation, RenderDecision, RouteProgram, TextDecision,
 };
 use glyphshift_runtime_contract::RuntimePublication;
-use glyphshift_target_runtime::{activate_deployment, deactivate_runtime, update_publication};
-use glyphshift_target_runtime_contract::{NativeAdapterDeployment, TargetRuntimeDeployment};
+use glyphshift_target_runtime::{
+    activate_deployment, control_diagnostics, deactivate_runtime,
+    glyphshift_runtime_diagnostics_query_v1, query_diagnostics, update_publication,
+};
+use glyphshift_target_runtime_contract::{
+    NativeAdapterDeployment, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
+    RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceStatus, TargetRuntimeDeployment,
+    MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
+};
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_windows_host::{render_gdiplus, render_gdiplus_text, render_raw_gdi_unicode};
 use sha2::{Digest, Sha256};
@@ -280,9 +287,26 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
 
     redraw_window.validate();
     activate_deployment(deployment).expect("target Runtime activation");
+    control_diagnostics(RuntimeDiagnosticsControl::new(true))
+        .expect("enable bounded runtime diagnostics");
     redraw_window.assert_redraw_requested("activation");
     let excluded = render_raw_gdi_unicode("Open").expect("adapter-scoped pass-through");
     assert_eq!(excluded.signature(), baseline.signature());
+    let excluded_trace = query_diagnostics().expect("query excluded trace");
+    assert_eq!(excluded_trace.records().len(), 1);
+    assert_eq!(excluded_trace.records()[0].source_text(), "Open");
+    assert_eq!(
+        excluded_trace.records()[0].status(),
+        RuntimeTraceStatus::NoMatch
+    );
+    assert_eq!(
+        excluded_trace.records()[0].text(),
+        RuntimeTextOutcome::Unmatched
+    );
+    assert!(query_diagnostics()
+        .expect("trace query drains the bounded window")
+        .records()
+        .is_empty());
 
     redraw_window.validate();
     update_publication(scoped_publication(
@@ -294,6 +318,36 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
     redraw_window.assert_redraw_requested("publication update");
     let first = render_raw_gdi_unicode("Open").expect("first translated render");
     assert_ne!(first.signature(), baseline.signature());
+    let translated_trace = query_diagnostics().expect("query translated trace");
+    assert_eq!(translated_trace.records().len(), 1);
+    assert_eq!(
+        translated_trace.records()[0].status(),
+        RuntimeTraceStatus::Matched
+    );
+    assert_eq!(
+        translated_trace.records()[0].text(),
+        RuntimeTextOutcome::Replaced
+    );
+    assert_eq!(translated_trace.records()[0].generation(), 2);
+    render_raw_gdi_unicode("Open").expect("render for C ABI diagnostics query");
+    let mut trace_json = vec![0_u8; MAX_RUNTIME_TRACE_BYTES];
+    let mut query = RuntimeDiagnosticsQueryV1 {
+        struct_size: std::mem::size_of::<RuntimeDiagnosticsQueryV1>() as u32,
+        output: trace_json.as_mut_ptr(),
+        output_capacity: trace_json.len() as u32,
+        output_len: 0,
+    };
+    assert_eq!(
+        unsafe { glyphshift_runtime_diagnostics_query_v1(&mut query) },
+        STATUS_TARGET_RUNTIME_OK
+    );
+    let queried = RuntimeTraceBatch::decode_json(
+        std::str::from_utf8(&trace_json[..query.output_len as usize])
+            .expect("C ABI trace JSON is UTF-8"),
+    )
+    .expect("C ABI trace batch");
+    assert_eq!(queried.records().len(), 1);
+    assert_eq!(queried.records()[0].source_text(), "Open");
     assert_eq!(
         render_gdiplus(pass_decision())
             .expect("GDI+ must remain outside the GDI-only entry")

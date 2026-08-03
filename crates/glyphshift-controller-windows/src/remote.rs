@@ -1,4 +1,7 @@
-use glyphshift_target_runtime_contract::{RuntimeCommandV1, STATUS_TARGET_RUNTIME_OK};
+use glyphshift_target_runtime_contract::{
+    RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1, RuntimeTraceBatch,
+    MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
+};
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
@@ -6,7 +9,7 @@ use std::path::Path;
 use std::ptr::null_mut;
 use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, WAIT_OBJECT_0};
-use windows::Win32::System::Diagnostics::Debug::WriteProcessMemory;
+use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W, TH32CS_SNAPMODULE,
     TH32CS_SNAPMODULE32,
@@ -30,6 +33,7 @@ pub enum RemoteError {
     ProcessUnavailable,
     AllocationFailed,
     WriteFailed,
+    ReadFailed,
     ModuleUnavailable,
     ExportUnavailable,
     ThreadFailed,
@@ -43,6 +47,7 @@ impl RemoteError {
             Self::ProcessUnavailable => "process_unavailable".into(),
             Self::AllocationFailed => "remote_allocation_failed".into(),
             Self::WriteFailed => "remote_write_failed".into(),
+            Self::ReadFailed => "remote_read_failed".into(),
             Self::ModuleUnavailable => "runtime_module_unavailable".into(),
             Self::ExportUnavailable => "runtime_export_unavailable".into(),
             Self::ThreadFailed => "remote_thread_failed".into(),
@@ -81,12 +86,12 @@ struct RemoteAllocation {
 }
 
 impl RemoteAllocation {
-    fn write(process: HANDLE, bytes: &[u8]) -> Result<Self, RemoteError> {
+    fn allocate(process: HANDLE, len: usize) -> Result<Self, RemoteError> {
         let address = unsafe {
             VirtualAllocEx(
                 process,
                 None,
-                bytes.len().max(1),
+                len.max(1),
                 MEM_COMMIT | MEM_RESERVE,
                 PAGE_READWRITE,
             )
@@ -94,15 +99,38 @@ impl RemoteAllocation {
         if address.is_null() {
             return Err(RemoteError::AllocationFailed);
         }
-        if unsafe { WriteProcessMemory(process, address, bytes.as_ptr().cast(), bytes.len(), None) }
-            .is_err()
+        Ok(Self { process, address })
+    }
+
+    fn write(process: HANDLE, bytes: &[u8]) -> Result<Self, RemoteError> {
+        let allocation = Self::allocate(process, bytes.len())?;
+        if unsafe {
+            WriteProcessMemory(
+                process,
+                allocation.address,
+                bytes.as_ptr().cast(),
+                bytes.len(),
+                None,
+            )
+        }
+        .is_err()
         {
-            unsafe {
-                let _ = VirtualFreeEx(process, address, 0, MEM_RELEASE);
-            }
             return Err(RemoteError::WriteFailed);
         }
-        Ok(Self { process, address })
+        Ok(allocation)
+    }
+
+    fn read(&self, output: &mut [u8]) -> Result<(), RemoteError> {
+        unsafe {
+            ReadProcessMemory(
+                self.process,
+                self.address,
+                output.as_mut_ptr().cast(),
+                output.len(),
+                None,
+            )
+        }
+        .map_err(|_| RemoteError::ReadFailed)
     }
 }
 
@@ -163,6 +191,66 @@ pub fn control_capture(
         "glyphshift_runtime_capture_control_v1",
         command,
     )
+}
+
+pub fn control_diagnostics(
+    process_id: u32,
+    runtime_library: &Path,
+    enabled: bool,
+) -> Result<(), RemoteError> {
+    let command = RuntimeDiagnosticsControl::new(enabled)
+        .encode_json()
+        .map_err(|_| RemoteError::WriteFailed)?;
+    let process = ProcessHandle::open(process_id)?;
+    invoke_json_export(
+        process_id,
+        process.0,
+        runtime_library,
+        "glyphshift_runtime_diagnostics_control_v1",
+        &command,
+    )
+}
+
+pub fn query_diagnostics(
+    process_id: u32,
+    runtime_library: &Path,
+) -> Result<RuntimeTraceBatch, RemoteError> {
+    let process = ProcessHandle::open(process_id)?;
+    let remote_output = RemoteAllocation::allocate(process.0, MAX_RUNTIME_TRACE_BYTES)?;
+    let query = RuntimeDiagnosticsQueryV1 {
+        struct_size: size_of::<RuntimeDiagnosticsQueryV1>() as u32,
+        output: remote_output.address.cast(),
+        output_capacity: MAX_RUNTIME_TRACE_BYTES as u32,
+        output_len: 0,
+    };
+    let query_bytes = unsafe {
+        std::slice::from_raw_parts(
+            (&query as *const RuntimeDiagnosticsQueryV1).cast::<u8>(),
+            size_of::<RuntimeDiagnosticsQueryV1>(),
+        )
+    };
+    let remote_query = RemoteAllocation::write(process.0, query_bytes)?;
+    let function = remote_export(
+        process_id,
+        runtime_library,
+        "glyphshift_runtime_diagnostics_query_v1",
+    )?;
+    let status = run_remote_thread(process.0, function, Some(remote_query.address.cast_const()))?;
+    if status != STATUS_TARGET_RUNTIME_OK {
+        return Err(RemoteError::RemoteRejected(status));
+    }
+    let mut returned_query = vec![0_u8; size_of::<RuntimeDiagnosticsQueryV1>()];
+    remote_query.read(&mut returned_query)?;
+    let returned_query = unsafe {
+        std::ptr::read_unaligned(returned_query.as_ptr().cast::<RuntimeDiagnosticsQueryV1>())
+    };
+    if returned_query.output_len as usize > MAX_RUNTIME_TRACE_BYTES {
+        return Err(RemoteError::ReadFailed);
+    }
+    let mut output = vec![0_u8; returned_query.output_len as usize];
+    remote_output.read(&mut output)?;
+    let json = std::str::from_utf8(&output).map_err(|_| RemoteError::ReadFailed)?;
+    RuntimeTraceBatch::decode_json(json).map_err(|_| RemoteError::ReadFailed)
 }
 
 pub fn deactivate(process_id: u32, runtime_library: &Path) -> Result<(), RemoteError> {

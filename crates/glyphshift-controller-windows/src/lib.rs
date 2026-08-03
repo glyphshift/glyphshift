@@ -2,8 +2,9 @@
 
 use glyphshift_controller_sdk::{
     ControllerPlugin, PluginError, WireAdapterRequirement, WireControllerConfiguration,
-    WireControllerLossPolicy, WireFeature, WireInventory, WireRecipe, WireRuntimeDeployment,
-    WireTarget,
+    WireControllerLossPolicy, WireFeature, WireInventory, WireRecipe, WireRuntimeAck,
+    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch,
+    WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
@@ -158,7 +159,7 @@ impl ControllerPlugin for WindowsController {
         &mut self,
         target_token: &str,
         deployment: &WireRuntimeDeployment,
-    ) -> Result<u64, PluginError> {
+    ) -> Result<WireRuntimeAck, PluginError> {
         let target = self
             .targets
             .get(target_token)
@@ -177,6 +178,11 @@ impl ControllerPlugin for WindowsController {
         {
             return Err(PluginError::new("invalid_runtime_deployment"));
         }
+        let publication_identity = decoded
+            .publication()
+            .identity()
+            .map_err(|_| PluginError::new("invalid_runtime_deployment"))?
+            .as_bytes();
         remote::activate(
             target.process_id,
             &runtime_library,
@@ -185,7 +191,10 @@ impl ControllerPlugin for WindowsController {
         .map_err(|error| PluginError::new(format!("runtime_activation_failed:{}", error.code())))?;
         self.runtime_libraries
             .insert(target_token.into(), runtime_library);
-        Ok(deployment.generation)
+        Ok(WireRuntimeAck {
+            generation: deployment.generation,
+            publication_identity,
+        })
     }
 
     fn update_runtime(
@@ -193,7 +202,7 @@ impl ControllerPlugin for WindowsController {
         target_token: &str,
         publication_json: &str,
         generation: u64,
-    ) -> Result<u64, PluginError> {
+    ) -> Result<WireRuntimeAck, PluginError> {
         let target = self
             .targets
             .get(target_token)
@@ -207,9 +216,16 @@ impl ControllerPlugin for WindowsController {
         if publication.generation().value() != generation {
             return Err(PluginError::new("invalid_runtime_publication"));
         }
+        let publication_identity = publication
+            .identity()
+            .map_err(|_| PluginError::new("invalid_runtime_publication"))?
+            .as_bytes();
         remote::update(target.process_id, runtime_library, publication_json)
             .map_err(|error| PluginError::new(format!("runtime_update_failed:{}", error.code())))?;
-        Ok(generation)
+        Ok(WireRuntimeAck {
+            generation,
+            publication_identity,
+        })
     }
 
     fn control_capture(&mut self, target_token: &str, paused: bool) -> Result<(), PluginError> {
@@ -223,6 +239,99 @@ impl ControllerPlugin for WindowsController {
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
         remote::control_capture(target.process_id, runtime_library, paused)
             .map_err(|error| PluginError::new(format!("capture_control_failed:{}", error.code())))
+    }
+
+    fn control_diagnostics(
+        &mut self,
+        target_token: &str,
+        enabled: bool,
+    ) -> Result<(), PluginError> {
+        let target = self
+            .targets
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("unknown_target"))?;
+        let runtime_library = self
+            .runtime_libraries
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("runtime_not_active"))?;
+        remote::control_diagnostics(target.process_id, runtime_library, enabled).map_err(|error| {
+            PluginError::new(format!("runtime_diagnostics_failed:{}", error.code()))
+        })
+    }
+
+    fn query_diagnostics(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireRuntimeTraceBatch, PluginError> {
+        let target = self
+            .targets
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("unknown_target"))?;
+        let runtime_library = self
+            .runtime_libraries
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("runtime_not_active"))?;
+        let batch =
+            remote::query_diagnostics(target.process_id, runtime_library).map_err(|error| {
+                PluginError::new(format!("runtime_diagnostics_failed:{}", error.code()))
+            })?;
+        Ok(WireRuntimeTraceBatch {
+            records: batch
+                .records()
+                .iter()
+                .map(|record| WireRuntimeTraceRecord {
+                    adapter_id: record.adapter_id().into(),
+                    source_text: record.source_text().into(),
+                    status: match record.status() {
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::NoMatch => {
+                            WireRuntimeTraceStatus::NoMatch
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::Matched => {
+                            WireRuntimeTraceStatus::Matched
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::ContextRecorded => {
+                            WireRuntimeTraceStatus::ContextRecorded
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::InvalidObservation => {
+                            WireRuntimeTraceStatus::InvalidObservation
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::InvalidRouteProgram => {
+                            WireRuntimeTraceStatus::InvalidRouteProgram
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::ExecutionLimitExceeded => {
+                            WireRuntimeTraceStatus::ExecutionLimitExceeded
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTraceStatus::StateLimitExceeded => {
+                            WireRuntimeTraceStatus::StateLimitExceeded
+                        }
+                    },
+                    text: match record.text() {
+                        glyphshift_target_runtime_contract::RuntimeTextOutcome::Unmatched => {
+                            WireRuntimeTextOutcome::Unmatched
+                        }
+                        glyphshift_target_runtime_contract::RuntimeTextOutcome::Replaced => {
+                            WireRuntimeTextOutcome::Replaced
+                        }
+                    },
+                    font: match record.font() {
+                        glyphshift_target_runtime_contract::RuntimeFontOutcome::Unmatched => {
+                            WireRuntimeFontOutcome::Unmatched
+                        }
+                        glyphshift_target_runtime_contract::RuntimeFontOutcome::Protected => {
+                            WireRuntimeFontOutcome::Protected
+                        }
+                        glyphshift_target_runtime_contract::RuntimeFontOutcome::Substituted => {
+                            WireRuntimeFontOutcome::Substituted
+                        }
+                    },
+                    generation: record.generation(),
+                    publication_identity: record.publication_identity(),
+                    translation_digest: record.translation_digest(),
+                    font_policy_digest: record.font_policy_digest(),
+                })
+                .collect(),
+            dropped: batch.dropped(),
+        })
     }
 
     fn deactivate_runtime(&mut self, target_token: &str) -> Result<(), PluginError> {

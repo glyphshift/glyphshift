@@ -8,13 +8,16 @@ use glyphshift_domain::{
 use glyphshift_extension::{ExtensionId, ProtocolVersion};
 use glyphshift_protocol::{
     ControllerConnection, ControllerHello, ControllerInventory, ControllerNonce,
-    ControllerRuntimeAck, ControllerRuntimeDeployment, ControllerTarget, ControllerTargetToken,
-    ControllerTransport, NonceLedger, TransportFailure,
+    ControllerRuntimeAck, ControllerRuntimeDeployment, ControllerRuntimeFontOutcome,
+    ControllerRuntimeTextOutcome, ControllerRuntimeTraceBatch, ControllerRuntimeTraceRecord,
+    ControllerRuntimeTraceStatus, ControllerTarget, ControllerTargetToken, ControllerTransport,
+    NonceLedger, TransportFailure,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_session::{
     AdapterHostPort, BoundAdapter, BoundFeature, HostActivation, HostDeactivation,
-    HostGenerationReport, SessionId, TargetInstance, TargetInstanceId,
+    HostGenerationReport, RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceStatus, SessionId,
+    TargetInstance, TargetInstanceId,
 };
 use glyphshift_target_process_host::{RuntimeArtifact, TargetArtifactCatalog, TargetProcessHost};
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
@@ -23,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 struct ContractTransport {
     activation_ack: u64,
+    wrong_publication_identity: bool,
 }
 
 impl ControllerTransport for ContractTransport {
@@ -69,7 +73,15 @@ impl ControllerTransport for ContractTransport {
         {
             return Err(TransportFailure::MalformedMessage);
         }
-        Ok(ControllerRuntimeAck::new(self.activation_ack))
+        let mut identity = decoded
+            .publication()
+            .identity()
+            .map_err(|_| TransportFailure::MalformedMessage)?
+            .as_bytes();
+        if self.wrong_publication_identity {
+            identity = [0xFF; 32];
+        }
+        Ok(ControllerRuntimeAck::new(self.activation_ack, identity))
     }
 
     fn update_runtime(
@@ -86,7 +98,44 @@ impl ControllerTransport for ContractTransport {
         {
             return Err(TransportFailure::MalformedMessage);
         }
-        Ok(ControllerRuntimeAck::new(5))
+        let identity = publication
+            .identity()
+            .map_err(|_| TransportFailure::MalformedMessage)?
+            .as_bytes();
+        Ok(ControllerRuntimeAck::new(5, identity))
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        target: &ControllerTargetToken,
+        _enabled: bool,
+    ) -> Result<(), TransportFailure> {
+        (target.as_str() == "private-target")
+            .then_some(())
+            .ok_or(TransportFailure::MalformedMessage)
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        target: &ControllerTargetToken,
+    ) -> Result<ControllerRuntimeTraceBatch, TransportFailure> {
+        if target.as_str() != "private-target" {
+            return Err(TransportFailure::MalformedMessage);
+        }
+        Ok(ControllerRuntimeTraceBatch::new(
+            [ControllerRuntimeTraceRecord::new(
+                "example.synthetic.inline",
+                "Open",
+                ControllerRuntimeTraceStatus::Matched,
+                ControllerRuntimeTextOutcome::Replaced,
+                ControllerRuntimeFontOutcome::Protected,
+                4,
+                [0x71; 32],
+                [0x72; 32],
+                [0x73; 32],
+            )],
+            2,
+        ))
     }
 
     fn deactivate_runtime(
@@ -126,7 +175,10 @@ fn publication(generation: u64, translation: &str) -> RuntimePublication {
 fn tph_001_turns_controller_runtime_acks_into_session_host_facts() {
     let extension_id = ExtensionId::new("org.example.synthetic");
     let mut connection = ControllerConnection::connect(
-        ContractTransport { activation_ack: 4 },
+        ContractTransport {
+            activation_ack: 4,
+            wrong_publication_identity: false,
+        },
         extension_id,
         ProtocolVersion::new(1, 0),
         ControllerNonce::new([0x51; 32]),
@@ -185,6 +237,26 @@ fn tph_001_turns_controller_runtime_acks_into_session_host_facts() {
         ),
         Ok(HostActivation::connected([feature]))
     );
+    host.control_runtime_diagnostics(SessionId::new(1), &target, true)
+        .expect("enable runtime diagnostics");
+    let diagnostics = host
+        .query_runtime_diagnostics(SessionId::new(1), &target)
+        .expect("query runtime diagnostics");
+    assert_eq!(diagnostics.records().len(), 1);
+    assert_eq!(diagnostics.records()[0].source_text(), "Open");
+    assert_eq!(
+        diagnostics.records()[0].status(),
+        RuntimeTraceStatus::Matched
+    );
+    assert_eq!(
+        diagnostics.records()[0].text(),
+        RuntimeTextOutcome::Replaced
+    );
+    assert_eq!(
+        diagnostics.records()[0].font(),
+        RuntimeFontOutcome::Protected
+    );
+    assert_eq!(diagnostics.dropped(), 2);
     assert_eq!(
         host.update_runtime(
             SessionId::new(1),
@@ -206,7 +278,10 @@ fn tph_001_turns_controller_runtime_acks_into_session_host_facts() {
 fn tph_002_rejects_a_controller_ack_for_the_wrong_generation() {
     let extension_id = ExtensionId::new("org.example.synthetic");
     let mut connection = ControllerConnection::connect(
-        ContractTransport { activation_ack: 3 },
+        ContractTransport {
+            activation_ack: 3,
+            wrong_publication_identity: false,
+        },
         extension_id,
         ProtocolVersion::new(1, 0),
         ControllerNonce::new([0x52; 32]),
@@ -228,6 +303,65 @@ fn tph_002_rejects_a_controller_ack_for_the_wrong_generation() {
     .expect("absolute local artifacts");
     let target = TargetInstance::new(
         TargetInstanceId::new("target-instance-mismatch"),
+        TargetFacts::new("windows", "x86_64"),
+    );
+    let mut host = TargetProcessHost::new(connection, artifacts);
+    host.register_target(target.id().clone(), controller_target);
+    let adapter_id = AdapterId::new("example.synthetic.inline");
+    let version = AdapterVersion::new(1, 0, 0);
+    let binding = AdapterBinding {
+        descriptor: AdapterDescriptor::new(
+            adapter_id.clone(),
+            version,
+            ApplyModel::InlineRender,
+            Placement::TargetProcess,
+            [Feature::TextReplace],
+        ),
+        adapter_id,
+        version,
+        apply_model: ApplyModel::InlineRender,
+        artifact_hash: ArtifactHash::sha256([0x62; 32]),
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/synthetic"),
+        },
+        features: vec![Feature::TextReplace],
+    };
+
+    assert_eq!(
+        host.activate_runtime(&target, &[binding], &publication(4, "First")),
+        Err(glyphshift_session::HostFailure::HandshakeRejected)
+    );
+}
+
+#[test]
+fn tph_003_rejects_a_controller_ack_for_the_wrong_publication_identity() {
+    let extension_id = ExtensionId::new("org.example.synthetic");
+    let mut connection = ControllerConnection::connect(
+        ContractTransport {
+            activation_ack: 4,
+            wrong_publication_identity: true,
+        },
+        extension_id,
+        ProtocolVersion::new(1, 0),
+        ControllerNonce::new([0x53; 32]),
+        &mut NonceLedger::new(),
+    )
+    .expect("controller connection");
+    let controller_target = connection
+        .inventory()
+        .expect("controller inventory")
+        .targets()[0]
+        .id();
+    let artifacts = TargetArtifactCatalog::new(
+        RuntimeArtifact::new(local_artifact("runtime-identity-mismatch.dll"), [0x61; 32]),
+        [(
+            PackageArtifactId::new("adapters/synthetic"),
+            local_artifact("adapter-identity-mismatch.dll"),
+        )],
+    )
+    .expect("absolute local artifacts");
+    let target = TargetInstance::new(
+        TargetInstanceId::new("target-instance-identity-mismatch"),
         TargetFacts::new("windows", "x86_64"),
     );
     let mut host = TargetProcessHost::new(connection, artifacts);

@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
+glyphshift-adapter-gdi-native-support = { path = "../glyphshift-adapter-gdi-native-support" }
 glyphshift-adapter-native-abi = { path = "../glyphshift-adapter-native-abi" }
 retour = "0.3"
 

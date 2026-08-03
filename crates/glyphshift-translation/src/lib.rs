@@ -27,6 +27,11 @@ pub struct SnapshotDigest([u8; 32]);
 pub struct FontPolicyDigest([u8; 32]);
 
 impl SnapshotDigest {
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
     fn from_entries(
         entries: &BTreeMap<Box<str>, BTreeMap<Box<str>, Arc<str>>>,
         contextual_entries: &ContextualTranslations,
@@ -595,6 +600,11 @@ impl FontPolicy {
 }
 
 impl FontPolicyDigest {
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
     fn from_policy(policy: &FontPolicy) -> Self {
         let mut lanes = [
             0xcbf2_9ce4_8422_2325_u64,

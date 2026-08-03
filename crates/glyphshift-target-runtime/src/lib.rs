@@ -11,14 +11,15 @@ use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
-    CaptureRuntimeControl, RuntimeCommandV1, TargetRuntimeDeployment,
+    CaptureRuntimeControl, RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
+    RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment, MAX_RUNTIME_TRACE_BYTES,
     STATUS_TARGET_RUNTIME_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
     STATUS_TARGET_RUNTIME_ADAPTER_CHANGED, STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
     STATUS_TARGET_RUNTIME_ALREADY_ACTIVE, STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
     STATUS_TARGET_RUNTIME_INVALID_COMMAND, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
     STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_OK,
-    STATUS_TARGET_RUNTIME_UNAVAILABLE, STATUS_TARGET_RUNTIME_UPDATE_FAILED,
-    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL, STATUS_TARGET_RUNTIME_UNAVAILABLE,
+    STATUS_TARGET_RUNTIME_UPDATE_FAILED, STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -238,6 +239,40 @@ pub fn control_capture(control: CaptureRuntimeControl) -> Result<(), TargetRunti
         .ok_or(TargetRuntimeError::Capture)?;
     capture.set_paused(control.paused());
     Ok(())
+}
+
+pub fn control_diagnostics(control: RuntimeDiagnosticsControl) -> Result<(), TargetRuntimeError> {
+    let state = runtime_state()
+        .lock()
+        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+    let runtime = state
+        .as_ref()
+        .filter(|runtime| runtime.active)
+        .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+    runtime.kernel.set_decision_tracing(control.enabled());
+    Ok(())
+}
+
+pub fn query_diagnostics() -> Result<RuntimeTraceBatch, TargetRuntimeError> {
+    let state = runtime_state()
+        .lock()
+        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+    let runtime = state
+        .as_ref()
+        .filter(|runtime| runtime.active)
+        .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+    let batch = runtime.kernel.drain_decision_traces();
+    Ok(RuntimeTraceBatch::new(
+        batch.records().iter().map(|record| {
+            RuntimeTraceRecord::from_decision(
+                record.adapter_id(),
+                record.source_text(),
+                record.trace(),
+                record.publication_identity(),
+            )
+        }),
+        batch.dropped(),
+    ))
 }
 
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
@@ -521,6 +556,63 @@ pub unsafe extern "system" fn glyphshift_runtime_capture_control_v1(
         Ok(Err(error)) => activation_status(error),
         Err(_) => STATUS_TARGET_RUNTIME_UPDATE_FAILED,
     }
+}
+
+#[no_mangle]
+/// Enables or disables bounded decision diagnostics.
+///
+/// # Safety
+///
+/// `command` and its JSON buffer must remain readable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_diagnostics_control_v1(
+    command: *const RuntimeCommandV1,
+) -> u32 {
+    let Some(json) = command_json(command) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    let Ok(control) = RuntimeDiagnosticsControl::decode_json(json) else {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    };
+    match std::panic::catch_unwind(|| control_diagnostics(control)) {
+        Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
+        Ok(Err(error)) => activation_status(error),
+        Err(_) => STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    }
+}
+
+#[no_mangle]
+/// Drains the bounded decision diagnostics window into a caller-owned JSON buffer.
+///
+/// # Safety
+///
+/// `query` and its output buffer must remain writable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_diagnostics_query_v1(
+    query: *mut RuntimeDiagnosticsQueryV1,
+) -> u32 {
+    if query.is_null()
+        || (*query).struct_size != std::mem::size_of::<RuntimeDiagnosticsQueryV1>() as u32
+        || (*query).output.is_null()
+        || (*query).output_capacity as usize > MAX_RUNTIME_TRACE_BYTES
+    {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    }
+    let encoded = match std::panic::catch_unwind(|| {
+        query_diagnostics().and_then(|batch| {
+            batch
+                .encode_json()
+                .map_err(|_| TargetRuntimeError::RuntimeUnavailable)
+        })
+    }) {
+        Ok(Ok(encoded)) => encoded,
+        Ok(Err(error)) => return activation_status(error),
+        Err(_) => return STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    };
+    (*query).output_len = encoded.len() as u32;
+    if encoded.len() > (*query).output_capacity as usize {
+        return STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), (*query).output, encoded.len());
+    STATUS_TARGET_RUNTIME_OK
 }
 
 #[no_mangle]

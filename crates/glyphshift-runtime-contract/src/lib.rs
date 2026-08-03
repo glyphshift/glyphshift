@@ -3,6 +3,7 @@
 use glyphshift_domain::{Generation, RouteLimits, RouteOperator, RouteProgram};
 use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const RUNTIME_SCHEMA: &str = "glyphshift.runtime/2";
 
@@ -11,6 +12,16 @@ pub enum RuntimeWireError {
     InvalidJson,
     UnsupportedSchema,
     ExecutableRoute,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimePublicationIdentity([u8; 32]);
+
+impl RuntimePublicationIdentity {
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,6 +140,14 @@ impl RuntimePublication {
     #[must_use]
     pub const fn font_policy(&self) -> &FontPolicy {
         &self.font_policy
+    }
+
+    /// Returns a deterministic identity for the complete encoded decision input.
+    pub fn identity(&self) -> Result<RuntimePublicationIdentity, RuntimeWireError> {
+        let encoded = self.encode_json()?;
+        Ok(RuntimePublicationIdentity(
+            Sha256::digest(encoded.as_bytes()).into(),
+        ))
     }
 
     #[must_use]

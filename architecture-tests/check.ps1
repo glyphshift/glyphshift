@@ -72,7 +72,13 @@ Assert-Dependencies `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdi-native' `
-    -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+    -Expected @(
+        'glyphshift-adapter-gdi',
+        'glyphshift-adapter-gdi-native-support',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdi-native-support' `
     -Expected @('glyphshift-adapter-native-abi', 'windows')
@@ -138,7 +144,7 @@ Assert-Dependencies `
     -Expected @('glyphshift-adapter-registry', 'glyphshift-domain', 'glyphshift-extension')
 Assert-Dependencies `
     -PackageName 'glyphshift-runtime-contract' `
-    -Expected @('glyphshift-domain', 'glyphshift-translation', 'serde', 'serde_json')
+    -Expected @('glyphshift-domain', 'glyphshift-translation', 'serde', 'serde_json', 'sha2')
 Assert-Dependencies `
     -PackageName 'glyphshift-runtime-kernel' `
     -Expected @(
@@ -154,6 +160,7 @@ Assert-Dependencies `
         'glyphshift-adapter-registry',
         'glyphshift-adapter-sdk',
         'glyphshift-capture',
+        'glyphshift-decision',
         'glyphshift-domain',
         'glyphshift-runtime-contract',
         'serde',

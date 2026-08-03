@@ -3,7 +3,9 @@
 use glyphshift_domain::{
     FontDecision, RenderDecision, RouteOperator, RouteProgram, TextDecision, TextObservation,
 };
-use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
+use glyphshift_translation::{
+    FontPolicy, FontPolicyDigest, FontRule, SnapshotDigest, TranslationSnapshot,
+};
 use std::collections::BTreeMap;
 
 const MAX_ADAPTER_ID_BYTES: usize = 256;
@@ -21,10 +23,95 @@ pub enum DecisionDiagnostic {
     StateLimitExceeded,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecisionTraceStatus {
+    NoMatch,
+    Matched,
+    ContextRecorded,
+    InvalidObservation,
+    InvalidRouteProgram,
+    ExecutionLimitExceeded,
+    StateLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextTrace {
+    Unmatched,
+    Replaced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FontTrace {
+    Unmatched,
+    Protected,
+    Substituted,
+}
+
+/// Allocation-free explanation of one decision and the immutable inputs that produced it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DecisionTrace {
+    status: DecisionTraceStatus,
+    text: TextTrace,
+    font: FontTrace,
+    generation: glyphshift_domain::Generation,
+    translation_digest: SnapshotDigest,
+    font_policy_digest: FontPolicyDigest,
+}
+
+impl DecisionTrace {
+    fn new(
+        status: DecisionTraceStatus,
+        text: TextTrace,
+        font: FontTrace,
+        snapshot: &TranslationSnapshot,
+        font_policy: &FontPolicy,
+    ) -> Self {
+        Self {
+            status,
+            text,
+            font,
+            generation: snapshot.generation(),
+            translation_digest: snapshot.digest(),
+            font_policy_digest: font_policy.digest(),
+        }
+    }
+
+    #[must_use]
+    pub const fn status(self) -> DecisionTraceStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn text(self) -> TextTrace {
+        self.text
+    }
+
+    #[must_use]
+    pub const fn font(self) -> FontTrace {
+        self.font
+    }
+
+    #[must_use]
+    pub const fn generation(self) -> glyphshift_domain::Generation {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn translation_digest(self) -> SnapshotDigest {
+        self.translation_digest
+    }
+
+    #[must_use]
+    pub const fn font_policy_digest(self) -> FontPolicyDigest {
+        self.font_policy_digest
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecisionResult {
     decision: RenderDecision,
     diagnostics: Vec<DecisionDiagnostic>,
+    trace: DecisionTrace,
 }
 
 impl DecisionResult {
@@ -36,6 +123,11 @@ impl DecisionResult {
     #[must_use]
     pub fn diagnostics(&self) -> &[DecisionDiagnostic] {
         &self.diagnostics
+    }
+
+    #[must_use]
+    pub const fn trace(&self) -> DecisionTrace {
+        self.trace
     }
 
     #[must_use]
@@ -102,11 +194,19 @@ impl DecisionEngine {
             font: FontDecision::Keep,
             generation: snapshot.generation(),
         };
+        let result = |decision, status, text, font, diagnostics| DecisionResult {
+            decision,
+            diagnostics,
+            trace: DecisionTrace::new(status, text, font, snapshot, font_policy),
+        };
         if !valid_observation(observation) {
-            return DecisionResult {
-                decision: pass(),
-                diagnostics: vec![DecisionDiagnostic::InvalidObservation],
-            };
+            return result(
+                pass(),
+                DecisionTraceStatus::InvalidObservation,
+                TextTrace::Unmatched,
+                FontTrace::Unmatched,
+                vec![DecisionDiagnostic::InvalidObservation],
+            );
         }
         let limits = route.limits();
         if limits.max_state_entries() == 0
@@ -114,42 +214,69 @@ impl DecisionEngine {
             || limits.max_steps() == 0
             || limits.max_steps() > MAX_ROUTE_STEPS
         {
-            return DecisionResult {
-                decision: pass(),
-                diagnostics: vec![DecisionDiagnostic::InvalidRouteProgram],
-            };
+            return result(
+                pass(),
+                DecisionTraceStatus::InvalidRouteProgram,
+                TextTrace::Unmatched,
+                FontTrace::Unmatched,
+                vec![DecisionDiagnostic::InvalidRouteProgram],
+            );
         }
 
         let mut steps = 0_u16;
         for operator in route.operators() {
             if !consume_step(&mut steps, limits.max_steps()) {
-                return execution_limited(pass());
+                return result(
+                    pass(),
+                    DecisionTraceStatus::ExecutionLimitExceeded,
+                    TextTrace::Unmatched,
+                    FontTrace::Unmatched,
+                    vec![DecisionDiagnostic::ExecutionLimitExceeded],
+                );
             }
             match operator {
                 RouteOperator::Direct { location } => {
-                    if let Some(decision) = decide_at(
+                    if let Some(matched) = decide_at(
                         location,
                         observation.adapter_id(),
                         observation.source_text(),
                         snapshot,
                         font_policy,
                     ) {
-                        return successful(decision);
+                        return result(
+                            matched.decision,
+                            DecisionTraceStatus::Matched,
+                            matched.text,
+                            matched.font,
+                            Vec::new(),
+                        );
                     }
                 }
                 RouteOperator::Fallback { locations } => {
                     for location in locations {
                         if !consume_step(&mut steps, limits.max_steps()) {
-                            return execution_limited(pass());
+                            return result(
+                                pass(),
+                                DecisionTraceStatus::ExecutionLimitExceeded,
+                                TextTrace::Unmatched,
+                                FontTrace::Unmatched,
+                                vec![DecisionDiagnostic::ExecutionLimitExceeded],
+                            );
                         }
-                        if let Some(decision) = decide_at(
+                        if let Some(matched) = decide_at(
                             location,
                             observation.adapter_id(),
                             observation.source_text(),
                             snapshot,
                             font_policy,
                         ) {
-                            return successful(decision);
+                            return result(
+                                matched.decision,
+                                DecisionTraceStatus::Matched,
+                                matched.text,
+                                matched.font,
+                                Vec::new(),
+                            );
                         }
                     }
                 }
@@ -165,12 +292,21 @@ impl DecisionEngine {
                                 heading.key(),
                                 usize::from(limits.max_state_entries()),
                             ) {
-                                return DecisionResult {
-                                    decision: pass(),
-                                    diagnostics: vec![diagnostic],
-                                };
+                                return result(
+                                    pass(),
+                                    DecisionTraceStatus::StateLimitExceeded,
+                                    TextTrace::Unmatched,
+                                    FontTrace::Unmatched,
+                                    vec![diagnostic],
+                                );
                             }
-                            return successful(pass());
+                            return result(
+                                pass(),
+                                DecisionTraceStatus::ContextRecorded,
+                                TextTrace::Unmatched,
+                                FontTrace::Unmatched,
+                                Vec::new(),
+                            );
                         }
                         continue;
                     }
@@ -179,7 +315,7 @@ impl DecisionEngine {
                     else {
                         continue;
                     };
-                    if let Some(decision) = decide_at_context(
+                    if let Some(matched) = decide_at_context(
                         location,
                         context_kind,
                         context_key,
@@ -188,21 +324,36 @@ impl DecisionEngine {
                         snapshot,
                         font_policy,
                     ) {
-                        return successful(decision);
+                        return result(
+                            matched.decision,
+                            DecisionTraceStatus::Matched,
+                            matched.text,
+                            matched.font,
+                            Vec::new(),
+                        );
                     }
                 }
                 RouteOperator::Unknown { .. }
                 | RouteOperator::NativeCode
                 | RouteOperator::Script
                 | RouteOperator::Io => {
-                    return DecisionResult {
-                        decision: pass(),
-                        diagnostics: vec![DecisionDiagnostic::InvalidRouteProgram],
-                    };
+                    return result(
+                        pass(),
+                        DecisionTraceStatus::InvalidRouteProgram,
+                        TextTrace::Unmatched,
+                        FontTrace::Unmatched,
+                        vec![DecisionDiagnostic::InvalidRouteProgram],
+                    );
                 }
             }
         }
-        successful(pass())
+        result(
+            pass(),
+            DecisionTraceStatus::NoMatch,
+            TextTrace::Unmatched,
+            FontTrace::Unmatched,
+            Vec::new(),
+        )
     }
 }
 
@@ -236,7 +387,7 @@ fn decide_at(
     source: &str,
     snapshot: &TranslationSnapshot,
     font_policy: &FontPolicy,
-) -> Option<RenderDecision> {
+) -> Option<MatchedDecision> {
     let text = snapshot.lookup_for_adapter(location, adapter_id, source);
     let font = font_policy.lookup_entry_for_adapter(location, adapter_id, source);
     decision_from_parts(text, font, snapshot)
@@ -250,7 +401,7 @@ fn decide_at_context(
     source: &str,
     snapshot: &TranslationSnapshot,
     font_policy: &FontPolicy,
-) -> Option<RenderDecision> {
+) -> Option<MatchedDecision> {
     let text = snapshot.lookup_context_for_adapter(
         location,
         context_kind,
@@ -268,34 +419,40 @@ fn decide_at_context(
     decision_from_parts(text, font, snapshot)
 }
 
+struct MatchedDecision {
+    decision: RenderDecision,
+    text: TextTrace,
+    font: FontTrace,
+}
+
 fn decision_from_parts(
     text: Option<std::sync::Arc<str>>,
     font: Option<FontRule>,
     snapshot: &TranslationSnapshot,
-) -> Option<RenderDecision> {
+) -> Option<MatchedDecision> {
     if text.is_none() && font.is_none() {
         return None;
     }
-    Some(RenderDecision {
-        text: text.map_or(TextDecision::Keep, TextDecision::Replace),
-        font: match font {
-            None | Some(FontRule::Unchanged) => FontDecision::Keep,
-            Some(FontRule::Substitute(family)) => FontDecision::Substitute(family),
+    let text_trace = if text.is_some() {
+        TextTrace::Replaced
+    } else {
+        TextTrace::Unmatched
+    };
+    let font_trace = match &font {
+        None => FontTrace::Unmatched,
+        Some(FontRule::Unchanged) => FontTrace::Protected,
+        Some(FontRule::Substitute(_)) => FontTrace::Substituted,
+    };
+    Some(MatchedDecision {
+        decision: RenderDecision {
+            text: text.map_or(TextDecision::Keep, TextDecision::Replace),
+            font: match font {
+                None | Some(FontRule::Unchanged) => FontDecision::Keep,
+                Some(FontRule::Substitute(family)) => FontDecision::Substitute(family),
+            },
+            generation: snapshot.generation(),
         },
-        generation: snapshot.generation(),
+        text: text_trace,
+        font: font_trace,
     })
-}
-
-fn successful(decision: RenderDecision) -> DecisionResult {
-    DecisionResult {
-        decision,
-        diagnostics: Vec::new(),
-    }
-}
-
-fn execution_limited(decision: RenderDecision) -> DecisionResult {
-    DecisionResult {
-        decision,
-        diagnostics: vec![DecisionDiagnostic::ExecutionLimitExceeded],
-    }
 }

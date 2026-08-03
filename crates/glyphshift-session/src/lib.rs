@@ -199,9 +199,158 @@ impl HostActivation {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostOperationFailure {
+    TargetProcessUnavailable,
+    RemoteMemoryUnavailable,
+    RuntimeModuleUnavailable,
+    RuntimeExportUnavailable,
+    RemoteThreadUnavailable,
+    RemoteThreadTimeout,
+    TargetRuntimeRejected(u32),
+    ControllerRejected,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostFailure {
     Unavailable,
     HandshakeRejected,
+    OperationRejected(HostOperationFailure),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeTraceStatus {
+    NoMatch,
+    Matched,
+    ContextRecorded,
+    InvalidObservation,
+    InvalidRouteProgram,
+    ExecutionLimitExceeded,
+    StateLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeTextOutcome {
+    Unmatched,
+    Replaced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeFontOutcome {
+    Unmatched,
+    Protected,
+    Substituted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeTraceRecord {
+    adapter_id: Box<str>,
+    source_text: Box<str>,
+    status: RuntimeTraceStatus,
+    text: RuntimeTextOutcome,
+    font: RuntimeFontOutcome,
+    generation: u64,
+    publication_identity: [u8; 32],
+    translation_digest: [u8; 32],
+    font_policy_digest: [u8; 32],
+}
+
+impl RuntimeTraceRecord {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        adapter_id: impl Into<Box<str>>,
+        source_text: impl Into<Box<str>>,
+        status: RuntimeTraceStatus,
+        text: RuntimeTextOutcome,
+        font: RuntimeFontOutcome,
+        generation: u64,
+        publication_identity: [u8; 32],
+        translation_digest: [u8; 32],
+        font_policy_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            adapter_id: adapter_id.into(),
+            source_text: source_text.into(),
+            status,
+            text,
+            font,
+            generation,
+            publication_identity,
+            translation_digest,
+            font_policy_digest,
+        }
+    }
+
+    #[must_use]
+    pub fn adapter_id(&self) -> &str {
+        &self.adapter_id
+    }
+
+    #[must_use]
+    pub fn source_text(&self) -> &str {
+        &self.source_text
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> RuntimeTraceStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn text(&self) -> RuntimeTextOutcome {
+        self.text
+    }
+
+    #[must_use]
+    pub const fn font(&self) -> RuntimeFontOutcome {
+        self.font
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn publication_identity(&self) -> [u8; 32] {
+        self.publication_identity
+    }
+
+    #[must_use]
+    pub const fn translation_digest(&self) -> [u8; 32] {
+        self.translation_digest
+    }
+
+    #[must_use]
+    pub const fn font_policy_digest(&self) -> [u8; 32] {
+        self.font_policy_digest
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeTraceBatch {
+    records: Vec<RuntimeTraceRecord>,
+    dropped: u64,
+}
+
+impl RuntimeTraceBatch {
+    #[must_use]
+    pub fn new(records: impl IntoIterator<Item = RuntimeTraceRecord>, dropped: u64) -> Self {
+        Self {
+            records: records.into_iter().collect(),
+            dropped,
+        }
+    }
+
+    #[must_use]
+    pub fn records(&self) -> &[RuntimeTraceRecord] {
+        &self.records
+    }
+
+    #[must_use]
+    pub const fn dropped(&self) -> u64 {
+        self.dropped
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -363,6 +512,23 @@ pub trait AdapterHostPort: Send {
         _target: &TargetInstance,
         _paused: bool,
     ) -> Result<(), HostFailure> {
+        Err(HostFailure::Unavailable)
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        _session_id: SessionId,
+        _target: &TargetInstance,
+        _enabled: bool,
+    ) -> Result<(), HostFailure> {
+        Err(HostFailure::Unavailable)
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        _session_id: SessionId,
+        _target: &TargetInstance,
+    ) -> Result<RuntimeTraceBatch, HostFailure> {
         Err(HostFailure::Unavailable)
     }
 
@@ -679,6 +845,35 @@ impl SessionManager {
         let target = record.target.clone();
         self.host
             .control_capture(session_id, &target, paused)
+            .map_err(SessionError::Host)
+    }
+
+    pub fn control_runtime_diagnostics(
+        &mut self,
+        session_id: SessionId,
+        enabled: bool,
+    ) -> Result<(), SessionError> {
+        let record = self
+            .sessions
+            .get(&session_id)
+            .ok_or(SessionError::SessionNotFound(session_id))?;
+        let target = record.target.clone();
+        self.host
+            .control_runtime_diagnostics(session_id, &target, enabled)
+            .map_err(SessionError::Host)
+    }
+
+    pub fn query_runtime_diagnostics(
+        &mut self,
+        session_id: SessionId,
+    ) -> Result<RuntimeTraceBatch, SessionError> {
+        let record = self
+            .sessions
+            .get(&session_id)
+            .ok_or(SessionError::SessionNotFound(session_id))?;
+        let target = record.target.clone();
+        self.host
+            .query_runtime_diagnostics(session_id, &target)
             .map_err(SessionError::Host)
     }
 

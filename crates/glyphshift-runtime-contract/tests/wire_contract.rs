@@ -89,3 +89,40 @@ fn runtime_publication_round_trips_default_and_entry_font_rules() {
 
     assert_eq!(decoded, publication);
 }
+
+#[test]
+fn runtime_publication_identity_covers_route_translation_and_font_content() {
+    let publication = RuntimePublication::new(
+        RouteProgram::direct("menu"),
+        TranslationSnapshot::empty(Generation::new(9)).with_entry("menu", "Open", "打开"),
+        FontPolicy::empty().with_location("menu", "Example Sans CJK"),
+    );
+    let decoded = RuntimePublication::decode_json(
+        &publication
+            .encode_json()
+            .expect("valid publication should encode"),
+    )
+    .expect("encoded publication should decode");
+    let changed_route = RuntimePublication::new(
+        RouteProgram::direct("panel"),
+        publication.snapshot().clone(),
+        publication.font_policy().clone(),
+    );
+    let changed_translation = RuntimePublication::new(
+        publication.route().clone(),
+        TranslationSnapshot::empty(Generation::new(9)).with_entry("menu", "Open", "开启"),
+        publication.font_policy().clone(),
+    );
+    let changed_font = RuntimePublication::new(
+        publication.route().clone(),
+        publication.snapshot().clone(),
+        FontPolicy::empty().with_location("menu", "Another CJK Font"),
+    );
+
+    let identity = publication.identity().expect("valid publication identity");
+    assert_eq!(decoded.identity(), Ok(identity));
+    assert_ne!(changed_route.identity(), Ok(identity));
+    assert_ne!(changed_translation.identity(), Ok(identity));
+    assert_ne!(changed_font.identity(), Ok(identity));
+    assert_ne!(identity.as_bytes(), [0; 32]);
+}

@@ -1,6 +1,7 @@
 //! Native `ExtTextOutW` package for the first-party GDI Adapter.
 
 use glyphshift_adapter_gdi::EXT_TEXT_OUT_ADAPTER_ID;
+use glyphshift_adapter_gdi_native_support::allows_font_substitution;
 use glyphshift_adapter_native_abi::{
     DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
     NativeNegotiationV1, NativeRuntimeHostV1, SourceCharactersUtf16V1, ARCH_X86, ARCH_X86_64,
@@ -255,6 +256,7 @@ unsafe fn call_with_decision(
             std::mem::size_of::<LOGFONTW>() as i32,
             Some(&mut logical_font as *mut _ as *mut core::ffi::c_void),
         ) != 0
+            && allows_font_substitution(logical_font.lfCharSet)
         {
             logical_font.lfCharSet = DEFAULT_CHARSET;
             logical_font.lfFaceName.fill(0);

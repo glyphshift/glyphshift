@@ -11,8 +11,8 @@ use glyphshift_extension::{
     ProtocolVersion,
 };
 use glyphshift_protocol::{
-    ControllerConnection, ControllerHealth, ControllerNonce, ControllerProtocolError, NonceLedger,
-    TransportFailure,
+    ControllerConnection, ControllerHealth, ControllerNonce, ControllerProtocolError,
+    ControllerRejection, NonceLedger, TransportFailure,
 };
 use std::path::PathBuf;
 use std::time::Duration;
@@ -76,7 +76,16 @@ fn ctl_process_001_verified_process_runs_inventory_launch_and_authorized_recipe(
     connection.authorize_capabilities([requirement()]);
     let inventory = connection.inventory().expect("inventory");
     assert_eq!(inventory.installations().len(), 1);
-    assert_eq!(inventory.targets().len(), 2);
+    assert_eq!(inventory.targets().len(), 3);
+    connection
+        .control_runtime_diagnostics(inventory.targets()[0].id(), true)
+        .expect("enable diagnostics through the process transport");
+    let diagnostics = connection
+        .query_runtime_diagnostics(inventory.targets()[0].id())
+        .expect("query diagnostics through the process transport");
+    assert_eq!(diagnostics.records().len(), 1);
+    assert_eq!(diagnostics.records()[0].source_text(), "Open");
+    assert_eq!(diagnostics.dropped(), 2);
 
     let receipt = connection
         .launch(inventory.installations()[0].id())
@@ -136,7 +145,25 @@ fn ctl_process_003_one_controller_crash_degrades_only_its_connection() {
             .expect("independent inventory")
             .targets()
             .len(),
-        2
+        3
     );
     assert_eq!(healthy.health(), ControllerHealth::Available);
+}
+
+#[test]
+fn ctl_process_004_preserves_a_controller_rejection_instead_of_calling_it_malformed() {
+    let mut connection = connection();
+    connection.authorize_capabilities([requirement()]);
+    let inventory = connection.inventory().expect("rejection inventory");
+
+    let error = connection
+        .prepare(inventory.targets()[2].id(), [Feature::TextReplace])
+        .expect_err("synthetic controller should reject activation");
+
+    assert_eq!(
+        error,
+        ControllerProtocolError::Transport(TransportFailure::Rejected(
+            ControllerRejection::RuntimeModuleUnavailable
+        ))
+    );
 }

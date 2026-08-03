@@ -16,7 +16,7 @@ import type { WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
-const desktopApiVersion = 12
+const desktopApiVersion = 13
 
 const { t } = useI18n()
 const appSettings = useAppSettings()

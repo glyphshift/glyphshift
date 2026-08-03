@@ -11,13 +11,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use windows::Win32::Graphics::Gdi::{
     CreateFontIndirectW, DeleteObject, GetCurrentObject, GetObjectW, SelectObject, DEFAULT_CHARSET,
-    HDC, HGDIOBJ, LOGFONTW, OBJ_FONT,
+    FONT_CHARSET, HDC, HGDIOBJ, LOGFONTW, OBJ_FONT, SYMBOL_CHARSET,
 };
 
 pub const SUPPORTED_FEATURES: u64 =
     FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE;
 pub const MAX_TEXT_UNITS: usize = 16 * 1024;
 const MAX_FONT_UNITS: usize = 63;
+
+/// Symbol charsets commonly carry icon glyphs whose font identity must be preserved.
+#[must_use]
+pub fn allows_font_substitution(charset: FONT_CHARSET) -> bool {
+    charset != SYMBOL_CHARSET
+}
 
 #[derive(Clone, Copy)]
 struct HostBridge {
@@ -206,6 +212,7 @@ pub unsafe fn with_replacement_font<R>(
             std::mem::size_of::<LOGFONTW>() as i32,
             Some(&mut logical_font as *mut _ as *mut core::ffi::c_void),
         ) != 0
+            && allows_font_substitution(logical_font.lfCharSet)
         {
             logical_font.lfCharSet = DEFAULT_CHARSET;
             logical_font.lfFaceName.fill(0);

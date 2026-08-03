@@ -4,15 +4,18 @@ use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVer
 use glyphshift_controller_sdk::{
     Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
     WireControllerConfiguration, WireControllerLossPolicy, WireFeature, WireOperation,
-    WireRuntimeDeployment, PROTOCOL_SCHEMA,
+    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
+    PROTOCOL_SCHEMA,
 };
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{CodeHash, ControllerCodeIdentity, ExtensionId, ProtocolVersion};
 use glyphshift_protocol::{
     ControllerHello, ControllerInstallation, ControllerInstallationToken, ControllerInventory,
     ControllerLaunchAck, ControllerNonce, ControllerOperation, ControllerRecipe,
-    ControllerRuntimeAck, ControllerRuntimeDeployment, ControllerTarget, ControllerTargetToken,
-    ControllerTransport, RecipeControllerLossPolicy, RecipeDirective, TransportFailure,
+    ControllerRuntimeAck, ControllerRuntimeDeployment, ControllerRuntimeFontOutcome,
+    ControllerRuntimeTextOutcome, ControllerRuntimeTraceBatch, ControllerRuntimeTraceRecord,
+    ControllerRuntimeTraceStatus, ControllerTarget, ControllerTargetToken, ControllerTransport,
+    RecipeControllerLossPolicy, RecipeDirective, TransportFailure,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -231,7 +234,33 @@ impl ProcessControllerTransport {
         if response.schema != PROTOCOL_SCHEMA || response.request_id != request_id {
             return Err(TransportFailure::MalformedMessage);
         }
+        if let Response::Error { code } = &response.response {
+            return Err(TransportFailure::Rejected(classify_rejection(code)));
+        }
         Ok(response.response)
+    }
+}
+
+fn classify_rejection(code: &str) -> glyphshift_protocol::ControllerRejection {
+    use glyphshift_protocol::ControllerRejection;
+
+    let reason = code.split_once(':').map_or(code, |(_, reason)| reason);
+    match reason {
+        "process_unavailable" => ControllerRejection::TargetProcessUnavailable,
+        "remote_allocation_failed" | "remote_write_failed" | "remote_read_failed" => {
+            ControllerRejection::RemoteMemoryUnavailable
+        }
+        "runtime_module_unavailable" => ControllerRejection::RuntimeModuleUnavailable,
+        "runtime_export_unavailable" => ControllerRejection::RuntimeExportUnavailable,
+        "remote_thread_failed" => ControllerRejection::RemoteThreadUnavailable,
+        "remote_thread_timeout" => ControllerRejection::RemoteThreadTimeout,
+        _ => reason
+            .strip_prefix("target_runtime_rejected_")
+            .and_then(|status| status.parse().ok())
+            .map_or(
+                ControllerRejection::Unknown,
+                ControllerRejection::TargetRuntimeRejected,
+            ),
     }
 }
 
@@ -348,7 +377,10 @@ impl ControllerTransport for ProcessControllerTransport {
                 generation: deployment.generation(),
             },
         })? {
-            Response::RuntimeActivated { generation } => Ok(ControllerRuntimeAck::new(generation)),
+            Response::RuntimeActivated {
+                generation,
+                publication_identity,
+            } => Ok(ControllerRuntimeAck::new(generation, publication_identity)),
             _ => Err(TransportFailure::MalformedMessage),
         }
     }
@@ -364,7 +396,10 @@ impl ControllerTransport for ProcessControllerTransport {
             publication_json: publication_json.into(),
             generation,
         })? {
-            Response::RuntimeUpdated { generation } => Ok(ControllerRuntimeAck::new(generation)),
+            Response::RuntimeUpdated {
+                generation,
+                publication_identity,
+            } => Ok(ControllerRuntimeAck::new(generation, publication_identity)),
             _ => Err(TransportFailure::MalformedMessage),
         }
     }
@@ -383,6 +418,84 @@ impl ControllerTransport for ProcessControllerTransport {
             } if acknowledged == paused => Ok(()),
             _ => Err(TransportFailure::MalformedMessage),
         }
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        target: &ControllerTargetToken,
+        enabled: bool,
+    ) -> Result<(), TransportFailure> {
+        match self.round_trip(Request::ControlDiagnostics {
+            target_token: target.as_str().into(),
+            enabled,
+        })? {
+            Response::DiagnosticsControlled {
+                enabled: acknowledged,
+            } if acknowledged == enabled => Ok(()),
+            _ => Err(TransportFailure::MalformedMessage),
+        }
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        target: &ControllerTargetToken,
+    ) -> Result<ControllerRuntimeTraceBatch, TransportFailure> {
+        let Response::RuntimeDiagnostics { batch } =
+            self.round_trip(Request::QueryDiagnostics {
+                target_token: target.as_str().into(),
+            })?
+        else {
+            return Err(TransportFailure::MalformedMessage);
+        };
+        Ok(ControllerRuntimeTraceBatch::new(
+            batch.records.into_iter().map(|record| {
+                ControllerRuntimeTraceRecord::new(
+                    record.adapter_id,
+                    record.source_text,
+                    match record.status {
+                        WireRuntimeTraceStatus::NoMatch => ControllerRuntimeTraceStatus::NoMatch,
+                        WireRuntimeTraceStatus::Matched => ControllerRuntimeTraceStatus::Matched,
+                        WireRuntimeTraceStatus::ContextRecorded => {
+                            ControllerRuntimeTraceStatus::ContextRecorded
+                        }
+                        WireRuntimeTraceStatus::InvalidObservation => {
+                            ControllerRuntimeTraceStatus::InvalidObservation
+                        }
+                        WireRuntimeTraceStatus::InvalidRouteProgram => {
+                            ControllerRuntimeTraceStatus::InvalidRouteProgram
+                        }
+                        WireRuntimeTraceStatus::ExecutionLimitExceeded => {
+                            ControllerRuntimeTraceStatus::ExecutionLimitExceeded
+                        }
+                        WireRuntimeTraceStatus::StateLimitExceeded => {
+                            ControllerRuntimeTraceStatus::StateLimitExceeded
+                        }
+                    },
+                    match record.text {
+                        WireRuntimeTextOutcome::Unmatched => {
+                            ControllerRuntimeTextOutcome::Unmatched
+                        }
+                        WireRuntimeTextOutcome::Replaced => ControllerRuntimeTextOutcome::Replaced,
+                    },
+                    match record.font {
+                        WireRuntimeFontOutcome::Unmatched => {
+                            ControllerRuntimeFontOutcome::Unmatched
+                        }
+                        WireRuntimeFontOutcome::Protected => {
+                            ControllerRuntimeFontOutcome::Protected
+                        }
+                        WireRuntimeFontOutcome::Substituted => {
+                            ControllerRuntimeFontOutcome::Substituted
+                        }
+                    },
+                    record.generation,
+                    record.publication_identity,
+                    record.translation_digest,
+                    record.font_policy_digest,
+                )
+            }),
+            batch.dropped,
+        ))
     }
 
     fn deactivate_runtime(

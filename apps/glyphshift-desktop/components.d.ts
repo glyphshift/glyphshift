@@ -21,6 +21,7 @@ declare module 'vue' {
     ManagementTableFrame: typeof import('./src/components/ManagementTableFrame.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    RuntimeDiagnosticsModal: typeof import('./src/components/RuntimeDiagnosticsModal.vue')['default']
     SettingsView: typeof import('./src/components/SettingsView.vue')['default']
     SoftwareTable: typeof import('./src/components/SoftwareTable.vue')['default']
     TitleBar: typeof import('./src/components/TitleBar.vue')['default']
@@ -37,8 +38,10 @@ declare module 'vue' {
     UModal: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Modal.vue')['default']
     UPagination: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Pagination.vue')['default']
     USelect: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Select.vue')['default']
+    USelectMenu: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/SelectMenu.vue')['default']
     USwitch: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Switch.vue')['default']
     UTable: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Table.vue')['default']
+    UTabs: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Tabs.vue')['default']
     UTextarea: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Textarea.vue')['default']
     WorkflowTable: typeof import('./src/components/WorkflowTable.vue')['default']
   }

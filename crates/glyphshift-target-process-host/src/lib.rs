@@ -3,14 +3,16 @@
 use glyphshift_adapter_registry::{AdapterBinding, AdapterHostBinding, PackageArtifactId};
 use glyphshift_capture::CaptureConfiguration;
 use glyphshift_protocol::{
-    ControllerConnection, ControllerHealth, ControllerRuntimeDeployment, ControllerTransport,
-    OpaqueTargetId,
+    ControllerConnection, ControllerHealth, ControllerProtocolError, ControllerRejection,
+    ControllerRuntimeDeployment, ControllerRuntimeFontOutcome, ControllerRuntimeTextOutcome,
+    ControllerRuntimeTraceStatus, ControllerTransport, OpaqueTargetId, TransportFailure,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_session::{
     AdapterDeactivation, AdapterHostPort, BoundAdapter, BoundFeature, HostActivation,
-    HostDeactivation, HostFailure, HostGenerationReport, HostHealthReport, SessionId,
-    TargetInstance, TargetInstanceId,
+    HostDeactivation, HostFailure, HostGenerationReport, HostHealthReport, HostOperationFailure,
+    RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceRecord,
+    RuntimeTraceStatus, SessionId, TargetInstance, TargetInstanceId,
 };
 use glyphshift_target_runtime_contract::{NativeAdapterDeployment, TargetRuntimeDeployment};
 use std::collections::BTreeMap;
@@ -161,6 +163,35 @@ impl<T: ControllerTransport + Send> TargetProcessHost<T> {
     }
 }
 
+fn host_protocol_failure(error: ControllerProtocolError) -> HostFailure {
+    let ControllerProtocolError::Transport(TransportFailure::Rejected(reason)) = error else {
+        return HostFailure::Unavailable;
+    };
+    let reason = match reason {
+        ControllerRejection::TargetProcessUnavailable => {
+            HostOperationFailure::TargetProcessUnavailable
+        }
+        ControllerRejection::RemoteMemoryUnavailable => {
+            HostOperationFailure::RemoteMemoryUnavailable
+        }
+        ControllerRejection::RuntimeModuleUnavailable => {
+            HostOperationFailure::RuntimeModuleUnavailable
+        }
+        ControllerRejection::RuntimeExportUnavailable => {
+            HostOperationFailure::RuntimeExportUnavailable
+        }
+        ControllerRejection::RemoteThreadUnavailable => {
+            HostOperationFailure::RemoteThreadUnavailable
+        }
+        ControllerRejection::RemoteThreadTimeout => HostOperationFailure::RemoteThreadTimeout,
+        ControllerRejection::TargetRuntimeRejected(status) => {
+            HostOperationFailure::TargetRuntimeRejected(status)
+        }
+        ControllerRejection::Unknown => HostOperationFailure::ControllerRejected,
+    };
+    HostFailure::OperationRejected(reason)
+}
+
 impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
     fn activate(
         &mut self,
@@ -200,8 +231,13 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
         let ack = self
             .connection
             .activate_runtime(target_id, &command)
-            .map_err(|_| HostFailure::Unavailable)?;
-        if ack.generation() != publication.generation().value() {
+            .map_err(host_protocol_failure)?;
+        let publication_identity = publication
+            .identity()
+            .map_err(|_| HostFailure::HandshakeRejected)?;
+        if ack.generation() != publication.generation().value()
+            || ack.publication_identity() != publication_identity.as_bytes()
+        {
             return Err(HostFailure::HandshakeRejected);
         }
         Ok(HostActivation::connected(Self::target_features(bindings)))
@@ -225,8 +261,13 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
                 &publication_json,
                 publication.generation().value(),
             )
-            .map_err(|_| HostFailure::Unavailable)?;
-        if ack.generation() != publication.generation().value() {
+            .map_err(host_protocol_failure)?;
+        let publication_identity = publication
+            .identity()
+            .map_err(|_| HostFailure::HandshakeRejected)?;
+        if ack.generation() != publication.generation().value()
+            || ack.publication_identity() != publication_identity.as_bytes()
+        {
             return Err(HostFailure::HandshakeRejected);
         }
         Ok(HostGenerationReport::target_runtime(
@@ -243,7 +284,74 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
         let target_id = self.target_id(target)?;
         self.connection
             .control_capture(target_id, paused)
-            .map_err(|_| HostFailure::Unavailable)
+            .map_err(host_protocol_failure)
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        _session_id: SessionId,
+        target: &TargetInstance,
+        enabled: bool,
+    ) -> Result<(), HostFailure> {
+        let target_id = self.target_id(target)?;
+        self.connection
+            .control_runtime_diagnostics(target_id, enabled)
+            .map_err(host_protocol_failure)
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        _session_id: SessionId,
+        target: &TargetInstance,
+    ) -> Result<RuntimeTraceBatch, HostFailure> {
+        let target_id = self.target_id(target)?;
+        let batch = self
+            .connection
+            .query_runtime_diagnostics(target_id)
+            .map_err(host_protocol_failure)?;
+        Ok(RuntimeTraceBatch::new(
+            batch.records().iter().map(|record| {
+                RuntimeTraceRecord::new(
+                    record.adapter_id(),
+                    record.source_text(),
+                    match record.status() {
+                        ControllerRuntimeTraceStatus::NoMatch => RuntimeTraceStatus::NoMatch,
+                        ControllerRuntimeTraceStatus::Matched => RuntimeTraceStatus::Matched,
+                        ControllerRuntimeTraceStatus::ContextRecorded => {
+                            RuntimeTraceStatus::ContextRecorded
+                        }
+                        ControllerRuntimeTraceStatus::InvalidObservation => {
+                            RuntimeTraceStatus::InvalidObservation
+                        }
+                        ControllerRuntimeTraceStatus::InvalidRouteProgram => {
+                            RuntimeTraceStatus::InvalidRouteProgram
+                        }
+                        ControllerRuntimeTraceStatus::ExecutionLimitExceeded => {
+                            RuntimeTraceStatus::ExecutionLimitExceeded
+                        }
+                        ControllerRuntimeTraceStatus::StateLimitExceeded => {
+                            RuntimeTraceStatus::StateLimitExceeded
+                        }
+                    },
+                    match record.text() {
+                        ControllerRuntimeTextOutcome::Unmatched => RuntimeTextOutcome::Unmatched,
+                        ControllerRuntimeTextOutcome::Replaced => RuntimeTextOutcome::Replaced,
+                    },
+                    match record.font() {
+                        ControllerRuntimeFontOutcome::Unmatched => RuntimeFontOutcome::Unmatched,
+                        ControllerRuntimeFontOutcome::Protected => RuntimeFontOutcome::Protected,
+                        ControllerRuntimeFontOutcome::Substituted => {
+                            RuntimeFontOutcome::Substituted
+                        }
+                    },
+                    record.generation(),
+                    record.publication_identity(),
+                    record.translation_digest(),
+                    record.font_policy_digest(),
+                )
+            }),
+            batch.dropped(),
+        ))
     }
 
     fn health(
@@ -270,7 +378,7 @@ impl<T: ControllerTransport + Send> AdapterHostPort for TargetProcessHost<T> {
         let target_id = self.target_id(target)?;
         self.connection
             .deactivate_runtime(target_id)
-            .map_err(|_| HostFailure::Unavailable)?;
+            .map_err(host_protocol_failure)?;
         Ok(HostDeactivation::completed(Self::target_adapters(bindings)))
     }
 

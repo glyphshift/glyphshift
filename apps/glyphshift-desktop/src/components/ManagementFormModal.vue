@@ -10,11 +10,13 @@ const props = withDefaults(defineProps<{
   confirmDisabled?: boolean
   busy?: boolean
   width?: 'sm' | 'md' | 'lg' | 'xl'
+  workspace?: boolean
 }>(), {
   description: '',
   confirmDisabled: false,
   busy: false,
   width: 'md',
+  workspace: false,
 })
 
 const emit = defineEmits<{
@@ -29,7 +31,10 @@ const widthClass = computed(() => ({
   lg: 'max-w-[640px]',
   xl: 'max-w-[760px]',
 })[props.width])
-const contentClass = computed(() => `${widthClass.value} flex max-h-[calc(100dvh-32px)] flex-col`)
+const contentClass = computed(() => `${widthClass.value} flex flex-col ${props.workspace ? 'h-[720px] max-h-[calc(100dvh-32px)]' : 'max-h-[calc(100dvh-32px)]'}`)
+const bodyClass = computed(() => props.workspace
+  ? 'flex min-h-0 flex-1 flex-col overflow-hidden p-0'
+  : 'min-h-0 overflow-y-auto px-5 py-4')
 </script>
 
 <template>
@@ -43,7 +48,7 @@ const contentClass = computed(() => `${widthClass.value} flex max-h-[calc(100dvh
       header: 'min-h-0 shrink-0 px-5 py-4',
       title: 'text-[15px]',
       description: 'mt-1 text-[10px] leading-4',
-      body: 'min-h-0 overflow-y-auto px-5 py-4',
+      body: bodyClass,
       footer: 'shrink-0 px-5 py-4',
     }"
     @update:open="emit('update:open', $event)"

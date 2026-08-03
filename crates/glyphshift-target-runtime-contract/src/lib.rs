@@ -5,12 +5,14 @@ use glyphshift_adapter_registry::{
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
 use glyphshift_capture::{CaptureConfiguration, CaptureSessionId};
+use glyphshift_decision::{DecisionTrace, DecisionTraceStatus, FontTrace, TextTrace};
 use glyphshift_domain::{AbiVersion, AdapterId, ApplyModel, Feature, Placement};
 use glyphshift_runtime_contract::{RuntimePublication, RuntimeWireError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/2";
+const TRACE_BATCH_SCHEMA: &str = "glyphshift.runtime-trace/1";
 pub const STATUS_TARGET_RUNTIME_OK: u32 = 0;
 pub const STATUS_TARGET_RUNTIME_INVALID_COMMAND: u32 = 1;
 pub const STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT: u32 = 2;
@@ -24,6 +26,8 @@ pub const STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED: u32 = 14;
 pub const STATUS_TARGET_RUNTIME_UNAVAILABLE: u32 = 15;
 pub const STATUS_TARGET_RUNTIME_UPDATE_REJECTED: u32 = 16;
 pub const STATUS_TARGET_RUNTIME_CAPTURE_FAILED: u32 = 17;
+pub const STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL: u32 = 18;
+pub const MAX_RUNTIME_TRACE_BYTES: usize = 8 * 1024 * 1024;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -31,6 +35,260 @@ pub struct RuntimeCommandV1 {
     pub struct_size: u32,
     pub json: *const u8,
     pub json_len: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RuntimeDiagnosticsQueryV1 {
+    pub struct_size: u32,
+    pub output: *mut u8,
+    pub output_capacity: u32,
+    pub output_len: u32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeDiagnosticsControl {
+    enabled: bool,
+}
+
+impl RuntimeDiagnosticsControl {
+    #[must_use]
+    pub const fn new(enabled: bool) -> Self {
+        Self { enabled }
+    }
+
+    #[must_use]
+    pub const fn enabled(self) -> bool {
+        self.enabled
+    }
+
+    pub fn encode_json(self) -> Result<String, DeploymentError> {
+        serde_json::to_string(&self).map_err(|_| DeploymentError::InvalidJson)
+    }
+
+    pub fn decode_json(json: &str) -> Result<Self, DeploymentError> {
+        serde_json::from_str(json).map_err(|_| DeploymentError::InvalidJson)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeTraceStatus {
+    NoMatch,
+    Matched,
+    ContextRecorded,
+    InvalidObservation,
+    InvalidRouteProgram,
+    ExecutionLimitExceeded,
+    StateLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeTextOutcome {
+    Unmatched,
+    Replaced,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeFontOutcome {
+    Unmatched,
+    Protected,
+    Substituted,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeTraceRecord {
+    adapter_id: Box<str>,
+    source_text: Box<str>,
+    status: RuntimeTraceStatus,
+    text: RuntimeTextOutcome,
+    font: RuntimeFontOutcome,
+    generation: u64,
+    publication_identity: [u8; 32],
+    translation_digest: [u8; 32],
+    font_policy_digest: [u8; 32],
+}
+
+impl RuntimeTraceRecord {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        adapter_id: impl Into<Box<str>>,
+        source_text: impl Into<Box<str>>,
+        status: RuntimeTraceStatus,
+        text: RuntimeTextOutcome,
+        font: RuntimeFontOutcome,
+        generation: u64,
+        publication_identity: [u8; 32],
+        translation_digest: [u8; 32],
+        font_policy_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            adapter_id: adapter_id.into(),
+            source_text: source_text.into(),
+            status,
+            text,
+            font,
+            generation,
+            publication_identity,
+            translation_digest,
+            font_policy_digest,
+        }
+    }
+
+    #[must_use]
+    pub fn from_decision(
+        adapter_id: impl Into<Box<str>>,
+        source_text: impl Into<Box<str>>,
+        trace: DecisionTrace,
+        publication_identity: glyphshift_runtime_contract::RuntimePublicationIdentity,
+    ) -> Self {
+        Self::new(
+            adapter_id,
+            source_text,
+            trace.status().into(),
+            trace.text().into(),
+            trace.font().into(),
+            trace.generation().value(),
+            publication_identity.as_bytes(),
+            trace.translation_digest().as_bytes(),
+            trace.font_policy_digest().as_bytes(),
+        )
+    }
+
+    #[must_use]
+    pub fn adapter_id(&self) -> &str {
+        &self.adapter_id
+    }
+
+    #[must_use]
+    pub fn source_text(&self) -> &str {
+        &self.source_text
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> RuntimeTraceStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn text(&self) -> RuntimeTextOutcome {
+        self.text
+    }
+
+    #[must_use]
+    pub const fn font(&self) -> RuntimeFontOutcome {
+        self.font
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn publication_identity(&self) -> [u8; 32] {
+        self.publication_identity
+    }
+
+    #[must_use]
+    pub const fn translation_digest(&self) -> [u8; 32] {
+        self.translation_digest
+    }
+
+    #[must_use]
+    pub const fn font_policy_digest(&self) -> [u8; 32] {
+        self.font_policy_digest
+    }
+}
+
+impl From<DecisionTraceStatus> for RuntimeTraceStatus {
+    fn from(value: DecisionTraceStatus) -> Self {
+        match value {
+            DecisionTraceStatus::NoMatch => Self::NoMatch,
+            DecisionTraceStatus::Matched => Self::Matched,
+            DecisionTraceStatus::ContextRecorded => Self::ContextRecorded,
+            DecisionTraceStatus::InvalidObservation => Self::InvalidObservation,
+            DecisionTraceStatus::InvalidRouteProgram => Self::InvalidRouteProgram,
+            DecisionTraceStatus::ExecutionLimitExceeded => Self::ExecutionLimitExceeded,
+            DecisionTraceStatus::StateLimitExceeded => Self::StateLimitExceeded,
+        }
+    }
+}
+
+impl From<TextTrace> for RuntimeTextOutcome {
+    fn from(value: TextTrace) -> Self {
+        match value {
+            TextTrace::Unmatched => Self::Unmatched,
+            TextTrace::Replaced => Self::Replaced,
+        }
+    }
+}
+
+impl From<FontTrace> for RuntimeFontOutcome {
+    fn from(value: FontTrace) -> Self {
+        match value {
+            FontTrace::Unmatched => Self::Unmatched,
+            FontTrace::Protected => Self::Protected,
+            FontTrace::Substituted => Self::Substituted,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeTraceBatch {
+    records: Vec<RuntimeTraceRecord>,
+    dropped: u64,
+}
+
+impl RuntimeTraceBatch {
+    #[must_use]
+    pub fn new(records: impl IntoIterator<Item = RuntimeTraceRecord>, dropped: u64) -> Self {
+        Self {
+            records: records.into_iter().collect(),
+            dropped,
+        }
+    }
+
+    #[must_use]
+    pub fn records(&self) -> &[RuntimeTraceRecord] {
+        &self.records
+    }
+
+    #[must_use]
+    pub const fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    pub fn encode_json(&self) -> Result<String, DeploymentError> {
+        serde_json::to_string(&WireRuntimeTraceBatch {
+            schema: TRACE_BATCH_SCHEMA.into(),
+            records: self.records.clone(),
+            dropped: self.dropped,
+        })
+        .map_err(|_| DeploymentError::InvalidJson)
+    }
+
+    pub fn decode_json(json: &str) -> Result<Self, DeploymentError> {
+        let wire: WireRuntimeTraceBatch =
+            serde_json::from_str(json).map_err(|_| DeploymentError::InvalidJson)?;
+        if wire.schema.as_ref() != TRACE_BATCH_SCHEMA {
+            return Err(DeploymentError::UnsupportedSchema);
+        }
+        Ok(Self::new(wire.records, wire.dropped))
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct WireRuntimeTraceBatch {
+    schema: Box<str>,
+    records: Vec<RuntimeTraceRecord>,
+    dropped: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

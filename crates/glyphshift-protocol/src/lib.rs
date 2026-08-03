@@ -43,11 +43,24 @@ impl ControllerHello {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerRejection {
+    TargetProcessUnavailable,
+    RemoteMemoryUnavailable,
+    RuntimeModuleUnavailable,
+    RuntimeExportUnavailable,
+    RemoteThreadUnavailable,
+    RemoteThreadTimeout,
+    TargetRuntimeRejected(u32),
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransportFailure {
     Timeout,
     Crashed,
     MalformedMessage,
     Cancelled,
+    Rejected(ControllerRejection),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -151,17 +164,165 @@ impl ControllerRuntimeDeployment {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ControllerRuntimeAck {
     generation: u64,
+    publication_identity: [u8; 32],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerRuntimeTraceStatus {
+    NoMatch,
+    Matched,
+    ContextRecorded,
+    InvalidObservation,
+    InvalidRouteProgram,
+    ExecutionLimitExceeded,
+    StateLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerRuntimeTextOutcome {
+    Unmatched,
+    Replaced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControllerRuntimeFontOutcome {
+    Unmatched,
+    Protected,
+    Substituted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerRuntimeTraceRecord {
+    adapter_id: Box<str>,
+    source_text: Box<str>,
+    status: ControllerRuntimeTraceStatus,
+    text: ControllerRuntimeTextOutcome,
+    font: ControllerRuntimeFontOutcome,
+    generation: u64,
+    publication_identity: [u8; 32],
+    translation_digest: [u8; 32],
+    font_policy_digest: [u8; 32],
+}
+
+impl ControllerRuntimeTraceRecord {
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn new(
+        adapter_id: impl Into<Box<str>>,
+        source_text: impl Into<Box<str>>,
+        status: ControllerRuntimeTraceStatus,
+        text: ControllerRuntimeTextOutcome,
+        font: ControllerRuntimeFontOutcome,
+        generation: u64,
+        publication_identity: [u8; 32],
+        translation_digest: [u8; 32],
+        font_policy_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            adapter_id: adapter_id.into(),
+            source_text: source_text.into(),
+            status,
+            text,
+            font,
+            generation,
+            publication_identity,
+            translation_digest,
+            font_policy_digest,
+        }
+    }
+
+    #[must_use]
+    pub fn adapter_id(&self) -> &str {
+        &self.adapter_id
+    }
+
+    #[must_use]
+    pub fn source_text(&self) -> &str {
+        &self.source_text
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> ControllerRuntimeTraceStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn text(&self) -> ControllerRuntimeTextOutcome {
+        self.text
+    }
+
+    #[must_use]
+    pub const fn font(&self) -> ControllerRuntimeFontOutcome {
+        self.font
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn publication_identity(&self) -> [u8; 32] {
+        self.publication_identity
+    }
+
+    #[must_use]
+    pub const fn translation_digest(&self) -> [u8; 32] {
+        self.translation_digest
+    }
+
+    #[must_use]
+    pub const fn font_policy_digest(&self) -> [u8; 32] {
+        self.font_policy_digest
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ControllerRuntimeTraceBatch {
+    records: Vec<ControllerRuntimeTraceRecord>,
+    dropped: u64,
+}
+
+impl ControllerRuntimeTraceBatch {
+    #[must_use]
+    pub fn new(
+        records: impl IntoIterator<Item = ControllerRuntimeTraceRecord>,
+        dropped: u64,
+    ) -> Self {
+        Self {
+            records: records.into_iter().collect(),
+            dropped,
+        }
+    }
+
+    #[must_use]
+    pub fn records(&self) -> &[ControllerRuntimeTraceRecord] {
+        &self.records
+    }
+
+    #[must_use]
+    pub const fn dropped(&self) -> u64 {
+        self.dropped
+    }
 }
 
 impl ControllerRuntimeAck {
     #[must_use]
-    pub const fn new(generation: u64) -> Self {
-        Self { generation }
+    pub const fn new(generation: u64, publication_identity: [u8; 32]) -> Self {
+        Self {
+            generation,
+            publication_identity,
+        }
     }
 
     #[must_use]
     pub const fn generation(self) -> u64 {
         self.generation
+    }
+
+    #[must_use]
+    pub const fn publication_identity(self) -> [u8; 32] {
+        self.publication_identity
     }
 }
 
@@ -452,6 +613,21 @@ pub trait ControllerTransport {
         _target: &ControllerTargetToken,
         _paused: bool,
     ) -> Result<(), TransportFailure> {
+        Err(TransportFailure::MalformedMessage)
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        _target: &ControllerTargetToken,
+        _enabled: bool,
+    ) -> Result<(), TransportFailure> {
+        Err(TransportFailure::MalformedMessage)
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        _target: &ControllerTargetToken,
+    ) -> Result<ControllerRuntimeTraceBatch, TransportFailure> {
         Err(TransportFailure::MalformedMessage)
     }
 
@@ -750,6 +926,35 @@ impl<T: ControllerTransport> ControllerConnection<T> {
             .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
         self.transport
             .control_capture(&target, paused)
+            .map_err(|failure| self.handle_transport_failure(failure))
+    }
+
+    pub fn control_runtime_diagnostics(
+        &mut self,
+        target_id: OpaqueTargetId,
+        enabled: bool,
+    ) -> Result<(), ControllerProtocolError> {
+        let target = self
+            .target_tokens
+            .get(&target_id)
+            .cloned()
+            .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
+        self.transport
+            .control_runtime_diagnostics(&target, enabled)
+            .map_err(|failure| self.handle_transport_failure(failure))
+    }
+
+    pub fn query_runtime_diagnostics(
+        &mut self,
+        target_id: OpaqueTargetId,
+    ) -> Result<ControllerRuntimeTraceBatch, ControllerProtocolError> {
+        let target = self
+            .target_tokens
+            .get(&target_id)
+            .cloned()
+            .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
+        self.transport
+            .query_runtime_diagnostics(&target)
             .map_err(|failure| self.handle_transport_failure(failure))
     }
 

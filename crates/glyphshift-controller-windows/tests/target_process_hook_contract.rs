@@ -5,7 +5,7 @@ use glyphshift_adapter_registry::{
 };
 use glyphshift_controller_sdk::{
     ControllerPlugin, WireAdapterRequirement, WireControllerConfiguration, WireFeature,
-    WireRuntimeDeployment,
+    WireRuntimeDeployment, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
 };
 use glyphshift_controller_windows::WindowsController;
 use glyphshift_domain::{Feature, Generation, RouteProgram};
@@ -155,40 +155,64 @@ fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() 
         .clone();
 
     let first_publication = publication(1, "First translated label");
+    let first_identity = first_publication
+        .identity()
+        .expect("first publication identity")
+        .as_bytes();
     let runtime_library = profile.join("glyphshift_target_runtime.dll");
     let encoded_deployment = deployment(&profile, first_publication)
         .encode_json()
         .expect("runtime deployment json");
-    assert_eq!(
-        controller
-            .activate_runtime(
-                &target_token,
-                &WireRuntimeDeployment {
-                    runtime_library: runtime_library.to_string_lossy().into_owned(),
-                    runtime_library_sha256: sha256(&runtime_library),
-                    deployment_json: encoded_deployment,
-                    generation: 1,
-                },
-            )
-            .expect("target Runtime activation"),
-        1
-    );
+    let first_ack = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: encoded_deployment,
+                generation: 1,
+            },
+        )
+        .expect("target Runtime activation");
+    assert_eq!(first_ack.generation, 1);
+    assert_eq!(first_ack.publication_identity, first_identity);
+    controller
+        .control_diagnostics(&target_token, true)
+        .expect("enable bounded runtime diagnostics");
     let first = target.render();
     assert_ne!(first, baseline, "the injected GDI hook should replace text");
+    let first_trace = controller
+        .query_diagnostics(&target_token)
+        .expect("query target Runtime diagnostics");
+    assert_eq!(first_trace.records.len(), 1);
+    assert_eq!(first_trace.records[0].source_text, "Open");
+    assert_eq!(
+        first_trace.records[0].status,
+        WireRuntimeTraceStatus::Matched
+    );
+    assert_eq!(
+        first_trace.records[0].text,
+        WireRuntimeTextOutcome::Replaced
+    );
+    assert_eq!(first_trace.records[0].generation, 1);
+    assert_eq!(first_trace.records[0].publication_identity, first_identity);
 
     let second_publication = publication(2, "Second translated label");
-    assert_eq!(
-        controller
-            .update_runtime(
-                &target_token,
-                &second_publication
-                    .encode_json()
-                    .expect("runtime publication json"),
-                2,
-            )
-            .expect("target Runtime update"),
-        2
-    );
+    let second_identity = second_publication
+        .identity()
+        .expect("second publication identity")
+        .as_bytes();
+    let second_ack = controller
+        .update_runtime(
+            &target_token,
+            &second_publication
+                .encode_json()
+                .expect("runtime publication json"),
+            2,
+        )
+        .expect("target Runtime update");
+    assert_eq!(second_ack.generation, 2);
+    assert_eq!(second_ack.publication_identity, second_identity);
     let second = target.render();
     assert_ne!(second, first, "the hook should use the new translation");
 

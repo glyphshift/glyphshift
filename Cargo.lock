@@ -1140,6 +1140,7 @@ name = "glyphshift-adapter-gdi-native"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-gdi",
+ "glyphshift-adapter-gdi-native-support",
  "glyphshift-adapter-native-abi",
  "retour",
  "windows 0.58.0",
@@ -1385,6 +1386,7 @@ dependencies = [
  "glyphshift-translation",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -1468,6 +1470,7 @@ dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-adapter-sdk",
  "glyphshift-capture",
+ "glyphshift-decision",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
  "glyphshift-translation",

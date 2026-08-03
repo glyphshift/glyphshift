@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
-pub const PROTOCOL_SCHEMA: &str = "glyphshift.controller/1";
+pub const PROTOCOL_SCHEMA: &str = "glyphshift.controller/2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -54,6 +54,13 @@ pub enum Request {
         target_token: String,
         paused: bool,
     },
+    ControlDiagnostics {
+        target_token: String,
+        enabled: bool,
+    },
+    QueryDiagnostics {
+        target_token: String,
+    },
     DeactivateRuntime {
         target_token: String,
     },
@@ -96,12 +103,20 @@ pub enum Response {
     },
     RuntimeActivated {
         generation: u64,
+        publication_identity: [u8; 32],
     },
     RuntimeUpdated {
         generation: u64,
+        publication_identity: [u8; 32],
     },
     CaptureControlled {
         paused: bool,
+    },
+    DiagnosticsControlled {
+        enabled: bool,
+    },
+    RuntimeDiagnostics {
+        batch: WireRuntimeTraceBatch,
     },
     RuntimeDeactivated,
     Cancelled,
@@ -168,6 +183,58 @@ pub enum WireControllerLossPolicy {
     Degrade,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WireRuntimeAck {
+    pub generation: u64,
+    pub publication_identity: [u8; 32],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireRuntimeTraceStatus {
+    NoMatch,
+    Matched,
+    ContextRecorded,
+    InvalidObservation,
+    InvalidRouteProgram,
+    ExecutionLimitExceeded,
+    StateLimitExceeded,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireRuntimeTextOutcome {
+    Unmatched,
+    Replaced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WireRuntimeFontOutcome {
+    Unmatched,
+    Protected,
+    Substituted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireRuntimeTraceRecord {
+    pub adapter_id: String,
+    pub source_text: String,
+    pub status: WireRuntimeTraceStatus,
+    pub text: WireRuntimeTextOutcome,
+    pub font: WireRuntimeFontOutcome,
+    pub generation: u64,
+    pub publication_identity: [u8; 32],
+    pub translation_digest: [u8; 32],
+    pub font_policy_digest: [u8; 32],
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireRuntimeTraceBatch {
+    pub records: Vec<WireRuntimeTraceRecord>,
+    pub dropped: u64,
+}
+
 pub trait ControllerPlugin {
     fn configure(
         &mut self,
@@ -191,7 +258,7 @@ pub trait ControllerPlugin {
         &mut self,
         _target_token: &str,
         _deployment: &WireRuntimeDeployment,
-    ) -> Result<u64, PluginError> {
+    ) -> Result<WireRuntimeAck, PluginError> {
         Err(PluginError::new("runtime_activation_unsupported"))
     }
 
@@ -200,12 +267,27 @@ pub trait ControllerPlugin {
         _target_token: &str,
         _publication_json: &str,
         _generation: u64,
-    ) -> Result<u64, PluginError> {
+    ) -> Result<WireRuntimeAck, PluginError> {
         Err(PluginError::new("runtime_update_unsupported"))
     }
 
     fn control_capture(&mut self, _target_token: &str, _paused: bool) -> Result<(), PluginError> {
         Err(PluginError::new("capture_control_unsupported"))
+    }
+
+    fn control_diagnostics(
+        &mut self,
+        _target_token: &str,
+        _enabled: bool,
+    ) -> Result<(), PluginError> {
+        Err(PluginError::new("runtime_diagnostics_unsupported"))
+    }
+
+    fn query_diagnostics(
+        &mut self,
+        _target_token: &str,
+    ) -> Result<WireRuntimeTraceBatch, PluginError> {
+        Err(PluginError::new("runtime_diagnostics_unsupported"))
     }
 
     fn deactivate_runtime(&mut self, _target_token: &str) -> Result<(), PluginError> {
@@ -285,7 +367,10 @@ pub fn serve(
                 deployment,
             } => plugin
                 .activate_runtime(&target_token, &deployment)
-                .map(|generation| Response::RuntimeActivated { generation })
+                .map(|ack| Response::RuntimeActivated {
+                    generation: ack.generation,
+                    publication_identity: ack.publication_identity,
+                })
                 .unwrap_or_else(plugin_error),
             Request::UpdateRuntime {
                 target_token,
@@ -293,7 +378,10 @@ pub fn serve(
                 generation,
             } => plugin
                 .update_runtime(&target_token, &publication_json, generation)
-                .map(|generation| Response::RuntimeUpdated { generation })
+                .map(|ack| Response::RuntimeUpdated {
+                    generation: ack.generation,
+                    publication_identity: ack.publication_identity,
+                })
                 .unwrap_or_else(plugin_error),
             Request::ControlCapture {
                 target_token,
@@ -301,6 +389,17 @@ pub fn serve(
             } => plugin
                 .control_capture(&target_token, paused)
                 .map(|()| Response::CaptureControlled { paused })
+                .unwrap_or_else(plugin_error),
+            Request::ControlDiagnostics {
+                target_token,
+                enabled,
+            } => plugin
+                .control_diagnostics(&target_token, enabled)
+                .map(|()| Response::DiagnosticsControlled { enabled })
+                .unwrap_or_else(plugin_error),
+            Request::QueryDiagnostics { target_token } => plugin
+                .query_diagnostics(&target_token)
+                .map(|batch| Response::RuntimeDiagnostics { batch })
                 .unwrap_or_else(plugin_error),
             Request::DeactivateRuntime { target_token } => plugin
                 .deactivate_runtime(&target_token)

@@ -13,8 +13,8 @@ use glyphshift_desktop_backend::{
     ExecutableSelection, SoftwareEdit, WorkflowCreate, WorkflowEdit, WorkflowView,
 };
 use glyphshift_desktop_runtime::{
-    DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, RuntimeBundle,
-    WorkflowReconcileReport,
+    DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, HostOperationFailure,
+    RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord, WorkflowReconcileReport,
 };
 use glyphshift_domain::{Feature, Generation, RouteOperator};
 use glyphshift_runtime_contract::RuntimePublication;
@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 12;
+const DESKTOP_API_VERSION: u16 = 13;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
@@ -223,6 +223,30 @@ struct WorkflowActivationView {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+struct WorkflowRuntimeDiagnosticsView {
+    workflow_id: Box<str>,
+    records: Vec<WorkflowRuntimeTraceView>,
+    dropped: u64,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowRuntimeTraceView {
+    software_id: Box<str>,
+    software_name: Box<str>,
+    adapter_name: Box<str>,
+    source_text: Box<str>,
+    status: Box<str>,
+    text: Box<str>,
+    font: Box<str>,
+    generation: u64,
+    publication_identity: Box<str>,
+    translation_digest: Box<str>,
+    font_policy_digest: Box<str>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 struct WorkflowCommandResult {
     definition: WorkflowView,
     activation: WorkflowActivationView,
@@ -281,6 +305,17 @@ trait WorkflowRuntimeService: Send {
         paused: bool,
     ) -> Result<(), DesktopRuntimeError>;
 
+    fn control_runtime_diagnostics(
+        &mut self,
+        software_id: &str,
+        enabled: bool,
+    ) -> Result<(), DesktopRuntimeError>;
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        software_id: &str,
+    ) -> Result<RuntimeTraceBatch, DesktopRuntimeError>;
+
     fn publish_capture(
         &mut self,
         software_id: &str,
@@ -335,6 +370,21 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
         paused: bool,
     ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntimePool::control_capture(self, software_id, paused)
+    }
+
+    fn control_runtime_diagnostics(
+        &mut self,
+        software_id: &str,
+        enabled: bool,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::control_runtime_diagnostics(self, software_id, enabled)
+    }
+
+    fn query_runtime_diagnostics(
+        &mut self,
+        software_id: &str,
+    ) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+        DesktopRuntimePool::query_runtime_diagnostics(self, software_id)
     }
 
     fn publish_capture(
@@ -1027,6 +1077,81 @@ impl DesktopApplication {
         Ok(self.snapshot())
     }
 
+    fn control_workflow_diagnostics(
+        &mut self,
+        workflow_id: &str,
+        enabled: bool,
+    ) -> Result<(), CommandError> {
+        let intent = self
+            .backend
+            .effective_workflow_intent(workflow_id)
+            .map_err(workflow_activation_command_error)?;
+        let runtimes = self.runtimes.as_mut().ok_or_else(runtime_unavailable)?;
+        let mut controlled = Vec::new();
+        for target in intent.targets() {
+            if let Err(error) = runtimes.control_runtime_diagnostics(target.software_id(), enabled)
+            {
+                if enabled {
+                    for software_id in controlled {
+                        let _ = runtimes.control_runtime_diagnostics(software_id, false);
+                    }
+                }
+                return Err(runtime_diagnostics_error(error, target.software_id()));
+            }
+            controlled.push(target.software_id());
+        }
+        Ok(())
+    }
+
+    fn workflow_diagnostics(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<WorkflowRuntimeDiagnosticsView, CommandError> {
+        let intent = self
+            .backend
+            .effective_workflow_intent(workflow_id)
+            .map_err(workflow_activation_command_error)?;
+        let snapshot = self.backend.snapshot();
+        let software_names = snapshot
+            .software()
+            .iter()
+            .map(|software| (software.id(), software.name()))
+            .collect::<BTreeMap<_, _>>();
+        let adapter_names = self
+            .adapters
+            .iter()
+            .map(|adapter| (adapter.id.as_ref(), adapter.name.as_ref()))
+            .collect::<BTreeMap<_, _>>();
+        let runtimes = self.runtimes.as_mut().ok_or_else(runtime_unavailable)?;
+        let mut records = Vec::new();
+        let mut dropped = 0_u64;
+        for target in intent.targets() {
+            let batch = runtimes
+                .query_runtime_diagnostics(target.software_id())
+                .map_err(|error| runtime_diagnostics_error(error, target.software_id()))?;
+            dropped = dropped.saturating_add(batch.dropped());
+            records.extend(batch.records().iter().map(|record| {
+                workflow_runtime_trace_view(
+                    target.software_id(),
+                    software_names
+                        .get(target.software_id())
+                        .copied()
+                        .unwrap_or("未知软件"),
+                    adapter_names
+                        .get(record.adapter_id())
+                        .copied()
+                        .unwrap_or("未知适配器"),
+                    record,
+                )
+            }));
+        }
+        Ok(WorkflowRuntimeDiagnosticsView {
+            workflow_id: workflow_id.into(),
+            records,
+            dropped,
+        })
+    }
+
     fn enable_workflow(
         &mut self,
         workflow_id: &str,
@@ -1179,9 +1304,95 @@ fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandE
             CommandError::new("runtime.session_rejected")
         }
         DesktopRuntimeError::BundleUnavailable => CommandError::new("runtime.bundle_unavailable"),
+        DesktopRuntimeError::ProtocolRejected if enabling => {
+            CommandError::new("runtime.component_incompatible")
+        }
+        DesktopRuntimeError::ActivationRejected(reason) if enabling => match reason {
+            HostOperationFailure::TargetProcessUnavailable
+            | HostOperationFailure::RemoteMemoryUnavailable
+            | HostOperationFailure::RemoteThreadUnavailable => {
+                CommandError::new("runtime.target_access_failed")
+            }
+            HostOperationFailure::RuntimeModuleUnavailable => {
+                CommandError::new("runtime.component_load_failed")
+            }
+            HostOperationFailure::RuntimeExportUnavailable
+            | HostOperationFailure::TargetRuntimeRejected(_) => {
+                CommandError::new("runtime.component_incompatible")
+            }
+            HostOperationFailure::RemoteThreadTimeout => {
+                CommandError::new("runtime.activation_timed_out")
+            }
+            HostOperationFailure::ControllerRejected => {
+                CommandError::new("runtime.activation_failed")
+            }
+        },
         _ if enabling => CommandError::new("runtime.activation_failed"),
         _ => CommandError::new("runtime.stop_unconfirmed"),
     }
+}
+
+fn runtime_diagnostics_error(error: DesktopRuntimeError, software_id: &str) -> CommandError {
+    let code = match error {
+        DesktopRuntimeError::InvalidState => "runtime.diagnostics_inactive",
+        DesktopRuntimeError::ControllerUnavailable
+        | DesktopRuntimeError::BundleUnavailable
+        | DesktopRuntimeError::ProtocolRejected => "runtime.diagnostics_unavailable",
+        _ => "runtime.diagnostics_failed",
+    };
+    CommandError::new(code).with_arg("softwareId", software_id)
+}
+
+fn workflow_runtime_trace_view(
+    software_id: &str,
+    software_name: &str,
+    adapter_name: &str,
+    record: &RuntimeTraceRecord,
+) -> WorkflowRuntimeTraceView {
+    use glyphshift_desktop_runtime::{RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceStatus};
+
+    WorkflowRuntimeTraceView {
+        software_id: software_id.into(),
+        software_name: software_name.into(),
+        adapter_name: adapter_name.into(),
+        source_text: record.source_text().into(),
+        status: match record.status() {
+            RuntimeTraceStatus::NoMatch => "no_match",
+            RuntimeTraceStatus::Matched => "matched",
+            RuntimeTraceStatus::ContextRecorded => "context_recorded",
+            RuntimeTraceStatus::InvalidObservation => "invalid_observation",
+            RuntimeTraceStatus::InvalidRouteProgram => "invalid_route_program",
+            RuntimeTraceStatus::ExecutionLimitExceeded => "execution_limit_exceeded",
+            RuntimeTraceStatus::StateLimitExceeded => "state_limit_exceeded",
+        }
+        .into(),
+        text: match record.text() {
+            RuntimeTextOutcome::Unmatched => "unmatched",
+            RuntimeTextOutcome::Replaced => "replaced",
+        }
+        .into(),
+        font: match record.font() {
+            RuntimeFontOutcome::Unmatched => "unmatched",
+            RuntimeFontOutcome::Protected => "protected",
+            RuntimeFontOutcome::Substituted => "substituted",
+        }
+        .into(),
+        generation: record.generation(),
+        publication_identity: digest_hex(record.publication_identity()).into(),
+        translation_digest: digest_hex(record.translation_digest()).into(),
+        font_policy_digest: digest_hex(record.font_policy_digest()).into(),
+    }
+}
+
+fn digest_hex(digest: [u8; 32]) -> String {
+    use std::fmt::Write;
+
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ = write!(output, "{byte:02x}");
+            output
+        })
 }
 
 fn workflow_runtime_view(
@@ -1705,6 +1916,29 @@ fn desktop_refresh_workflows(
 }
 
 #[tauri::command]
+fn desktop_control_workflow_diagnostics(
+    workflow_id: String,
+    enabled: bool,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .control_workflow_diagnostics(&workflow_id, enabled)
+}
+
+#[tauri::command]
+fn desktop_workflow_diagnostics(
+    workflow_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<WorkflowRuntimeDiagnosticsView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .workflow_diagnostics(&workflow_id)
+}
+
+#[tauri::command]
 fn desktop_remove_software(
     extension_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
@@ -1773,6 +2007,8 @@ pub fn run() {
             desktop_enable_workflow,
             desktop_disable_workflow,
             desktop_refresh_workflows,
+            desktop_control_workflow_diagnostics,
+            desktop_workflow_diagnostics,
             desktop_remove_software
         ])
         .run(tauri::generate_context!())
@@ -1925,6 +2161,38 @@ mod tests {
             Ok(())
         }
 
+        fn control_runtime_diagnostics(
+            &mut self,
+            _software_id: &str,
+            _enabled: bool,
+        ) -> Result<(), DesktopRuntimeError> {
+            Ok(())
+        }
+
+        fn query_runtime_diagnostics(
+            &mut self,
+            _software_id: &str,
+        ) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+            use glyphshift_desktop_runtime::{
+                RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceStatus,
+            };
+
+            Ok(RuntimeTraceBatch::new(
+                [RuntimeTraceRecord::new(
+                    TEST_ADAPTER_ID,
+                    "Open",
+                    RuntimeTraceStatus::Matched,
+                    RuntimeTextOutcome::Replaced,
+                    RuntimeFontOutcome::Protected,
+                    4,
+                    [0x71; 32],
+                    [0x72; 32],
+                    [0x73; 32],
+                )],
+                3,
+            ))
+        }
+
         fn publish_capture(
             &mut self,
             _software_id: &str,
@@ -2056,6 +2324,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_protocol_rejection_does_not_collapse_into_a_generic_activation_error() {
+        let error = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::ProtocolRejected,
+            true,
+        ))
+        .expect("serialize Runtime protocol rejection");
+
+        assert_eq!(error["code"], "runtime.component_incompatible");
+    }
+
+    #[test]
+    fn runtime_module_rejection_reaches_an_actionable_command_error() {
+        let error = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::ActivationRejected(HostOperationFailure::RuntimeModuleUnavailable),
+            true,
+        ))
+        .expect("serialize Runtime module rejection");
+
+        assert_eq!(error["code"], "runtime.component_load_failed");
+    }
+
+    #[test]
     fn workflow_enable_and_disable_share_one_product_command_path() {
         let (mut application, calls, software_id, _data_root) = workflow_application();
 
@@ -2092,6 +2382,43 @@ mod tests {
             calls.lock().expect("runtime call log").disabled,
             vec![Box::<str>::from("workflow.product")]
         );
+    }
+
+    #[test]
+    fn workflow_diagnostics_exposes_public_names_and_bounded_trace_facts() {
+        let (mut application, _calls, software_id, _data_root) = workflow_application();
+        application.adapters.push(AdapterView {
+            id: TEST_ADAPTER_ID.into(),
+            name: "合成适配器".into(),
+            version: "1.0.0".into(),
+            summary: "合成诊断适配器".into(),
+            platforms: vec!["windows".into()],
+            technologies: vec!["GDI".into()],
+            features: vec!["text-replace".into()],
+            technical_target: "Synthetic".into(),
+            configuration: "none".into(),
+        });
+        application
+            .enable_workflow("workflow.product", false)
+            .expect("enable workflow");
+
+        application
+            .control_workflow_diagnostics("workflow.product", true)
+            .expect("enable workflow diagnostics");
+        let diagnostics = application
+            .workflow_diagnostics("workflow.product")
+            .expect("query workflow diagnostics");
+
+        assert_eq!(diagnostics.workflow_id.as_ref(), "workflow.product");
+        assert_eq!(diagnostics.records.len(), 1);
+        assert_eq!(
+            diagnostics.records[0].software_id.as_ref(),
+            software_id.as_ref()
+        );
+        assert_eq!(diagnostics.records[0].adapter_name.as_ref(), "合成适配器");
+        assert_eq!(diagnostics.records[0].source_text.as_ref(), "Open");
+        assert_eq!(diagnostics.records[0].status.as_ref(), "matched");
+        assert_eq!(diagnostics.dropped, 3);
     }
 
     #[test]

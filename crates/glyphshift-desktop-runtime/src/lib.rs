@@ -24,9 +24,13 @@ use glyphshift_protocol::{
     NonceLedger, OpaqueTargetId, PreparedRecipe, RecipeControllerLossPolicy,
 };
 use glyphshift_session::{
-    ControllerFailure, ControllerHealth, ControllerLossPolicy, ControllerRecipePort, SessionId,
-    SessionManager, SessionRecipe, TargetHealth, TargetInstance, TargetInstanceId,
-    TargetLifecyclePort,
+    ControllerFailure, ControllerHealth, ControllerLossPolicy, ControllerRecipePort, HostFailure,
+    SessionError, SessionId, SessionManager, SessionRecipe, TargetHealth, TargetInstance,
+    TargetInstanceId, TargetLifecyclePort,
+};
+pub use glyphshift_session::{
+    HostOperationFailure, RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceBatch,
+    RuntimeTraceRecord, RuntimeTraceStatus,
 };
 use glyphshift_target_process_host::{RuntimeArtifact, TargetArtifactCatalog, TargetProcessHost};
 use serde::Deserialize;
@@ -55,6 +59,7 @@ pub enum DesktopRuntimeError {
     UnknownTarget,
     InvalidState,
     SessionRejected,
+    ActivationRejected(HostOperationFailure),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -399,6 +404,8 @@ trait ManagedRuntime: Send {
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError>;
     fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError>;
+    fn control_runtime_diagnostics(&mut self, enabled: bool) -> Result<(), DesktopRuntimeError>;
+    fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError>;
     fn stop(&mut self) -> Result<(), DesktopRuntimeError>;
     fn abandon(&mut self) {}
 
@@ -461,6 +468,14 @@ impl ManagedRuntime for WindowsDesktopRuntime {
 
     fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError> {
         DesktopRuntime::control_capture(self, paused)
+    }
+
+    fn control_runtime_diagnostics(&mut self, enabled: bool) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::control_runtime_diagnostics(self, enabled)
+    }
+
+    fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+        DesktopRuntime::query_runtime_diagnostics(self)
     }
 
     fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
@@ -887,7 +902,17 @@ impl DesktopRuntimePool {
         if status.supports(Feature::TextReplace) {
             requested_features.insert(Feature::TextReplace);
         }
-        runtime.start_capture(target_id, &requested_features, capture)?;
+        if let Err(error) = runtime.start_capture(target_id, &requested_features, capture) {
+            if let Some(mut failed) = self.sessions.remove(application_id.as_ref()) {
+                failed.abandon();
+            }
+            self.requested_features.remove(application_id.as_ref());
+            return Err(error);
+        }
+        let runtime = self
+            .sessions
+            .get(application_id.as_ref())
+            .ok_or(DesktopRuntimeError::InvalidState)?;
         self.requested_features
             .insert(application_id.clone(), requested_features.clone());
         self.capture_targets.insert(application_id.clone());
@@ -917,6 +942,35 @@ impl DesktopRuntimePool {
             .get_mut(application_id)
             .ok_or(DesktopRuntimeError::InvalidState)?
             .control_capture(paused)
+    }
+
+    pub fn control_runtime_diagnostics(
+        &mut self,
+        application_id: &str,
+        enabled: bool,
+    ) -> Result<(), DesktopRuntimeError> {
+        let runtime = self
+            .sessions
+            .get_mut(application_id)
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        if !runtime.is_active() {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        runtime.control_runtime_diagnostics(enabled)
+    }
+
+    pub fn query_runtime_diagnostics(
+        &mut self,
+        application_id: &str,
+    ) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+        let runtime = self
+            .sessions
+            .get_mut(application_id)
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        if !runtime.is_active() {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        runtime.query_runtime_diagnostics()
     }
 
     pub fn refresh(
@@ -1193,7 +1247,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         let active_features = requested_features.iter().copied().collect();
         let status = manager
             .start_with_runtime(target_instance, requested_features, &self.publication)
-            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+            .map_err(map_session_runtime_error)?;
         self.phase = Some(RuntimePhase::Active {
             manager,
             session_id: status.session_id(),
@@ -1233,6 +1287,37 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         };
         manager
             .control_capture(*session_id, paused)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)
+    }
+
+    pub fn control_runtime_diagnostics(
+        &mut self,
+        enabled: bool,
+    ) -> Result<(), DesktopRuntimeError> {
+        let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        manager
+            .control_runtime_diagnostics(*session_id, enabled)
+            .map_err(|_| DesktopRuntimeError::SessionRejected)
+    }
+
+    pub fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+        let Some(RuntimePhase::Active {
+            manager,
+            session_id,
+            ..
+        }) = self.phase.as_mut()
+        else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        manager
+            .query_runtime_diagnostics(*session_id)
             .map_err(|_| DesktopRuntimeError::SessionRejected)
     }
 
@@ -1310,8 +1395,51 @@ impl TargetLifecyclePort for RunningTarget {
     }
 }
 
-fn map_protocol_error(_error: ControllerProtocolError) -> DesktopRuntimeError {
-    DesktopRuntimeError::ProtocolRejected
+fn map_protocol_error(error: ControllerProtocolError) -> DesktopRuntimeError {
+    let ControllerProtocolError::Transport(glyphshift_protocol::TransportFailure::Rejected(reason)) =
+        error
+    else {
+        return DesktopRuntimeError::ProtocolRejected;
+    };
+    DesktopRuntimeError::ActivationRejected(map_controller_rejection(reason))
+}
+
+fn map_session_runtime_error(error: SessionError) -> DesktopRuntimeError {
+    match error {
+        SessionError::Host(HostFailure::OperationRejected(reason)) => {
+            DesktopRuntimeError::ActivationRejected(reason)
+        }
+        _ => DesktopRuntimeError::SessionRejected,
+    }
+}
+
+fn map_controller_rejection(
+    reason: glyphshift_protocol::ControllerRejection,
+) -> HostOperationFailure {
+    use glyphshift_protocol::ControllerRejection;
+
+    match reason {
+        ControllerRejection::TargetProcessUnavailable => {
+            HostOperationFailure::TargetProcessUnavailable
+        }
+        ControllerRejection::RemoteMemoryUnavailable => {
+            HostOperationFailure::RemoteMemoryUnavailable
+        }
+        ControllerRejection::RuntimeModuleUnavailable => {
+            HostOperationFailure::RuntimeModuleUnavailable
+        }
+        ControllerRejection::RuntimeExportUnavailable => {
+            HostOperationFailure::RuntimeExportUnavailable
+        }
+        ControllerRejection::RemoteThreadUnavailable => {
+            HostOperationFailure::RemoteThreadUnavailable
+        }
+        ControllerRejection::RemoteThreadTimeout => HostOperationFailure::RemoteThreadTimeout,
+        ControllerRejection::TargetRuntimeRejected(status) => {
+            HostOperationFailure::TargetRuntimeRejected(status)
+        }
+        ControllerRejection::Unknown => HostOperationFailure::ControllerRejected,
+    }
 }
 
 fn artifact_path(root: &Path, file: &str) -> Result<PathBuf, DesktopRuntimeError> {
@@ -1386,6 +1514,10 @@ mod tests {
         ControllerHello, ControllerInventory, ControllerTarget, ControllerTargetToken,
         TransportFailure,
     };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use tempfile::tempdir;
 
     const TEST_ADAPTER_ID: &str = "test.inline";
@@ -1435,6 +1567,107 @@ mod tests {
         active_features: BTreeSet<Feature>,
         generation: Generation,
         stop_fails: bool,
+    }
+
+    struct RetryRuntimeFactory {
+        discoveries: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeFactory for RetryRuntimeFactory {
+        fn discover(
+            &mut self,
+            application_id: Box<str>,
+            spec: &DesktopRuntimeSpec,
+        ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+            let reject_capture = self.discoveries.fetch_add(1, Ordering::SeqCst) == 0;
+            Ok(Box::new(RetryRuntime {
+                inner: InMemoryRuntime {
+                    application_id,
+                    active_features: BTreeSet::new(),
+                    generation: spec.publication().generation(),
+                    stop_fails: false,
+                },
+                reject_capture,
+            }))
+        }
+    }
+
+    struct RetryRuntime {
+        inner: InMemoryRuntime,
+        reject_capture: bool,
+    }
+
+    impl ManagedRuntime for RetryRuntime {
+        fn application_id(&self) -> &str {
+            self.inner.application_id()
+        }
+
+        fn targets(&self) -> Vec<RuntimeTarget> {
+            self.inner.targets()
+        }
+
+        fn supported_features(&self) -> BTreeSet<Feature> {
+            self.inner.supported_features()
+        }
+
+        fn active_features(&self) -> BTreeSet<Feature> {
+            self.inner.active_features()
+        }
+
+        fn active_target_id(&self) -> Option<u64> {
+            self.inner.active_target_id()
+        }
+
+        fn applied_generation(&self) -> Option<Generation> {
+            self.inner.applied_generation()
+        }
+
+        fn start(
+            &mut self,
+            target_id: u64,
+            requested_features: &BTreeSet<Feature>,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.inner.start(target_id, requested_features)
+        }
+
+        fn start_capture(
+            &mut self,
+            target_id: u64,
+            requested_features: &BTreeSet<Feature>,
+            capture: CaptureConfiguration,
+        ) -> Result<(), DesktopRuntimeError> {
+            if self.reject_capture {
+                return Err(DesktopRuntimeError::ProtocolRejected);
+            }
+            self.inner
+                .start_capture(target_id, requested_features, capture)
+        }
+
+        fn publish(
+            &mut self,
+            publication: glyphshift_runtime_contract::RuntimePublication,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.inner.publish(publication)
+        }
+
+        fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError> {
+            self.inner.control_capture(paused)
+        }
+
+        fn control_runtime_diagnostics(
+            &mut self,
+            enabled: bool,
+        ) -> Result<(), DesktopRuntimeError> {
+            self.inner.control_runtime_diagnostics(enabled)
+        }
+
+        fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+            self.inner.query_runtime_diagnostics()
+        }
+
+        fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
+            self.inner.stop()
+        }
     }
 
     impl ManagedRuntime for InMemoryRuntime {
@@ -1500,6 +1733,30 @@ mod tests {
 
         fn control_capture(&mut self, _paused: bool) -> Result<(), DesktopRuntimeError> {
             Ok(())
+        }
+
+        fn control_runtime_diagnostics(
+            &mut self,
+            _enabled: bool,
+        ) -> Result<(), DesktopRuntimeError> {
+            Ok(())
+        }
+
+        fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
+            Ok(RuntimeTraceBatch::new(
+                [RuntimeTraceRecord::new(
+                    TEST_ADAPTER_ID,
+                    "Open",
+                    RuntimeTraceStatus::Matched,
+                    RuntimeTextOutcome::Replaced,
+                    RuntimeFontOutcome::Protected,
+                    self.generation.value(),
+                    [1; 32],
+                    [2; 32],
+                    [3; 32],
+                )],
+                3,
+            ))
         }
 
         fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
@@ -1641,6 +1898,14 @@ mod tests {
             .start_capture(software_id.as_str(), &spec, None, configuration)
             .expect("start capture");
         assert!(active.is_feature_active(Feature::TextObserve));
+        pool.control_runtime_diagnostics(software_id.as_str(), true)
+            .expect("enable desktop runtime diagnostics");
+        let diagnostics = pool
+            .query_runtime_diagnostics(software_id.as_str())
+            .expect("query desktop runtime diagnostics");
+        assert_eq!(diagnostics.records().len(), 1);
+        assert_eq!(diagnostics.records()[0].source_text(), "Open");
+        assert_eq!(diagnostics.dropped(), 3);
         assert_eq!(
             pool.reconcile_workflow(&intent),
             Err(DesktopRuntimeError::InvalidState)
@@ -1653,6 +1918,44 @@ mod tests {
             .expect("start workflow after capture")
             .errors()
             .is_empty());
+    }
+
+    #[test]
+    fn failed_capture_start_is_discarded_so_connect_and_continue_can_retry() {
+        let root = tempdir().expect("capture retry Runtime data");
+        let executable = root.path().join("RetryCaptureHost.exe");
+        fs::write(&executable, b"synthetic executable").expect("selected executable");
+        let mut backend = open_test_backend(root.path().join("data"));
+        let software_id = backend
+            .add_software(ExecutableSelection::new(executable))
+            .expect("registered executable")
+            .selected_software_id()
+            .expect("selected software")
+            .to_owned();
+        let spec = backend
+            .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+            .expect("capture spec");
+        let configuration = CaptureConfiguration::new(
+            glyphshift_capture::CaptureSessionId::new("capture-retry").expect("session id"),
+            root.path().join("capture.json"),
+            100,
+        )
+        .expect("capture configuration");
+        let discoveries = Arc::new(AtomicUsize::new(0));
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(RetryRuntimeFactory {
+            discoveries: Arc::clone(&discoveries),
+        }));
+
+        assert_eq!(
+            pool.start_capture(software_id.as_str(), &spec, None, configuration.clone()),
+            Err(DesktopRuntimeError::ProtocolRejected)
+        );
+        let connected = pool
+            .start_capture(software_id.as_str(), &spec, None, configuration)
+            .expect("retry should rediscover a clean Runtime");
+
+        assert!(connected.is_feature_active(Feature::TextObserve));
+        assert_eq!(discoveries.load(Ordering::SeqCst), 2);
     }
 
     #[test]

@@ -173,6 +173,35 @@ export interface WorkflowRuntimeStatus {
   errors: Record<string, CommandError>
 }
 
+export type RuntimeTraceStatus
+  = 'no_match'
+    | 'matched'
+    | 'context_recorded'
+    | 'invalid_observation'
+    | 'invalid_route_program'
+    | 'execution_limit_exceeded'
+    | 'state_limit_exceeded'
+
+export interface WorkflowRuntimeTrace {
+  softwareId: string
+  softwareName: string
+  adapterName: string
+  sourceText: string
+  status: RuntimeTraceStatus
+  text: 'unmatched' | 'replaced'
+  font: 'unmatched' | 'protected' | 'substituted'
+  generation: number
+  publicationIdentity: string
+  translationDigest: string
+  fontPolicyDigest: string
+}
+
+export interface WorkflowRuntimeDiagnostics {
+  workflowId: string
+  records: WorkflowRuntimeTrace[]
+  dropped: number
+}
+
 export interface DesktopSnapshot {
   selectedSoftwareId: string | null
   software: SoftwareRecord[]

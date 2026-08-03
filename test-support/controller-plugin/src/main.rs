@@ -1,7 +1,8 @@
 use glyphshift_controller_sdk::{
     serve_stdio, ControllerPlugin, PluginError, WireAdapterRequirement,
     WireControllerConfiguration, WireControllerLossPolicy, WireFeature, WireInstallation,
-    WireInventory, WireRecipe, WireTarget,
+    WireInventory, WireRecipe, WireRuntimeFontOutcome, WireRuntimeTextOutcome,
+    WireRuntimeTraceBatch, WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget,
 };
 
 #[derive(Default)]
@@ -41,6 +42,12 @@ impl ControllerPlugin for SyntheticController {
                     operating_system: "windows".into(),
                     architecture: "x86_64".into(),
                 },
+                WireTarget {
+                    token: "target:rejected".into(),
+                    display_name: "Synthetic rejected target".into(),
+                    operating_system: "windows".into(),
+                    architecture: "x86_64".into(),
+                },
             ],
         })
     }
@@ -61,6 +68,11 @@ impl ControllerPlugin for SyntheticController {
         if target_token == "target:crash" {
             std::process::exit(23);
         }
+        if target_token == "target:rejected" {
+            return Err(PluginError::new(
+                "runtime_activation_failed:runtime_module_unavailable",
+            ));
+        }
         if target_token != "target:stable" {
             return Err(PluginError::new("target_not_found"));
         }
@@ -77,6 +89,39 @@ impl ControllerPlugin for SyntheticController {
                 })
                 .collect(),
             controller_loss_policy: WireControllerLossPolicy::Degrade,
+        })
+    }
+
+    fn control_diagnostics(
+        &mut self,
+        target_token: &str,
+        _enabled: bool,
+    ) -> Result<(), PluginError> {
+        (target_token == "target:stable")
+            .then_some(())
+            .ok_or_else(|| PluginError::new("target_not_found"))
+    }
+
+    fn query_diagnostics(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireRuntimeTraceBatch, PluginError> {
+        if target_token != "target:stable" {
+            return Err(PluginError::new("target_not_found"));
+        }
+        Ok(WireRuntimeTraceBatch {
+            records: vec![WireRuntimeTraceRecord {
+                adapter_id: "example.synthetic.process-inline".into(),
+                source_text: "Open".into(),
+                status: WireRuntimeTraceStatus::Matched,
+                text: WireRuntimeTextOutcome::Replaced,
+                font: WireRuntimeFontOutcome::Protected,
+                generation: 7,
+                publication_identity: [1; 32],
+                translation_digest: [2; 32],
+                font_policy_digest: [3; 32],
+            }],
+            dropped: 2,
         })
     }
 }

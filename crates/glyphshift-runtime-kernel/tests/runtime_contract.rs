@@ -3,10 +3,12 @@ use glyphshift_adapter_registry::{
     AdapterRegistry, AdapterRequirement, AdapterTrustPolicy, AdapterVersion,
     AdapterVersionRequirement, ArtifactHash, PackageArtifactId, SignerId,
 };
+use glyphshift_decision::{DecisionTraceStatus, FontTrace, TextTrace};
 use glyphshift_domain::{
     AbiVersion, AdapterId, ApplyModel, Feature, FontDecision, Generation, Placement,
     RenderDecision, RouteProgram, TargetFacts, TextDecision, TextObservation,
 };
+use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::{RuntimeKernel, RuntimeKernelError};
 use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
 
@@ -158,5 +160,83 @@ fn rtk_003_atomically_switches_snapshot_and_font_policy_by_generation() {
             font: FontDecision::Substitute("New Override".into()),
             generation: Generation::new(2),
         }
+    );
+}
+
+#[test]
+fn rtk_004_keeps_decision_tracing_disabled_by_default_and_bounded_when_enabled() {
+    let publication = RuntimePublication::new(
+        RouteProgram::direct("menu"),
+        TranslationSnapshot::empty(Generation::new(4)).with_entry("menu", "Open", "打开"),
+        FontPolicy::empty().with_location("menu", "Example Sans CJK"),
+    );
+    let publication_identity = publication.identity().expect("valid publication identity");
+    let kernel = RuntimeKernel::from_publication(std::iter::empty(), publication)
+        .expect("decision-only runtime fixture should activate");
+    let observation = TextObservation::new("adapter-a", "Open", "surface-main");
+
+    let decision_without_trace = kernel.decide(&observation);
+    assert!(kernel.drain_decision_traces().records().is_empty());
+
+    kernel.set_decision_tracing(true);
+    let decision_with_trace = kernel.decide(&observation);
+    let batch = kernel.drain_decision_traces();
+    assert_eq!(decision_with_trace, decision_without_trace);
+    assert_eq!(batch.dropped(), 0);
+    assert_eq!(batch.records().len(), 1);
+    let record = &batch.records()[0];
+    assert_eq!(record.adapter_id(), "adapter-a");
+    assert_eq!(record.source_text(), "Open");
+    assert_eq!(record.decision(), &decision_with_trace);
+    assert_eq!(record.publication_identity(), publication_identity);
+    assert_eq!(record.trace().status(), DecisionTraceStatus::Matched);
+    assert_eq!(record.trace().text(), TextTrace::Replaced);
+    assert_eq!(record.trace().font(), FontTrace::Substituted);
+
+    for _ in 0..257 {
+        let _ = kernel.decide(&TextObservation::new(
+            "adapter-a",
+            "Unmatched",
+            "surface-main",
+        ));
+    }
+    let bounded = kernel.drain_decision_traces();
+    assert_eq!(bounded.records().len(), 256);
+    assert_eq!(bounded.dropped(), 1);
+
+    kernel.set_decision_tracing(false);
+    let _ = kernel.decide(&observation);
+    assert!(kernel.drain_decision_traces().records().is_empty());
+}
+
+#[test]
+fn rtk_005_rejects_a_stale_publication_without_partially_switching_its_route() {
+    let mut kernel = RuntimeKernel::from_publication(
+        std::iter::empty(),
+        RuntimePublication::new(
+            RouteProgram::direct("menu"),
+            TranslationSnapshot::empty(Generation::new(2)).with_entry("menu", "Open", "当前"),
+            FontPolicy::empty(),
+        ),
+    )
+    .expect("current publication should activate");
+    let stale = RuntimePublication::new(
+        RouteProgram::direct("panel"),
+        TranslationSnapshot::empty(Generation::new(1)).with_entry("panel", "Open", "陈旧"),
+        FontPolicy::empty(),
+    );
+
+    assert_eq!(
+        kernel.apply_publication(stale),
+        Err(RuntimeKernelError::StaleGeneration {
+            current: Generation::new(2),
+            incoming: Generation::new(1),
+        })
+    );
+    assert_eq!(
+        kernel
+            .decide(&TextObservation::new("adapter-a", "Open", "surface-main"))
+            .text,
+        TextDecision::Replace("当前".into())
     );
 }

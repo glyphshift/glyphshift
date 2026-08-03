@@ -1,4 +1,6 @@
-use glyphshift_decision::{DecisionDiagnostic, DecisionEngine, DecisionState};
+use glyphshift_decision::{
+    DecisionDiagnostic, DecisionEngine, DecisionState, DecisionTraceStatus, FontTrace, TextTrace,
+};
 use glyphshift_domain::{
     FontDecision, Generation, RenderDecision, RouteLimits, RouteOperator, RouteProgram,
     TextDecision, TextObservation,
@@ -295,6 +297,10 @@ fn dec_007_and_009_use_heading_context_for_following_parameters() {
         &mut state,
     );
     assert_eq!(heading.decision().text, TextDecision::Keep);
+    assert_eq!(
+        heading.trace().status(),
+        DecisionTraceStatus::ContextRecorded
+    );
 
     let parameter = decide(
         &TextObservation::new("adapter-a", "Radius", "surface-main"),
@@ -454,6 +460,10 @@ fn dec_013_stops_at_execution_and_state_limits_with_a_diagnostic() {
     );
     assert_eq!(execution_result.decision().text, TextDecision::Keep);
     assert_eq!(
+        execution_result.trace().status(),
+        DecisionTraceStatus::ExecutionLimitExceeded
+    );
+    assert_eq!(
         execution_result.diagnostics(),
         &[DecisionDiagnostic::ExecutionLimitExceeded]
     );
@@ -484,4 +494,97 @@ fn dec_013_stops_at_execution_and_state_limits_with_a_diagnostic() {
         second.diagnostics(),
         &[DecisionDiagnostic::StateLimitExceeded]
     );
+    assert_eq!(
+        second.trace().status(),
+        DecisionTraceStatus::StateLimitExceeded
+    );
+}
+
+#[test]
+fn dec_014_explains_text_font_protection_and_publication_inputs() {
+    let cases = [
+        (
+            TranslationSnapshot::empty(Generation::new(21)),
+            FontPolicy::empty(),
+            DecisionTraceStatus::NoMatch,
+            TextTrace::Unmatched,
+            FontTrace::Unmatched,
+        ),
+        (
+            TranslationSnapshot::empty(Generation::new(22)).with_entry("menu", "Open", "打开"),
+            FontPolicy::empty(),
+            DecisionTraceStatus::Matched,
+            TextTrace::Replaced,
+            FontTrace::Unmatched,
+        ),
+        (
+            TranslationSnapshot::empty(Generation::new(23)).with_entry("menu", "Open", "打开"),
+            FontPolicy::empty()
+                .with_location("menu", "Example Sans CJK")
+                .with_entry("menu", "Open", FontRule::Unchanged),
+            DecisionTraceStatus::Matched,
+            TextTrace::Replaced,
+            FontTrace::Protected,
+        ),
+        (
+            TranslationSnapshot::empty(Generation::new(24)),
+            FontPolicy::empty().with_location("menu", "Example Sans CJK"),
+            DecisionTraceStatus::Matched,
+            TextTrace::Unmatched,
+            FontTrace::Substituted,
+        ),
+    ];
+
+    for (snapshot, font_policy, status, text, font) in cases {
+        let result = decide(
+            &TextObservation::new("adapter-a", "Open", "surface-main"),
+            &RouteProgram::direct("menu"),
+            &snapshot,
+            &font_policy,
+            &mut DecisionState::new(),
+        );
+
+        assert_eq!(result.trace().status(), status);
+        assert_eq!(result.trace().text(), text);
+        assert_eq!(result.trace().font(), font);
+        assert_eq!(result.trace().generation(), snapshot.generation());
+        assert_eq!(result.trace().translation_digest(), snapshot.digest());
+        assert_eq!(result.trace().font_policy_digest(), font_policy.digest());
+    }
+}
+
+#[test]
+fn dec_015_explains_fail_open_without_changing_the_render_decision() {
+    let snapshot = TranslationSnapshot::empty(Generation::new(25));
+    let font_policy = FontPolicy::empty();
+    let result = decide(
+        &TextObservation::new("adapter-a", "x".repeat(16_385), "surface-main"),
+        &RouteProgram::direct("menu"),
+        &snapshot,
+        &font_policy,
+        &mut DecisionState::new(),
+    );
+
+    assert_eq!(
+        result.trace().status(),
+        DecisionTraceStatus::InvalidObservation
+    );
+    assert_eq!(result.trace().text(), TextTrace::Unmatched);
+    assert_eq!(result.trace().font(), FontTrace::Unmatched);
+    assert_eq!(result.decision().text, TextDecision::Keep);
+    assert_eq!(result.decision().font, FontDecision::Keep);
+
+    let invalid_route = decide(
+        &TextObservation::new("adapter-a", "Open", "surface-main"),
+        &RouteProgram::new([RouteOperator::script()], RouteLimits::new(8, 16)),
+        &snapshot,
+        &font_policy,
+        &mut DecisionState::new(),
+    );
+    assert_eq!(
+        invalid_route.trace().status(),
+        DecisionTraceStatus::InvalidRouteProgram
+    );
+    assert_eq!(invalid_route.decision().text, TextDecision::Keep);
+    assert_eq!(invalid_route.decision().font, FontDecision::Keep);
 }
