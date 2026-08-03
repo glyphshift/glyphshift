@@ -273,6 +273,7 @@ Assert-Dependencies `
     -PackageName 'glyphshift-desktop-shell' `
     -Expected @(
         'glyphshift-capture',
+        'glyphshift-controller-windows',
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
         'glyphshift-dictionary-distribution',
@@ -284,6 +285,7 @@ Assert-Dependencies `
         'serde_json',
         'tauri',
         'tauri-plugin-dialog',
+        'tauri-plugin-global-shortcut',
         'tempfile',
         'winreg'
     )

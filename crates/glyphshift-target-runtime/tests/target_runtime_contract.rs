@@ -9,13 +9,14 @@ use glyphshift_domain::{
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_target_runtime::{
-    activate_deployment, control_diagnostics, deactivate_runtime,
+    activate_deployment, control_diagnostics, deactivate_runtime, glyphshift_runtime_activate_v1,
     glyphshift_runtime_diagnostics_query_v1, query_diagnostics, update_publication,
 };
 use glyphshift_target_runtime_contract::{
-    NativeAdapterDeployment, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
-    RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceStatus, TargetRuntimeDeployment,
-    MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
+    NativeAdapterDeployment, RuntimeCommandV1, RuntimeDiagnosticsControl,
+    RuntimeDiagnosticsQueryV1, RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceStatus,
+    TargetRuntimeDeployment, MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
+    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
 };
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_windows_host::{render_gdiplus, render_gdiplus_text, render_raw_gdi_unicode};
@@ -127,6 +128,42 @@ fn publication(generation: u64, translation: &str) -> RuntimePublication {
         ),
         FontPolicy::empty(),
     )
+}
+
+fn activate_status(deployment: &TargetRuntimeDeployment) -> u32 {
+    let json = deployment.encode_json().expect("target Runtime deployment");
+    let command = RuntimeCommandV1 {
+        struct_size: std::mem::size_of::<RuntimeCommandV1>() as u32,
+        json: json.as_ptr(),
+        json_len: json.len() as u32,
+    };
+    unsafe { glyphshift_runtime_activate_v1(&command) }
+}
+
+#[test]
+fn active_runtime_accepts_an_equivalent_deployment_as_a_new_owner() {
+    let initial = TargetRuntimeDeployment::new(publication(1, "First owner"), []);
+    assert_eq!(activate_status(&initial), STATUS_TARGET_RUNTIME_OK);
+
+    assert_eq!(activate_status(&initial), STATUS_TARGET_RUNTIME_OK);
+
+    assert_eq!(
+        activate_status(&TargetRuntimeDeployment::new(
+            publication(1, "Conflicting owner"),
+            [],
+        )),
+        STATUS_TARGET_RUNTIME_UPDATE_REJECTED
+    );
+
+    assert_eq!(
+        activate_status(&TargetRuntimeDeployment::new(
+            publication(2, "Replacement owner"),
+            [],
+        )),
+        STATUS_TARGET_RUNTIME_OK
+    );
+
+    deactivate_runtime().expect("replacement owner stops the target Runtime");
 }
 
 fn scoped_publication(generation: u64, translation: &str, adapter_id: &str) -> RuntimePublication {

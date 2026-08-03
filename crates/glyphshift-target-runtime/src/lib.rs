@@ -6,7 +6,7 @@ use glyphshift_adapter_native_abi::{
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::AdapterBinding;
-use glyphshift_capture::FileCaptureSink;
+use glyphshift_capture::{CaptureConfiguration, FileCaptureSink};
 use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
@@ -49,6 +49,7 @@ struct RuntimeState {
     adapter_libraries: Vec<PathBuf>,
     adapters: Vec<Arc<LoadedNativeAdapter>>,
     native_hosts: Vec<usize>,
+    capture_configuration: Option<CaptureConfiguration>,
     capture: Option<FileCaptureSink>,
     active: bool,
 }
@@ -75,12 +76,7 @@ fn native_host(adapter_id: &str) -> usize {
 }
 
 pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), TargetRuntimeError> {
-    let capture = deployment
-        .capture()
-        .cloned()
-        .map(FileCaptureSink::start)
-        .transpose()
-        .map_err(|_| TargetRuntimeError::Capture)?;
+    let capture_configuration = deployment.capture().cloned();
     let bindings = deployment
         .adapters()
         .iter()
@@ -107,7 +103,40 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
         if let Some(runtime) = state.as_mut() {
             if runtime.active {
-                return Err(TargetRuntimeError::AlreadyActive);
+                if !same_active_deployment(
+                    runtime,
+                    &bindings,
+                    &adapter_libraries,
+                    capture_configuration.as_ref(),
+                ) {
+                    return Err(TargetRuntimeError::InvalidDeployment);
+                }
+                let current_generation = runtime.publication.generation();
+                let incoming_generation = publication.generation();
+                if incoming_generation < current_generation {
+                    return Err(TargetRuntimeError::UpdateRejected);
+                }
+                if incoming_generation == current_generation {
+                    let current_identity = runtime
+                        .publication
+                        .identity()
+                        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+                    let incoming_identity = publication
+                        .identity()
+                        .map_err(|_| TargetRuntimeError::UpdateRejected)?;
+                    if current_identity != incoming_identity {
+                        return Err(TargetRuntimeError::UpdateRejected);
+                    }
+                    return Ok(());
+                }
+                runtime
+                    .kernel
+                    .apply_publication(publication.clone())
+                    .map_err(|_| TargetRuntimeError::UpdateRejected)?;
+                runtime.publication = publication;
+                drop(state);
+                request_current_process_redraw();
+                return Ok(());
             }
             if !same_adapter_set(&runtime.bindings, &bindings)
                 || runtime.adapter_libraries != adapter_libraries
@@ -117,9 +146,20 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
             runtime.kernel = kernel;
             runtime.publication = publication;
             runtime.bindings = bindings;
+            let capture = capture_configuration
+                .clone()
+                .map(FileCaptureSink::start)
+                .transpose()
+                .map_err(|_| TargetRuntimeError::Capture)?;
+            runtime.capture_configuration = capture_configuration;
             runtime.capture = capture;
             (runtime.adapters.clone(), runtime.native_hosts.clone())
         } else {
+            let capture = capture_configuration
+                .clone()
+                .map(FileCaptureSink::start)
+                .transpose()
+                .map_err(|_| TargetRuntimeError::Capture)?;
             let adapters = deployment
                 .adapters()
                 .iter()
@@ -140,6 +180,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 adapter_libraries,
                 adapters: adapters.clone(),
                 native_hosts: native_hosts.clone(),
+                capture_configuration,
                 capture,
                 active: false,
             });
@@ -183,6 +224,22 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
     }
     request_current_process_redraw();
     Ok(())
+}
+
+fn same_active_deployment(
+    runtime: &RuntimeState,
+    bindings: &[AdapterBinding],
+    adapter_libraries: &[PathBuf],
+    capture_configuration: Option<&CaptureConfiguration>,
+) -> bool {
+    same_adapter_set(&runtime.bindings, bindings)
+        && runtime
+            .bindings
+            .iter()
+            .zip(bindings)
+            .all(|(previous, next)| previous.features == next.features)
+        && runtime.adapter_libraries == adapter_libraries
+        && runtime.capture_configuration.as_ref() == capture_configuration
 }
 
 fn same_adapter_set(previous: &[AdapterBinding], next: &[AdapterBinding]) -> bool {
@@ -295,6 +352,7 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         } else {
             return Err(TargetRuntimeError::AdapterActivation);
         }
+        runtime.capture_configuration = None;
         runtime.capture.take()
     };
     if let Some(capture) = capture {

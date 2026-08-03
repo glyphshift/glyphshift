@@ -186,10 +186,27 @@ impl WindowsController {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        let roots = processes
+        let root_candidates = processes
             .iter()
             .filter(|process| process.instance_id().is_some() && self.is_root(process))
-            .filter_map(ProcessRecord::instance_id)
+            .filter_map(|process| {
+                process
+                    .instance_id()
+                    .map(|instance| (instance, process.parent_process_id))
+            })
+            .collect::<Vec<_>>();
+        let mut root_anchors = self.admitted_instances.clone();
+        root_anchors.extend(root_candidates.iter().map(|(instance, _)| *instance));
+        let roots = root_candidates
+            .iter()
+            .filter(|(_, parent_process_id)| {
+                !has_authorized_ancestor(*parent_process_id, &by_process_id, &root_anchors)
+            })
+            .map(|(instance, _)| *instance)
+            .collect::<BTreeSet<_>>();
+        let matching_root_executables = root_candidates
+            .iter()
+            .map(|(instance, _)| *instance)
             .collect::<BTreeSet<_>>();
         let mut anchors = self.admitted_instances.clone();
         anchors.extend(roots.iter().copied());
@@ -201,11 +218,14 @@ impl WindowsController {
             };
             let is_root = roots.contains(&instance);
             let is_admitted = self.admitted_instances.contains(&instance);
+            let is_same_executable_descendant = matching_root_executables.contains(&instance)
+                && !is_root
+                && has_authorized_ancestor(process.parent_process_id, &by_process_id, &anchors);
             let is_allowed_descendant = self
                 .descendant_executable_names
                 .contains(&process.executable_name.to_lowercase())
                 && has_authorized_ancestor(process.parent_process_id, &by_process_id, &anchors);
-            if is_root || is_admitted || is_allowed_descendant {
+            if is_root || is_admitted || is_same_executable_descendant || is_allowed_descendant {
                 authorized.push(AuthorizedProcess { process, is_root });
                 self.admitted_instances.insert(instance);
             }
@@ -963,6 +983,39 @@ mod tests {
             .inventory()
             .expect("replacement process instance");
         assert_eq!(replacement.targets[0].token, "target:2");
+    }
+
+    #[test]
+    fn same_executable_descendant_does_not_outrank_its_top_level_root() {
+        let mut controller = process_family_controller([vec![
+            process(100, 200, Some(1_100), "Editor.exe"),
+            process(200, 1, Some(1_000), "Editor.exe"),
+        ]]);
+
+        let inventory = controller.inventory().expect("same-executable family");
+
+        assert_eq!(inventory.targets.len(), 2);
+        assert_eq!(
+            controller.targets[&inventory.targets[0].token].process_id,
+            200
+        );
+        assert_eq!(
+            controller.targets[&inventory.targets[1].token].process_id,
+            100
+        );
+    }
+
+    #[test]
+    fn independent_same_executable_instances_remain_top_level_roots() {
+        let mut controller = process_family_controller([Vec::new()]);
+
+        let authorized = controller.authorized_processes(vec![
+            process(100, 1, Some(1_000), "Editor.exe"),
+            process(200, 1, Some(2_000), "Editor.exe"),
+        ]);
+
+        assert_eq!(authorized.len(), 2);
+        assert!(authorized.iter().all(|process| process.is_root));
     }
 
     #[test]
