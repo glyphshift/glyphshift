@@ -2,17 +2,20 @@
 
 use glyphshift_desktop_backend::{
     DesktopBackend, DesktopEnvironment, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit,
-    DictionaryEntryCreate, DictionaryView, ExecutableSelection, WorkflowCreate,
-    WorkflowTargetCreate,
+    DictionaryEntryCreate, DictionaryView, ExecutableSelection, FontCoverage, WorkflowCreate,
+    WorkflowFontPolicy, WorkflowTargetCreate,
 };
 use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
 use glyphshift_domain::Feature;
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
+const TEST_GDIPLUS_ADAPTER_ID: &str = "windows.gdiplus.draw-string";
 
 fn open_backend(data_root: &Path, runtime_root: &Path) -> DesktopBackend {
     let bundle = RuntimeBundle::open(runtime_root).expect("verified Runtime bundle");
@@ -20,7 +23,7 @@ fn open_backend(data_root: &Path, runtime_root: &Path) -> DesktopBackend {
         data_root,
         DesktopEnvironment::new(
             bundle.adapter_requirements().iter().cloned(),
-            Vec::<Box<str>>::new(),
+            ["Arial", "Courier New"],
         ),
     )
     .expect("desktop backend")
@@ -53,7 +56,11 @@ impl TargetProcess {
     }
 
     fn render(&mut self) -> String {
-        writeln!(self.stdin, "render").expect("render command");
+        self.render_command("render")
+    }
+
+    fn render_command(&mut self, command: &str) -> String {
+        writeln!(self.stdin, "{command}").expect("render command");
         self.stdin.flush().expect("flush render command");
         let mut evidence = String::new();
         self.stdout
@@ -68,6 +75,31 @@ impl TargetProcess {
         let _ = self.stdin.flush();
         let _ = self.child.wait();
     }
+}
+
+fn create_all_observations_font_workflow(
+    backend: &mut DesktopBackend,
+    software_id: &str,
+    family: &str,
+) -> DesktopRuntimeSpec {
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.font-safety", "Font safety").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id,
+                    [TEST_ADAPTER_ID, TEST_GDIPLUS_ADAPTER_ID],
+                    [] as [&str; 0],
+                )
+                .with_font_policy(WorkflowFontPolicy::new(
+                    [family],
+                    FontCoverage::AllObservations,
+                )),
+            ]),
+        )
+        .expect("create all-observations font workflow");
+    backend
+        .workflow_runtime_spec("workflow.font-safety", software_id)
+        .expect("compiled font safety Runtime spec")
 }
 
 impl Drop for TargetProcess {
@@ -211,6 +243,78 @@ fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
 
 #[test]
 #[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
+fn desktop_runtime_protects_gdi_symbol_fonts_and_documents_the_gdiplus_risk() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let mut target = TargetProcess::spawn(&target_executable);
+    let baseline_text = target.render();
+    let baseline_gdi_glyphs = target.render_command("render-gdi-glyph-indices");
+    let baseline_gdi_symbol = target.render_command("render-gdi-symbol");
+    let baseline_gdiplus_symbol = target.render_command("render-gdiplus-symbol");
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register target executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let spec = create_all_observations_font_workflow(&mut backend, &application_id, "Arial");
+
+    let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut runtime = bundle
+        .discover(application_id, &spec)
+        .expect("target discovery");
+    let target_id = runtime
+        .targets()
+        .next()
+        .expect("isolated target instance")
+        .id();
+    runtime
+        .start(target_id, [Feature::FontSubstitute])
+        .expect("font Runtime activation");
+
+    let substituted_text = target.render();
+    assert_ne!(
+        substituted_text, baseline_text,
+        "ordinary GDI text should use the configured substitute font"
+    );
+    assert_eq!(
+        target.render_command("render-gdi-glyph-indices"),
+        substituted_text,
+        "font-only substitution must decode glyph indices before changing the font"
+    );
+    assert_eq!(
+        target.render_command("render-gdi-symbol"),
+        baseline_gdi_symbol,
+        "GDI SYMBOL_CHARSET text must retain its original font"
+    );
+    assert_ne!(
+        target.render_command("render-gdiplus-symbol"),
+        baseline_gdiplus_symbol,
+        "GDI+ still substitutes a symbol font because it exposes no reliable font category"
+    );
+
+    runtime.stop().expect("Runtime pass-through");
+    assert_eq!(target.render(), baseline_text);
+    assert_eq!(
+        target.render_command("render-gdi-glyph-indices"),
+        baseline_gdi_glyphs
+    );
+    assert_eq!(
+        target.render_command("render-gdi-symbol"),
+        baseline_gdi_symbol
+    );
+    assert_eq!(
+        target.render_command("render-gdiplus-symbol"),
+        baseline_gdiplus_symbol
+    );
+    target.stop();
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
 fn desktop_runtime_refresh_reconnects_requested_features_after_target_restart() {
     let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
         .map(std::path::PathBuf::from)
@@ -304,6 +408,75 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         std::thread::sleep(std::time::Duration::from_millis(hold_ms));
     }
     runtime.stop().expect("authorized host pass-through");
+}
+
+#[test]
+#[ignore = "requires an explicitly authorized, already-running Windows host"]
+fn desktop_runtime_applies_and_restores_font_policy_in_an_authorized_real_host() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let host_executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
+        .map(std::path::PathBuf::from)
+        .expect("authorized host executable path");
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&host_executable))
+        .expect("register authorized host executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let family = std::env::var("GLYPHSHIFT_REAL_HOST_FONT").unwrap_or_else(|_| "Arial".to_owned());
+    let spec = create_all_observations_font_workflow(&mut backend, &application_id, &family);
+
+    let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut runtime = bundle
+        .discover(application_id, &spec)
+        .expect("authorized host discovery");
+    let target_id = runtime
+        .targets()
+        .next()
+        .expect("authorized host must already be running")
+        .id();
+    runtime
+        .start(target_id, [Feature::FontSubstitute])
+        .expect("authorized host font Runtime activation");
+    assert!(runtime.is_feature_active(Feature::FontSubstitute));
+    if let Some(hold_ms) = std::env::var_os("GLYPHSHIFT_REAL_HOST_HOLD_MS")
+        .and_then(|value| value.to_string_lossy().parse::<u64>().ok())
+    {
+        println!("authorized host font Runtime is active");
+        runtime
+            .control_runtime_diagnostics(true)
+            .expect("enable authorized host diagnostics");
+        let deadline = Instant::now() + Duration::from_millis(hold_ms);
+        let mut observed_adapters = BTreeSet::new();
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(250));
+            let batch = runtime
+                .query_runtime_diagnostics()
+                .expect("query authorized host diagnostics");
+            observed_adapters.extend(
+                batch
+                    .records()
+                    .iter()
+                    .map(|record| record.adapter_id().to_owned()),
+            );
+        }
+        assert!(
+            observed_adapters.contains(TEST_ADAPTER_ID),
+            "authorized host should exercise the GDI menu path"
+        );
+        assert!(
+            observed_adapters.contains(TEST_GDIPLUS_ADAPTER_ID),
+            "authorized host should exercise the GDI+ panel path"
+        );
+        runtime
+            .control_runtime_diagnostics(false)
+            .expect("disable authorized host diagnostics");
+        println!("authorized host diagnostics observed both GDI and GDI+ paths");
+    }
+    runtime.stop().expect("authorized host font pass-through");
 }
 
 #[test]

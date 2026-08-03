@@ -35,6 +35,10 @@ Glyphshift 让用户在不修改软件安装文件的前提下，为多个桌面
 - 应用首次启动使用深色主题；用户可在标题栏一键切换明暗主题，也可在设置中选择深色、浅色或
   跟随系统，并在 `zh-CN` 与 `en-US` 界面之间切换。
 - 桌面后端跨 IPC 返回稳定语义错误码与类型化参数；最终人类可读文案由当前界面语言决定。
+- Runtime Bundle `/2` 只接受产品内置的第一方 authority，并在加载 Native artifact 前验证清单路径
+  与 SHA-256；Release Bundle 不携带合成测试宿主。清单 authority 不等同于在线签名或证书服务。
+- Windows 安装候选嵌入已验证的 Release Runtime Bundle；未配置代码签名时明确标记为本地
+  unsigned candidate，不自动安装，也不冒充公共发行版。
 - Dictionary 是唯一翻译内容资产；Probe Run 只保存任务状态与 Dictionary 引用，Observation Index
   单独保存可恢复的技术证据。二者在探针详情联合展示，但不转换、不同步、不复制词条。
 

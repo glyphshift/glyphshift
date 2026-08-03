@@ -8,7 +8,7 @@ mod windows {
     use glyphshift_adapter_gdiplus::{
         GdiPlusCall, GdiPlusFont, GdiPlusInlineAdapter, PreparedGdiPlusCall,
     };
-    use glyphshift_domain::RenderDecision;
+    use glyphshift_domain::{FontDecision, Generation, RenderDecision, TextDecision};
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::{null, null_mut};
@@ -17,7 +17,7 @@ mod windows {
         CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject,
         DrawTextW, ExtTextOutW, GetGlyphIndicesW, SelectObject, SetBkMode, SetTextColor, TextOutW,
         BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, DT_LEFT, DT_SINGLELINE,
-        GGI_MARK_NONEXISTING_GLYPHS, HBITMAP, HDC, HGDIOBJ, LOGFONTW, TRANSPARENT,
+        GGI_MARK_NONEXISTING_GLYPHS, HBITMAP, HDC, HGDIOBJ, LOGFONTW, SYMBOL_CHARSET, TRANSPARENT,
     };
     use windows_sys::Win32::Graphics::GdiPlus::{
         GdipCreateFont, GdipCreateFontFamilyFromName, GdipCreateFromHDC, GdipCreateSolidFill,
@@ -175,7 +175,15 @@ mod windows {
         operation: impl FnOnce(&mut DibCanvas) -> Result<T, String>,
     ) -> Result<T, String> {
         let raw_font = log_font(font);
-        let handle = unsafe { CreateFontIndirectW(&raw_font) };
+        with_selected_log_font(canvas, &raw_font, operation)
+    }
+
+    fn with_selected_log_font<T>(
+        canvas: &mut DibCanvas,
+        raw_font: &LOGFONTW,
+        operation: impl FnOnce(&mut DibCanvas) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let handle = unsafe { CreateFontIndirectW(raw_font) };
         if handle.is_null() {
             return Err("CreateFontIndirectW failed".into());
         }
@@ -297,6 +305,37 @@ mod windows {
         Ok(canvas.evidence())
     }
 
+    pub fn render_raw_gdi_symbol(text: &str) -> Result<PixelEvidence, String> {
+        let mut canvas = DibCanvas::new()?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let mut raw_font = log_font(&GdiFont::new("Symbol", -30, 400));
+        raw_font.lfCharSet = SYMBOL_CHARSET;
+        with_selected_log_font(&mut canvas, &raw_font, |canvas| {
+            unsafe {
+                SetBkMode(canvas.hdc, TRANSPARENT as i32);
+                SetTextColor(canvas.hdc, 0);
+            }
+            if unsafe {
+                ExtTextOutW(
+                    canvas.hdc,
+                    12,
+                    18,
+                    0,
+                    null(),
+                    units.as_ptr(),
+                    units.len() as u32,
+                    null(),
+                )
+            } == 0
+            {
+                Err("ExtTextOutW failed".into())
+            } else {
+                Ok(())
+            }
+        })?;
+        Ok(canvas.evidence())
+    }
+
     pub fn render_raw_text_out(text: &str) -> Result<PixelEvidence, String> {
         let mut canvas = DibCanvas::new()?;
         let units = text.encode_utf16().collect::<Vec<_>>();
@@ -346,9 +385,12 @@ mod windows {
         Ok(canvas.evidence())
     }
 
-    pub fn render_gdi_glyph_indices(decision: RenderDecision) -> Result<PixelEvidence, String> {
+    fn render_gdi_glyph_indices_with_font(
+        font: GdiFont,
+        decision: RenderDecision,
+    ) -> Result<PixelEvidence, String> {
         let mut canvas = DibCanvas::new()?;
-        let (call, map) = glyph_call(&mut canvas, "Open", GdiFont::new("Segoe UI", -30, 400))?;
+        let (call, map) = glyph_call(&mut canvas, "Open", font)?;
         GdiInlineAdapter::new().invoke(
             call,
             Some(&map),
@@ -356,6 +398,21 @@ mod windows {
             |prepared| draw_gdi(&mut canvas, prepared),
         )?;
         Ok(canvas.evidence())
+    }
+
+    pub fn render_gdi_glyph_indices(decision: RenderDecision) -> Result<PixelEvidence, String> {
+        render_gdi_glyph_indices_with_font(GdiFont::new("Segoe UI", -30, 400), decision)
+    }
+
+    pub fn render_raw_gdi_glyph_indices() -> Result<PixelEvidence, String> {
+        render_gdi_glyph_indices_with_font(
+            GdiFont::new("Microsoft YaHei UI", -30, 400),
+            RenderDecision {
+                text: TextDecision::Keep,
+                font: FontDecision::Keep,
+                generation: Generation::new(0),
+            },
+        )
     }
 
     struct GdiPlusToken(usize);
@@ -501,18 +558,38 @@ mod windows {
         )
     }
 
-    pub fn render_gdiplus_text(
+    fn render_gdiplus_text_with_font(
         source: &str,
+        font: GdiPlusFont,
         decision: RenderDecision,
     ) -> Result<PixelEvidence, String> {
         let mut canvas = DibCanvas::new()?;
-        let call = GdiPlusCall::utf16(source, GdiPlusFont::new("Segoe UI", 30.0, 0, 2), 11, 12, 13);
+        let call = GdiPlusCall::utf16(source, font, 11, 12, 13);
         GdiPlusInlineAdapter::new().invoke(
             call,
             |_| Ok(decision),
             |prepared| draw_gdiplus(&mut canvas, prepared),
         )?;
         Ok(canvas.evidence())
+    }
+
+    pub fn render_gdiplus_text(
+        source: &str,
+        decision: RenderDecision,
+    ) -> Result<PixelEvidence, String> {
+        render_gdiplus_text_with_font(source, GdiPlusFont::new("Segoe UI", 30.0, 0, 2), decision)
+    }
+
+    pub fn render_raw_gdiplus_symbol(text: &str) -> Result<PixelEvidence, String> {
+        render_gdiplus_text_with_font(
+            text,
+            GdiPlusFont::new("Symbol", 30.0, 0, 2),
+            RenderDecision {
+                text: TextDecision::Keep,
+                font: FontDecision::Keep,
+                generation: Generation::new(0),
+            },
+        )
     }
 
     pub fn render_gdiplus(decision: RenderDecision) -> Result<PixelEvidence, String> {
@@ -523,5 +600,6 @@ mod windows {
 #[cfg(windows)]
 pub use windows::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
-    render_raw_draw_text, render_raw_gdi_unicode, render_raw_text_out, PixelEvidence,
+    render_raw_draw_text, render_raw_gdi_glyph_indices, render_raw_gdi_symbol,
+    render_raw_gdi_unicode, render_raw_gdiplus_symbol, render_raw_text_out, PixelEvidence,
 };

@@ -230,6 +230,7 @@ unsafe fn call_with_decision(
     original_text: *const u16,
     original_count: u32,
     spacing: *const i32,
+    decoded_text: &[u16],
     decision: &DecisionBuffers,
 ) -> BOOL {
     let active = ACTIVE_FEATURES.load(Ordering::Acquire);
@@ -237,16 +238,6 @@ unsafe fn call_with_decision(
         && decision.decision.decision_bits & DECISION_TEXT_REPLACE != 0;
     let replace_font = active & FEATURE_FONT_SUBSTITUTE != 0
         && decision.decision.decision_bits & DECISION_FONT_SUBSTITUTE != 0;
-    let (text, count, options, spacing) = if replace_text {
-        (
-            decision.text.as_ptr(),
-            decision.text.len() as u32,
-            options & !ETO_GLYPH_INDEX,
-            ptr::null(),
-        )
-    } else {
-        (original_text, original_count, options, spacing)
-    };
     let mut created_font = None;
     if replace_font && !decision.font.is_empty() {
         let current = GetCurrentObject(hdc, OBJ_FONT);
@@ -274,6 +265,24 @@ unsafe fn call_with_decision(
             }
         }
     }
+    let font_substituted = created_font.is_some();
+    let (text, count, options, spacing) = if replace_text {
+        (
+            decision.text.as_ptr(),
+            decision.text.len() as u32,
+            options & !ETO_GLYPH_INDEX,
+            ptr::null(),
+        )
+    } else if font_substituted && options & ETO_GLYPH_INDEX != 0 {
+        (
+            decoded_text.as_ptr(),
+            decoded_text.len() as u32,
+            options & !ETO_GLYPH_INDEX,
+            ptr::null(),
+        )
+    } else {
+        (original_text, original_count, options, spacing)
+    };
     let result = original.call(hdc, x, y, options, rect, text, count, spacing);
     if let Some((font, previous)) = created_font {
         SelectObject(hdc, previous);
@@ -317,8 +326,19 @@ unsafe extern "system" fn ext_text_out_w_detour(
     let Some(decision) = decision else {
         return original.call(hdc, x, y, options, rect, text, count, spacing);
     };
+    let decoded_text = source.encode_utf16().collect::<Vec<_>>();
     call_with_decision(
-        original, hdc, x, y, options, rect, text, count, spacing, &decision,
+        original,
+        hdc,
+        x,
+        y,
+        options,
+        rect,
+        text,
+        count,
+        spacing,
+        &decoded_text,
+        &decision,
     )
 }
 

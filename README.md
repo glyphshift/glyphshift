@@ -13,6 +13,8 @@ crates/                        Domain、Extension、Decision、Runtime、Workflo
 test-support/                  合成 Adapter、Controller 与 Windows 测试宿主
 architecture-tests/            通用边界和禁止依赖检查
 scripts/dev-app.ps1            本地 Runtime Bundle 验证与桌面启动
+scripts/build-runtime-bundle.ps1  Debug/Release Runtime Bundle 共用构建器
+scripts/build-desktop-release.ps1 本地 unsigned Windows 安装候选构建器
 flightdeck/                    可恢复的当前工作与稳定知识
 archive/dictionary-sources/    尚待产品化导入的历史词典源，仅作数据保全
 ```
@@ -22,7 +24,7 @@ archive/dictionary-sources/    尚待产品化导入的历史词典源，仅作�
 - **工作流：** 一组可启停的持续运行期望；每个软件目标独立组合 Adapter Plan、有序词典和字体绑定。
 - **软件：** 用户登记的名称、用途说明和程序绑定，不承载运行功能开关。
 - **词典：** 独立、可发布和复用的语言资产，只保存便携元数据与文字规则。
-- **字体方案：** 独立、可复用的有序字体候选；具体适用位置由工作流目标绑定。
+- **字体策略：** 属于单个工作流目标的有序字体候选，并选择仅作用于词典命中或 Hook 全部文字。
 - **Adapter Catalog：** 独立描述平台、技术分类、具体拦截方式与能力，不进入词典。
 
 ## 开发验证
@@ -41,6 +43,24 @@ npm --prefix apps/glyphshift-desktop test
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
 ```
+
+只生成严格分离的 Debug 或 Release Runtime Bundle：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-bundle.ps1 -Profile Release
+```
+
+Release Bundle 只包含 Controller、Target Runtime、四个 Native Adapter 与 `/2` 清单；测试宿主只在
+显式 `-IncludeTestTarget` 时加入。所有输出仍只进入 `target/local-test/`。
+
+生成包含 Release Runtime Bundle 的本地 unsigned NSIS candidate：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-release.ps1
+```
+
+脚本使用本地临时 Tauri 配置，不修改基础配置，也不安装 candidate。产物、清单和构建中间文件均
+只进入 `target/local-test/`；公开发行仍需要独立的代码签名与发布流程。
 
 本机程序位置、Runtime Bundle、截图、日志和实机结果必须放在 `target/local-test/`，不得提交。
 

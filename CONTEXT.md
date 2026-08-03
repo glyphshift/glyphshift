@@ -132,6 +132,10 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 - 当前未发布结构直接使用 Dictionary `/2`、Workflow `/3` 与 Target Runtime
   Deployment `/2`；不保留旧结构的兼容读取、迁移或双写。
 - 普通界面不显示进程标识、Controller token、DLL 路径或内部 Adapter ID。
+- Runtime Bundle authority 由产品固定，不能由 manifest 自我授权；Bundle artifact 在加载前验证
+  有界相对路径和 SHA-256。Debug/Release 复用同一构建清单，Release 不包含测试宿主。
+- GDI 字体替换遇到 `ETO_GLYPH_INDEX` 时，只有在新字体实际选入且原文可靠解码后才转为 Unicode
+  绘制并清除 glyph-index 与旧 spacing；否则保留原调用 fail-open，禁止新字体解释旧字体 glyph ID。
 - 帮助页从 Runtime Bundle 的公开 Catalog 展示 Adapter 名称、版本、Platform、Technology、Feature
   与配置要求；标题栏不显示桌面服务连接徽标。
 - 设置不保存在线翻译器或服务地址。当前 Dictionary 是本地版本化资产；未来下载来源与安装状态
