@@ -16,7 +16,9 @@ impl ControllerPlugin for SyntheticController {
         _extension_id: &str,
         configuration: &WireControllerConfiguration,
     ) -> Result<(), PluginError> {
-        if configuration.executable_names != ["SyntheticEditor.exe"] {
+        if configuration.executable_names != ["SyntheticEditor.exe"]
+            || configuration.descendant_executable_names != ["SyntheticRenderer.exe"]
+        {
             return Err(PluginError::new("invalid_target_configuration"));
         }
         self.adapter_requirements = configuration.adapter_requirements.clone();

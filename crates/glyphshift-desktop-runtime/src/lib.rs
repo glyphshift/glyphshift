@@ -362,7 +362,8 @@ impl RuntimeBundle {
                 spec.executable_names().iter().cloned(),
                 requirements.clone(),
             )
-            .with_executable_paths(spec.executable_paths().iter().cloned()),
+            .with_executable_paths(spec.executable_paths().iter().cloned())
+            .with_descendant_executable_names(spec.descendant_executable_names().iter().cloned()),
         )
         .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
         self.nonce_sequence = self.nonce_sequence.saturating_add(1);

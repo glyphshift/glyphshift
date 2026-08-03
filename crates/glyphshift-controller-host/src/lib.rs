@@ -58,6 +58,7 @@ pub struct VerifiedControllerArtifact {
 pub struct ControllerStartupConfig {
     executable_names: Vec<Box<str>>,
     executable_paths: Vec<Box<str>>,
+    descendant_executable_names: Vec<Box<str>>,
     adapter_requirements: Vec<AdapterRequirement>,
 }
 
@@ -70,6 +71,7 @@ impl ControllerStartupConfig {
         Self {
             executable_names: executable_names.into_iter().map(Into::into).collect(),
             executable_paths: Vec::new(),
+            descendant_executable_names: Vec::new(),
             adapter_requirements: adapter_requirements.into_iter().collect(),
         }
     }
@@ -80,6 +82,15 @@ impl ControllerStartupConfig {
         executable_paths: impl IntoIterator<Item = impl Into<Box<str>>>,
     ) -> Self {
         self.executable_paths = executable_paths.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_descendant_executable_names(
+        mut self,
+        executable_names: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.descendant_executable_names = executable_names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -94,6 +105,11 @@ impl ControllerStartupConfig {
                 .executable_paths
                 .iter()
                 .map(|path| path.to_string())
+                .collect(),
+            descendant_executable_names: self
+                .descendant_executable_names
+                .iter()
+                .map(|name| name.to_string())
                 .collect(),
             adapter_requirements: self
                 .adapter_requirements

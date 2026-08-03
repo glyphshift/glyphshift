@@ -205,6 +205,7 @@ pub struct SoftwareIdentity {
     name: Box<str>,
     vendor: Box<str>,
     executables: Vec<Box<str>>,
+    descendant_executables: Vec<Box<str>>,
 }
 
 impl SoftwareIdentity {
@@ -218,12 +219,27 @@ impl SoftwareIdentity {
             name: name.into(),
             vendor: vendor.into(),
             executables: executables.into_iter().map(Into::into).collect(),
+            descendant_executables: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_descendant_executables(
+        mut self,
+        executables: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.descendant_executables = executables.into_iter().map(Into::into).collect();
+        self
     }
 
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    #[must_use]
+    pub fn descendant_executables(&self) -> &[Box<str>] {
+        &self.descendant_executables
     }
 }
 

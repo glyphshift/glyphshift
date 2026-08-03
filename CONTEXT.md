@@ -93,6 +93,10 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 **运行状态（Runtime State）**：目标实际确认的能力、Generation 和错误，是工作流期望的短期
 执行结果，不是持久配置。
 
+**进程家族（Process Family）**：一个 Software Extension 对授权根进程及显式后代可执行文件
+allowlist 的声明。Windows Controller 根据真实父子关系解析当前目标实例；它不是 Dictionary、
+Workflow Target 或用户猜测的区域配置。
+
 ## Translation
 
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
@@ -132,6 +136,11 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 - 当前未发布结构直接使用 Dictionary `/2`、Workflow `/3` 与 Target Runtime
   Deployment `/2`；不保留旧结构的兼容读取、迁移或双写。
 - 普通界面不显示进程标识、Controller token、DLL 路径或内部 Adapter ID。
+- `runtime.target_not_found` 只表示按已授权程序路径没有发现运行实例，界面表述为“软件未启动”；
+  它不能表示 Adapter 或 Hook 不支持。权限、组件加载、协议不兼容与超时继续使用各自的 Command
+  Error，并在工作流实际状态中提供逐软件恢复详情。
+- Process Family 后代必须同时命中 Software Extension 的显式 allowlist 并继承已授权进程树；内部
+  实例身份和 opaque token 不进入持久模型，退出或失败的成员不能覆盖其他实例事实。
 - Runtime Bundle authority 由产品固定，不能由 manifest 自我授权；Bundle artifact 在加载前验证
   有界相对路径和 SHA-256。Debug/Release 复用同一构建清单，Release 不包含测试宿主。
 - GDI 字体替换遇到 `ETO_GLYPH_INDEX` 时，只有在新字体实际选入且原文可靠解码后才转为 Unicode

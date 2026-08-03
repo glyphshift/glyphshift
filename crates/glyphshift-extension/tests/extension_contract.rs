@@ -48,7 +48,8 @@ fn ext_002_discovers_generic_software_and_preserves_declared_capabilities() {
     let package = ExtensionPackage::software(
         extension_id.clone(),
         version,
-        SoftwareIdentity::new("Example Editor", "Example Vendor", ["ExampleEditor.exe"]),
+        SoftwareIdentity::new("Example Editor", "Example Vendor", ["ExampleEditor.exe"])
+            .with_descendant_executables(["ExampleRenderer.exe"]),
         [adapter_requirement.clone()],
         [TranslationLocation::without_context("menu", "Menu")],
     );
@@ -71,6 +72,13 @@ fn ext_002_discovers_generic_software_and_preserves_declared_capabilities() {
             .expect("software metadata should be preserved")
             .name(),
         "Example Editor"
+    );
+    assert_eq!(
+        resolved
+            .software()
+            .expect("software metadata should be preserved")
+            .descendant_executables(),
+        &[Box::<str>::from("ExampleRenderer.exe")]
     );
     assert_eq!(resolved.capability_requirements(), &[adapter_requirement]);
     assert_eq!(resolved.locations()[0].id(), "menu");

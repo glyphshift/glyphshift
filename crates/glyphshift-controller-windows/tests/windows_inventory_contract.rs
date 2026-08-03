@@ -19,6 +19,7 @@ fn configured_controller() -> WindowsController {
             &WireControllerConfiguration {
                 executable_names: vec![executable],
                 executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: vec![WireAdapterRequirement {
                     adapter_id: "example.synthetic.inline".into(),
                     version_major: 1,
@@ -76,6 +77,7 @@ fn ctl_windows_003_rejects_paths_and_unknown_target_tokens() {
             &WireControllerConfiguration {
                 executable_names: Vec::new(),
                 executable_paths: vec!["relative/program.exe".into()],
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: Vec::new(),
             },
         )
@@ -86,6 +88,7 @@ fn ctl_windows_003_rejects_paths_and_unknown_target_tokens() {
             &WireControllerConfiguration {
                 executable_names: vec!["folder/program.exe".into()],
                 executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: Vec::new(),
             },
         )
@@ -105,6 +108,7 @@ fn ctl_windows_004_prefers_the_full_executable_path_over_an_ambiguous_name() {
             &WireControllerConfiguration {
                 executable_names: vec!["intentionally-wrong-name.exe".into()],
                 executable_paths: vec![current_executable.to_string_lossy().into_owned()],
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: Vec::new(),
             },
         )
@@ -114,4 +118,57 @@ fn ctl_windows_004_prefers_the_full_executable_path_over_an_ambiguous_name() {
 
     assert_eq!(inventory.targets.len(), 1);
     assert_eq!(inventory.targets[0].token, "target:1");
+}
+
+#[test]
+#[ignore = "requires an explicitly authorized local executable and descendant allowlist"]
+fn ctl_windows_005_discovers_an_authorized_process_family_without_exposing_process_ids() {
+    let executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
+        .map(std::path::PathBuf::from)
+        .expect("authorized executable path");
+    let descendant_executable_names = std::env::var("GLYPHSHIFT_REAL_HOST_DESCENDANTS")
+        .expect("authorized descendant executable names")
+        .split(';')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert!(!descendant_executable_names.is_empty());
+    let executable_name = executable
+        .file_name()
+        .expect("authorized executable name")
+        .to_string_lossy()
+        .into_owned();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.authorized-process-family",
+            &WireControllerConfiguration {
+                executable_names: vec![executable_name],
+                executable_paths: vec![executable.to_string_lossy().into_owned()],
+                descendant_executable_names,
+                adapter_requirements: Vec::new(),
+            },
+        )
+        .expect("authorized process family configuration");
+
+    let inventory = controller
+        .inventory()
+        .expect("authorized process family inventory");
+
+    assert!(inventory.targets.len() > 1);
+    assert_eq!(
+        inventory
+            .targets
+            .iter()
+            .map(|target| target.token.as_str())
+            .collect::<Vec<_>>(),
+        (1..=inventory.targets.len())
+            .map(|index| format!("target:{index}"))
+            .collect::<Vec<_>>()
+    );
+    eprintln!(
+        "authorized process family discovered {} target instances",
+        inventory.targets.len()
+    );
 }

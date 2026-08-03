@@ -415,8 +415,27 @@ export default {
     status: {
       disabled: '已停用',
       running: '运行中',
-      attention: '需要处理',
       waiting: '等待目标',
+    },
+    runtimeIssue: {
+      title: '运行详情',
+      description: '工作流保持启用；解决下列问题后刷新状态即可继续。',
+      refresh: '刷新状态',
+      unknownSoftware: '已移除的软件',
+      status: {
+        softwareStopped: '软件未启动',
+        sessionRejected: '目标拒绝启动',
+        bundleUnavailable: '运行组件未就绪',
+        accessFailed: '权限不匹配',
+        componentLoadFailed: '组件加载失败',
+        componentIncompatible: '组件不兼容',
+        activationTimedOut: '启动超时',
+        activationFailed: '启动失败',
+        stopUnconfirmed: '停止未确认',
+        unavailable: '运行服务不可用',
+        multiple: '多个目标失败',
+        failed: '运行失败',
+      },
     },
     problems: {
       name: '填写工作流名称',

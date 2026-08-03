@@ -192,6 +192,67 @@ test('management table body stays continuous for empty and populated states', as
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
 })
 
+test('workflow names a stopped software and exposes its actionable Runtime error', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+  snapshot.workflowRuntimeStatus = {
+    'workflow-proof': {
+      workflowId: 'workflow-proof',
+      targets: [{
+        softwareId: 'software-proof', discovered: false, active: false,
+        translationRequested: true, fontRequested: true,
+        translationActive: false, fontActive: false, appliedGeneration: null,
+      }],
+      errors: {
+        'software-proof': {
+          schemaVersion: 1,
+          code: 'runtime.target_not_found',
+          args: {},
+        },
+      },
+    },
+  }
+  await replaceModel(page, snapshot)
+
+  await expect(page.getByText('需要处理', { exact: true })).toHaveCount(0)
+  const stoppedStatus = page.getByRole('button', { name: '软件未启动', exact: true })
+  await expect(stoppedStatus).toBeVisible()
+  await stoppedStatus.click()
+  const details = page.getByTestId('workflow-runtime-issues')
+  await expect(details.getByText('Vector Studio', { exact: true })).toBeVisible()
+  await expect(details.getByText('没有找到与该程序路径匹配的运行实例；请先启动这个版本的软件。')).toBeVisible()
+  await expect(details.getByRole('button', { name: '刷新状态', exact: true })).toBeVisible()
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-runtime-stopped.png' })
+})
+
+test('workflow keeps permission failures distinct from a stopped software', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+  snapshot.workflowRuntimeStatus = {
+    'workflow-proof': {
+      workflowId: 'workflow-proof',
+      targets: [{
+        softwareId: 'software-proof', discovered: true, active: false,
+        translationRequested: true, fontRequested: true,
+        translationActive: false, fontActive: false, appliedGeneration: null,
+      }],
+      errors: {
+        'software-proof': {
+          schemaVersion: 1,
+          code: 'runtime.target_access_failed',
+          args: {},
+        },
+      },
+    },
+  }
+  await replaceModel(page, snapshot)
+
+  const failedStatus = page.getByRole('button', { name: '权限不匹配', exact: true })
+  await expect(failedStatus).toBeVisible()
+  await failedStatus.click()
+  await expect(page.getByTestId('workflow-runtime-issues').getByText('无法写入目标软件。请确认目标软件仍在运行，并让 Glyphshift 与它使用相同的权限级别。')).toBeVisible()
+})
+
 test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '工作流' })).toBeVisible()
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()

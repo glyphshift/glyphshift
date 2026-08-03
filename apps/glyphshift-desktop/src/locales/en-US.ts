@@ -421,8 +421,27 @@ export default {
     status: {
       disabled: 'Disabled',
       running: 'Running',
-      attention: 'Needs attention',
       waiting: 'Waiting for target',
+    },
+    runtimeIssue: {
+      title: 'Runtime details',
+      description: 'The workflow remains enabled. Resolve the issues below, then refresh its status.',
+      refresh: 'Refresh status',
+      unknownSoftware: 'Removed software',
+      status: {
+        softwareStopped: 'Software not running',
+        sessionRejected: 'Target rejected startup',
+        bundleUnavailable: 'Runtime not ready',
+        accessFailed: 'Permission mismatch',
+        componentLoadFailed: 'Component load failed',
+        componentIncompatible: 'Component incompatible',
+        activationTimedOut: 'Startup timed out',
+        activationFailed: 'Startup failed',
+        stopUnconfirmed: 'Stop not confirmed',
+        unavailable: 'Runtime unavailable',
+        multiple: 'Multiple targets failed',
+        failed: 'Runtime failed',
+      },
     },
     problems: {
       name: 'Enter a workflow name',

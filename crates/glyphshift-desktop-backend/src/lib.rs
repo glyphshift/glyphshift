@@ -913,6 +913,8 @@ struct ExtensionArtifact {
     #[serde(default)]
     executables: Vec<Box<str>>,
     #[serde(default)]
+    descendant_executables: Vec<Box<str>>,
+    #[serde(default)]
     runtime: Option<ExtensionRuntimeArtifact>,
     locations: Vec<ExtensionLocationArtifact>,
 }
@@ -1071,6 +1073,7 @@ pub struct DesktopBackend {
 pub struct DesktopRuntimeSpec {
     executable_names: Vec<Box<str>>,
     executable_paths: Vec<Box<str>>,
+    descendant_executable_names: Vec<Box<str>>,
     requirements: Vec<AdapterRequirement>,
     publication: RuntimePublication,
 }
@@ -1126,6 +1129,11 @@ impl DesktopRuntimeSpec {
     #[must_use]
     pub fn executable_paths(&self) -> &[Box<str>] {
         &self.executable_paths
+    }
+
+    #[must_use]
+    pub fn descendant_executable_names(&self) -> &[Box<str>] {
+        &self.descendant_executable_names
     }
 
     #[must_use]
@@ -1854,6 +1862,7 @@ impl DesktopBackend {
                             .get(target.software_id())
                             .map(|software| vec![software.executable_path.clone()])
                             .unwrap_or_default(),
+                        descendant_executable_names: state.artifact.descendant_executables.clone(),
                         requirements,
                         publication: RuntimePublication::new(
                             target.route().clone(),
@@ -1898,6 +1907,7 @@ impl DesktopBackend {
                 .get(software_id)
                 .map(|software| vec![software.executable_path.clone()])
                 .unwrap_or_default(),
+            descendant_executable_names: state.artifact.descendant_executables.clone(),
             requirements,
             publication: RuntimePublication::new(
                 target.route().clone(),
@@ -1944,6 +1954,7 @@ impl DesktopBackend {
                 .get(extension_id)
                 .map(|software| vec![software.executable_path.clone()])
                 .unwrap_or_default(),
+            descendant_executable_names: state.artifact.descendant_executables.clone(),
             requirements,
             publication: RuntimePublication::new(
                 route,
@@ -2130,6 +2141,7 @@ impl DesktopBackend {
             name: name.into(),
             vendor: "—".into(),
             executables: vec![executable_name.into()],
+            descendant_executables: Vec::new(),
             runtime: None,
             locations: vec![ExtensionLocationArtifact {
                 id: "internal-default".into(),
@@ -2298,6 +2310,13 @@ fn validate_extension(artifact: &ExtensionArtifact, path: &Path) -> Result<(), B
         || artifact.version.trim().is_empty()
         || path.file_stem().and_then(|value| value.to_str()) != Some(&artifact.id)
         || artifact.executables.iter().any(|executable| {
+            executable.trim().is_empty()
+                || Path::new(executable.as_ref())
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    != Some(executable)
+        })
+        || artifact.descendant_executables.iter().any(|executable| {
             executable.trim().is_empty()
                 || Path::new(executable.as_ref())
                     .file_name()

@@ -68,6 +68,9 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 ## 交互合同
 
 - 工作流启用状态表示持久期望；Runtime actual state 与错误单独展示。
+- 工作流实际状态直接命名“软件未启动”“权限不匹配”“组件加载失败”等原因，不显示笼统的
+  “需要处理”。错误状态可点击展开逐软件的完整解释与恢复动作；软件未启动使用可恢复警告色，
+  确定的激活失败使用错误色。
 - 创建和编辑资产复用同一 Nuxt UI Modal；Modal 和 Select 浮层必须高于 sticky 表头。
 - Dictionary 设置与翻译词条编辑采用单列 Modal；矮窗口中 body 独立滚动，header/footer 固定。
 - Dictionary entry 只有非空原文与非空译文，同一 Dictionary 内原文唯一；Location、Context、

@@ -57,7 +57,8 @@ fn connection() -> ControllerConnection<ProcessControllerTransport> {
     let transport = ProcessControllerTransport::spawn_configured(
         verified_artifact(),
         Duration::from_secs(2),
-        ControllerStartupConfig::new(["SyntheticEditor.exe"], [requirement()]),
+        ControllerStartupConfig::new(["SyntheticEditor.exe"], [requirement()])
+            .with_descendant_executable_names(["SyntheticRenderer.exe"]),
     )
     .expect("spawn configured controller");
     ControllerConnection::connect(

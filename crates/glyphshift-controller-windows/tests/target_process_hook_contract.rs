@@ -136,6 +136,7 @@ fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() 
             &WireControllerConfiguration {
                 executable_names: vec![TARGET_BINARY.into()],
                 executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: vec![WireAdapterRequirement {
                     adapter_id: descriptor.adapter_id().as_str().into(),
                     version_major: descriptor.version().major(),
@@ -251,6 +252,7 @@ fn ctl_windows_005_rejects_a_changed_runtime_before_target_injection() {
             &WireControllerConfiguration {
                 executable_names: vec![executable],
                 executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
                 adapter_requirements: Vec::new(),
             },
         )

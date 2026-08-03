@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
 import RuntimeDiagnosticsModal from './RuntimeDiagnosticsModal.vue'
+import { translateCommandError } from '../commandError'
 import type {
   AdapterOption,
   DictionarySummary,
@@ -257,20 +258,47 @@ function targetIsConfigured(target: WorkflowTarget) {
   if (!target.fontPolicy.families.length) return false
   return target.fontPolicy.coverage !== 'dictionary_matches' || Boolean(target.dictionaryIds.length)
 }
-function actualStatus(item: WorkflowSummary): 'disabled' | 'running' | 'attention' | 'waiting' {
+function actualStatus(item: WorkflowSummary): 'disabled' | 'running' | 'failed' | 'waiting' {
   const status = props.runtimeStatus[item.id]
   if (!props.activationIds.has(item.id)) return 'disabled'
   if (status && status.targets.length > 0 && status.targets.every(target => target.active)) return 'running'
-  if (status && Object.keys(status.errors).length) return 'attention'
+  if (status && Object.keys(status.errors).length) return 'failed'
   return 'waiting'
 }
-function actualLabel(item: WorkflowSummary) {
-  return t(`workflows.status.${actualStatus(item)}`)
+function runtimeIssues(item: WorkflowSummary) {
+  return Object.entries(props.runtimeStatus[item.id]?.errors ?? {}).map(([softwareId, error]) => ({
+    softwareId,
+    softwareName: props.software.find(candidate => candidate.id === softwareId)?.name ?? t('workflows.runtimeIssue.unknownSoftware'),
+    error,
+  }))
 }
-function actualColor(item: WorkflowSummary): 'success' | 'error' | 'neutral' {
+function runtimeIssueKind(item: WorkflowSummary) {
+  const codes = [...new Set(runtimeIssues(item).map(issue => issue.error.code))]
+  if (codes.length !== 1) return 'multiple'
+  const code = codes[0] ?? ''
+  const knownKinds: Record<string, string> = {
+    'runtime.target_not_found': 'softwareStopped',
+    'runtime.session_rejected': 'sessionRejected',
+    'runtime.bundle_unavailable': 'bundleUnavailable',
+    'runtime.target_access_failed': 'accessFailed',
+    'runtime.component_load_failed': 'componentLoadFailed',
+    'runtime.component_incompatible': 'componentIncompatible',
+    'runtime.activation_timed_out': 'activationTimedOut',
+    'runtime.activation_failed': 'activationFailed',
+    'runtime.stop_unconfirmed': 'stopUnconfirmed',
+    'runtime.unavailable': 'unavailable',
+  }
+  return knownKinds[code] ?? 'failed'
+}
+function actualLabel(item: WorkflowSummary) {
+  return actualStatus(item) === 'failed'
+    ? t(`workflows.runtimeIssue.status.${runtimeIssueKind(item)}`)
+    : t(`workflows.status.${actualStatus(item)}`)
+}
+function actualColor(item: WorkflowSummary): 'success' | 'warning' | 'error' | 'neutral' {
   const status = actualStatus(item)
   if (status === 'running') return 'success'
-  if (status === 'attention') return 'error'
+  if (status === 'failed') return runtimeIssueKind(item) === 'softwareStopped' ? 'warning' : 'error'
   return 'neutral'
 }
 
@@ -407,7 +435,27 @@ function confirmRemoval() {
         <template #software-cell="{ row }"><div class="truncate" :title="softwareNames(row.original)">{{ softwareNames(row.original) }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('workflows.targetCount', { count: row.original.softwareIds.length }) }}</div></template>
         <template #adapters-cell="{ row }"><div class="truncate" :title="adapterNames(row.original)">{{ adapterNames(row.original) || t('workflows.notConfigured') }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('workflows.parallel') }}</div></template>
         <template #assets-cell="{ row }"><div class="truncate" :title="dictionaryNames(row.original)">{{ t('workflows.dictionaries', { names: dictionaryNames(row.original) || t('workflows.none') }) }}</div><div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]" :title="fontNames(row.original)">{{ t('workflows.fonts', { names: fontNames(row.original) || t('workflows.none') }) }}</div></template>
-        <template #status-cell="{ row }"><UBadge :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" /></template>
+        <template #status-cell="{ row }">
+          <UPopover v-if="runtimeIssues(row.original).length" :ui="{ content: 'z-[80]' }">
+            <UButton :color="actualColor(row.original)" variant="soft" size="xs" :label="actualLabel(row.original)" />
+            <template #content>
+              <section data-testid="workflow-runtime-issues" class="w-80 p-3" :aria-label="t('workflows.runtimeIssue.title')">
+                <h3 class="m-0 text-[11px] font-semibold">{{ t('workflows.runtimeIssue.title') }}</h3>
+                <p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.runtimeIssue.description') }}</p>
+                <div class="mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)]">
+                  <div v-for="issue in runtimeIssues(row.original)" :key="issue.softwareId" class="py-2.5">
+                    <div class="text-[10px] font-semibold">{{ issue.softwareName }}</div>
+                    <p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ translateCommandError(issue.error) }}</p>
+                  </div>
+                </div>
+                <div class="mt-3 flex justify-end">
+                  <UButton color="neutral" variant="outline" size="xs" icon="i-tabler-refresh" :label="t('workflows.runtimeIssue.refresh')" :loading="refreshing" :disabled="refreshing" @click="emit('refresh')" />
+                </div>
+              </section>
+            </template>
+          </UPopover>
+          <UBadge v-else :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" />
+        </template>
         <template #enabled-cell="{ row }"><USwitch :model-value="activationIds.has(row.original.id)" :disabled="busy" :aria-label="t('workflows.enableNamed', { name: row.original.name })" @update:model-value="emit('toggle', row.original.id, Boolean($event))" /></template>
         <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-activity-heartbeat" :disabled="actualStatus(row.original) !== 'running'" :aria-label="t('workflows.diagnostics.openNamed', { name: row.original.name })" @click="diagnosticWorkflow = row.original" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.name })" @click="emit('open', row.original.id)" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-copy" :aria-label="t('workflows.copyNamed', { name: row.original.name })" @click="emit('copy', row.original.id)" /><UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
         <template #empty><UEmpty icon="i-tabler-git-branch" :title="items.length ? t('workflows.noMatch') : t('workflows.empty')" :description="t('workflows.emptyDescription')" /></template>

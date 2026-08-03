@@ -136,6 +136,8 @@ pub struct WireControllerConfiguration {
     pub executable_names: Vec<String>,
     #[serde(default)]
     pub executable_paths: Vec<String>,
+    #[serde(default)]
+    pub descendant_executable_names: Vec<String>,
     pub adapter_requirements: Vec<WireAdapterRequirement>,
 }
 

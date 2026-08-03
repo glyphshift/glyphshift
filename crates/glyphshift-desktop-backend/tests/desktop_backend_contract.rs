@@ -261,6 +261,55 @@ fn capture_spec_uses_only_explicit_observable_adapters_and_an_empty_publication(
 }
 
 #[test]
+fn software_extension_process_family_reaches_the_runtime_spec_without_entering_workflow_data() {
+    let root = tempdir().expect("process family product data");
+    let executable = root.path().join("SyntheticFamilyHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open process family product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            executable,
+        ))
+        .expect("register process family root")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    drop(backend);
+
+    let extension_path = root
+        .path()
+        .join("extensions")
+        .join(format!("{software_id}.json"));
+    let mut artifact = serde_json::from_str::<serde_json::Value>(
+        &fs::read_to_string(&extension_path).expect("software extension"),
+    )
+    .expect("extension json");
+    artifact["descendant_executables"] =
+        serde_json::json!(["SyntheticRenderer.exe", "SyntheticWorker.exe"]);
+    fs::write(
+        &extension_path,
+        serde_json::to_string(&artifact).expect("encode extension json"),
+    )
+    .expect("write process family extension");
+
+    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("reopen process family product data");
+    let spec = reopened
+        .runtime_spec(&software_id)
+        .expect("compile process family runtime spec");
+
+    assert_eq!(
+        spec.descendant_executable_names(),
+        &[
+            Box::<str>::from("SyntheticRenderer.exe"),
+            Box::<str>::from("SyntheticWorker.exe"),
+        ]
+    );
+    assert!(reopened.snapshot().workflows().is_empty());
+}
+
+#[test]
 fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_dictionary() {
     let root = tempdir().expect("isolated product data");
     let executable = root.path().join("SyntheticEditor.exe");
