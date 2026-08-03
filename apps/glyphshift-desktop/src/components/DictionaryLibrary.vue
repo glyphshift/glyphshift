@@ -11,6 +11,7 @@ import type {
   DictionaryMetadata,
   DictionarySummary,
 } from '../model'
+import { editableRowIndex } from '../tableInteraction'
 
 const props = defineProps<{
   items: DictionarySummary[]
@@ -38,6 +39,7 @@ const page = ref(1)
 const pageSize = ref(20)
 const selected = ref(new Set<string>())
 const creating = ref(false)
+const exportError = ref('')
 const pendingRemoval = ref<DictionarySummary[]>([])
 const pendingInstall = ref<DictionaryCatalogRelease | null>(null)
 const catalogQuery = ref('')
@@ -104,7 +106,14 @@ watch(() => props.presentationLocale, () => {
 
 function setMode(next: 'local' | 'catalog') {
   mode.value = next
+  exportError.value = ''
   if (next === 'catalog') requestCatalog(true)
+}
+
+function openOnDoubleClick(event: MouseEvent) {
+  const index = editableRowIndex(event)
+  const item = index === null ? null : pageItems.value[index]
+  if (item) emit('open', item.metadata.id)
 }
 
 function toggleSelection(id: string) {
@@ -263,13 +272,21 @@ async function chooseImport() {
 }
 
 async function chooseExport(item: DictionarySummary) {
-  if (!('__TAURI_INTERNALS__' in window)) return
-  const outputPath = await save({
-    title: t('dictionaries.exportDialogTitle'),
-    defaultPath: `${item.metadata.id}.json`,
-    filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
-  })
-  if (outputPath) emit('exportDictionary', item.metadata.id, outputPath)
+  exportError.value = ''
+  if (!('__TAURI_INTERNALS__' in window)) {
+    exportError.value = t('dictionaries.exportDialogFailed')
+    return
+  }
+  try {
+    const outputPath = await save({
+      title: t('dictionaries.exportDialogTitle'),
+      defaultPath: `${item.metadata.id}.json`,
+      filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
+    })
+    if (outputPath) emit('exportDictionary', item.metadata.id, outputPath)
+  } catch {
+    exportError.value = t('dictionaries.exportDialogFailed')
+  }
 }
 </script>
 
@@ -319,7 +336,7 @@ async function chooseExport(item: DictionarySummary) {
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="mode === 'local' && messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
+    <UAlert v-if="mode === 'local' && (messages.dictionaries || exportError)" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries || exportError" class="mb-3" />
 
     <ManagementTableFrame
       v-if="mode === 'local'"
@@ -337,7 +354,7 @@ async function chooseExport(item: DictionarySummary) {
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
       </template>
 
-      <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[860px]' }">
+      <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[860px]' }" @dblclick="openOnDoubleClick">
         <template #select-header>
           <UCheckbox :model-value="pageSelected" :aria-label="t('dictionaries.selectPage')" @update:model-value="togglePageSelection" />
         </template>

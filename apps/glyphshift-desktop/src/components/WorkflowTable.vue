@@ -13,6 +13,8 @@ import type {
   WorkflowSummary,
   WorkflowTarget,
 } from '../model'
+import { editableRowIndex } from '../tableInteraction'
+import { usePageEscape } from '../usePageEscape'
 
 const props = defineProps<{
   items: WorkflowSummary[]
@@ -44,6 +46,7 @@ const emit = defineEmits<{
   copy: [id: string]
   remove: [ids: string[]]
   navigate: [view: 'software' | 'dictionaries']
+  'dirty-change': [dirty: boolean]
 }>()
 const { t, locale } = useI18n()
 
@@ -65,6 +68,12 @@ const fontFilter = ref('all')
 const activeEditorTab = ref('basic')
 const pendingRemoval = ref<WorkflowSummary[]>([])
 const diagnosticWorkflow = ref<WorkflowSummary | null>(null)
+const formBaseline = ref('')
+const discardFormOpen = ref(false)
+
+function serializeForm() {
+  return JSON.stringify({ name: name.value, description: description.value, targets: targets.value })
+}
 
 const statusFilterOptions = computed(() => [
   { value: 'all', label: t('workflows.filters.all') },
@@ -128,6 +137,10 @@ const targetOptions = computed(() => targets.value.map(target => ({
 })))
 const formOpen = computed(() => creating.value || Boolean(props.editing))
 const editingWorkflow = computed(() => Boolean(props.editing))
+const formDirty = computed(() => formOpen.value && serializeForm() !== formBaseline.value)
+const editorTitle = computed(() => props.editing ? (name.value.trim() || props.editing.name) : t('workflows.create'))
+
+watch(formDirty, dirty => emit('dirty-change', dirty), { immediate: true })
 const basicProblems = computed(() => name.value.trim() ? [] : [t('workflows.problems.name')])
 const softwareProblems = computed(() => {
   const problems: string[] = []
@@ -166,10 +179,10 @@ const formProblems = computed(() => [...new Set([
 ])])
 const formValid = computed(() => formProblems.value.length === 0)
 const editorTabs = computed(() => [
-  { value: 'basic', slot: 'basic', label: t('workflows.tabs.basic'), badge: problemBadge(basicProblems.value) },
-  { value: 'software', slot: 'software', label: t('workflows.tabs.software'), badge: problemBadge(softwareProblems.value) },
-  { value: 'dictionary', slot: 'dictionary', label: t('workflows.tabs.dictionary'), badge: problemBadge(dictionaryProblems.value) },
-  { value: 'font', slot: 'font', label: t('workflows.tabs.font'), badge: problemBadge(fontProblems.value) },
+  { value: 'basic', slot: 'basic', label: t('workflows.tabs.basic'), icon: 'i-tabler-adjustments-horizontal', badge: problemBadge(basicProblems.value) },
+  { value: 'software', slot: 'software', label: t('workflows.tabs.software'), icon: 'i-tabler-app-window', badge: problemBadge(softwareProblems.value) },
+  { value: 'dictionary', slot: 'dictionary', label: t('workflows.tabs.dictionary'), icon: 'i-tabler-language', badge: problemBadge(dictionaryProblems.value) },
+  { value: 'font', slot: 'font', label: t('workflows.tabs.font'), icon: 'i-tabler-typography', badge: problemBadge(fontProblems.value) },
 ])
 const catalogFilterOptions = computed(() => [
   { value: 'all', label: t('workflows.catalogFilters.all') },
@@ -218,6 +231,7 @@ watch(() => props.editing, (detail) => {
   targets.value = clone(detail.targets)
   activeSoftwareId.value = targets.value[0]?.softwareId ?? null
   activeEditorTab.value = 'basic'
+  formBaseline.value = serializeForm()
 }, { immediate: true })
 
 function softwareName(id: string) {
@@ -333,12 +347,21 @@ function resetForm() {
 }
 function startCreate() {
   resetForm()
+  formBaseline.value = serializeForm()
   creating.value = true
 }
 function closeForm() {
+  discardFormOpen.value = false
   if (props.editing) emit('closeEdit')
   else creating.value = false
   resetForm()
+}
+function requestCloseForm() {
+  if (formDirty.value) discardFormOpen.value = true
+  else closeForm()
+}
+function confirmDiscardForm() {
+  closeForm()
 }
 function toggleSoftware(id: string) {
   const index = targets.value.findIndex(target => target.softwareId === id)
@@ -413,10 +436,18 @@ function confirmRemoval() {
   selected.value = new Set([...selected.value].filter(id => !ids.includes(id)))
   pendingRemoval.value = []
 }
+function openOnDoubleClick(event: MouseEvent) {
+  const index = editableRowIndex(event)
+  const item = index === null ? null : pageItems.value[index]
+  if (item) emit('open', item.id)
+}
+
+usePageEscape(() => formOpen.value, requestCloseForm)
 </script>
 
 <template>
-  <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="workflow-title">
+  <section :data-testid="formOpen ? 'workflow-editor' : undefined" class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" :aria-labelledby="formOpen ? 'workflow-editor-title' : 'workflow-title'">
+    <template v-if="!formOpen">
     <ManagementPageHeader title-id="workflow-title" :title="t('workflows.title')" :description="t('workflows.description')" icon="i-tabler-git-branch">
       <template #actions>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('workflows.create')" :disabled="busy" @click="startCreate" />
@@ -431,7 +462,7 @@ function confirmRemoval() {
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-stop" :label="t('workflows.bulkDisable')" :disabled="busy" @click="emit('toggleMany', [...selected], false)" />
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('workflows.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.id))" />
       </template>
-      <UTable :data="pageItems" :columns="columns" sticky :ui="{ base: 'min-w-[1080px]' }">
+      <UTable :data="pageItems" :columns="columns" sticky :ui="{ base: 'min-w-[1080px]' }" @dblclick="openOnDoubleClick">
         <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('workflows.selectPage')" @update:model-value="togglePageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleSelection(row.original.id)" /></template>
         <template #workflow-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.description || t('workflows.revision', { revision: row.original.revision }) }}</div></template>
@@ -466,11 +497,25 @@ function confirmRemoval() {
     </ManagementTableFrame>
 
     <RuntimeDiagnosticsModal :open="Boolean(diagnosticWorkflow)" :workflow="diagnosticWorkflow" @update:open="$event || (diagnosticWorkflow = null)" />
+    </template>
 
-    <ManagementFormModal :open="formOpen" :title="editingWorkflow ? t('workflows.edit') : t('workflows.create')" :description="t('workflows.formDescription')" :confirm-label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :confirm-disabled="busy || !formValid" :busy="busy" width="xl" workspace @update:open="$event || closeForm()" @confirm="submitForm">
-      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="pill" size="sm" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: 'flex h-full min-h-0 w-full flex-col items-stretch gap-0', list: 'mx-5 mt-3 !grid w-auto shrink-0 grid-cols-4 gap-1 overflow-hidden rounded-[7px] bg-[var(--surface-subtle)] p-1', indicator: '!bg-[var(--surface)] shadow-none ring-1 ring-inset ring-[var(--border-strong)]', trigger: 'h-8 min-w-0 justify-center px-2 py-0 text-[10px] data-[state=active]:!text-[var(--text)]', label: 'truncate', trailingBadge: 'min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 flex-1 overflow-y-auto rounded-none px-5 py-4 focus:outline-none [scrollbar-gutter:stable]' }">
+    <template v-else>
+      <ManagementDetailHeader
+        title-id="workflow-editor-title"
+        :title="editorTitle"
+        :description="t('workflows.formDescription')"
+        :back-label="t('workflows.backToList')"
+        @back="requestCloseForm"
+      >
+        <template #status><UBadge v-if="formDirty" color="warning" variant="subtle" size="sm" :label="t('common.unsaved')" /></template>
+        <template #actions>
+          <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
+        </template>
+      </ManagementDetailHeader>
+      <div class="min-h-0 flex-1 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
+      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[10px] text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--surface)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'ml-auto min-w-4 justify-center px-1 text-[8px]', content: 'min-h-0 overflow-y-auto rounded-none px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
         <template #basic>
-          <section data-testid="workflow-basic-tab" class="space-y-4" :aria-label="t('workflows.tabs.basic')">
+          <section data-testid="workflow-basic-tab" class="max-w-3xl space-y-4" :aria-label="t('workflows.tabs.basic')">
             <div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.basicHeading') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.basicHint') }}</p></div>
             <UFormField :label="t('workflows.name')" required><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
             <UFormField :label="t('workflows.workflowDescription')"><UTextarea v-model="description" :maxlength="512" :rows="4" autoresize :maxrows="6" class="w-full" /></UFormField>
@@ -550,8 +595,10 @@ function confirmRemoval() {
           </section>
         </template>
       </UTabs>
-    </ManagementFormModal>
+      </div>
+    </template>
 
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('workflows.deleteTitle')" :description="removalDescription" :busy="busy" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
+    <ConfirmDialog :open="discardFormOpen" :title="t('common.discardTitle')" :description="t('common.discardDescription')" :cancel-label="t('common.continueEditing')" :confirm-label="t('common.discardChanges')" confirm-color="warning" @update:open="$event || (discardFormOpen = false)" @confirm="confirmDiscardForm" />
   </section>
 </template>

@@ -162,6 +162,10 @@ async function replaceModel(page: import('@playwright/test').Page, value: Return
   await page.goto('/')
 }
 
+function workflowEditor(page: import('@playwright/test').Page) {
+  return page.getByTestId('workflow-editor')
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
@@ -190,6 +194,117 @@ test('management table body stays continuous for empty and populated states', as
   await expect(lastRow).toBeVisible()
   await expect.poll(() => lastRow.evaluate(element => getComputedStyle(element).borderBottomWidth)).toBe('1px')
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
+})
+
+test('software creation requires preflight and supports two-step foreground capture', async ({ page }) => {
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await expect(page.getByRole('button', { name: '快速捕获' })).toBeVisible()
+
+  await page.getByRole('button', { name: '新增软件' }).click()
+  const dialog = page.getByRole('dialog', { name: '新增软件' })
+  await dialog.getByRole('textbox', { name: '软件名称' }).fill('Synthetic Editor')
+  await dialog.getByRole('textbox', { name: '程序路径' }).fill('X:\\SyntheticFixtures\\SyntheticEditor.exe')
+  await expect(dialog.getByRole('button', { name: '添加软件' })).toBeDisabled()
+  await expect(dialog.getByText('通过接入检查后才能添加。')).toBeVisible()
+  await dialog.getByRole('button', { name: '检查' }).click()
+  await expect(dialog.getByText('基础接入条件已通过')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '添加软件' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '取消' }).click()
+
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
+    detail: { state: 'armed', shortcut: 'Ctrl+Shift+F8' },
+  })))
+  await expect(page.getByRole('alert', { name: '等待选择软件' })).toContainText('Ctrl+Shift+F8')
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
+    detail: {
+      state: 'captured',
+      shortcut: 'Ctrl+Shift+F8',
+      preflight: {
+        executablePath: 'X:\\SyntheticFixtures\\CapturedEditor.exe',
+        executableName: 'CapturedEditor.exe',
+        suggestedName: 'CapturedEditor',
+        architecture: 'x86_64',
+        running: true,
+        canAdd: true,
+        state: 'ready',
+        existingName: null,
+      },
+    },
+  })))
+  await expect(dialog.getByRole('textbox', { name: '软件名称' })).toHaveValue('CapturedEditor')
+  await expect(dialog.getByRole('textbox', { name: '程序路径' })).toHaveValue('X:\\SyntheticFixtures\\CapturedEditor.exe')
+  await expect(dialog.getByText('基础接入条件已通过')).toBeVisible()
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await expect(dialog).toBeHidden()
+})
+
+test('software rows expose a direct delete action', async ({ page }) => {
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: 'Vector Studio' })
+
+  await expect(row.getByRole('button', { name: '删除 Vector Studio' })).toBeVisible()
+})
+
+test('software direct and batch delete remove unreferenced records', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.software.push({
+    ...snapshot.software[0],
+    id: 'software-disposable-one',
+    name: 'Disposable One',
+    executableName: 'DisposableOne.exe',
+    executablePath: 'X:\\SyntheticFixtures\\DisposableOne.exe',
+  }, {
+    ...snapshot.software[0],
+    id: 'software-disposable-two',
+    name: 'Disposable Two',
+    executableName: 'DisposableTwo.exe',
+    executablePath: 'X:\\SyntheticFixtures\\DisposableTwo.exe',
+  })
+  await replaceModel(page, snapshot)
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+
+  await page.getByRole('button', { name: '删除 Disposable One' }).click()
+  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '确认删除' }).click()
+  await expect(page.getByText('Disposable One', { exact: true })).toBeHidden()
+
+  await page.getByRole('checkbox', { name: '选择 Disposable Two' }).click()
+  await page.getByRole('button', { name: '批量删除' }).click()
+  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '确认删除' }).click()
+  await expect(page.getByText('Disposable Two', { exact: true })).toBeHidden()
+})
+
+test('software batch delete keeps a rejected record and explains why', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  await page.addInitScript(({ current }) => {
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return current
+        if (command === 'desktop_remove_software') {
+          throw {
+            schemaVersion: 1,
+            code: 'software.referenced',
+            args: { workflowCount: 1, probeCount: 0 },
+          }
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { current: snapshot })
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await page.getByRole('checkbox', { name: '选择 Vector Studio' }).click()
+  await page.getByRole('button', { name: '批量删除' }).click()
+  const confirmation = page.getByRole('dialog', { name: '删除软件' })
+  await confirmation.getByRole('button', { name: '确认删除' }).click()
+
+  await expect(page.getByText('Vector Studio', { exact: true })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('仍被 1 个工作流使用')
 })
 
 test('workflow names a stopped software and exposes its actionable Runtime error', async ({ page }) => {
@@ -315,7 +430,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
         if (command === 'desktop_import_dictionary') {
@@ -358,6 +473,97 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
   }))
 })
 
+test('dictionary export reports when the native save dialog cannot open', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { snapshot: model })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '导出发布文件 界面基础词典', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('无法打开保存窗口，请重试')
+})
+
+test('local management items support double-click editing while keeping explicit actions', async ({ page }) => {
+  await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await expect(page.getByRole('heading', { name: '默认创作工作流' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回工作流列表' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '编辑工作流' })).toHaveCount(0)
+  await page.getByRole('button', { name: '返回工作流列表' }).click()
+
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
+  await expect(page.getByRole('heading', { name: 'Vector Studio' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回软件列表' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '编辑软件' })).toHaveCount(0)
+  await page.getByRole('button', { name: '返回软件列表' }).click()
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
+  await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回词典列表' })).toBeVisible()
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
+  await page.getByRole('button', { name: '返回探针管理' }).click()
+  await page.getByRole('row').filter({ hasText: 'Vector Studio 探针' }).dblclick()
+  await expect(page.getByRole('heading', { name: 'Vector Studio 探针' })).toBeVisible()
+
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
+  await expect(page.getByRole('button', { name: '编辑 默认创作工作流' })).toBeVisible()
+})
+
+test('escape returns from each independent item page and protects dirty forms', async ({ page }) => {
+  await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
+
+  await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await page.getByRole('textbox', { name: '工作流名称' }).fill('尚未保存的工作流')
+  await page.keyboard.press('Escape')
+  const workflowDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
+  await expect(workflowDiscard).toBeVisible()
+  await workflowDiscard.getByRole('button', { name: '放弃更改' }).click()
+  await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
+
+  await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await page.getByRole('textbox', { name: '工作流名称' }).fill('切换菜单前尚未保存')
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  const navigationDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
+  await expect(navigationDiscard).toBeVisible()
+  await navigationDiscard.getByRole('button', { name: '放弃更改' }).click()
+  await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
+
+  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
+  await page.getByRole('textbox', { name: '显示名称' }).fill('尚未保存的软件')
+  await page.keyboard.press('Escape')
+  const softwareDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
+  await expect(softwareDiscard).toBeVisible()
+  await softwareDiscard.getByRole('button', { name: '放弃更改' }).click()
+  await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: '词典', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
+})
+
 test('configured dictionary catalog queries and installs through the desktop seam', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.dictionaries[0].installation = {
@@ -381,7 +587,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -437,7 +643,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -481,7 +687,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale
@@ -529,7 +735,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -611,7 +817,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -737,7 +943,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -874,7 +1080,7 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
 
 test('workflow target independently selects adapters dictionaries and one font policy', async ({ page }) => {
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  const dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  const dialog = workflowEditor(page)
   await expect(dialog.getByRole('tab')).toHaveCount(4)
   await expect(dialog.getByRole('tab', { name: '基础配置' })).toHaveAttribute('aria-selected', 'true')
 
@@ -900,7 +1106,7 @@ test('workflow target independently selects adapters dictionaries and one font p
 
 test('font policy uses a compact coverage selector and an explicit cached refresh', async ({ page }) => {
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  const dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  const dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '字体策略' }).click()
 
   await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('仅词典命中')
@@ -910,11 +1116,11 @@ test('font policy uses a compact coverage selector and an explicit cached refres
   await expect(dialog.getByRole('button', { name: '刷新字体列表' })).toBeVisible()
 })
 
-test('workflow editor separates large catalogs across four focused tabs', async ({ page }) => {
+test('workflow editor uses a left section rail for four focused large-catalog views', async ({ page }) => {
   await page.setViewportSize({ width: 1180, height: 760 })
   await replaceModel(page, largeWorkflowCatalogModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  const dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  const dialog = workflowEditor(page)
 
   const nameBox = await dialog.getByRole('textbox', { name: '工作流名称' }).boundingBox()
   const descriptionBox = await dialog.getByRole('textbox', { name: '工作流描述' }).boundingBox()
@@ -922,15 +1128,20 @@ test('workflow editor separates large catalogs across four focused tabs', async 
   expect(descriptionBox).not.toBeNull()
   expect(descriptionBox!.y).toBeGreaterThan(nameBox!.y + nameBox!.height)
 
-  await expect(dialog).toHaveClass(/h-\[720px\]/)
+  await expect(dialog).toHaveClass(/flex-1/)
   await page.waitForTimeout(250)
-  const initialDialogHeight = await dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))
+  const initialEditorHeight = await dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))
   const tabList = dialog.getByRole('tablist')
-  const modalBody = dialog.locator('[data-slot="body"]')
-  await expect.poll(() => modalBody.evaluate(element => getComputedStyle(element).overflowY)).toBe('hidden')
+  await expect(dialog.getByTestId('workflow-editor-tabs')).toHaveClass(/h-full/)
+  await expect.poll(() => tabList.evaluate(element => getComputedStyle(element).flexDirection)).toBe('column')
+  const navigationBox = await tabList.boundingBox()
+  const basicContentBox = await dialog.getByTestId('workflow-basic-tab').boundingBox()
+  expect(navigationBox).not.toBeNull()
+  expect(basicContentBox).not.toBeNull()
+  expect(navigationBox!.x + navigationBox!.width).toBeLessThanOrEqual(basicContentBox!.x)
   await expect.poll(() => tabList.evaluate(element => element.scrollWidth === element.clientWidth && element.scrollHeight === element.clientHeight)).toBe(true)
   await dialog.getByRole('tab', { name: '软件与拦截' }).click()
-  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialDialogHeight)
+  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialEditorHeight)
   const softwareCatalog = dialog.getByTestId('workflow-software-catalog')
   await expect.poll(() => softwareCatalog.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
   await dialog.getByPlaceholder('搜索软件').fill('Batch Studio 10')
@@ -938,7 +1149,7 @@ test('workflow editor separates large catalogs across four focused tabs', async 
   await expect(dialog.getByTestId('workflow-adapter-config')).toBeVisible()
 
   await dialog.getByRole('tab', { name: '翻译词典' }).click()
-  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialDialogHeight)
+  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialEditorHeight)
   const targetSelect = dialog.getByRole('button', { name: '当前软件目标' })
   await targetSelect.click()
   await expect(page.getByRole('option')).toHaveCount(10)
@@ -949,7 +1160,7 @@ test('workflow editor separates large catalogs across four focused tabs', async 
   await expect(dialog.getByText('批量词典 100', { exact: true })).toBeVisible()
 
   await dialog.getByRole('tab', { name: '字体策略' }).click()
-  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialDialogHeight)
+  await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialEditorHeight)
   await expect(dialog.getByRole('tab', { name: '字体策略' })).toHaveAttribute('aria-selected', 'true')
   await expect(dialog.getByTestId('workflow-font-tab')).toBeVisible()
   await expect(dialog.getByTestId('workflow-dictionary-catalog')).toHaveCount(0)
@@ -960,14 +1171,14 @@ test('workflow editor separates large catalogs across four focused tabs', async 
 test('workflow saves reordered dictionaries in explicit priority order', async ({ page }) => {
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  let dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  let dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '翻译词典' }).click()
   await dialog.getByRole('checkbox', { name: '选择词典 效果词典' }).click()
   await dialog.getByRole('button', { name: '提高 效果词典 的优先级' }).click()
   await dialog.getByRole('button', { name: '保存工作流' }).click()
 
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '翻译词典' }).click()
   const priorityItems = dialog.getByTestId('workflow-dictionary-catalog').locator('[data-dictionary-id]')
   await expect(priorityItems.nth(0)).toHaveAttribute('data-dictionary-id', 'dictionary-effects')
@@ -979,7 +1190,7 @@ test('workflow saves reordered dictionaries in explicit priority order', async (
 test('workflow saves font coverage and ordered inline candidates', async ({ page }) => {
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  let dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  let dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await expect(dialog.getByRole('alert', { name: '高影响字体模式' })).toHaveCount(0)
   await dialog.getByRole('combobox', { name: '应用范围' }).click()
@@ -990,7 +1201,7 @@ test('workflow saves font coverage and ordered inline candidates', async ({ page
   await dialog.getByRole('button', { name: '保存工作流' }).click()
 
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('Hook 捕获的全部文字')
   const priorityItems = dialog.getByTestId('workflow-font-catalog').locator('[data-font-family]')
@@ -1003,7 +1214,7 @@ test('workflow saves font coverage and ordered inline candidates', async ({ page
 test('inline font policy stays isolated between software targets', async ({ page }) => {
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  const dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  const dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   const currentTarget = dialog.getByRole('button', { name: '当前软件目标' })
   await currentTarget.click()
@@ -1110,7 +1321,7 @@ test('dictionary text editing saves only source and translation', async ({ page 
 
 test('saved browser model contains inline policy without font assets or locations', async ({ page }) => {
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
-  await page.getByRole('dialog', { name: '编辑工作流' }).getByRole('button', { name: '保存工作流' }).click()
+  await workflowEditor(page).getByRole('button', { name: '保存工作流' }).click()
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v3') ?? '{}'))
   expect(saved.fontProfiles).toBeUndefined()
   expect(saved.software[0].locations).toBeUndefined()

@@ -16,6 +16,7 @@ declare module 'vue' {
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
     HelpView: typeof import('./src/components/HelpView.vue')['default']
+    ManagementDetailHeader: typeof import('./src/components/ManagementDetailHeader.vue')['default']
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']
     ManagementPageHeader: typeof import('./src/components/ManagementPageHeader.vue')['default']
     ManagementTableFrame: typeof import('./src/components/ManagementTableFrame.vue')['default']

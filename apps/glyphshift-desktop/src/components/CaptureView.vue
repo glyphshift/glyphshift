@@ -11,7 +11,9 @@ import type {
   ProbeRunSummary,
   SoftwareRecord,
 } from '../model'
+import { editableRowIndex } from '../tableInteraction'
 import { useProbeRuns } from '../useProbeRuns'
+import { usePageEscape } from '../usePageEscape'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
@@ -29,6 +31,12 @@ const query = ref('')
 const adapterFilterIds = ref<string[]>([])
 const page = ref(1)
 const pageSize = ref(50)
+
+function openRunOnDoubleClick(event: MouseEvent) {
+  const index = editableRowIndex(event)
+  const item = index === null ? null : listPageItems.value[index]
+  if (item) probe.selectRun(item.id)
+}
 const entryPage = ref({
   observationRevision: 0,
   dictionaryRevision: 1,
@@ -314,7 +322,9 @@ async function createRun() {
   }
 }
 
-function closeDetail() {
+async function closeDetail() {
+  await Promise.all([...dirtyTranslations].map(saveTranslation))
+  if (dirtyTranslations.size) return
   probe.selectRun('')
   selected.value = new Set()
 }
@@ -548,19 +558,23 @@ async function confirmRemoval() {
     pendingRemoval.value = []
   }
 }
+
+usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
 </script>
 
 <template>
   <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="capture-title">
-    <ManagementPageHeader
+    <ManagementDetailHeader
+      v-if="selectedRun"
       title-id="capture-title"
-      icon="i-tabler-radar"
-      :title="selectedRun ? selectedRun.name : t('capture.title')"
-      :description="selectedRun ? t('capture.detailDescription', { dictionary: selectedDictionary?.metadata.name ?? selectedRun.dictionaryId }) : t('capture.description')"
-    >
+      :title="selectedRun.name"
+      :description="t('capture.detailDescription', { dictionary: selectedDictionary?.metadata.name ?? selectedRun.dictionaryId })"
+      :back-label="t('capture.backToRuns')"
+      @back="closeDetail"
+    />
+    <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
       <template #actions>
-        <UButton v-if="selectedRun" color="neutral" variant="outline" size="sm" icon="i-tabler-arrow-left" :label="t('capture.backToRuns')" @click="closeDetail" />
-        <UButton v-else color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
       </template>
     </ManagementPageHeader>
 
@@ -627,7 +641,7 @@ async function confirmRemoval() {
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('capture.bulkDelete')" :disabled="[...listSelected].some(id => ['running', 'paused'].includes(probe.runs.value.find(run => run.id === id)?.status ?? ''))" @click="pendingRemoval = probe.runs.value.filter(run => listSelected.has(run.id))" />
       </template>
-      <UTable :data="listPageItems" :columns="runColumns" sticky :ui="{ base: 'min-w-[920px]' }">
+      <UTable :data="listPageItems" :columns="runColumns" sticky :ui="{ base: 'min-w-[920px]' }" @dblclick="openRunOnDoubleClick">
         <template #select-header><UCheckbox :model-value="listPageSelected" :aria-label="t('capture.selectRunPage')" @update:model-value="toggleListPageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="listSelected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleListSelection(row.original.id)" /></template>
         <template #run-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ row.original.adapterIds.map(adapterName).join(' · ') }}</div></template>

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
+import { usePageEscape } from '../usePageEscape'
 
 interface DictionaryTableRow {
   entry: DictionaryEntry
@@ -163,26 +164,25 @@ function saveDraft() {
   draft.value = clone(next)
   emit('save', next)
 }
+
+usePageEscape(() => true, () => emit('back'))
 </script>
 
 <template>
   <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="dictionary-title">
-    <div class="mb-3 flex min-h-10 items-center justify-between gap-4">
-      <div class="flex min-w-0 items-center gap-2">
-        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-arrow-left" :aria-label="t('dictionaryEditor.back')" @click="emit('back')" />
-        <div class="min-w-0">
-          <div class="flex min-w-0 items-center gap-2">
-            <h1 id="dictionary-title" class="m-0 truncate text-[20px] font-semibold tracking-[-0.02em]">{{ draft.metadata.name }}</h1>
-            <UBadge v-if="hasUnsavedChanges" color="warning" variant="subtle" size="sm" :label="t('dictionaryEditor.unsaved')" />
-          </div>
-          <p class="m-0 mt-0.5 text-[10px] text-[var(--text-muted)]">{{ t('dictionaryEditor.metadataLine', { source: draft.metadata.sourceLocale, target: draft.metadata.targetLocale, version: draft.metadata.releaseVersion, revision: draft.revision, count: draft.entries.length }) }}</p>
-        </div>
-      </div>
-      <div class="flex shrink-0 gap-2">
+    <ManagementDetailHeader
+      title-id="dictionary-title"
+      :title="draft.metadata.name"
+      :description="t('dictionaryEditor.metadataLine', { source: draft.metadata.sourceLocale, target: draft.metadata.targetLocale, version: draft.metadata.releaseVersion, revision: draft.revision, count: draft.entries.length })"
+      :back-label="t('dictionaryEditor.back')"
+      @back="emit('back')"
+    >
+      <template #status><UBadge v-if="hasUnsavedChanges" color="warning" variant="subtle" size="sm" :label="t('dictionaryEditor.unsaved')" /></template>
+      <template #actions>
         <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" @click="openMetadata" />
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('dictionaryEditor.saveDictionary')" :loading="busy" :disabled="busy || !canSave" @click="saveDraft" />
-      </div>
-    </div>
+      </template>
+    </ManagementDetailHeader>
 
     <ManagementTableFrame
       v-model:query="query"

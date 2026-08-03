@@ -11,7 +11,70 @@ use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowsExecutable {
+    path: PathBuf,
+    name: Box<str>,
+    architecture: Box<str>,
+    running: bool,
+}
+
+impl WindowsExecutable {
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn architecture(&self) -> &str {
+        &self.architecture
+    }
+
+    #[must_use]
+    pub const fn running(&self) -> bool {
+        self.running
+    }
+}
+
+pub fn inspect_windows_executable(
+    path: impl AsRef<Path>,
+) -> Result<WindowsExecutable, PluginError> {
+    windows_executable(path.as_ref(), None)
+}
+
+#[cfg(windows)]
+pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_null() {
+        return Err(PluginError::new("foreground_window_unavailable"));
+    }
+    let mut process_id = 0_u32;
+    unsafe {
+        GetWindowThreadProcessId(window, &mut process_id);
+    }
+    if process_id == 0 {
+        return Err(PluginError::new("foreground_process_unavailable"));
+    }
+    let path = process_executable_path(process_id)
+        .ok_or_else(|| PluginError::new("foreground_process_inaccessible"))?;
+    windows_executable(Path::new(&path), Some(true))
+}
+
+#[cfg(not(windows))]
+pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
+    Err(PluginError::new("unsupported_operating_system"))
+}
 
 #[derive(Clone, Debug)]
 struct ProcessRecord {
@@ -542,6 +605,75 @@ fn has_authorized_ancestor(
     false
 }
 
+fn windows_executable(
+    path: &Path,
+    known_running: Option<bool>,
+) -> Result<WindowsExecutable, PluginError> {
+    let metadata =
+        std::fs::metadata(path).map_err(|_| PluginError::new("invalid_executable_path"))?;
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|_| metadata.is_file())
+        .filter(|value| {
+            Path::new(value)
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+        })
+        .ok_or_else(|| PluginError::new("invalid_executable_path"))?;
+    if !path.is_absolute() {
+        return Err(PluginError::new("invalid_executable_path"));
+    }
+    let architecture = std::fs::read(path)
+        .ok()
+        .and_then(|source| pe_architecture(&source))
+        .ok_or_else(|| PluginError::new("invalid_executable_image"))?;
+    let canonical =
+        std::fs::canonicalize(path).map_err(|_| PluginError::new("invalid_executable_path"))?;
+    let normalized = normalize_executable_path(&canonical.to_string_lossy());
+    let running = known_running.unwrap_or_else(|| {
+        enumerate_processes().is_ok_and(|processes| {
+            processes.iter().any(|process| {
+                process
+                    .executable_path
+                    .as_deref()
+                    .is_some_and(|candidate| candidate == normalized)
+            })
+        })
+    });
+
+    Ok(WindowsExecutable {
+        path: canonical,
+        name: name.into(),
+        architecture: architecture.into(),
+        running,
+    })
+}
+
+fn pe_architecture(source: &[u8]) -> Option<&'static str> {
+    if source.get(0..2)? != b"MZ" {
+        return None;
+    }
+    let pe_offset = u32::from_le_bytes(source.get(0x3c..0x40)?.try_into().ok()?) as usize;
+    if source.get(pe_offset..pe_offset.checked_add(4)?)? != b"PE\0\0" {
+        return None;
+    }
+    let machine_offset = pe_offset.checked_add(4)?;
+    let machine = u16::from_le_bytes(
+        source
+            .get(machine_offset..machine_offset.checked_add(2)?)?
+            .try_into()
+            .ok()?,
+    );
+    match machine {
+        0x8664 => Some("x86_64"),
+        0x014c => Some("x86"),
+        0xaa64 => Some("arm64"),
+        _ => Some("unknown"),
+    }
+}
+
 #[cfg(windows)]
 fn enumerate_processes() -> Result<Vec<ProcessRecord>, PluginError> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -831,5 +963,22 @@ mod tests {
             .inventory()
             .expect("replacement process instance");
         assert_eq!(replacement.targets[0].token, "target:2");
+    }
+
+    #[test]
+    fn pe_header_reports_only_the_windows_target_architectures_we_can_screen() {
+        fn image(machine: u16) -> Vec<u8> {
+            let mut bytes = vec![0_u8; 256];
+            bytes[0..2].copy_from_slice(b"MZ");
+            bytes[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
+            bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
+            bytes[0x84..0x86].copy_from_slice(&machine.to_le_bytes());
+            bytes
+        }
+
+        assert_eq!(pe_architecture(&image(0x8664)), Some("x86_64"));
+        assert_eq!(pe_architecture(&image(0x014c)), Some("x86"));
+        assert_eq!(pe_architecture(&image(0xaa64)), Some("arm64"));
+        assert_eq!(pe_architecture(b"not a PE image"), None);
     }
 }

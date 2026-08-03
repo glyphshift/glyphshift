@@ -26,6 +26,30 @@ export interface SoftwareRecord {
   observe: CapabilityEvidence
 }
 
+export type SoftwarePreflightState
+  = 'ready'
+    | 'already_added'
+    | 'not_running'
+    | 'runtime_unavailable'
+    | 'self_target'
+    | 'unsupported_architecture'
+
+export interface SoftwarePreflight {
+  executablePath: string
+  executableName: string
+  suggestedName: string
+  architecture: string
+  running: boolean
+  canAdd: boolean
+  state: SoftwarePreflightState
+  existingName: string | null
+}
+
+export type SoftwareQuickCaptureEvent
+  = { state: 'armed'; shortcut: string }
+    | { state: 'captured'; shortcut: string; preflight: SoftwarePreflight }
+    | { state: 'failed'; shortcut: string; errorCode: string }
+
 export interface DictionaryMetadata {
   id: string
   releaseVersion: string

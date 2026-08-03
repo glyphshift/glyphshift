@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { en, zh_cn } from '@nuxt/ui/locale'
 import { useI18n } from 'vue-i18n'
@@ -13,23 +14,24 @@ import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
 import { useAppSettings } from './appSettings'
-import type { WorkflowDetail, WorkflowTarget } from './model'
+import type { SoftwareQuickCaptureEvent, WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 16
+const desktopApiVersion = 17
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
 const workspace = useWorkspace()
 const view = ref<View>('workflows')
-const dictionaryDirty = ref(false)
+const editorDirty = ref(false)
 const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
 const shellCompatibilityErrorKey = ref('')
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
+let unlistenSoftwareCapture: UnlistenFn | null = null
 
 async function openWorkflow(id: string) {
   await workspace.loadWorkflow(id)
@@ -37,17 +39,18 @@ async function openWorkflow(id: string) {
 
 async function openDictionary(id: string) {
   if (await workspace.loadDictionary(id)) {
-    dictionaryDirty.value = false
+    editorDirty.value = false
     view.value = 'dictionary-editor'
   }
 }
 
 function requestNavigation(next: NavigableView) {
-  if (view.value === 'dictionary-editor' && dictionaryDirty.value) {
+  if (next === view.value) return
+  if (editorDirty.value) {
     pendingExit.value = next
     return
   }
-  dictionaryDirty.value = false
+  editorDirty.value = false
   view.value = next
 }
 
@@ -61,7 +64,7 @@ async function closeWindow() {
 }
 
 function requestWindowClose() {
-  if (view.value === 'dictionary-editor' && dictionaryDirty.value) {
+  if (editorDirty.value) {
     pendingExit.value = 'close'
     return
   }
@@ -75,13 +78,13 @@ function cancelDiscard() {
 function confirmDiscard() {
   const destination = pendingExit.value
   pendingExit.value = null
-  dictionaryDirty.value = false
+  editorDirty.value = false
   if (destination === 'close') void closeWindow()
   else if (destination) view.value = destination
 }
 
 function guardBrowserExit(event: BeforeUnloadEvent) {
-  if (view.value !== 'dictionary-editor' || !dictionaryDirty.value) return
+  if (!editorDirty.value) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -112,12 +115,39 @@ async function connectDesktopShell() {
   }
 }
 
+function receiveSoftwareQuickCapture(event: SoftwareQuickCaptureEvent) {
+  workspace.handleSoftwareQuickCaptureEvent(event)
+  requestNavigation('software')
+}
+
+function receiveBrowserSoftwareQuickCapture(event: Event) {
+  receiveSoftwareQuickCapture((event as CustomEvent<SoftwareQuickCaptureEvent>).detail)
+}
+
+async function connectSoftwareQuickCaptureEvents() {
+  window.addEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
+  if (!('__TAURI_INTERNALS__' in window)) return
+  try {
+    unlistenSoftwareCapture = await listen<SoftwareQuickCaptureEvent>('software-quick-capture', event => {
+      receiveSoftwareQuickCapture(event.payload)
+    })
+  }
+  catch {
+    // The explicit Quick capture action still reports shortcut registration failures.
+  }
+}
+
 onMounted(() => {
   window.addEventListener('beforeunload', guardBrowserExit)
   void connectDesktopShell()
+  void connectSoftwareQuickCaptureEvents()
 })
 
-onBeforeUnmount(() => window.removeEventListener('beforeunload', guardBrowserExit))
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', guardBrowserExit)
+  window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
+  unlistenSoftwareCapture?.()
+})
 </script>
 
 <template>
@@ -159,16 +189,27 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', guardBrowserExi
         @copy="workspace.copyWorkflow"
         @remove="workspace.removeWorkflows"
         @toggle-many="workspace.setWorkflowsEnabled"
-        @navigate="view = $event"
+        @navigate="requestNavigation"
+        @dirty-change="editorDirty = $event"
       />
       <SoftwareTable
         v-else-if="view === 'software'"
         :items="workspace.model.value.software"
         :busy="workspace.softwareBusy.value"
         :messages="workspace.messages.value"
+        :preflight="workspace.softwarePreflight.value"
+        :preflight-busy="workspace.softwarePreflightBusy.value"
+        :capture-armed="workspace.softwareCaptureArmed.value"
+        :capture-shortcut="workspace.softwareCaptureShortcut.value"
+        :capture-result="workspace.softwareCaptureResult.value"
         @add="workspace.addSoftware"
+        @validate="workspace.validateSoftware"
+        @clear-preflight="workspace.clearSoftwarePreflight"
+        @arm-capture="workspace.armSoftwareCapture"
+        @cancel-capture="workspace.cancelSoftwareCapture"
         @update-software="workspace.updateSoftware"
         @remove="workspace.removeSoftware"
+        @dirty-change="editorDirty = $event"
       />
       <DictionaryLibrary
         v-else-if="view === 'dictionaries'"
@@ -193,7 +234,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', guardBrowserExi
         :busy="workspace.workspaceBusy.value"
         @back="requestNavigation('dictionaries')"
         @save="workspace.saveDictionary"
-        @dirty-change="dictionaryDirty = $event"
+        @dirty-change="editorDirty = $event"
       />
       <CaptureView
         v-else-if="view === 'capture'"
@@ -206,10 +247,10 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', guardBrowserExi
       </main>
       <ConfirmDialog
         :open="discardOpen"
-        :title="t('dictionaryEditor.discardTitle')"
-        :description="t('dictionaryEditor.discardDescription')"
-        :cancel-label="t('dictionaryEditor.continueEditing')"
-        :confirm-label="t('dictionaryEditor.discardConfirm')"
+        :title="t('common.discardTitle')"
+        :description="t('common.discardDescription')"
+        :cancel-label="t('common.continueEditing')"
+        :confirm-label="t('common.discardChanges')"
         confirm-color="warning"
         @update:open="$event || cancelDiscard()"
         @confirm="confirmDiscard"

@@ -14,6 +14,7 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 glyphshift-capture = { path = "../../../crates/glyphshift-capture" }
+glyphshift-controller-windows = { path = "../../../crates/glyphshift-controller-windows" }
 glyphshift-desktop-backend = { path = "../../../crates/glyphshift-desktop-backend" }
 glyphshift-desktop-runtime = { path = "../../../crates/glyphshift-desktop-runtime" }
 glyphshift-dictionary-distribution = { path = "../../../crates/glyphshift-dictionary-distribution" }
@@ -25,6 +26,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.6.0"
+tauri-plugin-global-shortcut = "2.3.2"
 tempfile = "3.23.0"
 
 [target.'cfg(windows)'.dependencies]

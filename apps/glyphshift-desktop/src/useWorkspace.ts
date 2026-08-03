@@ -1,6 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { presentationError, translateCommandError } from './commandError'
+import { presentationError, translateCommandCode, translateCommandError } from './commandError'
 import { i18n } from './i18n'
 import {
   emptyModel,
@@ -14,6 +14,8 @@ import {
   type DictionaryInstallationSummary,
   type DictionaryMetadata,
   type SoftwareRecord,
+  type SoftwarePreflight,
+  type SoftwareQuickCaptureEvent,
   type WorkflowCommandResult,
   type WorkflowDetail,
   type WorkflowRuntimeStatus,
@@ -78,6 +80,11 @@ const workflowDetail = ref<WorkflowDetail | null>(null)
 const dictionaryCatalog = ref<DictionaryCatalogPage>({ releases: [], nextCursor: null })
 const dictionaryCatalogBusy = ref(false)
 const dictionaryCatalogError = ref('')
+const softwarePreflight = ref<SoftwarePreflight | null>(null)
+const softwarePreflightBusy = ref(false)
+const softwareCaptureArmed = ref(false)
+const softwareCaptureShortcut = ref('Ctrl+Shift+F8')
+const softwareCaptureResult = ref<SoftwarePreflight | null>(null)
 
 watch(model, (value) => {
   if (!hasDesktopRuntime()) localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
@@ -549,6 +556,96 @@ export function useWorkspace() {
     }
   }
 
+  function browserSoftwarePreflight(executablePath: string): SoftwarePreflight {
+    const path = executablePath.trim()
+    const executableName = path.split(/[\\/]/).pop() || path
+    const existing = model.value.software.find(item =>
+      item.executablePath?.toLocaleLowerCase() === path.toLocaleLowerCase())
+    return {
+      executablePath: path,
+      executableName,
+      suggestedName: executableName.replace(/\.exe$/i, ''),
+      architecture: 'x86_64',
+      running: true,
+      canAdd: !existing,
+      state: existing ? 'already_added' : 'ready',
+      existingName: existing?.name ?? null,
+    }
+  }
+
+  function clearSoftwarePreflight() {
+    softwarePreflight.value = null
+    softwareCaptureResult.value = null
+    setMessage('software', '')
+  }
+
+  async function validateSoftware(executablePath: string) {
+    const path = executablePath.trim()
+    if (!path || softwarePreflightBusy.value) return false
+    softwarePreflightBusy.value = true
+    setMessage('software', '')
+    try {
+      softwarePreflight.value = hasDesktopRuntime()
+        ? await invoke<SoftwarePreflight>('desktop_preflight_software', { executablePath: path })
+        : browserSoftwarePreflight(path)
+      return true
+    }
+    catch (error) {
+      softwarePreflight.value = null
+      setMessage('software', errorMessage(error))
+      return false
+    }
+    finally {
+      softwarePreflightBusy.value = false
+    }
+  }
+
+  async function armSoftwareCapture() {
+    setMessage('software', '')
+    try {
+      if (hasDesktopRuntime()) {
+        softwareCaptureShortcut.value = await invoke<string>('desktop_arm_software_capture')
+      }
+      softwareCaptureArmed.value = true
+      return true
+    }
+    catch (error) {
+      setMessage('software', errorMessage(error))
+      return false
+    }
+  }
+
+  async function cancelSoftwareCapture() {
+    try {
+      if (hasDesktopRuntime()) await invoke('desktop_cancel_software_capture')
+    }
+    catch (error) {
+      setMessage('software', errorMessage(error))
+    }
+    finally {
+      softwareCaptureArmed.value = false
+    }
+  }
+
+  function handleSoftwareQuickCaptureEvent(event: SoftwareQuickCaptureEvent) {
+    softwareCaptureShortcut.value = event.shortcut
+    if (event.state === 'armed') {
+      softwareCaptureArmed.value = true
+      softwareCaptureResult.value = null
+      setMessage('software', '')
+      return
+    }
+    if (event.state === 'captured') {
+      softwareCaptureArmed.value = false
+      softwarePreflight.value = event.preflight
+      softwareCaptureResult.value = event.preflight
+      setMessage('software', '')
+      return
+    }
+    softwareCaptureArmed.value = true
+    setMessage('software', translateCommandCode(event.errorCode))
+  }
+
   async function addSoftware(displayName: string, description: string, executablePath: string) {
     setMessage('software', '')
     if (softwareBusy.value) return false
@@ -592,6 +689,7 @@ export function useWorkspace() {
         }
         model.value.software = [...model.value.software, record].sort((left, right) => left.name.localeCompare(right.name))
       }
+      clearSoftwarePreflight()
       return true
     }
     catch (error) {
@@ -624,21 +722,28 @@ export function useWorkspace() {
       return true
     }
     catch (error) {
-      setMessage(id, errorMessage(error))
+      setMessage('software', errorMessage(error))
       return false
     }
   }
 
   async function removeSoftware(ids: string[]) {
+    if (softwareBusy.value || !ids.length) return false
+    softwareBusy.value = true
+    setMessage('software', '')
+    let succeeded = true
     for (const id of ids) {
       try {
         if (hasDesktopRuntime()) applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_remove_software', { extensionId: id }))
         else model.value.software = model.value.software.filter(item => item.id !== id)
       }
       catch (error) {
-        setMessage(id, errorMessage(error))
+        succeeded = false
+        setMessage('software', errorMessage(error))
       }
     }
+    softwareBusy.value = false
+    return succeeded
   }
 
   function runtimeStatus(id: string): WorkflowRuntimeStatus | undefined {
@@ -653,6 +758,11 @@ export function useWorkspace() {
     dictionaryCatalog,
     dictionaryCatalogBusy,
     dictionaryCatalogError,
+    softwarePreflight,
+    softwarePreflightBusy,
+    softwareCaptureArmed,
+    softwareCaptureShortcut,
+    softwareCaptureResult,
     softwareBusy,
     workspaceBusy,
     refreshing,
@@ -677,6 +787,11 @@ export function useWorkspace() {
     installDictionaryRelease,
     removeDictionaries,
     selectSoftware,
+    validateSoftware,
+    clearSoftwarePreflight,
+    armSoftwareCapture,
+    cancelSoftwareCapture,
+    handleSoftwareQuickCaptureEvent,
     addSoftware,
     updateSoftware,
     removeSoftware,

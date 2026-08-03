@@ -55,6 +55,12 @@ test('management pages share the project management-page modules', () => {
 
   const dictionaryEditor = readFileSync(join(sourceRoot, 'components', 'DictionaryProof.vue'), 'utf8')
   expect(dictionaryEditor, 'DictionaryProof.vue must use the shared table frame.').toContain('<ManagementTableFrame')
+
+  const detailPages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryProof.vue', 'CaptureView.vue']
+  for (const page of detailPages) {
+    const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
+    expect(source, `${basename(page)} must use the shared detail header.`).toContain('<ManagementDetailHeader')
+  }
 })
 
 test('modal layers stay above sticky tables and transient menus', () => {

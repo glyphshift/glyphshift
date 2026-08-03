@@ -63,8 +63,19 @@ const messageKeys: Record<string, string> = {
   'workflow.disable_failed': 'errors.workflow.disableFailed',
   'workflow.invalid': 'errors.workflow.invalid',
   'software.invalid_executable': 'errors.software.invalidExecutable',
+  'software.preflight_required': 'errors.software.preflightRequired',
+  'software.already_added': 'errors.software.alreadyAdded',
+  'software.not_running': 'errors.software.notRunning',
+  'software.runtime_unavailable': 'errors.software.runtimeUnavailable',
+  'software.self_target': 'errors.software.selfTarget',
+  'software.unsupported_architecture': 'errors.software.unsupportedArchitecture',
+  'software.quick_capture_unavailable': 'errors.software.quickCaptureUnavailable',
+  'software.quick_capture_foreground_unavailable': 'errors.software.quickCaptureForegroundUnavailable',
+  'software.quick_capture_self': 'errors.software.quickCaptureSelf',
+  'software.quick_capture_failed': 'errors.software.quickCaptureFailed',
   'software.select_failed': 'errors.software.selectFailed',
   'software.runtime_stop_unconfirmed': 'errors.software.runtimeStopUnconfirmed',
+  'software.referenced': 'errors.software.referencedByWorkflowAndProbe',
   'software.delete_failed': 'errors.software.deleteFailed',
   'software.invalid_update': 'errors.software.invalidUpdate',
   'runtime.target_not_found': 'errors.runtime.targetNotFound',
@@ -117,9 +128,19 @@ export function presentationError(message: string): PresentationError {
   return { presentationMessage: message }
 }
 
+export function translateCommandCode(code: string, args: Record<string, CommandErrorArg> = {}): string {
+  return translateCommandError({ schemaVersion: 1, code, args })
+}
+
 export function translateCommandError(error: unknown): string {
   if (isPresentationError(error)) return error.presentationMessage
   if (!isCommandError(error)) return i18n.global.t('errors.unknown')
-  const key = messageKeys[error.code] ?? 'errors.unknown'
+  let key = messageKeys[error.code] ?? 'errors.unknown'
+  if (error.code === 'software.referenced') {
+    const workflowCount = Number(error.args.workflowCount ?? 0)
+    const probeCount = Number(error.args.probeCount ?? 0)
+    if (workflowCount > 0 && probeCount === 0) key = 'errors.software.referencedByWorkflow'
+    else if (probeCount > 0 && workflowCount === 0) key = 'errors.software.referencedByProbe'
+  }
   return i18n.global.t(key, error.args)
 }
