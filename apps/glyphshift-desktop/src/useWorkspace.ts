@@ -71,6 +71,7 @@ const model = ref<DesktopModel>(readModel())
 const softwareBusy = ref(false)
 const workspaceBusy = ref(false)
 const refreshing = ref(false)
+const fontRefreshing = ref(false)
 const messages = ref<Record<string, string>>({})
 const dictionaryDetail = ref<DictionaryDetail | null>(null)
 const workflowDetail = ref<WorkflowDetail | null>(null)
@@ -167,6 +168,25 @@ export function useWorkspace() {
     }
     finally {
       refreshing.value = false
+    }
+  }
+
+  async function refreshFontFamilies() {
+    if (fontRefreshing.value) return false
+    fontRefreshing.value = true
+    setMessage('workflows', '')
+    try {
+      if (hasDesktopRuntime()) {
+        applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_refresh_font_families'))
+      }
+      return true
+    }
+    catch (error) {
+      setMessage('workflows', errorMessage(error))
+      return false
+    }
+    finally {
+      fontRefreshing.value = false
     }
   }
 
@@ -636,10 +656,12 @@ export function useWorkspace() {
     softwareBusy,
     workspaceBusy,
     refreshing,
+    fontRefreshing,
     messages,
     connectDesktopBackend,
     setWorkflowEnabled,
     refreshWorkflows,
+    refreshFontFamilies,
     loadWorkflow,
     loadDictionary,
     createWorkflow,

@@ -6,10 +6,12 @@ withDefaults(defineProps<{
   title: string
   description: string
   confirmLabel?: string
+  cancelLabel?: string
   confirmColor?: 'error' | 'warning' | 'primary'
   busy?: boolean
 }>(), {
   confirmLabel: '',
+  cancelLabel: '',
   confirmColor: 'error',
   busy: false,
 })
@@ -42,7 +44,7 @@ const emit = defineEmits<{
         color="neutral"
         variant="outline"
         size="sm"
-        :label="t('common.cancel')"
+        :label="cancelLabel || t('common.cancel')"
         class="ml-auto"
         :disabled="busy"
         @click="emit('update:open', false)"

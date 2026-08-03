@@ -37,7 +37,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **软件：** 只管理名称、用途说明和完整程序路径；不展示或配置文字/字体能力。
 - **词典：** 同一页面以紧凑模式切换本地 Library 与在线 Catalog，不新增一级导航。本地表展示
   名称、说明、语言、版本、规则数及 verified/modified/unmanaged 来源状态；低频 metadata 进入
-  词典设置 Modal。Catalog 表展示本地化 presentation、语言、版本、发布者与标签，并使用后端
+  词典设置 Modal；词条表本身支持直接编辑，末行常驻空白新增入口。Catalog 表展示本地化
+  presentation、语言、版本、发布者与标签，并使用后端
   cursor 分页；现有 metadata tags 同时作为可点击的精确筛选条件，不另建重复的分类模型。本地与
   Catalog 当前模式使用明确的主色选中态。标准 Dictionary `/2` JSON 通过本地页头导入、逐行导出，
   不增加发布中心或向导。
@@ -53,7 +54,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 
 完整软件或词典集合不用普通下拉框承载。Workflow 编辑弹窗使用可搜索、多选的管理列表，并为
 每个目标维护 Adapter Plan、有序词典集合和至多一个内联 Font Policy；字体策略直接选择本机字体
-候选优先级，以及“仅词典命中”或“Hook 捕获的全部文字”。
+候选优先级，并用紧凑的“应用范围”选择器切换“仅词典命中”或“Hook 捕获的全部文字”。字体
+目录显示缓存数量，重新扫描系统字体只能由相邻的显式刷新动作触发。
 
 ## 布局与密度
 
@@ -72,7 +74,10 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   “需要处理”。错误状态可点击展开逐软件的完整解释与恢复动作；软件未启动使用可恢复警告色，
   确定的激活失败使用错误色。
 - 创建和编辑资产复用同一 Nuxt UI Modal；Modal 和 Select 浮层必须高于 sticky 表头。
-- Dictionary 设置与翻译词条编辑采用单列 Modal；矮窗口中 body 独立滚动，header/footer 固定。
+- Dictionary 低频 metadata 使用单列设置 Modal；应用设置只更新同一份编辑草稿，并立即显示
+  “未保存”。词条不再使用编辑 Modal，现有行直接编辑，末行在每次成功添加后自动恢复为空白行。
+- Dictionary 设置、行内修改、新增和删除共享一份草稿与校验；保存成功才更新基线。返回列表、
+  顶部导航和关闭窗口都必须在有未保存更改时请求确认。
 - Dictionary entry 只有非空原文与非空译文，同一 Dictionary 内原文唯一；Location、Context、
   keep 和逐词条字体都不属于 Dictionary。未来区域限制由 Workflow 的 Region Binding 组合。
 - 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。
@@ -81,6 +86,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   unmanaged Dictionary 必须二次确认。普通界面不展示 digest、signature bytes、key ID 或路径。
 - Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Policy；不同 Target 不共享
   隐式选择状态。Font Policy 不成为独立资产，不出现 Location、`main-ui`、全部位置或指定位置。
+- 本机字体目录是应用级机器缓存，不属于 Workflow Target 或 AppSettings；普通启动读取缓存，用户
+  点击刷新后才重新扫描并替换缓存，刷新失败时保留当前可用目录。
 - Probe Run 必须且只绑定一个 Dictionary；观测次数、Adapter 和时间属于内部 Observation Index，
   不进入 Dictionary。暂停不结束任务，重启后可恢复，释放连接后任务和证据仍保留。
 - Probe 详情不分“技术目录”和“字典草稿”；联合表支持后端搜索分页、行内翻译、批量忽略/恢复/

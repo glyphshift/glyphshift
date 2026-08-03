@@ -24,6 +24,7 @@ const props = defineProps<{
   runtimeStatus: Record<string, WorkflowRuntimeStatus>
   busy: boolean
   refreshing: boolean
+  fontRefreshing: boolean
   messages: Record<string, string>
   editing: WorkflowDetail | null
 }>()
@@ -35,6 +36,7 @@ const emit = defineEmits<{
   toggle: [id: string, enabled: boolean]
   toggleMany: [ids: string[], enabled: boolean]
   refresh: []
+  refreshFonts: []
   open: [id: string]
   create: [name: string, description: string, targets: WorkflowTarget[]]
   save: [detail: WorkflowDetail]
@@ -172,6 +174,10 @@ const editorTabs = computed(() => [
 const catalogFilterOptions = computed(() => [
   { value: 'all', label: t('workflows.catalogFilters.all') },
   { value: 'selected', label: t('workflows.catalogFilters.selected') },
+])
+const fontCoverageOptions = computed(() => [
+  { value: 'dictionary_matches' as const, label: t('workflows.fontDictionaryMatches') },
+  { value: 'all_observations' as const, label: t('workflows.fontAllObservations') },
 ])
 const workflowMessage = computed(() => props.messages.workflows || props.items.map(item => props.messages[item.id]).find(Boolean) || '')
 const adapterGroups = computed(() => {
@@ -376,9 +382,6 @@ function setFontPolicyEnabled(enabled: boolean) {
     ? { families: [], coverage: 'dictionary_matches' }
     : null
 }
-function setFontCoverage(coverage: 'dictionary_matches' | 'all_observations') {
-  if (activeTarget.value?.fontPolicy) activeTarget.value.fontPolicy.coverage = coverage
-}
 function toggleFontFamily(family: string) {
   const policy = activeTarget.value?.fontPolicy
   if (!policy) return
@@ -523,8 +526,17 @@ function confirmRemoval() {
               <div class="rounded-[6px] bg-[var(--surface-subtle)] p-3"><UFormField :label="t('workflows.currentTarget')"><USelectMenu v-model="activeSoftwareId" :items="targetOptions" value-key="value" label-key="label" description-key="description" :search-input="{ placeholder: t('workflows.searchSelectedTargets') }" :aria-label="t('workflows.currentTarget')" class="w-full" :ui="{ content: 'z-[90]' }" /></UFormField><p class="m-0 mt-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
               <div class="flex items-start justify-between gap-3"><div><h3 class="m-0 text-[12px] font-semibold">{{ t('workflows.fontPolicy') }}</h3><p class="m-0 mt-1 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontPolicyHint') }}</p></div><USwitch :model-value="Boolean(activeTarget.fontPolicy)" :aria-label="t('workflows.fontPolicyToggle')" @update:model-value="setFontPolicyEnabled(Boolean($event))" /></div>
               <div v-if="activeTarget.fontPolicy" class="space-y-3">
-                <div class="grid gap-1.5" role="group" :aria-label="t('workflows.fontCoverageLabel')"><UButton size="xs" :variant="activeTarget.fontPolicy.coverage === 'dictionary_matches' ? 'solid' : 'outline'" :label="t('workflows.fontDictionaryMatches')" :aria-pressed="activeTarget.fontPolicy.coverage === 'dictionary_matches'" @click="setFontCoverage('dictionary_matches')" /><UButton size="xs" :variant="activeTarget.fontPolicy.coverage === 'all_observations' ? 'solid' : 'outline'" :label="t('workflows.fontAllObservations')" :aria-pressed="activeTarget.fontPolicy.coverage === 'all_observations'" @click="setFontCoverage('all_observations')" /></div>
-                <p v-if="activeTarget.fontPolicy.coverage === 'dictionary_matches'" class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontDictionaryMatchesHint') }}</p><UAlert v-else role="alert" color="warning" variant="soft" icon="i-tabler-alert-triangle" :aria-label="t('workflows.fontAllObservationsWarningTitle')" :title="t('workflows.fontAllObservationsWarningTitle')" :description="t('workflows.fontAllObservationsWarningDescription')" :ui="{ root: 'p-2', title: 'text-[9px]', description: 'text-[9px] leading-4' }" />
+                <div class="flex items-start gap-4">
+                  <UFormField :label="t('workflows.fontCoverageLabel')" class="w-56 shrink-0">
+                    <USelect v-model="activeTarget.fontPolicy.coverage" :items="fontCoverageOptions" value-key="value" label-key="label" :aria-label="t('workflows.fontCoverageLabel')" class="w-full" />
+                  </UFormField>
+                  <p v-if="activeTarget.fontPolicy.coverage === 'dictionary_matches'" class="m-0 max-w-[52ch] pt-5 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontDictionaryMatchesHint') }}</p>
+                </div>
+                <UAlert v-if="activeTarget.fontPolicy.coverage === 'all_observations'" role="alert" color="warning" variant="soft" icon="i-tabler-alert-triangle" :aria-label="t('workflows.fontAllObservationsWarningTitle')" :title="t('workflows.fontAllObservationsWarningTitle')" :description="t('workflows.fontAllObservationsWarningDescription')" :ui="{ root: 'p-2', title: 'text-[9px]', description: 'text-[9px] leading-4' }" />
+                <div class="flex items-center justify-between gap-3">
+                  <div><h4 class="m-0 text-[11px] font-semibold">{{ t('workflows.fontCatalog') }}</h4><p class="m-0 mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('workflows.fontCacheCount', { count: installedFamilies.length }) }}</p></div>
+                  <UButton color="neutral" variant="outline" size="xs" icon="i-tabler-refresh" :label="t('workflows.refreshFonts')" :aria-label="t('workflows.refreshFontsLabel')" :title="t('workflows.refreshFontsLabel')" :loading="fontRefreshing" :disabled="fontRefreshing" @click="emit('refreshFonts')" />
+                </div>
                 <div class="grid grid-cols-[minmax(0,1fr)_128px] gap-2"><UInput v-model="fontQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchFonts')" :aria-label="t('workflows.searchFonts')" /><USelect v-model="fontFilter" :items="catalogFilterOptions" value-key="value" label-key="label" :aria-label="t('workflows.fontFilter')" class="w-full" /></div>
                 <div data-testid="workflow-font-catalog" class="max-h-64 overflow-y-auto rounded-[6px] border border-[var(--border)] [scrollbar-gutter:stable]">
                   <div v-for="family in visibleFontFamilies" :key="family" :data-font-family="family" class="flex min-h-10 items-center gap-2 border-b border-[var(--border)] px-3 last:border-b-0 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.fontPolicy.families.includes(family)" :aria-label="t('workflows.selectFontNamed', { name: family })" @update:model-value="toggleFontFamily(family)" /><span class="min-w-0 flex-1 truncate text-[9px]">{{ family }}</span><template v-if="activeTarget.fontPolicy.families.includes(family)"><UBadge color="neutral" variant="soft" size="sm" :label="t('workflows.priorityNumber', { number: activeTarget.fontPolicy.families.indexOf(family) + 1 })" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-up" :disabled="activeTarget.fontPolicy.families.indexOf(family) === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="moveFontFamily(family, -1)" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-down" :disabled="activeTarget.fontPolicy.families.indexOf(family) === activeTarget.fontPolicy.families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="moveFontFamily(family, 1)" /></template></div>

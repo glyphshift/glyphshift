@@ -10,6 +10,7 @@ defineProps<{
 }>()
 const emit = defineEmits<{
   navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'help' | 'settings']
+  close: []
 }>()
 
 const { t } = useI18n()
@@ -37,12 +38,11 @@ function toggleTheme() {
   })
 }
 
-async function native(action: 'minimize' | 'maximize' | 'close') {
+async function native(action: 'minimize' | 'maximize') {
   try {
     const window = getCurrentWindow()
     if (action === 'minimize') await window.minimize()
-    else if (action === 'maximize') await window.toggleMaximize()
-    else await window.close()
+    else await window.toggleMaximize()
   }
   catch {
     // Browser previews do not expose native window controls.
@@ -90,7 +90,7 @@ async function native(action: 'minimize' | 'maximize' | 'close') {
       <UButton color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.settings')" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
       <UButton color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" :aria-label="t('titleBar.minimize')" @click="native('minimize')" />
       <UButton color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" :aria-label="t('titleBar.maximize')" @click="native('maximize')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="native('close')" />
+      <UButton color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="emit('close')" />
     </div>
   </header>
 </template>

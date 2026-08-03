@@ -30,12 +30,15 @@ use glyphshift_workflow::ResolveError;
 use serde::{Deserialize, Serialize};
 use settings::{AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 15;
+const DESKTOP_API_VERSION: u16 = 16;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
+const FONT_CACHE_SCHEMA: &str = "glyphshift.font-cache/1";
+const FONT_CACHE_FILE: &str = "font-families.json";
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
     match error {
@@ -587,6 +590,7 @@ struct DesktopApplication {
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     font_families: Vec<Box<str>>,
+    font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
     active_probe_run_id: Option<Box<str>>,
 }
@@ -621,7 +625,7 @@ impl DesktopApplication {
                     .collect()
             })
             .unwrap_or_default();
-        let font_families = system_font_families();
+        let font_families = load_cached_font_families(&data_root, system_font_families);
         let environment = DesktopEnvironment::new(
             runtime_bundle
                 .as_ref()
@@ -629,7 +633,7 @@ impl DesktopApplication {
                 .unwrap_or_default(),
             font_families.iter().cloned(),
         );
-        let backend = DesktopBackend::open_with_environment(data_root, environment)
+        let backend = DesktopBackend::open_with_environment(&data_root, environment)
             .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
             backend,
@@ -640,6 +644,7 @@ impl DesktopApplication {
             workflow_runtime_status: BTreeMap::new(),
             adapters,
             font_families,
+            font_cache_root: data_root.clone(),
             probe_runs,
             active_probe_run_id: None,
         };
@@ -683,6 +688,16 @@ impl DesktopApplication {
             adapters: self.adapters.clone(),
             font_families: self.font_families.clone(),
         }
+    }
+
+    fn refresh_font_families(&mut self) -> Result<DesktopProductSnapshot, CommandError> {
+        let font_families =
+            refresh_cached_font_families(&self.font_cache_root, system_font_families)
+                .map_err(|_| CommandError::new("font.cache_write_failed"))?;
+        self.backend
+            .replace_font_families(font_families.iter().cloned());
+        self.font_families = font_families;
+        Ok(self.snapshot())
     }
 
     fn probe_run_view(&self, summary: ProbeRunSummary) -> Result<ProbeRunView, CommandError> {
@@ -1784,6 +1799,78 @@ fn normalize_font_registry_label(label: &str) -> Option<&str> {
     (!family.is_empty()).then_some(family)
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontFamilyCache {
+    schema: Box<str>,
+    families: Vec<Box<str>>,
+}
+
+fn normalize_font_families(
+    families: impl IntoIterator<Item = impl Into<Box<str>>>,
+) -> Vec<Box<str>> {
+    families
+        .into_iter()
+        .map(Into::into)
+        .filter_map(|family| {
+            let family = family.trim();
+            (!family.is_empty()).then(|| Box::<str>::from(family))
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn read_cached_font_families(data_root: &Path) -> Option<Vec<Box<str>>> {
+    let source = fs::read_to_string(data_root.join(FONT_CACHE_FILE)).ok()?;
+    let artifact = serde_json::from_str::<FontFamilyCache>(&source).ok()?;
+    if artifact.schema.as_ref() != FONT_CACHE_SCHEMA {
+        return None;
+    }
+    let families = normalize_font_families(artifact.families);
+    (!families.is_empty()).then_some(families)
+}
+
+fn write_cached_font_families(
+    data_root: &Path,
+    families: &[Box<str>],
+) -> Result<(), std::io::Error> {
+    if families.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "font catalog is empty",
+        ));
+    }
+    fs::create_dir_all(data_root)?;
+    let payload = serde_json::to_vec_pretty(&FontFamilyCache {
+        schema: FONT_CACHE_SCHEMA.into(),
+        families: families.to_vec(),
+    })
+    .map_err(std::io::Error::other)?;
+    fs::write(data_root.join(FONT_CACHE_FILE), payload)
+}
+
+fn load_cached_font_families(
+    data_root: &Path,
+    scan: impl FnOnce() -> Vec<Box<str>>,
+) -> Vec<Box<str>> {
+    if let Some(families) = read_cached_font_families(data_root) {
+        return families;
+    }
+    let families = normalize_font_families(scan());
+    let _ = write_cached_font_families(data_root, &families);
+    families
+}
+
+fn refresh_cached_font_families(
+    data_root: &Path,
+    scan: impl FnOnce() -> Vec<Box<str>>,
+) -> Result<Vec<Box<str>>, std::io::Error> {
+    let families = normalize_font_families(scan());
+    write_cached_font_families(data_root, &families)?;
+    Ok(families)
+}
+
 #[cfg(target_os = "windows")]
 fn system_font_families() -> Vec<Box<str>> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
@@ -1864,6 +1951,16 @@ fn desktop_snapshot(
         .lock()
         .map_err(|_| workspace_unavailable())
         .map(|application| application.snapshot())
+}
+
+#[tauri::command]
+fn desktop_refresh_font_families(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .refresh_font_families()
 }
 
 #[tauri::command]
@@ -2280,6 +2377,7 @@ pub fn run() {
             desktop_settings,
             desktop_update_settings,
             desktop_snapshot,
+            desktop_refresh_font_families,
             desktop_probe_runs,
             desktop_create_probe_run,
             desktop_delete_probe_runs,
@@ -2809,6 +2907,7 @@ mod tests {
                 workflow_runtime_status: BTreeMap::new(),
                 adapters: Vec::new(),
                 font_families: Vec::new(),
+                font_cache_root: data_root.path().to_path_buf(),
                 probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
                     .expect("probe run store"),
                 active_probe_run_id: None,
@@ -3382,6 +3481,7 @@ mod tests {
             workflow_runtime_status: BTreeMap::new(),
             adapters: Vec::new(),
             font_families: Vec::new(),
+            font_cache_root: data_root.path().to_path_buf(),
             probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
                 .expect("probe run store"),
             active_probe_run_id: None,
@@ -3428,5 +3528,48 @@ mod tests {
         assert!(snapshot
             .workflow_runtime_status
             .contains_key("workflow.product"));
+    }
+
+    #[test]
+    fn font_catalog_cache_skips_system_scan_until_explicit_refresh() {
+        let root = tempdir().expect("font cache root");
+        let mut scans = 0;
+        let first = load_cached_font_families(root.path(), || {
+            scans += 1;
+            vec![
+                Box::<str>::from("Zulu Sans"),
+                Box::<str>::from("Alpha Sans"),
+            ]
+        });
+        assert_eq!(scans, 1);
+        assert_eq!(
+            first,
+            vec![
+                Box::<str>::from("Alpha Sans"),
+                Box::<str>::from("Zulu Sans")
+            ]
+        );
+
+        let second = load_cached_font_families(root.path(), || {
+            scans += 1;
+            vec![Box::<str>::from("must not scan")]
+        });
+        assert_eq!(scans, 1);
+        assert_eq!(second, first);
+
+        let refreshed = refresh_cached_font_families(root.path(), || {
+            scans += 1;
+            vec![Box::<str>::from("Refreshed Sans")]
+        })
+        .expect("refresh font cache");
+        assert_eq!(scans, 2);
+        assert_eq!(refreshed, vec![Box::<str>::from("Refreshed Sans")]);
+
+        let reopened = load_cached_font_families(root.path(), || {
+            scans += 1;
+            vec![Box::<str>::from("must not rescan")]
+        });
+        assert_eq!(scans, 2);
+        assert_eq!(reopened, refreshed);
     }
 }

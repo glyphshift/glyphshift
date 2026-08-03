@@ -315,7 +315,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
         if (command === 'desktop_import_dictionary') {
@@ -381,7 +381,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -437,7 +437,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -481,7 +481,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale
@@ -529,7 +529,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -611,7 +611,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -737,7 +737,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 15 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 16 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -855,7 +855,7 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
   await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
   await expect(page.getByText('en-US → zh-CN')).toBeVisible()
-  await expect(page.getByText('另存为…')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '编辑译文：Save As…' })).toHaveValue('另存为…')
   await expect(page.getByRole('columnheader', { name: '位置', exact: true })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: '语境', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '词典设置' }).click()
@@ -863,13 +863,11 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
   await expect(settings.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
   await expect(settings.getByRole('textbox', { name: '作者' })).toHaveValue('Glyphshift')
   await settings.getByRole('button', { name: '取消' }).click()
-  await page.getByRole('button', { name: '添加词条' }).click()
-  const ruleEditor = page.getByRole('dialog', { name: '添加翻译词条' })
-  await expect(ruleEditor.getByRole('textbox', { name: '原文' })).toBeVisible()
-  await expect(ruleEditor.getByRole('textbox', { name: '译文' })).toBeVisible()
-  await expect(ruleEditor.getByText('语义位置')).toHaveCount(0)
-  await expect(ruleEditor.getByText('限定语境')).toHaveCount(0)
-  await ruleEditor.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByRole('button', { name: '添加词条' })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: '新词条原文' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '新词条译文' })).toBeVisible()
+  await expect(page.getByText('语义位置')).toHaveCount(0)
+  await expect(page.getByText('限定语境')).toHaveCount(0)
   await expect(page.getByText('默认字体')).toHaveCount(0)
   await expect(page.getByText(/Hook/)).toHaveCount(0)
 })
@@ -895,10 +893,21 @@ test('workflow target independently selects adapters dictionaries and one font p
 
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await expect(dialog.getByRole('switch', { name: '启用字体策略' })).toBeChecked()
-  await expect(dialog.getByRole('button', { name: '仅词典命中' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('仅词典命中')
   await expect(dialog.getByPlaceholder('搜索本机字体')).toBeVisible()
   await expect(dialog.getByText(/位置|main-ui/)).toHaveCount(0)
+})
+
+test('font policy uses a compact coverage selector and an explicit cached refresh', async ({ page }) => {
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑工作流' })
+  await dialog.getByRole('tab', { name: '字体策略' }).click()
+
+  await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('仅词典命中')
+  await expect(dialog.getByRole('button', { name: '仅词典命中' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveCount(0)
+  await expect(dialog.getByText('已缓存 3 种字体', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '刷新字体列表' })).toBeVisible()
 })
 
 test('workflow editor separates large catalogs across four focused tabs', async ({ page }) => {
@@ -973,7 +982,8 @@ test('workflow saves font coverage and ordered inline candidates', async ({ page
   let dialog = page.getByRole('dialog', { name: '编辑工作流' })
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await expect(dialog.getByRole('alert', { name: '高影响字体模式' })).toHaveCount(0)
-  await dialog.getByRole('button', { name: 'Hook 捕获的全部文字' }).click()
+  await dialog.getByRole('combobox', { name: '应用范围' }).click()
+  await page.getByRole('option', { name: 'Hook 捕获的全部文字' }).click()
   await expect(dialog.getByRole('alert', { name: '高影响字体模式' })).toContainText('未翻译文字、图标或符号')
   await dialog.getByRole('button', { name: '提高 Synthetic Serif 的优先级' }).click()
   await dialog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' }).click()
@@ -982,7 +992,7 @@ test('workflow saves font coverage and ordered inline candidates', async ({ page
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   dialog = page.getByRole('dialog', { name: '编辑工作流' })
   await dialog.getByRole('tab', { name: '字体策略' }).click()
-  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('Hook 捕获的全部文字')
   const priorityItems = dialog.getByTestId('workflow-font-catalog').locator('[data-font-family]')
   await expect(priorityItems.nth(0)).toHaveAttribute('data-font-family', 'Synthetic Serif')
   await expect(priorityItems.nth(0)).toContainText('优先级 1')
@@ -1000,17 +1010,18 @@ test('inline font policy stays isolated between software targets', async ({ page
   await page.getByRole('option', { name: /^Pixel Studio/ }).click()
   await expect(dialog.getByRole('switch', { name: '启用字体策略' })).not.toBeChecked()
   await dialog.getByRole('switch', { name: '启用字体策略' }).click()
-  await dialog.getByRole('button', { name: 'Hook 捕获的全部文字' }).click()
+  await dialog.getByRole('combobox', { name: '应用范围' }).click()
+  await page.getByRole('option', { name: 'Hook 捕获的全部文字' }).click()
   await dialog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' }).click()
   await currentTarget.click()
   await page.getByRole('option', { name: /^Vector Studio/ }).click()
-  await expect(dialog.getByRole('button', { name: '仅词典命中' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('仅词典命中')
   await expect(dialog.getByRole('checkbox', { name: '选择字体 Synthetic Sans' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: '选择字体 Synthetic Serif' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).not.toBeChecked()
   await currentTarget.click()
   await page.getByRole('option', { name: /^Pixel Studio/ }).click()
-  await expect(dialog.getByRole('button', { name: 'Hook 捕获的全部文字' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('Hook 捕获的全部文字')
   await expect(dialog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).toBeChecked()
   await expect(dialog.getByRole('checkbox', { name: '选择字体 Synthetic Sans' })).not.toBeChecked()
 })
@@ -1027,7 +1038,9 @@ test('dictionary editor saves the complete portable metadata set', async ({ page
   await settings.getByRole('textbox', { name: '许可证' }).fill('Apache-2.0')
   await settings.getByRole('textbox', { name: '主页' }).fill('https://example.invalid/dictionary')
   await settings.getByRole('button', { name: '应用设置' }).click()
+  await expect(page.getByText('未保存', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '保存词典' }).click()
+  await expect(page.getByText('未保存', { exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '返回词典列表' }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
   await page.getByRole('button', { name: '词典设置' }).click()
@@ -1039,23 +1052,60 @@ test('dictionary editor saves the complete portable metadata set', async ({ page
   await expect(settings.getByRole('textbox', { name: '主页' })).toHaveValue('https://example.invalid/dictionary')
 })
 
+test('dictionary editor uses one guarded inline draft', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
+
+  const existingRow = page.getByRole('row').filter({ has: page.getByRole('textbox', { name: '编辑原文：Save As…' }) })
+  await expect(existingRow.getByRole('textbox', { name: '编辑原文：Save As…' })).toHaveValue('Save As…')
+  await expect(existingRow.getByRole('textbox', { name: '编辑译文：Save As…' })).toHaveValue('另存为…')
+  await expect(page.getByRole('button', { name: '编辑 Save As…' })).toHaveCount(0)
+
+  const blankRow = page.getByRole('row').filter({ has: page.getByRole('textbox', { name: '新词条原文' }) })
+  await expect(blankRow.getByRole('textbox', { name: '新词条原文' })).toBeVisible()
+  await blankRow.getByRole('textbox', { name: '新词条原文' }).fill('Close')
+  await blankRow.getByRole('textbox', { name: '新词条译文' }).fill('关闭')
+  await blankRow.getByRole('textbox', { name: '新词条译文' }).press('Enter')
+
+  await expect(page.getByText('未保存', { exact: true })).toBeVisible()
+  await expect(blankRow.getByRole('textbox', { name: '新词条原文' })).toHaveValue('')
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-inline-draft.png' })
+
+  await page.getByRole('button', { name: '返回词典列表' }).click()
+  const guard = page.getByRole('dialog', { name: '放弃未保存更改？' })
+  await expect(guard).toBeVisible()
+  await guard.getByRole('button', { name: '继续编辑' }).click()
+  await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '放弃未保存更改？' })).toBeVisible()
+  await page.getByRole('dialog', { name: '放弃未保存更改？' }).getByRole('button', { name: '继续编辑' }).click()
+  await page.getByRole('button', { name: '关闭窗口' }).click()
+  await expect(page.getByRole('dialog', { name: '放弃未保存更改？' })).toBeVisible()
+  await page.getByRole('dialog', { name: '放弃未保存更改？' }).getByRole('button', { name: '继续编辑' }).click()
+  await page.getByRole('button', { name: '返回词典列表' }).click()
+  await page.getByRole('dialog', { name: '放弃未保存更改？' }).getByRole('button', { name: '放弃更改' }).click()
+  await expect(page.getByRole('heading', { name: '词典', exact: true })).toBeVisible()
+})
+
 test('dictionary text editing saves only source and translation', async ({ page }) => {
   await page.getByRole('button', { name: '词典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await page.getByRole('button', { name: '编辑 Save As…' }).click()
-  const editor = page.getByRole('dialog', { name: '编辑翻译词条' })
-  await editor.getByRole('textbox', { name: '译文' }).fill('另存一个副本…')
-  await editor.getByRole('button', { name: '保存词条' }).click()
+  await page.getByRole('textbox', { name: '编辑译文：Save As…' }).fill('另存一个副本…')
+  await page.getByRole('textbox', { name: '新词条原文' }).fill('Close')
+  await page.getByRole('textbox', { name: '新词条译文' }).fill('关闭')
+  await expect(page.getByText('未保存', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '保存词典' }).click()
 
   const saved = await page.evaluate(() => {
     const model = JSON.parse(localStorage.getItem('glyphshift.composable-product-model.v3') ?? '{}')
-    return model.dictionaryDetails?.['dictionary-proof']?.entries?.[1]
+    return model.dictionaryDetails?.['dictionary-proof']?.entries
   })
-  expect(saved).toEqual({
+  expect(saved[1]).toEqual({
     source: 'Save As…',
     translation: '另存一个副本…',
   })
+  expect(saved[2]).toEqual({ source: 'Close', translation: '关闭' })
 })
 
 test('saved browser model contains inline policy without font assets or locations', async ({ page }) => {

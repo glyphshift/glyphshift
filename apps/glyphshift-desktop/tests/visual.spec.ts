@@ -50,7 +50,8 @@ test('capture composable workflow and asset surfaces', async ({ page }) => {
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-dictionaries.png' })
   await dialog.getByRole('tab', { name: '字体策略' }).click()
-  await dialog.getByRole('button', { name: 'Hook 捕获的全部文字' }).click()
+  await dialog.getByRole('combobox', { name: '应用范围' }).click()
+  await page.getByRole('option', { name: 'Hook 捕获的全部文字' }).click()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-font-policy-all-observations.png' })
   await page.getByRole('button', { name: '取消' }).click()
@@ -79,7 +80,7 @@ test('capture probe run creation and joined table state', async ({ page }) => {
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/probe-run-table-compact.png' })
 })
 
-test('capture distilled dictionary editor and its focused modals', async ({ page }) => {
+test('capture distilled dictionary editor, metadata, and guarded inline draft', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/')
@@ -108,10 +109,16 @@ test('capture distilled dictionary editor and its focused modals', async ({ page
   await page.setViewportSize({ width: 960, height: 640 })
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-editor-distilled-compact.png' })
-  await page.getByRole('button', { name: '添加词条' }).click()
-  await expect(page.getByRole('dialog', { name: '添加翻译词条' })).toBeVisible()
+  await page.getByRole('textbox', { name: '新词条原文' }).fill('Close')
+  await page.getByRole('textbox', { name: '新词条译文' }).fill('关闭')
+  await page.getByRole('textbox', { name: '新词条译文' }).press('Enter')
+  await expect(page.getByText('未保存', { exact: true })).toBeVisible()
   await waitForVisualStability(page)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-rule-modal-compact.png' })
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-inline-draft-compact.png' })
+  await page.getByRole('button', { name: '返回词典列表' }).click()
+  await expect(page.getByRole('dialog', { name: '放弃未保存更改？' })).toBeVisible()
+  await waitForVisualStability(page)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/dictionary-discard-guard-compact.png' })
 })
 
 test('capture local dictionary provenance and offline catalog modes', async ({ page }) => {

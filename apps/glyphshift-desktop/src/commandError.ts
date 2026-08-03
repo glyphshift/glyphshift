@@ -19,6 +19,7 @@ const messageKeys: Record<string, string> = {
   'settings.write_failed': 'errors.settings.writeFailed',
   'workspace.unavailable': 'errors.workspaceUnavailable',
   'storage.write_failed': 'errors.storageWriteFailed',
+  'font.cache_write_failed': 'errors.fontCacheWriteFailed',
   'dictionary.not_found': 'errors.dictionary.notFound',
   'dictionary.invalid_create': 'errors.dictionary.invalidCreate',
   'dictionary.invalid_update': 'errors.dictionary.invalidUpdate',

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { en, zh_cn } from '@nuxt/ui/locale'
 import { useI18n } from 'vue-i18n'
 import DictionaryLibrary from './components/DictionaryLibrary.vue'
@@ -16,12 +17,16 @@ import type { WorkflowDetail, WorkflowTarget } from './model'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
-const desktopApiVersion = 15
+type NavigableView = Exclude<View, 'dictionary-editor'>
+const desktopApiVersion = 16
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
 const workspace = useWorkspace()
 const view = ref<View>('workflows')
+const dictionaryDirty = ref(false)
+const pendingExit = ref<NavigableView | 'close' | null>(null)
+const discardOpen = computed(() => pendingExit.value !== null)
 const shellCompatibilityErrorKey = ref('')
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
@@ -31,7 +36,54 @@ async function openWorkflow(id: string) {
 }
 
 async function openDictionary(id: string) {
-  if (await workspace.loadDictionary(id)) view.value = 'dictionary-editor'
+  if (await workspace.loadDictionary(id)) {
+    dictionaryDirty.value = false
+    view.value = 'dictionary-editor'
+  }
+}
+
+function requestNavigation(next: NavigableView) {
+  if (view.value === 'dictionary-editor' && dictionaryDirty.value) {
+    pendingExit.value = next
+    return
+  }
+  dictionaryDirty.value = false
+  view.value = next
+}
+
+async function closeWindow() {
+  try {
+    await getCurrentWindow().close()
+  }
+  catch {
+    // Browser previews do not expose native window controls.
+  }
+}
+
+function requestWindowClose() {
+  if (view.value === 'dictionary-editor' && dictionaryDirty.value) {
+    pendingExit.value = 'close'
+    return
+  }
+  void closeWindow()
+}
+
+function cancelDiscard() {
+  pendingExit.value = null
+}
+
+function confirmDiscard() {
+  const destination = pendingExit.value
+  pendingExit.value = null
+  dictionaryDirty.value = false
+  if (destination === 'close') void closeWindow()
+  else if (destination) view.value = destination
+}
+
+function guardBrowserExit(event: BeforeUnloadEvent) {
+  if (view.value !== 'dictionary-editor' || !dictionaryDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 async function createWorkflow(name: string, description: string, targets: WorkflowTarget[]) {
@@ -61,14 +113,17 @@ async function connectDesktopShell() {
 }
 
 onMounted(() => {
+  window.addEventListener('beforeunload', guardBrowserExit)
   void connectDesktopShell()
 })
+
+onBeforeUnmount(() => window.removeEventListener('beforeunload', guardBrowserExit))
 </script>
 
 <template>
   <UApp :locale="nuxtLocale">
     <div class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
-      <TitleBar :current="view" @navigate="view = $event" />
+      <TitleBar :current="view" @navigate="requestNavigation" @close="requestWindowClose" />
       <main class="flex min-h-0 flex-1 overflow-hidden">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <UAlert
@@ -91,10 +146,12 @@ onMounted(() => {
         :runtime-status="workspace.model.value.workflowRuntimeStatus"
         :busy="workspace.workspaceBusy.value"
         :refreshing="workspace.refreshing.value"
+        :font-refreshing="workspace.fontRefreshing.value"
         :messages="workspace.messages.value"
         :editing="workspace.workflowDetail.value"
         @toggle="workspace.setWorkflowEnabled"
         @refresh="workspace.refreshWorkflows"
+        @refresh-fonts="workspace.refreshFontFamilies"
         @open="openWorkflow"
         @create="createWorkflow"
         @save="saveWorkflow"
@@ -134,8 +191,9 @@ onMounted(() => {
         v-else-if="view === 'dictionary-editor' && workspace.dictionaryDetail.value"
         :detail="workspace.dictionaryDetail.value"
         :busy="workspace.workspaceBusy.value"
-        @back="view = 'dictionaries'"
+        @back="requestNavigation('dictionaries')"
         @save="workspace.saveDictionary"
+        @dirty-change="dictionaryDirty = $event"
       />
       <CaptureView
         v-else-if="view === 'capture'"
@@ -146,6 +204,16 @@ onMounted(() => {
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />
       </main>
+      <ConfirmDialog
+        :open="discardOpen"
+        :title="t('dictionaryEditor.discardTitle')"
+        :description="t('dictionaryEditor.discardDescription')"
+        :cancel-label="t('dictionaryEditor.continueEditing')"
+        :confirm-label="t('dictionaryEditor.discardConfirm')"
+        confirm-color="warning"
+        @update:open="$event || cancelDiscard()"
+        @confirm="confirmDiscard"
+      />
     </div>
   </UApp>
 </template>

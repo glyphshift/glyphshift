@@ -1042,6 +1042,14 @@ impl DesktopEnvironment {
         }
         self.composition = composition_environment(&self.adapter_requirements, &self.font_families);
     }
+
+    fn replace_font_families(
+        &mut self,
+        font_families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) {
+        self.font_families = font_families.into_iter().map(Into::into).collect();
+        self.composition = composition_environment(&self.adapter_requirements, &self.font_families);
+    }
 }
 
 fn composition_environment(
@@ -1246,6 +1254,13 @@ impl DesktopBackend {
         self.dictionaries
             .get(dictionary_id)
             .ok_or_else(|| BackendError::UnknownDictionary(dictionary_id.into()))
+    }
+
+    pub fn replace_font_families(
+        &mut self,
+        font_families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) {
+        self.environment.replace_font_families(font_families);
     }
 
     pub fn dictionary_json(&self, dictionary_id: &str) -> Result<Vec<u8>, BackendError> {
