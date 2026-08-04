@@ -18,6 +18,7 @@ glyphshift-adapter-console = { path = "../glyphshift-adapter-console" }
 glyphshift-adapter-direct2d = { path = "../glyphshift-adapter-direct2d" }
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
+glyphshift-adapter-gtk3-pango = { path = "../glyphshift-adapter-gtk3-pango" }
 glyphshift-adapter-qt-painter = { path = "../glyphshift-adapter-qt-painter" }
 glyphshift-windows-host = { path = "../../test-support/windows-host" }
 

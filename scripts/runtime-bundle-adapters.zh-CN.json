@@ -47,5 +47,12 @@
     "summary": "拦截动态链接 Qt 5/6 Widgets 的常见文本绘制并应用字典译文；不适用于静态 Qt 或 QML",
     "technology": "Qt 5 / Qt 6 Widgets",
     "technicalTarget": "QtGui!QPainter::drawText"
+  },
+  {
+    "id": "windows.gtk3.pango-render-layout",
+    "name": "GTK 3 / Pango 绘制",
+    "summary": "拦截动态链接 GTK 3 的常见文本布局绘制并应用字典译文；局部样式文本安全放行，不适用于 GTK 4",
+    "technology": "GTK 3 / Pango",
+    "technicalTarget": "GTK 3!gtk_render_layout"
   }
 ]

@@ -50,6 +50,7 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-gdi-native',
     '-p', 'glyphshift-adapter-gdi-text-out-native',
     '-p', 'glyphshift-adapter-gdiplus-native',
+    '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native'
 )
 if ($IncludeTestTarget) {
@@ -106,6 +107,8 @@ $drawTextBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text' 'dll'
 $gdiPlusBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdiplus_native.dll' 'adapter-gdiplus' 'dll'
+$gtk3PangoBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
 
@@ -136,6 +139,7 @@ $uiaPresentation = Get-AdapterPresentation 'windows.uia.observe'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
+$gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 
 $runtimeManifest = [ordered]@{
@@ -191,6 +195,14 @@ $runtimeManifest = [ordered]@{
             summary = $gdiPlusPresentation.summary
             technology = $gdiPlusPresentation.technology
             technicalTarget = $gdiPlusPresentation.technicalTarget
+        },
+        [ordered]@{
+            file = $gtk3PangoBundle.file
+            sha256 = $gtk3PangoBundle.sha256
+            name = $gtk3PangoPresentation.name
+            summary = $gtk3PangoPresentation.summary
+            technology = $gtk3PangoPresentation.technology
+            technicalTarget = $gtk3PangoPresentation.technicalTarget
         },
         [ordered]@{
             file = $qtPainterBundle.file

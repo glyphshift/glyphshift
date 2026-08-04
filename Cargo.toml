@@ -14,6 +14,8 @@ members = [
     "crates/glyphshift-adapter-gdi-text-out-native",
     "crates/glyphshift-adapter-gdiplus",
     "crates/glyphshift-adapter-gdiplus-native",
+    "crates/glyphshift-adapter-gtk3-pango",
+    "crates/glyphshift-adapter-gtk3-pango-native",
     "crates/glyphshift-adapter-qt-painter",
     "crates/glyphshift-adapter-qt-painter-native",
     "crates/glyphshift-adapter-native-abi",

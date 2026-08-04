@@ -1248,6 +1248,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-gtk3-pango"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-gtk3-pango-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-gtk3-pango",
+ "glyphshift-adapter-native-abi",
+ "retour",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "glyphshift-adapter-native-abi"
 version = "0.1.0"
 dependencies = [
@@ -1263,6 +1281,7 @@ dependencies = [
  "glyphshift-adapter-direct2d",
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
+ "glyphshift-adapter-gtk3-pango",
  "glyphshift-adapter-native-abi",
  "glyphshift-adapter-qt-painter",
  "glyphshift-adapter-sdk",
