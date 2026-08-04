@@ -44,6 +44,7 @@ $cargoArguments = @(
     '--manifest-path', $manifestPath,
     '-p', 'glyphshift-controller-windows',
     '-p', 'glyphshift-target-runtime',
+    '-p', 'glyphshift-adapter-uia-worker',
     '-p', 'glyphshift-adapter-console-native',
     '-p', 'glyphshift-adapter-draw-text-native',
     '-p', 'glyphshift-adapter-gdi-native',
@@ -92,6 +93,8 @@ $controllerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-controller-windows.exe' 'controller' 'exe'
 $runtimeBundle = Copy-VersionedBundleArtifact `
     'glyphshift_target_runtime.dll' 'runtime' 'dll'
+$uiaWorkerBundle = Copy-VersionedBundleArtifact `
+    'glyphshift-adapter-uia-worker.exe' 'adapter-uia-worker' 'exe'
 $consoleBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
@@ -126,6 +129,7 @@ function Get-AdapterPresentation([string]$AdapterId) {
 
 $extTextOutPresentation = Get-AdapterPresentation 'windows.gdi.ext-text-out'
 $consolePresentation = Get-AdapterPresentation 'windows.console.write-console'
+$uiaPresentation = Get-AdapterPresentation 'windows.uia.observe'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
@@ -185,6 +189,21 @@ $runtimeManifest = [ordered]@{
             technicalTarget = $gdiPlusPresentation.technicalTarget
         }
     )
+    isolated_workers = @(
+        [ordered]@{
+            file = $uiaWorkerBundle.file
+            sha256 = $uiaWorkerBundle.sha256
+            adapter_id = 'windows.uia.observe'
+            version = @(1, 0, 0)
+            features = @('text-observe')
+            platforms = @('windows')
+            architectures = @('x86', 'x86_64')
+            name = $uiaPresentation.name
+            summary = $uiaPresentation.summary
+            technology = $uiaPresentation.technology
+            technicalTarget = $uiaPresentation.technicalTarget
+        }
+    )
 }
 $runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 6
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
@@ -197,7 +216,7 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 $declaredArtifacts = @(
     $runtimeManifest.controller,
     $runtimeManifest.runtime
-) + @($runtimeManifest.adapters)
+) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers)
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
 if ($IncludeTestTarget) {
     $expectedFiles += 'test-target.exe'

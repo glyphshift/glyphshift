@@ -37,10 +37,14 @@ mod windows_worker {
         UIA_ValuePatternId, UIA_ValueValuePropertyId, UIA_EVENT_ID, UIA_PROPERTY_ID,
     };
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HWND, LPARAM};
+    use windows_sys::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
+        TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
+    };
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::System::Ole::SafeArrayDestroy;
     use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
@@ -627,6 +631,49 @@ mod windows_worker {
         queried.then_some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
     }
 
+    fn process_integrity_rid(process_id: u32) -> Option<u32> {
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        if process.is_null() {
+            return None;
+        }
+        let mut token = std::ptr::null_mut();
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            unsafe { CloseHandle(process) };
+            return None;
+        }
+        let mut required = 0;
+        unsafe {
+            GetTokenInformation(
+                token,
+                TokenIntegrityLevel,
+                std::ptr::null_mut(),
+                0,
+                &mut required,
+            );
+        }
+        let mut buffer = vec![0_u8; required as usize];
+        let queried = required > 0
+            && unsafe {
+                GetTokenInformation(
+                    token,
+                    TokenIntegrityLevel,
+                    buffer.as_mut_ptr().cast(),
+                    required,
+                    &mut required,
+                )
+            } != 0;
+        let integrity = queried.then(|| unsafe {
+            let label = &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>();
+            let count = *GetSidSubAuthorityCount(label.Label.Sid) as u32;
+            *GetSidSubAuthority(label.Label.Sid, count.saturating_sub(1))
+        });
+        unsafe {
+            CloseHandle(token);
+            CloseHandle(process);
+        }
+        integrity
+    }
+
     fn parse_target(activation: &WorkerActivation) -> Result<ProcessInstance, WorkerError> {
         if activation.adapter_id != ADAPTER_ID
             || activation.target_grant.platform != TARGET_GRANT_PLATFORM
@@ -650,6 +697,13 @@ mod windows_worker {
             .ok_or_else(|| WorkerError::new("invalid_target_grant"))?;
         if process_started_at(process_id) != Some(started_at) {
             return Err(WorkerError::new("target_instance_changed"));
+        }
+        let worker_integrity = process_integrity_rid(std::process::id())
+            .ok_or_else(|| WorkerError::new("uia_permission_denied"))?;
+        let target_integrity = process_integrity_rid(process_id)
+            .ok_or_else(|| WorkerError::new("uia_permission_denied"))?;
+        if target_integrity > worker_integrity {
+            return Err(WorkerError::new("uia_permission_denied"));
         }
         Ok(ProcessInstance {
             process_id,

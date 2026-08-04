@@ -151,3 +151,5 @@ Workflow Target 或用户猜测的区域配置。
   进入独立 Catalog/Artifact seam，不进入 Dictionary metadata。
 - 顶部主题切换与设置页操作共同写入唯一 App Settings；页面和组件不各自维护主题副本。
 - 本机路径、实机样本、截图与日志只存在于被忽略的 `target/local-test/`。
+- 外部产品调研进入 Flightdeck 或其他跟踪文档时，只保留匿名化、可复用的技术汇总结论；不记录
+  竞品名称、付费信息、宣传文案或品牌来源链接。

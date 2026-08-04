@@ -6,7 +6,7 @@ use glyphshift_desktop_backend::{
     DictionaryEntryCreate, DictionaryView, ExecutableSelection, FontCoverage, WorkflowCreate,
     WorkflowFontPolicy, WorkflowTargetCreate,
 };
-use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
+use glyphshift_desktop_runtime::{DesktopRuntimeError, DesktopRuntimePool, RuntimeBundle};
 use glyphshift_domain::Feature;
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
@@ -18,6 +18,7 @@ use tempfile::tempdir;
 const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
 const TEST_GDIPLUS_ADAPTER_ID: &str = "windows.gdiplus.draw-string";
 const TEST_CONSOLE_OBSERVER_ID: &str = "windows.console.write-console";
+const TEST_UIA_OBSERVER_ID: &str = "windows.uia.observe";
 
 #[test]
 #[ignore = "requires the local Windows Runtime bundle built by scripts/build-runtime-bundle.ps1"]
@@ -37,6 +38,110 @@ fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_transl
         .translation_adapter_ids()
         .iter()
         .any(|adapter_id| adapter_id.as_ref() == TEST_CONSOLE_OBSERVER_ID));
+
+    let uia = bundle
+        .adapter_options()
+        .iter()
+        .find(|adapter| adapter.id() == TEST_UIA_OBSERVER_ID)
+        .expect("UIA observer must be visible to the desktop Probe catalog");
+    assert_eq!(uia.features(), [Feature::TextObserve]);
+    assert!(!bundle
+        .translation_adapter_ids()
+        .iter()
+        .any(|adapter_id| adapter_id.as_ref() == TEST_UIA_OBSERVER_ID));
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/build-runtime-bundle.ps1"]
+fn runtime_bundle_rejects_a_missing_isolated_worker_artifact() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/local-test/evidence/runtime-bundle-missing-worker");
+    std::fs::create_dir_all(&local_test).expect("missing-worker evidence root");
+    let copy = tempfile::Builder::new()
+        .prefix("contract-")
+        .tempdir_in(local_test)
+        .expect("isolated bundle copy");
+    for entry in std::fs::read_dir(&runtime_root).expect("Runtime bundle files") {
+        let entry = entry.expect("Runtime bundle entry");
+        if entry
+            .file_type()
+            .expect("Runtime bundle entry type")
+            .is_file()
+        {
+            std::fs::copy(entry.path(), copy.path().join(entry.file_name()))
+                .expect("copy Runtime bundle artifact");
+        }
+    }
+    let manifest = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(copy.path().join("runtime-bundle.json"))
+            .expect("Runtime bundle manifest"),
+    )
+    .expect("Runtime bundle manifest json");
+    let worker_file = manifest["isolated_workers"][0]["file"]
+        .as_str()
+        .expect("isolated worker artifact name");
+    std::fs::remove_file(copy.path().join(worker_file)).expect("remove isolated worker copy");
+
+    assert_eq!(
+        RuntimeBundle::open(copy.path()).err(),
+        Some(DesktopRuntimeError::BundleUnavailable)
+    );
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle with its synthetic target"]
+fn desktop_bundle_captures_uia_public_text_without_password_content() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/local-test/evidence/desktop-uia-capture");
+    std::fs::create_dir_all(&local_test).expect("UIA capture evidence root");
+    let data = tempfile::Builder::new()
+        .prefix("contract-")
+        .tempdir_in(local_test)
+        .expect("isolated UIA capture data");
+    let mut target =
+        TargetProcess::spawn_with_args(&target_executable, ["--uia-standard-controls"]);
+    assert_eq!(target.read_response(), "uia-ready");
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register synthetic UIA target");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let spec = backend
+        .capture_runtime_spec(&application_id, &[TEST_UIA_OBSERVER_ID.into()])
+        .expect("compiled UIA capture Runtime spec");
+    let output = data.path().join("capture.json");
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("desktop-uia-capture").expect("capture session id"),
+        &output,
+        100,
+    )
+    .expect("UIA capture configuration");
+    let bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut pool = DesktopRuntimePool::new(bundle);
+
+    pool.start_capture(application_id.clone(), &spec, None, capture)
+        .expect("start UIA capture");
+    std::thread::sleep(Duration::from_millis(1_250));
+    pool.stop_capture(application_id).expect("stop UIA capture");
+    let catalog = CaptureCatalog::read_current(&output).expect("UIA capture catalog");
+    let sources = catalog
+        .entries()
+        .iter()
+        .filter(|entry| entry.adapter_id() == TEST_UIA_OBSERVER_ID)
+        .map(|entry| entry.source())
+        .collect::<BTreeSet<_>>();
+    for expected in ["Fixture label", "Fixture value", "Fixture document"] {
+        assert!(sources.contains(expected), "missing {expected}");
+    }
+    assert!(!sources.contains("Fixture secret"));
+    target.stop();
 }
 
 #[test]
@@ -169,9 +274,17 @@ struct TargetProcess {
 
 impl TargetProcess {
     fn spawn(executable: &Path) -> Self {
+        Self::spawn_with_args(executable, std::iter::empty::<&str>())
+    }
+
+    fn spawn_with_args<'a>(
+        executable: &Path,
+        arguments: impl IntoIterator<Item = &'a str>,
+    ) -> Self {
         use std::os::windows::process::CommandExt;
 
         let mut child = Command::new(executable)
+            .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -194,6 +307,10 @@ impl TargetProcess {
     fn render_command(&mut self, command: &str) -> String {
         writeln!(self.stdin, "{command}").expect("render command");
         self.stdin.flush().expect("flush render command");
+        self.read_response()
+    }
+
+    fn read_response(&mut self) -> String {
         let mut evidence = String::new();
         self.stdout
             .read_line(&mut evidence)

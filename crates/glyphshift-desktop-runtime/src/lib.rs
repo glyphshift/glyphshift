@@ -5,8 +5,9 @@
 
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::{
-    AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement, AdapterTrustPolicy,
-    AdapterVersionRequirement, ArtifactHash, PackageArtifactId, SignerId,
+    AdapterDescriptor, AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement,
+    AdapterTrustPolicy, AdapterVersion, AdapterVersionRequirement, ArtifactHash, PackageArtifactId,
+    SignerId,
 };
 use glyphshift_capture::{CaptureConfiguration, FileCaptureSink};
 use glyphshift_controller_host::{
@@ -14,12 +15,14 @@ use glyphshift_controller_host::{
     VerifiedControllerArtifact,
 };
 use glyphshift_desktop_backend::{DesktopRuntimeSpec, EffectiveWorkflowIntent};
-use glyphshift_domain::{Feature, Generation, TargetFacts};
+use glyphshift_domain::{AdapterId, ApplyModel, Feature, Generation, Placement, TargetFacts};
 use glyphshift_extension::{
     CodeHash, ControllerArtifactId, ControllerCodeIdentity, ControllerSignerId, ExtensionId,
     ProtocolVersion,
 };
-use glyphshift_isolated_worker_host::HybridAdapterHost;
+use glyphshift_isolated_worker_host::{
+    HybridAdapterHost, IsolatedWorkerHost, WorkerArtifactCatalog, WorkerTargetGrant,
+};
 use glyphshift_protocol::{
     ControllerConnection, ControllerNonce, ControllerProtocolError, ControllerTransport,
     NonceLedger, OpaqueTargetId, PreparedRecipe, RecipeControllerLossPolicy,
@@ -45,6 +48,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const BUNDLE_SCHEMA: &str = "glyphshift.runtime-bundle/2";
 const FIRST_PARTY_BUNDLE_AUTHORITY: &str = "app.glyphshift.runtime.first-party";
 const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(8);
+const ISOLATED_WORKER_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopRuntimeError {
@@ -96,6 +100,8 @@ struct BundleManifest {
     controller: ControllerManifest,
     runtime: ArtifactManifest,
     adapters: Vec<ArtifactManifest>,
+    #[serde(default)]
+    isolated_workers: Vec<IsolatedWorkerManifest>,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +123,26 @@ struct ArtifactManifest {
     #[serde(default)]
     technology: Option<Box<str>>,
     #[serde(default)]
+    #[serde(alias = "technicalTarget")]
+    technical_target: Option<Box<str>>,
+}
+
+#[derive(Deserialize)]
+struct IsolatedWorkerManifest {
+    file: Box<str>,
+    sha256: Box<str>,
+    adapter_id: Box<str>,
+    version: [u16; 3],
+    features: Vec<Box<str>>,
+    platforms: Vec<Box<str>>,
+    architectures: Vec<Box<str>>,
+    #[serde(default)]
+    name: Option<Box<str>>,
+    #[serde(default)]
+    summary: Option<Box<str>>,
+    #[serde(default)]
+    technology: Option<Box<str>>,
+    #[serde(default, alias = "technicalTarget")]
     technical_target: Option<Box<str>>,
 }
 
@@ -186,6 +212,8 @@ pub struct RuntimeBundle {
     controller_protocol: ProtocolVersion,
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
+    worker_artifacts: WorkerArtifactCatalog,
+    isolated_adapter_ids: BTreeSet<AdapterId>,
     discovered_requirements: Vec<AdapterRequirement>,
     adapter_options: Vec<RuntimeAdapterOption>,
     nonce_ledger: NonceLedger,
@@ -302,6 +330,80 @@ impl RuntimeBundle {
             catalog_adapters.push((artifact_id, path));
         }
 
+        let mut catalog_workers = Vec::new();
+        let mut isolated_adapter_ids = BTreeSet::new();
+        for (index, worker) in manifest.isolated_workers.iter().enumerate() {
+            let hash = parse_hash(&worker.sha256)?;
+            let path = verified_artifact(&root, &worker.file, hash)?;
+            let features = worker
+                .features
+                .iter()
+                .map(|feature| match feature.as_ref() {
+                    "text-observe" => Ok(Feature::TextObserve),
+                    _ => Err(DesktopRuntimeError::InvalidManifest),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if worker.adapter_id.trim().is_empty()
+                || features.is_empty()
+                || worker.platforms.is_empty()
+                || worker.architectures.is_empty()
+            {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            let adapter_id = AdapterId::new(worker.adapter_id.clone());
+            let version =
+                AdapterVersion::new(worker.version[0], worker.version[1], worker.version[2]);
+            let descriptor = AdapterDescriptor::new(
+                adapter_id.clone(),
+                version,
+                ApplyModel::ObserveOnly,
+                Placement::IsolatedWorker,
+                features.iter().copied(),
+            )
+            .with_platforms(worker.platforms.iter().cloned())
+            .with_architectures(worker.architectures.iter().cloned());
+            let artifact_id = PackageArtifactId::new(format!("isolated-workers/{index}"));
+            discovered_requirements.push(AdapterRequirement::new(
+                adapter_id.clone(),
+                AdapterVersionRequirement::Exact(version),
+                features.iter().copied(),
+            ));
+            adapter_options.push(RuntimeAdapterOption {
+                id: adapter_id.as_str().into(),
+                name: worker
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| adapter_id.as_str().into()),
+                version: format!(
+                    "{}.{}.{}",
+                    worker.version[0], worker.version[1], worker.version[2]
+                )
+                .into(),
+                summary: worker
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| "独立进程文字观察适配器".into()),
+                platforms: worker.platforms.clone(),
+                technologies: worker.technology.iter().cloned().collect(),
+                features: features.clone(),
+                technical_target: worker
+                    .technical_target
+                    .clone()
+                    .unwrap_or_else(|| adapter_id.as_str().into()),
+                configuration: "none".into(),
+            });
+            packages.push(AdapterPackage::new(
+                descriptor,
+                artifact_id.clone(),
+                signer.clone(),
+                ArtifactHash::sha256(hash),
+                ArtifactHash::sha256(hash),
+            ));
+            authorized_adapters.push(adapter_id.clone());
+            isolated_adapter_ids.insert(adapter_id);
+            catalog_workers.push((artifact_id, path));
+        }
+
         let mut registry =
             AdapterRegistry::new(AdapterTrustPolicy::new([signer], authorized_adapters));
         registry
@@ -309,12 +411,16 @@ impl RuntimeBundle {
             .map_err(|_| DesktopRuntimeError::AdapterRegistryRejected)?;
         let artifacts = TargetArtifactCatalog::new(runtime_artifact, catalog_adapters)
             .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+        let worker_artifacts = WorkerArtifactCatalog::new(catalog_workers)
+            .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
 
         Ok(Self {
             controller,
             controller_protocol,
             registry,
             artifacts,
+            worker_artifacts,
+            isolated_adapter_ids,
             discovered_requirements,
             adapter_options,
             nonce_ledger: NonceLedger::new(),
@@ -375,6 +481,8 @@ impl RuntimeBundle {
             spec.publication().clone(),
             self.registry.clone(),
             self.artifacts.clone(),
+            self.worker_artifacts.clone(),
+            self.isolated_adapter_ids.clone(),
             self.controller_protocol,
             next_nonce(self.nonce_sequence),
             &mut self.nonce_ledger,
@@ -1111,6 +1219,8 @@ pub struct DesktopRuntime<T> {
     publication: glyphshift_runtime_contract::RuntimePublication,
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
+    worker_artifacts: WorkerArtifactCatalog,
+    isolated_adapter_ids: BTreeSet<AdapterId>,
     targets: Vec<TargetRecord>,
     active_features: BTreeSet<Feature>,
     phase: Option<RuntimePhase<T>>,
@@ -1125,6 +1235,8 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         publication: glyphshift_runtime_contract::RuntimePublication,
         registry: AdapterRegistry,
         artifacts: TargetArtifactCatalog,
+        worker_artifacts: WorkerArtifactCatalog,
+        isolated_adapter_ids: BTreeSet<AdapterId>,
         protocol: ProtocolVersion,
         nonce: ControllerNonce,
         ledger: &mut NonceLedger,
@@ -1163,6 +1275,8 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             publication,
             registry,
             artifacts,
+            worker_artifacts,
+            isolated_adapter_ids,
             targets,
             active_features: BTreeSet::new(),
             phase: Some(RuntimePhase::Discovered(connection)),
@@ -1225,6 +1339,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         capture: Option<CaptureConfiguration>,
     ) -> Result<(), DesktopRuntimeError> {
         let requested_features = requested_features.into_iter().collect::<Vec<_>>();
+        let capture_requested = capture.is_some();
         if requested_features.is_empty()
             || requested_features
                 .iter()
@@ -1266,34 +1381,81 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
                 }
             };
             let target_instance_id = TargetInstanceId::new(format!("target-{}", target.view.id));
+            let requires_isolated_worker = recipe
+                .requirements()
+                .iter()
+                .any(|requirement| self.isolated_adapter_ids.contains(requirement.adapter_id()));
+            if requires_isolated_worker && !capture_requested {
+                self.phase = Some(RuntimePhase::Discovered(connection));
+                return Err(DesktopRuntimeError::SessionRejected);
+            }
+            let worker_grant = if requires_isolated_worker {
+                let grant = match connection.authorize_worker_target(target.controller_id) {
+                    Ok(grant) => grant,
+                    Err(error) => {
+                        self.phase = Some(RuntimePhase::Discovered(connection));
+                        return Err(map_protocol_error(error));
+                    }
+                };
+                Some(WorkerTargetGrant {
+                    platform: grant.platform().into(),
+                    payload: grant.payload().into(),
+                })
+            } else {
+                None
+            };
             prepared.push((target_instance_id.clone(), recipe));
             runtime_targets.push((
                 target.view.id,
                 target_instance_id.clone(),
                 target.controller_id,
+                worker_grant,
                 TargetInstance::new(target_instance_id, target.facts),
             ));
         }
-        let capture_owner = capture
-            .map(FileCaptureSink::start)
-            .transpose()
-            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        let capture_owner = match capture.map(FileCaptureSink::start).transpose() {
+            Ok(owner) => owner,
+            Err(_) => {
+                self.phase = Some(RuntimePhase::Discovered(connection));
+                return Err(DesktopRuntimeError::SessionRejected);
+            }
+        };
         let mut host = TargetProcessHost::new(connection, self.artifacts.clone());
         if let Some(owner) = capture_owner.as_ref() {
             host = host.with_capture_ingress(owner.ingress());
         }
-        for (_, target_instance_id, controller_id, _) in &runtime_targets {
+        for (_, target_instance_id, controller_id, _, _) in &runtime_targets {
             host.register_target(target_instance_id.clone(), *controller_id);
+        }
+        let mut hybrid_host = HybridAdapterHost::new(host);
+        if runtime_targets
+            .iter()
+            .any(|(_, _, _, grant, _)| grant.is_some())
+        {
+            let owner = capture_owner
+                .as_ref()
+                .ok_or(DesktopRuntimeError::SessionRejected)?;
+            let mut isolated_worker = IsolatedWorkerHost::new(
+                self.worker_artifacts.clone(),
+                owner.ingress(),
+                ISOLATED_WORKER_TIMEOUT,
+            );
+            for (_, target_instance_id, _, grant, _) in &runtime_targets {
+                if let Some(grant) = grant {
+                    isolated_worker.register_target(target_instance_id.clone(), grant.clone());
+                }
+            }
+            hybrid_host = hybrid_host.with_isolated_worker(isolated_worker);
         }
         let mut manager = SessionManager::new(
             self.registry.clone(),
             PreparedController::new(prepared),
-            HybridAdapterHost::new(host),
+            hybrid_host,
             RunningTarget,
         );
         let active_features = requested_features.iter().copied().collect();
         let mut sessions = BTreeMap::new();
-        for (target_id, _, _, target_instance) in runtime_targets {
+        for (target_id, _, _, _, target_instance) in runtime_targets {
             let status = match manager.start_with_runtime(
                 target_instance,
                 requested_features.clone(),
@@ -2543,6 +2705,8 @@ mod tests {
             spec.publication().clone(),
             AdapterRegistry::new(AdapterTrustPolicy::new([], [])),
             artifacts,
+            WorkerArtifactCatalog::default(),
+            BTreeSet::new(),
             ProtocolVersion::new(1, 0),
             ControllerNonce::new([7; 32]),
             &mut ledger,

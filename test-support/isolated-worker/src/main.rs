@@ -57,7 +57,10 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
             || activation.target_grant.platform != "synthetic-process-v1"
             || !matches!(
                 activation.target_grant.payload.as_str(),
-                "target:authorized" | "target:hang-on-query" | "target:hang-once"
+                "target:authorized"
+                    | "target:hang-on-query"
+                    | "target:hang-once"
+                    | "target:hang-until-reconnect"
             )
         {
             return Err(WorkerError::new("activation_rejected"));
@@ -74,7 +77,9 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
         self.publication_generation = activation.publication_generation;
         self.hang_on_query = activation.target_grant.payload == "target:hang-on-query"
             || (activation.target_grant.payload == "target:hang-once"
-                && activation.producer_generation == 1);
+                && activation.producer_generation == 1)
+            || (activation.target_grant.payload == "target:hang-until-reconnect"
+                && activation.producer_generation < 5);
         self.producer = Some(producer);
         self.ingress = Some(ingress);
         self.observe_snapshot(UiaElementSnapshot::new("window-title").with_name("Window title"))?;

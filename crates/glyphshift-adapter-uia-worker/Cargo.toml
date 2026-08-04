@@ -10,6 +10,7 @@ glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-isolated-worker-sdk = { path = "../glyphshift-isolated-worker-sdk" }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_System_Com",
     "Win32_System_Ole",
     "Win32_System_Threading",

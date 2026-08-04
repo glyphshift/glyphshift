@@ -67,7 +67,7 @@ fn iwh_001_worker_handshake_health_pause_and_deactivation_tail_use_one_capture_o
         &AdapterId::new("windows.uia.synthetic"),
         target_grant("target:authorized"),
         producer(),
-        11,
+        0,
     )
     .expect("worker handshake");
 
@@ -407,5 +407,80 @@ fn iwh_007_restart_budget_exhaustion_remains_visible_in_health() {
         "isolated_worker_restart_exhausted"
     );
     let _ = host.deactivate(SessionId::new(1), &target, &[binding], &[]);
+    sink.finish().expect("finish capture owner");
+}
+
+#[test]
+fn iwh_008_manual_reactivation_recovers_after_restart_budget_exhaustion() {
+    let root = tempdir().expect("temporary capture root");
+    let output = root.path().join("isolated-worker-manual-recovery.json");
+    let sink = FileCaptureSink::start(
+        CaptureConfiguration::new(
+            CaptureSessionId::new("isolated-worker-manual-recovery").expect("session id"),
+            &output,
+            100,
+        )
+        .expect("capture configuration"),
+    )
+    .expect("capture owner");
+    let artifact_id = PackageArtifactId::new("workers/uia-manual-recovery");
+    let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
+        .expect("worker catalog");
+    let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_millis(100));
+    let target = TargetInstance::new(
+        TargetInstanceId::new("target-manual-recovery"),
+        TargetFacts::new("windows", "x86_64"),
+    );
+    host.register_target(
+        target.id().clone(),
+        target_grant("target:hang-until-reconnect"),
+    );
+    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let version = AdapterVersion::new(1, 0, 0);
+    let binding = AdapterBinding {
+        descriptor: AdapterDescriptor::new(
+            adapter_id.clone(),
+            version,
+            ApplyModel::ObserveOnly,
+            Placement::IsolatedWorker,
+            [Feature::TextObserve],
+        ),
+        adapter_id,
+        version,
+        apply_model: ApplyModel::ObserveOnly,
+        artifact_hash: ArtifactHash::sha256([11; 32]),
+        host: AdapterHostBinding::IsolatedWorker {
+            executable: artifact_id,
+        },
+        features: vec![Feature::TextObserve],
+    };
+
+    host.activate(&target, std::slice::from_ref(&binding))
+        .expect("activate stalled worker");
+    std::thread::sleep(Duration::from_millis(2_200));
+    let exhausted = host
+        .health(SessionId::new(1), &target, std::slice::from_ref(&binding))
+        .expect("terminal supervisor health");
+    assert_eq!(
+        exhausted.diagnostics()[0].code(),
+        "isolated_worker_restart_exhausted"
+    );
+
+    host.deactivate(
+        SessionId::new(1),
+        &target,
+        std::slice::from_ref(&binding),
+        &[],
+    )
+    .expect("remove exhausted supervisor");
+    host.activate(&target, std::slice::from_ref(&binding))
+        .expect("manually reactivate recovered worker");
+    std::thread::sleep(Duration::from_millis(900));
+    let recovered = host
+        .health(SessionId::new(2), &target, std::slice::from_ref(&binding))
+        .expect("recovered worker health");
+    assert!(recovered.failed_adapters().is_empty());
+    host.deactivate(SessionId::new(2), &target, &[binding], &[])
+        .expect("deactivate recovered worker");
     sink.finish().expect("finish capture owner");
 }

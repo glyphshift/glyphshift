@@ -5,9 +5,10 @@ use glyphshift_capture::{
     CaptureIngress, CaptureObservationBatch, CaptureObservationCursor, CaptureProducerConfiguration,
 };
 use glyphshift_domain::AdapterId;
+pub use glyphshift_isolated_worker_sdk::WorkerTargetGrant;
 use glyphshift_isolated_worker_sdk::{
     Request, RequestEnvelope, Response, ResponseEnvelope, WireWorkerHealth, WireWorkerHealthReport,
-    WorkerActivation, WorkerTargetGrant, PROTOCOL_SCHEMA,
+    WorkerActivation, PROTOCOL_SCHEMA,
 };
 use glyphshift_protocol::ControllerTransport;
 use glyphshift_runtime_contract::RuntimePublication;
@@ -154,7 +155,6 @@ impl ProcessIsolatedWorker {
             || target_grant.payload.trim().is_empty()
             || target_grant.platform.len() > 128
             || target_grant.payload.len() > MAX_TARGET_GRANT_BYTES
-            || publication_generation == 0
         {
             return Err(WorkerHostError::HandshakeRejected);
         }
@@ -918,16 +918,15 @@ impl<T: ControllerTransport + Send + 'static> AdapterHostPort for HybridAdapterH
                 .isolated_worker
                 .as_mut()
                 .ok_or(HostFailure::Unavailable);
-            if isolated
-                .and_then(|host| host.activate_runtime(target, bindings, publication))
-                .is_err()
+            if let Err(error) =
+                isolated.and_then(|host| host.activate_runtime(target, bindings, publication))
             {
                 if placements.target_process {
                     let _ =
                         self.target_process
                             .deactivate(SessionId::new(0), target, bindings, &[]);
                 }
-                return Err(HostFailure::Unavailable);
+                return Err(error);
             }
         }
         self.active.insert(target.id().clone(), placements);

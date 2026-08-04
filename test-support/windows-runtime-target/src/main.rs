@@ -97,10 +97,22 @@ fn run_console_child() -> io::Result<()> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if std::env::args().any(|argument| argument == UIA_TARGET_ARGUMENT) {
-        return run_uia_standard_control_server().map_err(Into::into);
+    let arguments = std::env::args().collect::<Vec<_>>();
+    if arguments
+        .iter()
+        .any(|argument| argument == UIA_TARGET_ARGUMENT)
+    {
+        let keepalive = arguments
+            .iter()
+            .find_map(|argument| argument.strip_prefix("--uia-keepalive-ms="))
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis);
+        return run_uia_standard_control_server(keepalive).map_err(Into::into);
     }
-    if std::env::args().any(|argument| argument == CONSOLE_CHILD_ARGUMENT) {
+    if arguments
+        .iter()
+        .any(|argument| argument == CONSOLE_CHILD_ARGUMENT)
+    {
         return run_console_child().map_err(Into::into);
     }
 

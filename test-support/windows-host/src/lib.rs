@@ -856,13 +856,18 @@ mod windows {
     /// Runs a deterministic standard-control UIA target over a line-oriented stdin contract.
     ///
     /// Commands: `update` changes the public label/edit/document values; `recreate` replaces the
-    /// top-level window and controls; `exit` closes the window. A password edit is also changed so
-    /// the observer contract can prove that sensitive text never reaches capture output.
-    pub fn run_uia_standard_control_server() -> std::io::Result<()> {
+    /// top-level window and controls; `block-provider` stalls the window thread until the stdin
+    /// reader receives `unblock-provider`; `exit` closes the window. A password edit is also
+    /// changed so the observer contract can prove that sensitive text never reaches capture output.
+    pub fn run_uia_standard_control_server(
+        keepalive: Option<std::time::Duration>,
+    ) -> std::io::Result<()> {
         use std::io::{BufRead, Write};
         use std::ptr::{null, null_mut};
+        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc::{self, TryRecvError};
-        use std::time::Duration;
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, SetWindowTextW,
             ShowWindow, TranslateMessage, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE,
@@ -996,12 +1001,18 @@ mod windows {
         let mut controls = unsafe { create_controls(false) }
             .ok_or_else(|| std::io::Error::other("uia fixture control unavailable"))?;
 
+        let provider_blocked = Arc::new(AtomicBool::new(false));
+        let reader_provider_blocked = Arc::clone(&provider_blocked);
         let (commands, incoming) = mpsc::channel();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
                 let Ok(line) = line else {
                     break;
                 };
+                if line.trim() == "unblock-provider" {
+                    reader_provider_blocked.store(false, Ordering::Release);
+                    continue;
+                }
                 if commands.send(line).is_err() {
                     break;
                 }
@@ -1010,8 +1021,16 @@ mod windows {
         let mut stdout = std::io::stdout().lock();
         writeln!(stdout, "uia-ready")?;
         stdout.flush()?;
+        let disconnected_keepalive = keepalive.filter(|value| {
+            let milliseconds = value.as_millis();
+            (1..=60_000).contains(&milliseconds)
+        });
+        let started = Instant::now();
         let mut running = true;
         while running {
+            if disconnected_keepalive.is_some_and(|keepalive| started.elapsed() >= keepalive) {
+                break;
+            }
             let mut message = MSG::default();
             unsafe {
                 while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
@@ -1040,12 +1059,25 @@ mod windows {
                     writeln!(stdout, "uia-recreated")?;
                     stdout.flush()?;
                 }
+                Ok(command) if command.trim() == "block-provider" => {
+                    provider_blocked.store(true, Ordering::Release);
+                    writeln!(stdout, "uia-provider-blocking")?;
+                    stdout.flush()?;
+                    while provider_blocked.load(Ordering::Acquire) {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    writeln!(stdout, "uia-provider-unblocked")?;
+                    stdout.flush()?;
+                }
                 Ok(command) if command.trim() == "exit" => {
                     writeln!(stdout, "uia-exiting")?;
                     stdout.flush()?;
                     running = false;
                 }
                 Ok(_) | Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected)
+                    if disconnected_keepalive
+                        .is_some_and(|keepalive| started.elapsed() < keepalive) => {}
                 Err(TryRecvError::Disconnected) => running = false,
             }
             std::thread::sleep(Duration::from_millis(10));
