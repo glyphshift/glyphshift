@@ -1264,10 +1264,30 @@ dependencies = [
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
  "glyphshift-adapter-native-abi",
+ "glyphshift-adapter-qt-painter",
  "glyphshift-adapter-sdk",
  "glyphshift-domain",
  "glyphshift-windows-host",
  "libloading 0.8.9",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "glyphshift-adapter-qt-painter"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-qt-painter-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "glyphshift-adapter-qt-painter",
+ "retour",
+ "windows 0.58.0",
 ]
 
 [[package]]

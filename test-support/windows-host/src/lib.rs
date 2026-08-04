@@ -674,6 +674,17 @@ mod windows {
         )
     }
 
+    pub fn render_raw_gdiplus_unicode(text: &str) -> Result<PixelEvidence, String> {
+        render_gdiplus_text(
+            text,
+            RenderDecision {
+                text: TextDecision::Keep,
+                font: FontDecision::Keep,
+                generation: Generation::new(0),
+            },
+        )
+    }
+
     pub fn render_gdiplus(decision: RenderDecision) -> Result<PixelEvidence, String> {
         render_gdiplus_text("Open", decision)
     }
@@ -1094,6 +1105,6 @@ pub use windows::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
     render_raw_direct2d_text, render_raw_direct2d_wic_text, render_raw_draw_text,
     render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
-    render_raw_gdiplus_symbol, render_raw_text_out, run_uia_standard_control_server,
-    write_raw_console, PixelEvidence,
+    render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, render_raw_text_out,
+    run_uia_standard_control_server, write_raw_console, PixelEvidence,
 };

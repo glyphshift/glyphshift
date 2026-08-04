@@ -18,7 +18,11 @@ glyphshift-adapter-console = { path = "../glyphshift-adapter-console" }
 glyphshift-adapter-direct2d = { path = "../glyphshift-adapter-direct2d" }
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
+glyphshift-adapter-qt-painter = { path = "../glyphshift-adapter-qt-painter" }
 glyphshift-windows-host = { path = "../../test-support/windows-host" }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = ["Win32_System_LibraryLoader"] }
 
 [lints.rust]
 unsafe_code = "allow"

@@ -2,7 +2,8 @@
 
 use glyphshift_windows_host::{
     render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
-    render_raw_gdiplus_symbol, run_uia_standard_control_server, write_raw_console,
+    render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, run_uia_standard_control_server,
+    write_raw_console,
 };
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -138,6 +139,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "render-gdiplus-symbol" => {
                 let evidence = render_raw_gdiplus_symbol("ABC")?;
+                writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
+                stdout.flush()?;
+            }
+            "render-gdiplus" => {
+                let evidence = render_raw_gdiplus_unicode("Open")?;
                 writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
                 stdout.flush()?;
             }

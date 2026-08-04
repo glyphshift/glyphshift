@@ -8,6 +8,7 @@ use glyphshift_desktop_backend::{
 };
 use glyphshift_desktop_runtime::{DesktopRuntimeError, DesktopRuntimePool, RuntimeBundle};
 use glyphshift_domain::Feature;
+use glyphshift_session::{RuntimeTextOutcome, RuntimeTraceStatus};
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -511,6 +512,100 @@ fn desktop_runtime_changes_pixels_updates_and_restores_pass_through() {
 }
 
 #[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/build-runtime-bundle.ps1"]
+fn desktop_runtime_updates_gdiplus_translation_without_restarting_the_target() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let mut target = TargetProcess::spawn(&target_executable);
+    let baseline = target.render_command("render-gdiplus");
+
+    let data = tempdir().expect("isolated desktop data");
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register target executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let (dictionary, spec) = create_text_workflow_with_adapter(
+        &mut backend,
+        &application_id,
+        TEST_GDIPLUS_ADAPTER_ID,
+        "dictionary.gdiplus-update",
+        "workflow.gdiplus-update",
+        "Open",
+        "First GDI+ label",
+    );
+    let initial_generation = spec.publication().generation().value();
+
+    let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut runtime = bundle
+        .discover(application_id.clone(), &spec)
+        .expect("target discovery");
+    let target_id = runtime.targets().next().expect("isolated target").id();
+    runtime
+        .start(target_id, [Feature::TextReplace])
+        .expect("GDI+ Runtime activation");
+    runtime
+        .control_runtime_diagnostics(true)
+        .expect("enable GDI+ diagnostics");
+
+    let translated = target.render_command("render-gdiplus");
+    assert_ne!(translated, baseline, "GDI+ should replace source text");
+    let initial_diagnostics = runtime
+        .query_runtime_diagnostics()
+        .expect("query initial GDI+ diagnostics");
+    assert!(initial_diagnostics.records().iter().any(|record| {
+        record.adapter_id() == TEST_GDIPLUS_ADAPTER_ID
+            && record.source_text() == "Open"
+            && record.generation() == initial_generation
+            && record.status() == RuntimeTraceStatus::Matched
+            && record.text() == RuntimeTextOutcome::Replaced
+    }));
+
+    backend
+        .update_dictionary(
+            DictionaryEdit::new(
+                dictionary.id(),
+                dictionary.metadata().name(),
+                dictionary.metadata().source_locale(),
+                dictionary.metadata().target_locale(),
+                dictionary.revision(),
+            )
+            .with_entries([DictionaryEntryCreate::new("Open", "Second GDI+ label")]),
+        )
+        .expect("update GDI+ dictionary");
+    let updated_spec = backend
+        .workflow_runtime_spec("workflow.gdiplus-update", &application_id)
+        .expect("compile updated GDI+ Runtime spec");
+    let updated_generation = updated_spec.publication().generation().value();
+    assert!(updated_generation > initial_generation);
+    runtime
+        .publish(updated_spec.publication().clone())
+        .expect("publish updated GDI+ dictionary");
+
+    let updated = target.render_command("render-gdiplus");
+    assert_ne!(updated, translated, "GDI+ should apply the next generation");
+    let updated_diagnostics = runtime
+        .query_runtime_diagnostics()
+        .expect("query updated GDI+ diagnostics");
+    assert!(updated_diagnostics.records().iter().any(|record| {
+        record.adapter_id() == TEST_GDIPLUS_ADAPTER_ID
+            && record.source_text() == "Open"
+            && record.generation() == updated_generation
+            && record.status() == RuntimeTraceStatus::Matched
+            && record.text() == RuntimeTextOutcome::Replaced
+    }));
+
+    runtime
+        .control_runtime_diagnostics(false)
+        .expect("disable GDI+ diagnostics");
+    runtime.stop().expect("GDI+ Runtime pass-through");
+    assert_eq!(target.render_command("render-gdiplus"), baseline);
+    target.stop();
+}
+
+#[test]
 #[ignore = "requires the local Windows Runtime bundle built by scripts/dev-app.ps1"]
 fn desktop_runtime_protects_gdi_symbol_fonts_and_documents_the_gdiplus_risk() {
     let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
@@ -647,6 +742,12 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         Ok("observe") => Feature::TextObserve,
         _ => Feature::TextReplace,
     };
+    let source = std::env::var("GLYPHSHIFT_REAL_HOST_SOURCE").unwrap_or_else(|_| "File".into());
+    let translation =
+        std::env::var("GLYPHSHIFT_REAL_HOST_TRANSLATION").unwrap_or_else(|_| "文件".into());
+    let updated_translation = std::env::var("GLYPHSHIFT_REAL_HOST_TRANSLATION_UPDATE").ok();
+    let require_replacement_hits = std::env::var("GLYPHSHIFT_REAL_HOST_REQUIRE_HITS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
 
     let data = tempdir().expect("isolated desktop data");
     let mut backend = open_backend(data.path(), &runtime_root);
@@ -654,26 +755,29 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         .add_software(ExecutableSelection::new(&host_executable))
         .expect("register authorized host executable");
     let application_id = snapshot.software()[0].id().to_owned();
-    let spec = if requested_feature == Feature::TextObserve {
-        backend
-            .capture_runtime_spec(&application_id, &[adapter_id.clone().into_boxed_str()])
-            .expect("compiled authorized capture Runtime spec")
+    let (dictionary, spec) = if requested_feature == Feature::TextObserve {
+        (
+            None,
+            backend
+                .capture_runtime_spec(&application_id, &[adapter_id.clone().into_boxed_str()])
+                .expect("compiled authorized capture Runtime spec"),
+        )
     } else {
-        create_text_workflow_with_adapter(
+        let (dictionary, spec) = create_text_workflow_with_adapter(
             &mut backend,
             &application_id,
             &adapter_id,
             "dictionary.real-host",
             "workflow.real-host",
-            "File",
-            "文件",
-        )
-        .1
+            &source,
+            &translation,
+        );
+        (Some(dictionary), spec)
     };
 
     let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
     let mut runtime = bundle
-        .discover(application_id, &spec)
+        .discover(application_id.clone(), &spec)
         .expect("authorized host discovery");
     let target_id = runtime
         .targets()
@@ -691,9 +795,15 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         runtime
             .control_runtime_diagnostics(true)
             .expect("enable authorized host diagnostics");
-        let deadline = Instant::now() + Duration::from_millis(hold_ms);
+        let initial_generation = spec.publication().generation().value();
+        let initial_hold_ms = if updated_translation.is_some() {
+            hold_ms / 2
+        } else {
+            hold_ms
+        };
+        let deadline = Instant::now() + Duration::from_millis(initial_hold_ms);
         let mut hit_count = 0_usize;
-        let mut observed_sources = BTreeSet::new();
+        let mut initial_replacement_hits = 0_usize;
         while Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(250));
             let batch = runtime
@@ -705,14 +815,85 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
                 .filter(|record| record.adapter_id() == adapter_id)
             {
                 hit_count += 1;
-                observed_sources.insert(record.source_text().to_owned());
+                if record.source_text() == source
+                    && record.generation() == initial_generation
+                    && record.status() == RuntimeTraceStatus::Matched
+                    && record.text() == RuntimeTextOutcome::Replaced
+                {
+                    initial_replacement_hits += 1;
+                }
+            }
+        }
+
+        let mut updated_replacement_hits = 0_usize;
+        if let (Some(dictionary), Some(updated_translation)) =
+            (dictionary.as_ref(), updated_translation.as_deref())
+        {
+            assert_eq!(requested_feature, Feature::TextReplace);
+            backend
+                .update_dictionary(
+                    DictionaryEdit::new(
+                        dictionary.id(),
+                        dictionary.metadata().name(),
+                        dictionary.metadata().source_locale(),
+                        dictionary.metadata().target_locale(),
+                        dictionary.revision(),
+                    )
+                    .with_entries([DictionaryEntryCreate::new(
+                        source.as_str(),
+                        updated_translation,
+                    )]),
+                )
+                .expect("update authorized host dictionary");
+            let updated_spec = backend
+                .workflow_runtime_spec("workflow.real-host", &application_id)
+                .expect("compile updated authorized host Runtime spec");
+            let updated_generation = updated_spec.publication().generation().value();
+            assert!(updated_generation > initial_generation);
+            runtime
+                .publish(updated_spec.publication().clone())
+                .expect("publish updated authorized host dictionary");
+
+            let deadline = Instant::now() + Duration::from_millis(hold_ms - initial_hold_ms);
+            while Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(250));
+                let batch = runtime
+                    .query_runtime_diagnostics()
+                    .expect("query updated authorized host diagnostics");
+                for record in batch
+                    .records()
+                    .iter()
+                    .filter(|record| record.adapter_id() == adapter_id)
+                {
+                    hit_count += 1;
+                    if record.source_text() == source
+                        && record.generation() == updated_generation
+                        && record.status() == RuntimeTraceStatus::Matched
+                        && record.text() == RuntimeTextOutcome::Replaced
+                    {
+                        updated_replacement_hits += 1;
+                    }
+                }
             }
         }
         runtime
             .control_runtime_diagnostics(false)
             .expect("disable authorized host diagnostics");
         println!("authorized host adapter diagnostics hits: {hit_count}");
-        println!("authorized host adapter diagnostic sources: {observed_sources:?}");
+        println!("authorized host initial replacement hits: {initial_replacement_hits}");
+        println!("authorized host updated replacement hits: {updated_replacement_hits}");
+        if require_replacement_hits && requested_feature == Feature::TextReplace {
+            assert!(
+                initial_replacement_hits > 0,
+                "authorized host must replace the configured source text"
+            );
+            if updated_translation.is_some() {
+                assert!(
+                    updated_replacement_hits > 0,
+                    "authorized host must use the updated dictionary generation"
+                );
+            }
+        }
     }
     runtime.stop().expect("authorized host pass-through");
 }

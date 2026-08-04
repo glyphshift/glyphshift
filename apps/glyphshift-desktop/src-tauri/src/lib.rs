@@ -3166,6 +3166,7 @@ mod tests {
         refreshed: Vec<Box<str>>,
         captures_started: Vec<Box<str>>,
         captures_stopped: Vec<Box<str>>,
+        capture_publications: Vec<(Box<str>, RuntimePublication)>,
         software_removed: Vec<Box<str>>,
     }
 
@@ -3329,9 +3330,14 @@ mod tests {
 
         fn publish_capture(
             &mut self,
-            _software_id: &str,
-            _publication: RuntimePublication,
+            software_id: &str,
+            publication: RuntimePublication,
         ) -> Result<(), DesktopRuntimeError> {
+            self.calls
+                .lock()
+                .expect("runtime call log")
+                .capture_publications
+                .push((software_id.into(), publication));
             Ok(())
         }
     }
@@ -3783,6 +3789,78 @@ mod tests {
             vec![Box::<str>::from(TEST_ADAPTER_ID)]
         );
         assert!(!application.adapters_support_preview(&collection_only));
+    }
+
+    #[test]
+    fn probe_translation_edit_publishes_the_next_live_preview_generation() {
+        let (mut application, calls, software_id, _data_root) = workflow_application();
+        application.adapters = vec![AdapterView {
+            id: TEST_ADAPTER_ID.into(),
+            name: "Replacement adapter".into(),
+            version: "1.0.0".into(),
+            summary: "Synthetic replacement adapter".into(),
+            platforms: vec!["windows".into()],
+            technologies: vec!["Synthetic".into()],
+            features: vec!["textObserve".into(), "textReplace".into()],
+            technical_target: "SyntheticReplace".into(),
+            configuration: "none".into(),
+        }];
+
+        let created = application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-live-preview".into(),
+                name: "Live preview probe".into(),
+                software_id: software_id.clone(),
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: true,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("create live preview probe");
+        assert_eq!(created.summary.preview_generation(), 1);
+
+        let edited = application
+            .edit_probe_translation(ProbeTranslationEditRequest {
+                run_id: created.summary.id().into(),
+                source: "Open".into(),
+                translation: "立即打开".into(),
+            })
+            .expect("edit and publish live preview");
+        assert_eq!(edited.summary.preview_generation(), 2);
+
+        let calls = calls.lock().expect("runtime call log");
+        assert_eq!(calls.capture_publications.len(), 2);
+        assert!(calls
+            .capture_publications
+            .iter()
+            .all(|(published_software, _)| published_software.as_ref() == software_id.as_ref()));
+        assert_eq!(calls.capture_publications[0].1.generation().value(), 1);
+        assert_eq!(calls.capture_publications[1].1.generation().value(), 2);
+        let mut published_entries = Vec::new();
+        calls.capture_publications[1]
+            .1
+            .snapshot()
+            .visit_entries_with_adapters(|location, source, translation, adapters| {
+                published_entries.push((
+                    location.to_owned(),
+                    source.to_owned(),
+                    translation.to_owned(),
+                    adapters
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>(),
+                ));
+            });
+        assert_eq!(
+            published_entries,
+            vec![(
+                "internal-default".to_owned(),
+                "Open".to_owned(),
+                "立即打开".to_owned(),
+                vec![TEST_ADAPTER_ID.to_owned()],
+            )]
+        );
     }
 
     #[test]

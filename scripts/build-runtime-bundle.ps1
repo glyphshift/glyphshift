@@ -49,7 +49,8 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-draw-text-native',
     '-p', 'glyphshift-adapter-gdi-native',
     '-p', 'glyphshift-adapter-gdi-text-out-native',
-    '-p', 'glyphshift-adapter-gdiplus-native'
+    '-p', 'glyphshift-adapter-gdiplus-native',
+    '-p', 'glyphshift-adapter-qt-painter-native'
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
@@ -105,6 +106,8 @@ $drawTextBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text' 'dll'
 $gdiPlusBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdiplus_native.dll' 'adapter-gdiplus' 'dll'
+$qtPainterBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -133,6 +136,7 @@ $uiaPresentation = Get-AdapterPresentation 'windows.uia.observe'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
+$qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/2'
@@ -187,6 +191,14 @@ $runtimeManifest = [ordered]@{
             summary = $gdiPlusPresentation.summary
             technology = $gdiPlusPresentation.technology
             technicalTarget = $gdiPlusPresentation.technicalTarget
+        },
+        [ordered]@{
+            file = $qtPainterBundle.file
+            sha256 = $qtPainterBundle.sha256
+            name = $qtPainterPresentation.name
+            summary = $qtPainterPresentation.summary
+            technology = $qtPainterPresentation.technology
+            technicalTarget = $qtPainterPresentation.technicalTarget
         }
     )
     isolated_workers = @(
