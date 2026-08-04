@@ -38,7 +38,7 @@ function toggle(adapterId: string, checked: boolean | 'indeterminate') {
 </script>
 
 <template>
-  <div class="max-h-64 overflow-auto rounded-[6px] border border-[var(--border)]">
+  <div class="rounded-[6px] border border-[var(--border)]">
     <section v-for="(group, groupIndex) in groups" :key="group.id" :class="groupIndex ? 'border-t border-[var(--border)]' : ''">
       <div class="bg-[var(--surface-subtle)] px-3 py-2">
         <div class="flex items-center justify-between gap-3">

@@ -942,7 +942,7 @@ impl DesktopApplication {
         )
         .map_err(probe_run_error)?;
         let summary = self.probe_runs.create(create).map_err(probe_run_error)?;
-        self.start_probe_run_runtime(summary.id())
+        self.start_probe_run_runtime(summary.id(), true)
     }
 
     fn delete_probe_runs(&mut self, run_ids: &[Box<str>]) -> Result<(), CommandError> {
@@ -1024,10 +1024,14 @@ impl DesktopApplication {
     }
 
     fn resume_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
-        self.start_probe_run_runtime(run_id)
+        self.start_probe_run_runtime(run_id, false)
     }
 
-    fn start_probe_run_runtime(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+    fn start_probe_run_runtime(
+        &mut self,
+        run_id: &str,
+        allow_offline_target: bool,
+    ) -> Result<ProbeRunView, CommandError> {
         if self.active_probe_run_id.is_some() {
             return Err(CommandError::new("capture.already_active"));
         }
@@ -1046,11 +1050,18 @@ impl DesktopApplication {
             .probe_runs
             .capture_configuration(run_id, DEFAULT_MAX_ENTRIES)
             .map_err(probe_run_error)?;
-        self.runtimes
+        let start_result = self
+            .runtimes
             .as_mut()
             .ok_or_else(|| CommandError::new("runtime.unavailable"))?
-            .start_capture(summary.software_id(), &spec, configuration)
-            .map_err(|error| runtime_command_error(error, true))?;
+            .start_capture(summary.software_id(), &spec, configuration);
+        match start_result {
+            Ok(()) => {}
+            Err(DesktopRuntimeError::UnknownTarget) if allow_offline_target => {
+                return self.probe_run_view(summary);
+            }
+            Err(error) => return Err(runtime_command_error(error, true)),
+        }
         self.active_probe_run_id = Some(run_id.into());
         self.probe_runs
             .set_status(run_id, ProbeRunStatus::Running)
@@ -3172,6 +3183,7 @@ mod tests {
 
     struct RecordingWorkflowRuntime {
         calls: Arc<StdMutex<WorkflowRuntimeCalls>>,
+        start_capture_error: Option<DesktopRuntimeError>,
     }
 
     impl WorkflowRuntimeService for RecordingWorkflowRuntime {
@@ -3273,6 +3285,9 @@ mod tests {
                 .expect("runtime call log")
                 .captures_started
                 .push(software_id.into());
+            if let Some(error) = self.start_capture_error {
+                return Err(error);
+            }
             glyphshift_capture::FileCaptureSink::start(configuration)
                 .and_then(glyphshift_capture::FileCaptureSink::finish)
                 .map(|_| ())
@@ -3393,6 +3408,7 @@ mod tests {
         let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));
         let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
             calls: Arc::clone(&calls),
+            start_capture_error: None,
         });
         (
             DesktopApplication {
@@ -3864,6 +3880,38 @@ mod tests {
     }
 
     #[test]
+    fn probe_creation_waits_for_an_offline_target_instead_of_reporting_creation_failure() {
+        let (mut application, calls, software_id, _data_root) = workflow_application();
+        application.runtimes = Some(Box::new(RecordingWorkflowRuntime {
+            calls,
+            start_capture_error: Some(DesktopRuntimeError::UnknownTarget),
+        }));
+
+        let created = application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-waiting-target".into(),
+                name: "Waiting target probe".into(),
+                software_id,
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("persist probe while target is offline");
+
+        assert_eq!(created.summary.status(), ProbeRunStatus::Ready);
+        assert!(application.active_probe_run_id.is_none());
+        assert_eq!(application.probe_run_list().expect("list probes").len(), 1);
+
+        let resume_error = application
+            .resume_probe_run(created.summary.id())
+            .expect_err("explicit reconnect should still explain the offline target");
+        let error_json = serde_json::to_value(resume_error).expect("serialize reconnect error");
+        assert_eq!(error_json["code"], "runtime.target_not_found");
+    }
+
+    #[test]
     fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
         let (mut application, _calls, software_id, _data_root) = workflow_application();
         let first = application
@@ -4189,6 +4237,7 @@ mod tests {
         let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));
         let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
             calls: Arc::clone(&calls),
+            start_capture_error: None,
         });
         let mut reopened = DesktopApplication {
             backend,

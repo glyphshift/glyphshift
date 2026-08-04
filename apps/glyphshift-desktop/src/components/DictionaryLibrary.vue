@@ -48,14 +48,8 @@ const catalogPageNumber = ref(1)
 const catalogPageSize = ref(20)
 const catalogCursors = ref<(string | null)[]>([null])
 const name = ref('')
-const description = ref('')
 const sourceLocale = ref('en-US')
 const targetLocale = ref('zh-CN')
-const releaseVersion = ref('0.1.0')
-const authors = ref('')
-const license = ref('')
-const homepage = ref('')
-const tags = ref('')
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
@@ -131,31 +125,34 @@ function togglePageSelection() {
 
 function resetForm() {
   name.value = ''
-  description.value = ''
   sourceLocale.value = 'en-US'
   targetLocale.value = 'zh-CN'
-  releaseVersion.value = '0.1.0'
-  authors.value = ''
-  license.value = ''
-  homepage.value = ''
-  tags.value = ''
+}
+
+function openCreate() {
+  resetForm()
+  creating.value = true
+}
+
+function closeCreate() {
+  creating.value = false
+  resetForm()
 }
 
 function submit() {
-  if (!name.value.trim() || !sourceLocale.value.trim() || !targetLocale.value.trim() || !releaseVersion.value.trim()) return
+  if (!name.value.trim() || !sourceLocale.value.trim() || !targetLocale.value.trim()) return
   emit('create', {
     name: name.value.trim(),
-    description: description.value.trim(),
+    description: '',
     sourceLocale: sourceLocale.value.trim(),
     targetLocale: targetLocale.value.trim(),
-    releaseVersion: releaseVersion.value.trim(),
-    authors: authors.value.split(',').map(value => value.trim()).filter(Boolean),
-    license: license.value.trim() || null,
-    homepage: homepage.value.trim() || null,
-    tags: tags.value.split(',').map(value => value.trim()).filter(Boolean),
+    releaseVersion: '0.1.0',
+    authors: [],
+    license: null,
+    homepage: null,
+    tags: [],
   })
-  creating.value = false
-  resetForm()
+  closeCreate()
 }
 
 function confirmRemoval() {
@@ -331,7 +328,7 @@ async function chooseExport(item: DictionarySummary) {
             />
           </div>
           <UButton v-if="mode === 'local'" color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :disabled="busy" @click="chooseImport" />
-          <UButton v-if="mode === 'local'" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="creating = true" />
+          <UButton v-if="mode === 'local'" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="openCreate" />
         </div>
       </template>
     </ManagementPageHeader>
@@ -493,22 +490,18 @@ async function chooseExport(item: DictionarySummary) {
       :title="t('dictionaries.create')"
       :description="t('dictionaries.createDescription')"
       :confirm-label="t('dictionaries.createConfirm')"
-      :confirm-disabled="busy || !name.trim() || !sourceLocale.trim() || !targetLocale.trim() || !releaseVersion.trim()"
+      :confirm-disabled="busy || !name.trim() || !sourceLocale.trim() || !targetLocale.trim()"
       :busy="busy"
-      width="lg"
-      @update:open="$event || (creating = false)"
+      width="md"
+      @update:open="$event || closeCreate()"
       @confirm="submit"
     >
-      <div class="grid grid-cols-2 gap-3">
-        <UFormField :label="t('dictionaries.name')" required class="col-span-2"><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.descriptionField')" class="col-span-2"><UTextarea v-model="description" :maxlength="512" :rows="2" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.sourceLocale')" required><UInput v-model="sourceLocale" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.targetLocale')" required><UInput v-model="targetLocale" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.releaseVersion')" required><UInput v-model="releaseVersion" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.authors')" :hint="t('dictionaries.authorsHint')"><UInput v-model="authors" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaries.license')"><UInput v-model="license" class="w-full" :placeholder="t('dictionaries.licensePlaceholder')" /></UFormField>
-        <UFormField :label="t('dictionaries.homepage')"><UInput v-model="homepage" class="w-full" placeholder="https://…" /></UFormField>
-        <UFormField :label="t('dictionaries.tags')" :hint="t('dictionaries.tagsHint')" class="col-span-2"><UInput v-model="tags" class="w-full" /></UFormField>
+      <div class="space-y-3">
+        <UFormField :label="t('dictionaries.name')" required><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
+        <div class="grid grid-cols-2 gap-3">
+          <UFormField :label="t('dictionaries.sourceLocale')" required><UInput v-model="sourceLocale" class="w-full" /></UFormField>
+          <UFormField :label="t('dictionaries.targetLocale')" required><UInput v-model="targetLocale" class="w-full" /></UFormField>
+        </div>
       </div>
     </ManagementFormModal>
 

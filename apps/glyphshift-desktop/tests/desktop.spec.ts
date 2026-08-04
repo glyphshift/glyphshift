@@ -800,6 +800,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/位置|语境/)).toHaveCount(0)
 
+  await dialog.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
   await dialog.getByRole('button', { name: '创建并连接' }).click()
   await expect(page.getByRole('heading', { name: 'Vector Studio 探针', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '返回探针管理' })).toBeVisible()
@@ -808,6 +809,69 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('还没有捕获到文字')).toBeVisible()
   await expect(page.getByText('每页')).toBeVisible()
   await expect(page.getByRole('button', { name: /开始监听|停止并生成/ })).toHaveCount(0)
+})
+
+test('new probe discards a cancelled inline dictionary draft', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+
+  let dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  const existingDictionaryMode = dialog.getByRole('button', { name: '使用已有词典' })
+  const newDictionaryMode = dialog.getByRole('button', { name: '新建空词典' })
+  await expect(dialog.getByRole('textbox', { name: '任务名称' })).toHaveValue('')
+  await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'true')
+  await expect(existingDictionaryMode).toHaveClass(/text-primary/)
+  await expect(newDictionaryMode).toHaveAttribute('aria-pressed', 'false')
+  await dialog.getByRole('textbox', { name: '任务名称' }).fill('不应保留的任务')
+  await dialog.getByRole('checkbox', { name: 'TextOutW', exact: true }).uncheck()
+  await newDictionaryMode.click()
+  await expect(newDictionaryMode).toHaveAttribute('aria-pressed', 'true')
+  await expect(newDictionaryMode).toHaveClass(/text-primary/)
+  await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'false')
+  const scrollableRegions = await dialog.locator('*').evaluateAll(elements => elements.filter((element) => {
+    const style = getComputedStyle(element)
+    return ['auto', 'scroll'].includes(style.overflowY) && element.scrollHeight > element.clientHeight + 1
+  }).length)
+  expect(scrollableRegions).toBe(1)
+  await dialog.getByRole('textbox', { name: '词典名称' }).fill('不应保留的词典')
+  await dialog.getByRole('textbox', { name: '源语言' }).fill('ja-JP')
+  await dialog.getByRole('textbox', { name: '目标语言' }).fill('ko-KR')
+  await dialog.getByRole('button', { name: '取消' }).click()
+
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  await expect(dialog.getByRole('textbox', { name: '任务名称' })).toHaveValue('')
+  await expect(dialog.getByRole('checkbox', { name: 'TextOutW', exact: true })).toBeChecked()
+  await dialog.getByRole('button', { name: '新建空词典' }).click()
+  await expect(dialog.getByRole('textbox', { name: '词典名称' })).toHaveValue('')
+  await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
+  await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
+  await expect(dialog.getByText('词典标识', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('说明', { exact: true })).toHaveCount(0)
+})
+
+test('new dictionary discards a cancelled metadata draft', async ({ page }) => {
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '新建词典' }).click()
+
+  let dialog = page.getByRole('dialog', { name: '新建词典' })
+  await dialog.getByRole('textbox', { name: '词典名称' }).fill('不应保留的词典')
+  await dialog.getByRole('textbox', { name: '源语言' }).fill('ja-JP')
+  await dialog.getByRole('textbox', { name: '目标语言' }).fill('ko-KR')
+  await dialog.getByRole('button', { name: '取消' }).click()
+
+  await page.getByRole('button', { name: '新建词典' }).click()
+  dialog = page.getByRole('dialog', { name: '新建词典' })
+  await expect(dialog.getByRole('textbox', { name: '词典名称' })).toHaveValue('')
+  await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
+  await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
+  await expect(dialog.getByRole('textbox', { name: '发布版本' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '作者' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '许可证' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '主页' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '说明' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '标签' })).toHaveCount(0)
 })
 
 test('probe detail edits settings and clears all joined entries behind confirmation', async ({ page }) => {

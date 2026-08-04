@@ -60,9 +60,7 @@ const createAdapterIds = ref<string[]>([])
 const createLivePreview = ref(false)
 const createDictionaryMode = ref<'existing' | 'new'>('existing')
 const createDictionaryId = ref('')
-const newDictionaryId = ref('')
 const newDictionaryName = ref('')
-const newDictionaryDescription = ref('')
 const newSourceLocale = ref('en-US')
 const newTargetLocale = ref('zh-CN')
 const settingsOpen = ref(false)
@@ -131,8 +129,7 @@ const createValid = computed(() => Boolean(
   && createAdapterIds.value.length
   && (createDictionaryMode.value === 'existing'
     ? createDictionaryId.value
-    : newDictionaryId.value.trim()
-      && newDictionaryName.value.trim()
+    : newDictionaryName.value.trim()
       && newSourceLocale.value.trim()
       && newTargetLocale.value.trim()),
 ))
@@ -320,17 +317,31 @@ async function poll() {
   )) await loadPage()
 }
 
+function resetCreateForm() {
+  createName.value = ''
+  createSoftwareId.value = ''
+  createAdapterIds.value = []
+  createLivePreview.value = false
+  createDictionaryMode.value = 'existing'
+  createDictionaryId.value = ''
+  newDictionaryName.value = ''
+  newSourceLocale.value = 'en-US'
+  newTargetLocale.value = 'zh-CN'
+}
+
+function closeCreate() {
+  creating.value = false
+  resetCreateForm()
+}
+
 function openCreate() {
+  resetCreateForm()
   const software = props.software[0]
   createSoftwareId.value = software?.id ?? ''
   createAdapterIds.value = observableAdapters.value.map(adapter => adapter.id)
-  createName.value = software ? t('capture.defaultRunName', { software: software.name }) : ''
   createLivePreview.value = createPreviewAvailable.value
   createDictionaryMode.value = props.dictionaries.length ? 'existing' : 'new'
   createDictionaryId.value = props.dictionaries[0]?.metadata.id ?? ''
-  newDictionaryId.value = `dictionary.probe-${crypto.randomUUID()}`
-  newDictionaryName.value = software ? t('capture.defaultDictionaryName', { software: software.name }) : ''
-  newDictionaryDescription.value = ''
   creating.value = true
 }
 
@@ -349,9 +360,9 @@ async function createRun() {
     ? { kind: 'existing' as const, dictionaryId: createDictionaryId.value }
     : {
         kind: 'new' as const,
-        id: newDictionaryId.value.trim(),
+        id: `dictionary.probe-${crypto.randomUUID()}`,
         name: newDictionaryName.value.trim(),
-        description: newDictionaryDescription.value.trim(),
+        description: '',
         sourceLocale: newSourceLocale.value.trim(),
         targetLocale: newTargetLocale.value.trim(),
       }
@@ -364,7 +375,7 @@ async function createRun() {
     dictionary,
   })
   if (created) {
-    creating.value = false
+    closeCreate()
     await loadPage()
   }
 }
@@ -729,21 +740,42 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </UTable>
     </ManagementTableFrame>
 
-    <ManagementFormModal :open="creating" :title="t('capture.createRun')" :description="t('capture.createDescription')" :confirm-label="t('capture.createConfirm')" :confirm-disabled="probe.busy.value || !createValid" :busy="probe.busy.value" width="lg" @update:open="$event || (creating = false)" @confirm="createRun">
+    <ManagementFormModal :open="creating" :title="t('capture.createRun')" :description="t('capture.createDescription')" :confirm-label="t('capture.createConfirm')" :confirm-disabled="probe.busy.value || !createValid" :busy="probe.busy.value" width="lg" @update:open="$event || closeCreate()" @confirm="createRun">
       <div class="space-y-3">
         <UFormField :label="t('capture.runName')" required><UInput v-model="createName" :maxlength="128" class="w-full" /></UFormField>
         <UFormField :label="t('capture.chooseSoftware')" required><USelect v-model="createSoftwareId" :items="software.map(item => ({ value: item.id, label: item.name }))" value-key="value" label-key="label" class="w-full" /></UFormField>
         <UFormField :label="t('capture.dictionaryBinding')" required>
-          <div class="mb-2 flex rounded-[6px] border border-[var(--border)] p-0.5">
-            <UButton class="flex-1" color="neutral" size="xs" :variant="createDictionaryMode === 'existing' ? 'soft' : 'ghost'" :label="t('capture.useExistingDictionary')" :disabled="!dictionaries.length" @click="createDictionaryMode = 'existing'" />
-            <UButton class="flex-1" color="neutral" size="xs" :variant="createDictionaryMode === 'new' ? 'soft' : 'ghost'" :label="t('capture.createDictionary')" @click="createDictionaryMode = 'new'" />
+          <div class="mb-2 flex rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-0.5" role="group" :aria-label="t('capture.dictionaryBinding')">
+            <UButton
+              class="flex-1"
+              :color="createDictionaryMode === 'existing' ? 'primary' : 'neutral'"
+              size="xs"
+              :variant="createDictionaryMode === 'existing' ? 'soft' : 'ghost'"
+              :label="t('capture.useExistingDictionary')"
+              :disabled="!dictionaries.length"
+              :aria-pressed="createDictionaryMode === 'existing'"
+              @click="createDictionaryMode = 'existing'"
+            />
+            <UButton
+              class="flex-1"
+              :color="createDictionaryMode === 'new' ? 'primary' : 'neutral'"
+              size="xs"
+              :variant="createDictionaryMode === 'new' ? 'soft' : 'ghost'"
+              :label="t('capture.createDictionary')"
+              :aria-pressed="createDictionaryMode === 'new'"
+              @click="createDictionaryMode = 'new'"
+            />
           </div>
           <USelect v-if="createDictionaryMode === 'existing'" v-model="createDictionaryId" :items="dictionaries.map(item => ({ value: item.metadata.id, label: item.metadata.name }))" value-key="value" label-key="label" class="w-full" />
-          <div v-else class="space-y-2 rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-2">
-            <UInput v-model="newDictionaryName" :placeholder="t('capture.dictionaryName')" class="w-full" />
-            <UInput v-model="newDictionaryId" :placeholder="t('capture.dictionaryId')" class="w-full" />
-            <UInput v-model="newDictionaryDescription" :placeholder="t('capture.dictionaryDescription')" class="w-full" />
-            <div class="grid grid-cols-2 gap-2"><UInput v-model="newSourceLocale" :placeholder="t('capture.sourceLocale')" /><UInput v-model="newTargetLocale" :placeholder="t('capture.targetLocale')" /></div>
+          <div v-else class="space-y-3 rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+            <p class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('capture.createDictionaryHint') }}</p>
+            <UFormField :label="t('capture.dictionaryName')" required>
+              <UInput v-model="newDictionaryName" :maxlength="128" class="w-full" />
+            </UFormField>
+            <div class="grid grid-cols-2 gap-3">
+              <UFormField :label="t('capture.sourceLocale')" required><UInput v-model="newSourceLocale" class="w-full" /></UFormField>
+              <UFormField :label="t('capture.targetLocale')" required><UInput v-model="newTargetLocale" class="w-full" /></UFormField>
+            </div>
           </div>
         </UFormField>
         <UFormField :label="t('capture.adapters')" :hint="t('capture.adaptersHint')" required><ProbeAdapterPicker v-model="createAdapterIds" :adapters="observableAdapters" /></UFormField>
