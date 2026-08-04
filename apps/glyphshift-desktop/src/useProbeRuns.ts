@@ -31,6 +31,13 @@ export interface ProbeRunQueryInput {
   pageSize: number
 }
 
+export interface ProbeRunUpdateInput {
+  runId: string
+  name: string
+  adapterIds: string[]
+  livePreviewEnabled: boolean
+}
+
 const runs = ref<ProbeRunSummary[]>([])
 const selectedRunId = ref(localStorage.getItem('glyphshift.probe.selectedRun') ?? '')
 const busy = ref(false)
@@ -127,6 +134,73 @@ export function useProbeRuns() {
     catch (error) {
       message.value = translateCommandError(error)
       return false
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
+  async function update(input: ProbeRunUpdateInput) {
+    if (busy.value) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const summary = hasDesktopRuntime()
+        ? await invoke<ProbeRunSummary>('desktop_update_probe_run', { request: input })
+        : (() => {
+            const current = runs.value.find(run => run.id === input.runId)
+            return current
+              ? {
+                  ...current,
+                  name: input.name,
+                  adapterIds: [...input.adapterIds],
+                  livePreviewEnabled: input.livePreviewEnabled,
+                  updatedAtMs: Date.now(),
+                }
+              : null
+          })()
+      if (!summary) return null
+      upsert(summary)
+      return summary
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return null
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
+  async function clearEntries(runId: string) {
+    if (busy.value) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const summary = hasDesktopRuntime()
+        ? await invoke<ProbeRunSummary>('desktop_clear_probe_run_entries', { runId })
+        : (() => {
+            const current = runs.value.find(run => run.id === runId)
+            return current
+              ? {
+                  ...current,
+                  observationRevision: current.observationRevision + 1,
+                  observedCount: 0,
+                  ignoredCount: 0,
+                  droppedObservations: 0,
+                  dictionaryRevision: current.dictionaryRevision + (current.dictionaryEntryCount ? 1 : 0),
+                  dictionaryEntryCount: 0,
+                  updatedAtMs: Date.now(),
+                }
+              : null
+          })()
+      if (!summary) return null
+      upsert(summary)
+      return summary
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return null
     }
     finally {
       busy.value = false
@@ -243,6 +317,8 @@ export function useProbeRuns() {
     selectRun,
     create,
     remove,
+    update,
+    clearEntries,
     resume,
     setPaused,
     disconnect,

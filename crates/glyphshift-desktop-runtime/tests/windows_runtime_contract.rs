@@ -1,5 +1,6 @@
 #![cfg(windows)]
 
+use glyphshift_capture::{CaptureCatalog, CaptureConfiguration, CaptureSessionId};
 use glyphshift_desktop_backend::{
     DesktopBackend, DesktopEnvironment, DesktopRuntimeSpec, DictionaryCreate, DictionaryEdit,
     DictionaryEntryCreate, DictionaryView, ExecutableSelection, FontCoverage, WorkflowCreate,
@@ -16,6 +17,137 @@ use tempfile::tempdir;
 
 const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
 const TEST_GDIPLUS_ADAPTER_ID: &str = "windows.gdiplus.draw-string";
+const TEST_CONSOLE_OBSERVER_ID: &str = "windows.console.write-console";
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle built by scripts/build-runtime-bundle.ps1"]
+fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_translation() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let bundle = RuntimeBundle::open(runtime_root).expect("verified Runtime bundle");
+
+    let observer = bundle
+        .adapter_options()
+        .iter()
+        .find(|adapter| adapter.id() == TEST_CONSOLE_OBSERVER_ID)
+        .expect("Console observer must be visible to the desktop Probe catalog");
+    assert_eq!(observer.features(), [Feature::TextObserve]);
+    assert!(!bundle
+        .translation_adapter_ids()
+        .iter()
+        .any(|adapter_id| adapter_id.as_ref() == TEST_CONSOLE_OBSERVER_ID));
+}
+
+#[test]
+#[ignore = "requires the local Windows Runtime bundle with its synthetic target"]
+fn desktop_capture_owns_one_checkpoint_for_a_process_family() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let target_executable = runtime_root.join("test-target.exe");
+    let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/local-test/evidence/desktop-central-capture");
+    std::fs::create_dir_all(&local_test).expect("central capture evidence root");
+    let data = tempfile::Builder::new()
+        .prefix("contract-")
+        .tempdir_in(local_test)
+        .expect("isolated central capture data");
+    let mut target = TargetProcess::spawn(&target_executable);
+    assert_eq!(
+        target.render_command("start-console-child"),
+        "child-started"
+    );
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&target_executable))
+        .expect("register synthetic capture target");
+    let application_id = snapshot.software()[0].id().to_owned();
+    drop(backend);
+    let extension_path = data
+        .path()
+        .join("extensions")
+        .join(format!("{application_id}.json"));
+    let mut extension = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(&extension_path).expect("software extension"),
+    )
+    .expect("software extension json");
+    extension["descendant_executables"] = serde_json::json!(["test-target.exe"]);
+    std::fs::write(
+        &extension_path,
+        serde_json::to_string(&extension).expect("encode process family extension"),
+    )
+    .expect("write process family extension");
+    let backend = open_backend(data.path(), &runtime_root);
+    let spec = backend
+        .capture_runtime_spec(&application_id, &[TEST_CONSOLE_OBSERVER_ID.into()])
+        .expect("compiled Console capture Runtime spec");
+    let output = data.path().join("capture.json");
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("desktop-central-capture").expect("capture session id"),
+        &output,
+        100,
+    )
+    .expect("central capture configuration");
+    let bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut pool = DesktopRuntimePool::new(bundle);
+
+    pool.start_capture(application_id.clone(), &spec, None, capture)
+        .expect("start Desktop-owned capture");
+    pool.control_capture(&application_id, true)
+        .expect("pause every process-family producer");
+    assert_eq!(
+        target.render_command("write-console"),
+        "parent-console-attempted"
+    );
+    assert_eq!(
+        target.render_command("child-write-console"),
+        "child-console-attempted"
+    );
+    pool.control_capture(&application_id, false)
+        .expect("resume every process-family producer");
+    assert_eq!(
+        target.render_command("write-console"),
+        "parent-console-attempted"
+    );
+    assert_eq!(
+        target.render_command("child-write-console"),
+        "child-console-attempted"
+    );
+    std::thread::sleep(Duration::from_millis(350));
+    assert_eq!(target.render_command("stop-console-child"), "child-stopped");
+    assert_eq!(
+        target.render_command("write-console"),
+        "parent-console-attempted"
+    );
+    pool.stop_capture(application_id)
+        .expect("drain and stop Desktop-owned capture");
+
+    let catalog = CaptureCatalog::read_current(&output).expect("Desktop-owned checkpoint");
+    assert_eq!(
+        catalog
+            .entries()
+            .iter()
+            .find(|entry| {
+                entry.adapter_id() == TEST_CONSOLE_OBSERVER_ID
+                    && entry.source() == "ParentConsoleText"
+            })
+            .map(|entry| entry.count()),
+        Some(2)
+    );
+    assert_eq!(
+        catalog
+            .entries()
+            .iter()
+            .find(|entry| {
+                entry.adapter_id() == TEST_CONSOLE_OBSERVER_ID
+                    && entry.source() == "ChildConsoleText"
+            })
+            .map(|entry| entry.count()),
+        Some(1)
+    );
+    target.stop();
+}
 
 fn open_backend(data_root: &Path, runtime_root: &Path) -> DesktopBackend {
     let bundle = RuntimeBundle::open(runtime_root).expect("verified Runtime bundle");
@@ -119,6 +251,26 @@ fn create_text_workflow(
     source: &str,
     translation: &str,
 ) -> (DictionaryView, DesktopRuntimeSpec) {
+    create_text_workflow_with_adapter(
+        backend,
+        software_id,
+        TEST_ADAPTER_ID,
+        dictionary_id,
+        workflow_id,
+        source,
+        translation,
+    )
+}
+
+fn create_text_workflow_with_adapter(
+    backend: &mut DesktopBackend,
+    software_id: &str,
+    adapter_id: &str,
+    dictionary_id: &str,
+    workflow_id: &str,
+    source: &str,
+    translation: &str,
+) -> (DictionaryView, DesktopRuntimeSpec) {
     let dictionary = backend
         .create_dictionary(
             DictionaryCreate::new(dictionary_id, dictionary_id, "en-US", "zh-CN")
@@ -127,7 +279,7 @@ fn create_text_workflow(
         .expect("create Runtime dictionary");
     backend
         .create_workflow(WorkflowCreate::new(workflow_id, workflow_id).with_targets([
-            WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], [dictionary_id]),
+            WorkflowTargetCreate::new(software_id, [adapter_id], [dictionary_id]),
         ]))
         .expect("create Runtime workflow");
     let spec = backend
@@ -372,6 +524,12 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
     let host_executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
         .map(std::path::PathBuf::from)
         .expect("authorized host executable path");
+    let adapter_id = std::env::var("GLYPHSHIFT_REAL_HOST_ADAPTER_ID")
+        .unwrap_or_else(|_| TEST_ADAPTER_ID.to_owned());
+    let requested_feature = match std::env::var("GLYPHSHIFT_REAL_HOST_FEATURE").as_deref() {
+        Ok("observe") => Feature::TextObserve,
+        _ => Feature::TextReplace,
+    };
 
     let data = tempdir().expect("isolated desktop data");
     let mut backend = open_backend(data.path(), &runtime_root);
@@ -379,14 +537,22 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         .add_software(ExecutableSelection::new(&host_executable))
         .expect("register authorized host executable");
     let application_id = snapshot.software()[0].id().to_owned();
-    let (_, spec) = create_text_workflow(
-        &mut backend,
-        &application_id,
-        "dictionary.real-host",
-        "workflow.real-host",
-        "File",
-        "文件",
-    );
+    let spec = if requested_feature == Feature::TextObserve {
+        backend
+            .capture_runtime_spec(&application_id, &[adapter_id.clone().into_boxed_str()])
+            .expect("compiled authorized capture Runtime spec")
+    } else {
+        create_text_workflow_with_adapter(
+            &mut backend,
+            &application_id,
+            &adapter_id,
+            "dictionary.real-host",
+            "workflow.real-host",
+            "File",
+            "文件",
+        )
+        .1
+    };
 
     let mut bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
     let mut runtime = bundle
@@ -398,14 +564,38 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         .expect("authorized host must already be running")
         .id();
     runtime
-        .start(target_id, [Feature::TextReplace])
+        .start(target_id, [requested_feature])
         .expect("authorized host Runtime activation");
-    assert!(runtime.is_feature_active(Feature::TextReplace));
+    assert!(runtime.is_feature_active(requested_feature));
     if let Some(hold_ms) = std::env::var_os("GLYPHSHIFT_REAL_HOST_HOLD_MS")
         .and_then(|value| value.to_string_lossy().parse::<u64>().ok())
     {
         println!("authorized host Runtime is active");
-        std::thread::sleep(std::time::Duration::from_millis(hold_ms));
+        runtime
+            .control_runtime_diagnostics(true)
+            .expect("enable authorized host diagnostics");
+        let deadline = Instant::now() + Duration::from_millis(hold_ms);
+        let mut hit_count = 0_usize;
+        let mut observed_sources = BTreeSet::new();
+        while Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(250));
+            let batch = runtime
+                .query_runtime_diagnostics()
+                .expect("query authorized host diagnostics");
+            for record in batch
+                .records()
+                .iter()
+                .filter(|record| record.adapter_id() == adapter_id)
+            {
+                hit_count += 1;
+                observed_sources.insert(record.source_text().to_owned());
+            }
+        }
+        runtime
+            .control_runtime_diagnostics(false)
+            .expect("disable authorized host diagnostics");
+        println!("authorized host adapter diagnostics hits: {hit_count}");
+        println!("authorized host adapter diagnostic sources: {observed_sources:?}");
     }
     runtime.stop().expect("authorized host pass-through");
 }

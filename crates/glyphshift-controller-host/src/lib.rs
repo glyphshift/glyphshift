@@ -1,11 +1,12 @@
 //! Verified isolated-process host implementing the Controller transport contract.
 
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
+use glyphshift_capture::{CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId};
 use glyphshift_controller_sdk::{
     Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
-    WireControllerConfiguration, WireControllerLossPolicy, WireFeature, WireOperation,
-    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
-    PROTOCOL_SCHEMA,
+    WireCaptureObservationBatch, WireControllerConfiguration, WireControllerLossPolicy,
+    WireFeature, WireOperation, WireRuntimeDeployment, WireRuntimeFontOutcome,
+    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant, PROTOCOL_SCHEMA,
 };
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{CodeHash, ControllerCodeIdentity, ExtensionId, ProtocolVersion};
@@ -15,7 +16,7 @@ use glyphshift_protocol::{
     ControllerRuntimeAck, ControllerRuntimeDeployment, ControllerRuntimeFontOutcome,
     ControllerRuntimeTextOutcome, ControllerRuntimeTraceBatch, ControllerRuntimeTraceRecord,
     ControllerRuntimeTraceStatus, ControllerTarget, ControllerTargetToken, ControllerTransport,
-    RecipeControllerLossPolicy, RecipeDirective, TransportFailure,
+    ControllerWorkerTargetGrant, RecipeControllerLossPolicy, RecipeDirective, TransportFailure,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -401,6 +402,20 @@ impl ControllerTransport for ProcessControllerTransport {
         }
     }
 
+    fn authorize_worker_target(
+        &mut self,
+        target: &ControllerTargetToken,
+    ) -> Result<ControllerWorkerTargetGrant, TransportFailure> {
+        match self.round_trip(Request::AuthorizeWorkerTarget {
+            target_token: target.as_str().into(),
+        })? {
+            Response::WorkerTargetAuthorized {
+                grant: WireWorkerTargetGrant { platform, payload },
+            } => Ok(ControllerWorkerTargetGrant::new(platform, payload)),
+            _ => Err(TransportFailure::MalformedMessage),
+        }
+    }
+
     fn update_runtime(
         &mut self,
         target: &ControllerTargetToken,
@@ -514,6 +529,20 @@ impl ControllerTransport for ProcessControllerTransport {
         ))
     }
 
+    fn query_observations(
+        &mut self,
+        target: &ControllerTargetToken,
+    ) -> Result<CaptureObservationBatch, TransportFailure> {
+        let Response::RuntimeObservations { batch } =
+            self.round_trip(Request::QueryObservations {
+                target_token: target.as_str().into(),
+            })?
+        else {
+            return Err(TransportFailure::MalformedMessage);
+        };
+        decode_observation_batch(batch)
+    }
+
     fn deactivate_runtime(
         &mut self,
         target: &ControllerTargetToken,
@@ -565,6 +594,23 @@ impl ControllerTransport for ProcessControllerTransport {
             let _ = reader.join();
         }
     }
+}
+
+fn decode_observation_batch(
+    batch: WireCaptureObservationBatch,
+) -> Result<CaptureObservationBatch, TransportFailure> {
+    let producer_id = CaptureProducerId::new(batch.producer_id)
+        .map_err(|_| TransportFailure::MalformedMessage)?;
+    let records = batch
+        .records
+        .into_iter()
+        .map(|record| {
+            CaptureObservationRecord::new(record.sequence, record.adapter_id, record.source)
+                .map_err(|_| TransportFailure::MalformedMessage)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    CaptureObservationBatch::new(producer_id, batch.generation, batch.dropped_total, records)
+        .map_err(|_| TransportFailure::MalformedMessage)
 }
 
 impl Drop for ProcessControllerTransport {

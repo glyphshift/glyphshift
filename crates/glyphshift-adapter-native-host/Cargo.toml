@@ -14,6 +14,8 @@ glyphshift-domain = { path = "../glyphshift-domain" }
 libloading = "0.8"
 
 [dev-dependencies]
+glyphshift-adapter-console = { path = "../glyphshift-adapter-console" }
+glyphshift-adapter-direct2d = { path = "../glyphshift-adapter-direct2d" }
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
 glyphshift-windows-host = { path = "../../test-support/windows-host" }

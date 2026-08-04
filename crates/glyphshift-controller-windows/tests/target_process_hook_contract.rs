@@ -3,6 +3,7 @@
 use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
+use glyphshift_capture::{CaptureProducerConfiguration, CaptureProducerId};
 use glyphshift_controller_sdk::{
     ControllerPlugin, WireAdapterRequirement, WireControllerConfiguration, WireFeature,
     WireRuntimeDeployment, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
@@ -17,8 +18,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::Mutex;
 
 const TARGET_BINARY: &str = "glyphshift-windows-runtime-target.exe";
+static TARGET_PROCESS_LOCK: Mutex<()> = Mutex::new(());
 
 struct TargetProcess {
     child: Child,
@@ -47,14 +50,18 @@ impl TargetProcess {
     }
 
     fn render(&mut self) -> String {
-        writeln!(self.stdin, "render").expect("send render command");
-        self.stdin.flush().expect("flush render command");
-        let mut evidence = String::new();
+        self.command("render")
+    }
+
+    fn command(&mut self, command: &str) -> String {
+        writeln!(self.stdin, "{command}").expect("send target command");
+        self.stdin.flush().expect("flush target command");
+        let mut response = String::new();
         self.stdout
-            .read_line(&mut evidence)
-            .expect("read render evidence");
-        assert!(!evidence.is_empty(), "target should return pixel evidence");
-        evidence.trim().into()
+            .read_line(&mut response)
+            .expect("read target response");
+        assert!(!response.is_empty(), "target should return a response");
+        response.trim().into()
     }
 
     fn stop(&mut self) {
@@ -122,8 +129,32 @@ fn deployment(profile: &Path, publication: RuntimePublication) -> TargetRuntimeD
     )
 }
 
+fn console_deployment(profile: &Path, publication: RuntimePublication) -> TargetRuntimeDeployment {
+    let descriptor = glyphshift_adapter_console::descriptor();
+    let adapter_library = profile.join("glyphshift_adapter_console_native.dll");
+    let binding = AdapterBinding {
+        descriptor: descriptor.clone(),
+        adapter_id: descriptor.adapter_id().clone(),
+        version: descriptor.version(),
+        apply_model: descriptor.apply_model(),
+        artifact_hash: ArtifactHash::sha256(sha256(&adapter_library)),
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/console"),
+        },
+        features: vec![Feature::TextObserve],
+    };
+    TargetRuntimeDeployment::new(
+        publication,
+        [NativeAdapterDeployment::new(adapter_library, binding)
+            .expect("target-process Console observer deployment")],
+    )
+}
+
 #[test]
 fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let profile = profile_directory();
     let mut target = TargetProcess::spawn(&profile);
     let baseline = target.render();
@@ -221,6 +252,195 @@ fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() 
         .deactivate_runtime(&target_token)
         .expect("target Runtime pass-through");
     assert_eq!(target.render(), baseline, "deactivate should restore text");
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_006_console_observation_requires_deployment_in_each_process_family_member() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn(&profile);
+    assert_eq!(target.command("start-console-child"), "child-started");
+
+    let descriptor = glyphshift_adapter_console::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-console-family",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: vec![TARGET_BINARY.into()],
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextObserve],
+                }],
+            },
+        )
+        .expect("synthetic Console process family configuration");
+    let inventory = controller
+        .inventory()
+        .expect("synthetic Console process family inventory");
+    assert_eq!(inventory.targets.len(), 2);
+    let parent_token = inventory.targets[0].token.clone();
+    let child_token = inventory.targets[1].token.clone();
+
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = console_deployment(&profile, publication(1, "Unused"))
+        .encode_json()
+        .expect("Console observer deployment json");
+    let runtime = || WireRuntimeDeployment {
+        runtime_library: runtime_library.to_string_lossy().into_owned(),
+        runtime_library_sha256: sha256(&runtime_library),
+        deployment_json: deployment.clone(),
+        generation: 1,
+    };
+
+    controller
+        .activate_runtime(&parent_token, &runtime())
+        .expect("parent Runtime activation");
+    controller
+        .control_diagnostics(&parent_token, true)
+        .expect("enable parent diagnostics");
+
+    assert_eq!(target.command("write-console"), "parent-console-attempted");
+    let parent_trace = controller
+        .query_diagnostics(&parent_token)
+        .expect("query parent diagnostics");
+    assert_eq!(parent_trace.records.len(), 1);
+    assert_eq!(
+        parent_trace.records[0].adapter_id,
+        descriptor.adapter_id().as_str()
+    );
+    assert_eq!(parent_trace.records[0].source_text, "ParentConsoleText");
+
+    assert_eq!(
+        target.command("child-write-console"),
+        "child-console-attempted"
+    );
+    assert!(controller
+        .query_diagnostics(&parent_token)
+        .expect("query parent after uninjected child output")
+        .records
+        .is_empty());
+
+    controller
+        .activate_runtime(&child_token, &runtime())
+        .expect("child Runtime activation");
+    controller
+        .control_diagnostics(&child_token, true)
+        .expect("enable child diagnostics");
+    assert_eq!(
+        target.command("child-write-console"),
+        "child-console-attempted"
+    );
+    let child_trace = controller
+        .query_diagnostics(&child_token)
+        .expect("query child diagnostics");
+    assert_eq!(child_trace.records.len(), 1);
+    assert_eq!(
+        child_trace.records[0].adapter_id,
+        descriptor.adapter_id().as_str()
+    );
+    assert_eq!(child_trace.records[0].source_text, "ChildConsoleText");
+    assert!(controller
+        .query_diagnostics(&parent_token)
+        .expect("query isolated parent diagnostics")
+        .records
+        .is_empty());
+
+    controller
+        .deactivate_runtime(&child_token)
+        .expect("child Runtime pass-through");
+    controller
+        .deactivate_runtime(&parent_token)
+        .expect("parent Runtime pass-through");
+    assert_eq!(target.command("stop-console-child"), "child-stopped");
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_007_drains_bounded_observation_batches_through_the_controller() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn(&profile);
+    let descriptor = glyphshift_adapter_console::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-observation-batch",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextObserve],
+                }],
+            },
+        )
+        .expect("synthetic observation target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("synthetic observation target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let deployment = console_deployment(&profile, publication(1, "Unused"))
+        .with_observation_producer(
+            CaptureProducerConfiguration::new(
+                CaptureProducerId::new("synthetic-target").expect("producer id"),
+                11,
+            )
+            .expect("producer configuration"),
+        )
+        .encode_json()
+        .expect("observation producer deployment json");
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+
+    controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect("observation Runtime activation");
+    assert_eq!(target.command("write-console"), "parent-console-attempted");
+
+    let batch = controller
+        .query_observations(&target_token)
+        .expect("query observations through Windows Controller");
+    assert_eq!(batch.producer_id, "synthetic-target");
+    assert_eq!(batch.generation, 11);
+    assert_eq!(batch.dropped_total, 0);
+    assert_eq!(batch.records.len(), 1);
+    assert_eq!(
+        batch.records[0].adapter_id,
+        descriptor.adapter_id().as_str()
+    );
+    assert_eq!(batch.records[0].source, "ParentConsoleText");
+
+    let empty = controller
+        .query_observations(&target_token)
+        .expect("query empty observation heartbeat");
+    assert!(empty.records.is_empty());
+    controller
+        .deactivate_runtime(&target_token)
+        .expect("observation Runtime pass-through");
     target.stop();
 }
 

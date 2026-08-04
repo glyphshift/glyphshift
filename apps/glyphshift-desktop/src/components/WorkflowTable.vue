@@ -193,9 +193,11 @@ const fontCoverageOptions = computed(() => [
   { value: 'all_observations' as const, label: t('workflows.fontAllObservations') },
 ])
 const workflowMessage = computed(() => props.messages.workflows || props.items.map(item => props.messages[item.id]).find(Boolean) || '')
+const workflowAdapters = computed(() => props.adapters.filter(adapter =>
+  adapter.features.includes('textReplace') || adapter.features.includes('fontSubstitute')))
 const adapterGroups = computed(() => {
   const groups = new Map<string, AdapterOption[]>()
-  for (const adapter of props.adapters) {
+  for (const adapter of workflowAdapters.value) {
     const platform = adapter.platforms.join(' / ') || t('workflows.crossPlatform')
     const technology = adapter.technologies.join(' / ') || t('workflows.otherTechnology')
     const key = `${platform} · ${technology}`
@@ -552,7 +554,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
             <section v-if="activeTarget" data-testid="workflow-adapter-config" class="space-y-3 border-t border-[var(--border)] pt-5">
               <div><h4 class="m-0 text-[11px] font-semibold">{{ t('workflows.interceptionFor', { name: softwareName(activeTarget.softwareId) }) }}</h4><p class="m-0 mt-1 text-[9px] text-[var(--text-muted)]">{{ t('workflows.adaptersHint') }}</p></div>
               <div v-for="[group, options] in adapterGroups" :key="group" class="space-y-1"><div class="text-[9px] text-[var(--text-muted)]">{{ group }}</div><div class="overflow-hidden rounded-[5px] border border-[var(--border)]"><label v-for="adapter in options" :key="adapter.id" class="flex cursor-pointer items-start gap-2 border-b border-[var(--border)] p-2.5 last:border-b-0 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.adapterPlan.adapterIds.includes(adapter.id)" class="mt-0.5" @update:model-value="toggleAdapter(adapter.id)" /><span class="min-w-0"><strong class="block text-[10px]">{{ adapter.name }}</strong><span class="block text-[9px] leading-4 text-[var(--text-muted)]">{{ adapter.summary }}</span></span></label></div></div>
-              <UAlert v-if="!adapters.length" color="warning" variant="soft" :title="t('workflows.noAdapters')" :description="t('workflows.noAdaptersDescription')" />
+              <UAlert v-if="!workflowAdapters.length" color="warning" variant="soft" :title="t('workflows.noAdapters')" :description="t('workflows.noAdaptersDescription')" />
             </section>
             <UEmpty v-else icon="i-tabler-app-window" :title="t('workflows.chooseTarget')" :description="t('workflows.addSoftwareFirstDescription')" size="sm" />
             <UAlert v-if="softwareProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(softwareProblems)" />

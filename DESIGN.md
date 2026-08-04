@@ -44,7 +44,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
   Catalog 当前模式使用明确的主色选中态。标准 Dictionary `/2` JSON 通过本地页头导入、逐行导出，
   不增加发布中心或向导。
   详情页主表只展示原文和译文，不出现字体、Hook、Adapter 或内部匹配键。
-- **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组 Adapter；详情用一张
+- **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组 Adapter；选择器按
+  “可实时翻译”和“仅采集原文”分组，后者仍支持软件内编辑、导出与未来 AI 建议。详情用一张
   联合表展示原文、译文、状态与技术证据，译文编辑直接修改绑定词典。
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
   Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
@@ -121,6 +122,8 @@ Settings 外观、Workflow 基础配置与 Software 编辑属于同一类轻量�
   点击刷新后才重新扫描并替换缓存，刷新失败时保留当前可用目录。
 - Probe Run 必须且只绑定一个 Dictionary；观测次数、Adapter 和时间属于内部 Observation Index，
   不进入 Dictionary。暂停不结束任务，重启后可恢复，释放连接后任务和证据仍保留。
+- Probe 混合选择写回与仅采集 Adapter 时，实时预览保持可用，但 Translation Snapshot 只绑定具备
+  `TextReplace` 的 Adapter；只有全部所选 Adapter 都无法写回时，实时预览才不可用。
 - Probe 详情不分“技术目录”和“字典草稿”；联合表支持后端搜索分页、行内翻译、批量忽略/恢复/
   清空及导出。5000 条基准下 Vue 只渲染当前页，不叠加虚拟滚动。
 - 原文和译文各占一行并使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。

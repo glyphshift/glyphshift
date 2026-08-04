@@ -1145,6 +1145,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-console"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-console-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-console",
+ "glyphshift-adapter-native-abi",
+ "retour",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "glyphshift-adapter-direct2d"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-direct2d-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-direct2d",
+ "glyphshift-adapter-native-abi",
+ "retour",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "glyphshift-adapter-draw-text-native"
 version = "0.1.0"
 dependencies = [
@@ -1223,6 +1259,8 @@ dependencies = [
 name = "glyphshift-adapter-native-host"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-adapter-console",
+ "glyphshift-adapter-direct2d",
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
  "glyphshift-adapter-native-abi",
@@ -1248,6 +1286,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-uia"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-uia-worker"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-uia",
+ "glyphshift-capture",
+ "glyphshift-domain",
+ "glyphshift-isolated-worker-host",
+ "glyphshift-isolated-worker-sdk",
+ "tempfile",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "glyphshift-capture"
 version = "0.1.0"
 dependencies = [
@@ -1261,6 +1322,7 @@ name = "glyphshift-controller-host"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
+ "glyphshift-capture",
  "glyphshift-controller-sdk",
  "glyphshift-domain",
  "glyphshift-extension",
@@ -1281,8 +1343,10 @@ dependencies = [
 name = "glyphshift-controller-windows"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-adapter-console",
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-registry",
+ "glyphshift-capture",
  "glyphshift-controller-sdk",
  "glyphshift-domain",
  "glyphshift-runtime-contract",
@@ -1329,6 +1393,7 @@ dependencies = [
  "glyphshift-desktop-backend",
  "glyphshift-domain",
  "glyphshift-extension",
+ "glyphshift-isolated-worker-host",
  "glyphshift-protocol",
  "glyphshift-runtime-contract",
  "glyphshift-session",
@@ -1400,10 +1465,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-isolated-worker-host"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-registry",
+ "glyphshift-adapter-sdk",
+ "glyphshift-capture",
+ "glyphshift-domain",
+ "glyphshift-isolated-worker-sdk",
+ "glyphshift-protocol",
+ "glyphshift-runtime-contract",
+ "glyphshift-session",
+ "glyphshift-target-process-host",
+ "glyphshift-translation",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "glyphshift-isolated-worker-sdk"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "glyphshift-protocol"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
+ "glyphshift-capture",
  "glyphshift-domain",
  "glyphshift-extension",
 ]
@@ -1524,6 +1616,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-test-isolated-worker"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-uia",
+ "glyphshift-capture",
+ "glyphshift-isolated-worker-sdk",
+]
+
+[[package]]
 name = "glyphshift-translation"
 version = "0.1.0"
 dependencies = [
@@ -1538,6 +1639,7 @@ dependencies = [
  "glyphshift-adapter-gdiplus",
  "glyphshift-adapter-sdk",
  "glyphshift-domain",
+ "windows 0.58.0",
  "windows-sys 0.61.2",
 ]
 

@@ -15,6 +15,7 @@ glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-desktop-backend = { path = "../glyphshift-desktop-backend" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-extension = { path = "../glyphshift-extension" }
+glyphshift-isolated-worker-host = { path = "../glyphshift-isolated-worker-host" }
 glyphshift-protocol = { path = "../glyphshift-protocol" }
 glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }
 glyphshift-session = { path = "../glyphshift-session" }

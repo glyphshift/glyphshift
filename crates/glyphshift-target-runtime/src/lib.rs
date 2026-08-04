@@ -6,13 +6,17 @@ use glyphshift_adapter_native_abi::{
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::AdapterBinding;
-use glyphshift_capture::{CaptureConfiguration, FileCaptureSink};
+use glyphshift_capture::{
+    CaptureBatchIngress, CaptureBatchProducer, CaptureConfiguration, CaptureIngress,
+    CaptureObservationBatch, CaptureProducerConfiguration, FileCaptureSink,
+};
 use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
     CaptureRuntimeControl, RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
-    RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment, MAX_RUNTIME_TRACE_BYTES,
+    RuntimeObservationQueryV1, RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment,
+    MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     STATUS_TARGET_RUNTIME_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
     STATUS_TARGET_RUNTIME_ADAPTER_CHANGED, STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
     STATUS_TARGET_RUNTIME_ALREADY_ACTIVE, STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
@@ -49,9 +53,111 @@ struct RuntimeState {
     adapter_libraries: Vec<PathBuf>,
     adapters: Vec<Arc<LoadedNativeAdapter>>,
     native_hosts: Vec<usize>,
-    capture_configuration: Option<CaptureConfiguration>,
-    capture: Option<FileCaptureSink>,
+    capture: Option<RuntimeCapture>,
     active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RuntimeCaptureConfiguration {
+    File(CaptureConfiguration),
+    Batch(CaptureProducerConfiguration),
+}
+
+impl RuntimeCaptureConfiguration {
+    fn from_deployment(deployment: &TargetRuntimeDeployment) -> Option<Self> {
+        deployment
+            .capture()
+            .cloned()
+            .map(Self::File)
+            .or_else(|| deployment.observation_producer().cloned().map(Self::Batch))
+    }
+}
+
+enum RuntimeCapture {
+    File {
+        configuration: CaptureConfiguration,
+        ingress: CaptureIngress,
+        owner: FileCaptureSink,
+    },
+    Batch {
+        configuration: CaptureProducerConfiguration,
+        ingress: CaptureBatchIngress,
+        producer: CaptureBatchProducer,
+    },
+}
+
+impl RuntimeCapture {
+    fn start(configuration: RuntimeCaptureConfiguration) -> Result<Self, TargetRuntimeError> {
+        match configuration {
+            RuntimeCaptureConfiguration::File(configuration) => {
+                let owner = FileCaptureSink::start(configuration.clone())
+                    .map_err(|_| TargetRuntimeError::Capture)?;
+                let ingress = owner.ingress();
+                Ok(Self::File {
+                    configuration,
+                    ingress,
+                    owner,
+                })
+            }
+            RuntimeCaptureConfiguration::Batch(configuration) => {
+                let (producer, ingress) = CaptureBatchProducer::start(configuration.clone())
+                    .map_err(|_| TargetRuntimeError::Capture)?;
+                Ok(Self::Batch {
+                    configuration,
+                    ingress,
+                    producer,
+                })
+            }
+        }
+    }
+
+    fn configuration(&self) -> RuntimeCaptureConfiguration {
+        match self {
+            Self::File { configuration, .. } => {
+                RuntimeCaptureConfiguration::File(configuration.clone())
+            }
+            Self::Batch { configuration, .. } => {
+                RuntimeCaptureConfiguration::Batch(configuration.clone())
+            }
+        }
+    }
+
+    fn try_observe(&self, adapter_id: Box<str>, source: Box<str>) {
+        match self {
+            Self::File { ingress, .. } => {
+                let _ = ingress.try_observe(adapter_id, source);
+            }
+            Self::Batch { ingress, .. } => {
+                let _ = ingress.try_observe(adapter_id, source);
+            }
+        }
+    }
+
+    fn set_paused(&self, paused: bool) {
+        match self {
+            Self::File { owner, .. } => owner.set_paused(paused),
+            Self::Batch { producer, .. } => producer.set_paused(paused),
+        }
+    }
+
+    fn drain(&mut self) -> Result<CaptureObservationBatch, TargetRuntimeError> {
+        match self {
+            Self::Batch { producer, .. } => {
+                producer.drain().map_err(|_| TargetRuntimeError::Capture)
+            }
+            Self::File { .. } => Err(TargetRuntimeError::Capture),
+        }
+    }
+
+    fn finish(self) -> Result<(), TargetRuntimeError> {
+        match self {
+            Self::File { owner, .. } => owner
+                .finish()
+                .map(|_| ())
+                .map_err(|_| TargetRuntimeError::Capture),
+            Self::Batch { .. } => Ok(()),
+        }
+    }
 }
 
 fn runtime_state() -> &'static Mutex<Option<RuntimeState>> {
@@ -76,7 +182,7 @@ fn native_host(adapter_id: &str) -> usize {
 }
 
 pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), TargetRuntimeError> {
-    let capture_configuration = deployment.capture().cloned();
+    let capture_configuration = RuntimeCaptureConfiguration::from_deployment(&deployment);
     let bindings = deployment
         .adapters()
         .iter()
@@ -146,20 +252,16 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
             runtime.kernel = kernel;
             runtime.publication = publication;
             runtime.bindings = bindings;
-            let capture = capture_configuration
+            runtime.capture = capture_configuration
                 .clone()
-                .map(FileCaptureSink::start)
-                .transpose()
-                .map_err(|_| TargetRuntimeError::Capture)?;
-            runtime.capture_configuration = capture_configuration;
-            runtime.capture = capture;
+                .map(RuntimeCapture::start)
+                .transpose()?;
             (runtime.adapters.clone(), runtime.native_hosts.clone())
         } else {
             let capture = capture_configuration
                 .clone()
-                .map(FileCaptureSink::start)
-                .transpose()
-                .map_err(|_| TargetRuntimeError::Capture)?;
+                .map(RuntimeCapture::start)
+                .transpose()?;
             let adapters = deployment
                 .adapters()
                 .iter()
@@ -180,7 +282,6 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 adapter_libraries,
                 adapters: adapters.clone(),
                 native_hosts: native_hosts.clone(),
-                capture_configuration,
                 capture,
                 active: false,
             });
@@ -230,7 +331,7 @@ fn same_active_deployment(
     runtime: &RuntimeState,
     bindings: &[AdapterBinding],
     adapter_libraries: &[PathBuf],
-    capture_configuration: Option<&CaptureConfiguration>,
+    capture_configuration: Option<&RuntimeCaptureConfiguration>,
 ) -> bool {
     same_adapter_set(&runtime.bindings, bindings)
         && runtime
@@ -239,7 +340,12 @@ fn same_active_deployment(
             .zip(bindings)
             .all(|(previous, next)| previous.features == next.features)
         && runtime.adapter_libraries == adapter_libraries
-        && runtime.capture_configuration.as_ref() == capture_configuration
+        && runtime
+            .capture
+            .as_ref()
+            .map(RuntimeCapture::configuration)
+            .as_ref()
+            == capture_configuration
 }
 
 fn same_adapter_set(previous: &[AdapterBinding], next: &[AdapterBinding]) -> bool {
@@ -298,6 +404,21 @@ pub fn control_capture(control: CaptureRuntimeControl) -> Result<(), TargetRunti
     Ok(())
 }
 
+pub fn query_observations() -> Result<CaptureObservationBatch, TargetRuntimeError> {
+    let mut state = runtime_state()
+        .lock()
+        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+    let runtime = state
+        .as_mut()
+        .filter(|runtime| runtime.active)
+        .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+    runtime
+        .capture
+        .as_mut()
+        .ok_or(TargetRuntimeError::Capture)?
+        .drain()
+}
+
 pub fn control_diagnostics(control: RuntimeDiagnosticsControl) -> Result<(), TargetRuntimeError> {
     let state = runtime_state()
         .lock()
@@ -352,11 +473,10 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         } else {
             return Err(TargetRuntimeError::AdapterActivation);
         }
-        runtime.capture_configuration = None;
         runtime.capture.take()
     };
     if let Some(capture) = capture {
-        capture.finish().map_err(|_| TargetRuntimeError::Capture)?;
+        capture.finish()?;
     }
     request_current_process_redraw();
     Ok(())
@@ -431,7 +551,7 @@ extern "C" fn decide_utf16(
     }
     let context = unsafe { &*context.cast::<NativeDecisionContext>() };
     if let Some(capture) = &runtime.capture {
-        capture.observe(context.adapter_id.clone(), source.clone());
+        capture.try_observe(context.adapter_id.clone(), source.clone().into());
     }
     let decision = runtime.kernel.decide(&TextObservation::new(
         context.adapter_id.clone(),
@@ -617,6 +737,41 @@ pub unsafe extern "system" fn glyphshift_runtime_capture_control_v1(
 }
 
 #[no_mangle]
+/// Drains one bounded observation batch into a caller-owned JSON buffer.
+///
+/// # Safety
+///
+/// `query` and its output buffer must remain writable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_observation_query_v1(
+    query: *mut RuntimeObservationQueryV1,
+) -> u32 {
+    if query.is_null()
+        || (*query).struct_size != std::mem::size_of::<RuntimeObservationQueryV1>() as u32
+        || (*query).output.is_null()
+        || (*query).output_capacity as usize > MAX_RUNTIME_OBSERVATION_BYTES
+    {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    }
+    let encoded = match std::panic::catch_unwind(|| {
+        query_observations().and_then(|batch| {
+            batch
+                .encode_json()
+                .map_err(|_| TargetRuntimeError::RuntimeUnavailable)
+        })
+    }) {
+        Ok(Ok(encoded)) => encoded,
+        Ok(Err(error)) => return activation_status(error),
+        Err(_) => return STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    };
+    (*query).output_len = encoded.len() as u32;
+    if encoded.len() > (*query).output_capacity as usize {
+        return STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), (*query).output, encoded.len());
+    STATUS_TARGET_RUNTIME_OK
+}
+
+#[no_mangle]
 /// Enables or disables bounded decision diagnostics.
 ///
 /// # Safety
@@ -679,5 +834,69 @@ pub extern "system" fn glyphshift_runtime_deactivate_v1(_command: *mut core::ffi
         Ok(Ok(())) => STATUS_TARGET_RUNTIME_OK,
         Ok(Err(error)) => activation_status(error),
         Err(_) => STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glyphshift_capture::{CaptureProducerConfiguration, CaptureProducerId};
+    use glyphshift_domain::{Generation, RouteProgram};
+    use glyphshift_translation::{FontPolicy, TranslationSnapshot};
+
+    #[test]
+    fn target_runtime_drains_observations_only_in_batch_producer_mode() {
+        let publication = RuntimePublication::new(
+            RouteProgram::direct("capture"),
+            TranslationSnapshot::empty(Generation::new(1)),
+            FontPolicy::empty(),
+        );
+        let deployment = TargetRuntimeDeployment::new(publication, std::iter::empty())
+            .with_observation_producer(
+                CaptureProducerConfiguration::new(
+                    CaptureProducerId::new("target-1").expect("producer id"),
+                    2,
+                )
+                .expect("producer configuration"),
+            );
+        activate_deployment(deployment).expect("activate batch producer");
+
+        let context = Box::into_raw(Box::new(NativeDecisionContext {
+            adapter_id: "synthetic.observe".into(),
+        }));
+        let observe = |source: &str| {
+            let source = source.encode_utf16().collect::<Vec<_>>();
+            decide_utf16(
+                context.cast(),
+                source.as_ptr(),
+                source.len() as u32,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(observe("Open").status, STATUS_OK);
+        let first = query_observations().expect("first observation batch");
+        assert_eq!(first.producer_id().as_str(), "target-1");
+        assert_eq!(first.generation(), 2);
+        assert_eq!(first.records().len(), 1);
+        assert_eq!(first.records()[0].source(), "Open");
+
+        control_capture(CaptureRuntimeControl::new(true)).expect("pause producer");
+        assert_eq!(observe("Ignored").status, STATUS_OK);
+        assert!(query_observations()
+            .expect("paused observation batch")
+            .records()
+            .is_empty());
+        control_capture(CaptureRuntimeControl::new(false)).expect("resume producer");
+        deactivate_runtime().expect("deactivate batch producer");
+        assert_eq!(
+            query_observations(),
+            Err(TargetRuntimeError::RuntimeUnavailable)
+        );
+        unsafe {
+            drop(Box::from_raw(context));
+        }
     }
 }

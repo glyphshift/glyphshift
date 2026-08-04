@@ -206,6 +206,8 @@ pub enum HostOperationFailure {
     RuntimeExportUnavailable,
     RemoteThreadUnavailable,
     RemoteThreadTimeout,
+    IsolatedWorkerPermissionDenied,
+    IsolatedWorkerTimeout,
     TargetRuntimeRejected(u32),
     ControllerRejected,
 }
@@ -379,6 +381,17 @@ impl HostGenerationReport {
     }
 
     #[must_use]
+    pub fn reported(
+        target_runtime_ack: Option<Generation>,
+        isolated_acknowledgements: impl IntoIterator<Item = (BoundFeature, Generation)>,
+    ) -> Self {
+        Self {
+            target_runtime_ack,
+            isolated_feature_acks: isolated_acknowledgements.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
     pub const fn pending() -> Self {
         Self {
             target_runtime_ack: None,
@@ -401,6 +414,11 @@ impl SessionDiagnostic {
     pub fn new(code: impl Into<Box<str>>) -> Self {
         Self(code.into())
     }
+
+    #[must_use]
+    pub fn code(&self) -> &str {
+        &self.0
+    }
 }
 
 impl HostHealthReport {
@@ -410,6 +428,16 @@ impl HostHealthReport {
             failed_adapters: BTreeSet::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn failed_adapters(&self) -> &BTreeSet<BoundAdapter> {
+        &self.failed_adapters
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[SessionDiagnostic] {
+        &self.diagnostics
     }
 
     #[must_use]
@@ -432,6 +460,14 @@ impl HostHealthReport {
                 .take(SESSION_DIAGNOSTIC_LIMIT)
                 .collect(),
         }
+    }
+
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        self.failed_adapters.extend(other.failed_adapters);
+        self.diagnostics.extend(other.diagnostics);
+        self.diagnostics.truncate(SESSION_DIAGNOSTIC_LIMIT);
+        self
     }
 }
 
@@ -467,6 +503,13 @@ impl HostDeactivation {
             completed_adapters: BTreeSet::new(),
             failed_adapters: BTreeSet::new(),
         }
+    }
+
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        self.completed_adapters.extend(other.completed_adapters);
+        self.failed_adapters.extend(other.failed_adapters);
+        self
     }
 }
 

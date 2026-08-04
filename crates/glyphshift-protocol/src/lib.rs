@@ -1,6 +1,7 @@
 //! Controller Plugin protocol state and validation.
 
 use glyphshift_adapter_registry::AdapterRequirement;
+use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{ExtensionId, ProtocolVersion};
 use std::collections::{BTreeMap, BTreeSet};
@@ -90,6 +91,36 @@ impl ControllerTargetToken {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Ephemeral platform-private authority for a verified isolated worker.
+///
+/// The Desktop shell never receives this value. It is minted from an already authorized
+/// Controller target and remains inside the runtime composition root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerWorkerTargetGrant {
+    platform: Box<str>,
+    payload: Box<str>,
+}
+
+impl ControllerWorkerTargetGrant {
+    #[must_use]
+    pub fn new(platform: impl Into<Box<str>>, payload: impl Into<Box<str>>) -> Self {
+        Self {
+            platform: platform.into(),
+            payload: payload.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn platform(&self) -> &str {
+        &self.platform
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &str {
+        &self.payload
     }
 }
 
@@ -591,6 +622,13 @@ pub trait ControllerTransport {
         Err(TransportFailure::MalformedMessage)
     }
 
+    fn authorize_worker_target(
+        &mut self,
+        _target: &ControllerTargetToken,
+    ) -> Result<ControllerWorkerTargetGrant, TransportFailure> {
+        Err(TransportFailure::MalformedMessage)
+    }
+
     fn activate_runtime(
         &mut self,
         _target: &ControllerTargetToken,
@@ -628,6 +666,13 @@ pub trait ControllerTransport {
         &mut self,
         _target: &ControllerTargetToken,
     ) -> Result<ControllerRuntimeTraceBatch, TransportFailure> {
+        Err(TransportFailure::MalformedMessage)
+    }
+
+    fn query_observations(
+        &mut self,
+        _target: &ControllerTargetToken,
+    ) -> Result<CaptureObservationBatch, TransportFailure> {
         Err(TransportFailure::MalformedMessage)
     }
 
@@ -898,6 +943,20 @@ impl<T: ControllerTransport> ControllerConnection<T> {
             .map_err(|failure| self.handle_transport_failure(failure))
     }
 
+    pub fn authorize_worker_target(
+        &mut self,
+        target_id: OpaqueTargetId,
+    ) -> Result<ControllerWorkerTargetGrant, ControllerProtocolError> {
+        let target = self
+            .target_tokens
+            .get(&target_id)
+            .cloned()
+            .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
+        self.transport
+            .authorize_worker_target(&target)
+            .map_err(|failure| self.handle_transport_failure(failure))
+    }
+
     pub fn update_runtime(
         &mut self,
         target_id: OpaqueTargetId,
@@ -958,6 +1017,20 @@ impl<T: ControllerTransport> ControllerConnection<T> {
             .map_err(|failure| self.handle_transport_failure(failure))
     }
 
+    pub fn query_observations(
+        &mut self,
+        target_id: OpaqueTargetId,
+    ) -> Result<CaptureObservationBatch, ControllerProtocolError> {
+        let target = self
+            .target_tokens
+            .get(&target_id)
+            .cloned()
+            .ok_or(ControllerProtocolError::UnknownTarget(target_id))?;
+        self.transport
+            .query_observations(&target)
+            .map_err(|failure| self.handle_transport_failure(failure))
+    }
+
     pub fn deactivate_runtime(
         &mut self,
         target_id: OpaqueTargetId,
@@ -997,7 +1070,10 @@ impl<T: ControllerTransport> ControllerConnection<T> {
     }
 
     fn handle_transport_failure(&mut self, failure: TransportFailure) -> ControllerProtocolError {
-        if failure != TransportFailure::Cancelled {
+        if !matches!(
+            failure,
+            TransportFailure::Cancelled | TransportFailure::Rejected(_)
+        ) {
             self.health = ControllerHealth::Degraded;
             self.transport.terminate();
         }

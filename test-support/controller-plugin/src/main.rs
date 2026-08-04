@@ -1,8 +1,9 @@
 use glyphshift_controller_sdk::{
     serve_stdio, ControllerPlugin, PluginError, WireAdapterRequirement,
-    WireControllerConfiguration, WireControllerLossPolicy, WireFeature, WireInstallation,
-    WireInventory, WireRecipe, WireRuntimeFontOutcome, WireRuntimeTextOutcome,
-    WireRuntimeTraceBatch, WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget,
+    WireCaptureObservationBatch, WireCaptureObservationRecord, WireControllerConfiguration,
+    WireControllerLossPolicy, WireFeature, WireInstallation, WireInventory, WireRecipe,
+    WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch, WireRuntimeTraceRecord,
+    WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
 };
 
 #[derive(Default)]
@@ -104,6 +105,19 @@ impl ControllerPlugin for SyntheticController {
             .ok_or_else(|| PluginError::new("target_not_found"))
     }
 
+    fn authorize_worker_target(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireWorkerTargetGrant, PluginError> {
+        if target_token != "target:stable" {
+            return Err(PluginError::new("target_not_found"));
+        }
+        Ok(WireWorkerTargetGrant {
+            platform: "synthetic-process-v1".into(),
+            payload: "target:authorized".into(),
+        })
+    }
+
     fn query_diagnostics(
         &mut self,
         target_token: &str,
@@ -124,6 +138,25 @@ impl ControllerPlugin for SyntheticController {
                 font_policy_digest: [3; 32],
             }],
             dropped: 2,
+        })
+    }
+
+    fn query_observations(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireCaptureObservationBatch, PluginError> {
+        if target_token != "target:stable" {
+            return Err(PluginError::new("target_not_found"));
+        }
+        Ok(WireCaptureObservationBatch {
+            producer_id: "synthetic-target".into(),
+            generation: 7,
+            dropped_total: 3,
+            records: vec![WireCaptureObservationRecord {
+                sequence: 11,
+                adapter_id: "example.synthetic.process-inline".into(),
+                source: "Open".into(),
+            }],
         })
     }
 }

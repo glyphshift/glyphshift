@@ -8,7 +8,7 @@ use glyphshift_adapter_registry::{
     AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement, AdapterTrustPolicy,
     AdapterVersionRequirement, ArtifactHash, PackageArtifactId, SignerId,
 };
-use glyphshift_capture::CaptureConfiguration;
+use glyphshift_capture::{CaptureConfiguration, FileCaptureSink};
 use glyphshift_controller_host::{
     ControllerStartupConfig, ControllerTrustPolicy, ProcessControllerTransport,
     VerifiedControllerArtifact,
@@ -19,6 +19,7 @@ use glyphshift_extension::{
     CodeHash, ControllerArtifactId, ControllerCodeIdentity, ControllerSignerId, ExtensionId,
     ProtocolVersion,
 };
+use glyphshift_isolated_worker_host::HybridAdapterHost;
 use glyphshift_protocol::{
     ControllerConnection, ControllerNonce, ControllerProtocolError, ControllerTransport,
     NonceLedger, OpaqueTargetId, PreparedRecipe, RecipeControllerLossPolicy,
@@ -186,7 +187,7 @@ pub struct RuntimeBundle {
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
     discovered_requirements: Vec<AdapterRequirement>,
-    translation_adapters: Vec<RuntimeAdapterOption>,
+    adapter_options: Vec<RuntimeAdapterOption>,
     nonce_ledger: NonceLedger,
     nonce_sequence: u64,
 }
@@ -239,7 +240,7 @@ impl RuntimeBundle {
         let mut catalog_adapters = Vec::new();
         let mut authorized_adapters = Vec::new();
         let mut discovered_requirements = Vec::new();
-        let mut translation_adapters = Vec::new();
+        let mut adapter_options = Vec::new();
         for (index, adapter) in manifest.adapters.iter().enumerate() {
             let hash = parse_hash(&adapter.sha256)?;
             let path = verified_artifact(&root, &adapter.file, hash)?;
@@ -256,8 +257,8 @@ impl RuntimeBundle {
                     )
                 })
                 .collect::<Vec<_>>();
-            if features.contains(&Feature::TextReplace) {
-                translation_adapters.push(RuntimeAdapterOption {
+            if !features.is_empty() {
+                adapter_options.push(RuntimeAdapterOption {
                     id: descriptor.adapter_id().as_str().into(),
                     name: adapter
                         .name
@@ -315,7 +316,7 @@ impl RuntimeBundle {
             registry,
             artifacts,
             discovered_requirements,
-            translation_adapters,
+            adapter_options,
             nonce_ledger: NonceLedger::new(),
             nonce_sequence: 0,
         })
@@ -335,8 +336,8 @@ impl RuntimeBundle {
     }
 
     #[must_use]
-    pub fn translation_adapter_options(&self) -> &[RuntimeAdapterOption] {
-        &self.translation_adapters
+    pub fn adapter_options(&self) -> &[RuntimeAdapterOption] {
+        &self.adapter_options
     }
 
     #[must_use]
@@ -397,7 +398,7 @@ trait ManagedRuntime: Send {
     ) -> Result<(), DesktopRuntimeError>;
     fn start_capture(
         &mut self,
-        target_id: u64,
+        target_ids: &[u64],
         requested_features: &BTreeSet<Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError>;
@@ -454,11 +455,16 @@ impl ManagedRuntime for WindowsDesktopRuntime {
 
     fn start_capture(
         &mut self,
-        target_id: u64,
+        target_ids: &[u64],
         requested_features: &BTreeSet<Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError> {
-        DesktopRuntime::start_capture(self, target_id, requested_features.iter().copied(), capture)
+        DesktopRuntime::start_capture(
+            self,
+            target_ids.iter().copied(),
+            requested_features.iter().copied(),
+            capture,
+        )
     }
 
     fn publish(
@@ -897,14 +903,23 @@ impl DesktopRuntimePool {
             .sessions
             .get_mut(application_id.as_ref())
             .ok_or(DesktopRuntimeError::InvalidState)?;
-        let target_id = target_id
-            .or_else(|| runtime.targets().first().map(RuntimeTarget::id))
-            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        let target_ids = if let Some(target_id) = target_id {
+            vec![target_id]
+        } else {
+            runtime
+                .targets()
+                .into_iter()
+                .map(|target| target.id())
+                .collect::<Vec<_>>()
+        };
+        if target_ids.is_empty() {
+            return Err(DesktopRuntimeError::UnknownTarget);
+        }
         let mut requested_features = BTreeSet::from([Feature::TextObserve]);
         if status.supports(Feature::TextReplace) {
             requested_features.insert(Feature::TextReplace);
         }
-        if let Err(error) = runtime.start_capture(target_id, &requested_features, capture) {
+        if let Err(error) = runtime.start_capture(&target_ids, &requested_features, capture) {
             if let Some(mut failed) = self.sessions.remove(application_id.as_ref()) {
                 failed.abandon();
             }
@@ -1084,8 +1099,8 @@ enum RuntimePhase<T> {
     Discovered(ControllerConnection<T>),
     Active {
         manager: SessionManager,
-        session_id: SessionId,
-        target_id: u64,
+        sessions: BTreeMap<u64, SessionId>,
+        capture_owner: Option<FileCaptureSink>,
     },
 }
 
@@ -1181,7 +1196,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
     #[must_use]
     pub fn active_target_id(&self) -> Option<u64> {
         match self.phase.as_ref() {
-            Some(RuntimePhase::Active { target_id, .. }) => Some(*target_id),
+            Some(RuntimePhase::Active { sessions, .. }) => sessions.keys().next().copied(),
             _ => None,
         }
     }
@@ -1191,21 +1206,21 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         target_id: u64,
         requested_features: impl IntoIterator<Item = Feature>,
     ) -> Result<(), DesktopRuntimeError> {
-        self.start_inner(target_id, requested_features, None)
+        self.start_inner([target_id], requested_features, None)
     }
 
     pub fn start_capture(
         &mut self,
-        target_id: u64,
+        target_ids: impl IntoIterator<Item = u64>,
         requested_features: impl IntoIterator<Item = Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError> {
-        self.start_inner(target_id, requested_features, Some(capture))
+        self.start_inner(target_ids, requested_features, Some(capture))
     }
 
     fn start_inner(
         &mut self,
-        target_id: u64,
+        target_ids: impl IntoIterator<Item = u64>,
         requested_features: impl IntoIterator<Item = Feature>,
         capture: Option<CaptureConfiguration>,
     ) -> Result<(), DesktopRuntimeError> {
@@ -1217,12 +1232,20 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         {
             return Err(DesktopRuntimeError::SessionRejected);
         }
-        let target = self
-            .targets
+        let target_ids = target_ids.into_iter().collect::<BTreeSet<_>>();
+        if target_ids.is_empty() {
+            return Err(DesktopRuntimeError::UnknownTarget);
+        }
+        let targets = target_ids
             .iter()
-            .find(|target| target.view.id == target_id)
-            .cloned()
-            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+            .map(|target_id| {
+                self.targets
+                    .iter()
+                    .find(|target| target.view.id == *target_id)
+                    .cloned()
+                    .ok_or(DesktopRuntimeError::UnknownTarget)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut connection = match self.phase.take() {
             Some(RuntimePhase::Discovered(connection)) => connection,
             phase => {
@@ -1230,30 +1253,69 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
                 return Err(DesktopRuntimeError::InvalidState);
             }
         };
-        let prepared = connection
-            .prepare(target.controller_id, requested_features.iter().copied())
-            .map_err(map_protocol_error)?;
-        let target_instance_id = TargetInstanceId::new(format!("target-{target_id}"));
-        let target_instance = TargetInstance::new(target_instance_id.clone(), target.facts);
-        let mut host = TargetProcessHost::new(connection, self.artifacts.clone());
-        if let Some(capture) = capture {
-            host = host.with_capture(capture);
+        let mut prepared = Vec::new();
+        let mut runtime_targets = Vec::new();
+        for target in targets {
+            let recipe = match connection
+                .prepare(target.controller_id, requested_features.iter().copied())
+            {
+                Ok(recipe) => recipe,
+                Err(error) => {
+                    self.phase = Some(RuntimePhase::Discovered(connection));
+                    return Err(map_protocol_error(error));
+                }
+            };
+            let target_instance_id = TargetInstanceId::new(format!("target-{}", target.view.id));
+            prepared.push((target_instance_id.clone(), recipe));
+            runtime_targets.push((
+                target.view.id,
+                target_instance_id.clone(),
+                target.controller_id,
+                TargetInstance::new(target_instance_id, target.facts),
+            ));
         }
-        host.register_target(target_instance_id, target.controller_id);
+        let capture_owner = capture
+            .map(FileCaptureSink::start)
+            .transpose()
+            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        let mut host = TargetProcessHost::new(connection, self.artifacts.clone());
+        if let Some(owner) = capture_owner.as_ref() {
+            host = host.with_capture_ingress(owner.ingress());
+        }
+        for (_, target_instance_id, controller_id, _) in &runtime_targets {
+            host.register_target(target_instance_id.clone(), *controller_id);
+        }
         let mut manager = SessionManager::new(
             self.registry.clone(),
             PreparedController::new(prepared),
-            host,
+            HybridAdapterHost::new(host),
             RunningTarget,
         );
         let active_features = requested_features.iter().copied().collect();
-        let status = manager
-            .start_with_runtime(target_instance, requested_features, &self.publication)
-            .map_err(map_session_runtime_error)?;
+        let mut sessions = BTreeMap::new();
+        for (target_id, _, _, target_instance) in runtime_targets {
+            let status = match manager.start_with_runtime(
+                target_instance,
+                requested_features.clone(),
+                &self.publication,
+            ) {
+                Ok(status) => status,
+                Err(error) => {
+                    for session_id in sessions.values().copied() {
+                        let _ = manager.stop(session_id);
+                    }
+                    if let Some(owner) = capture_owner {
+                        let _ = owner.finish();
+                    }
+                    return Err(map_session_runtime_error(error));
+                }
+            };
+            sessions.insert(target_id, status.session_id());
+        }
         self.phase = Some(RuntimePhase::Active {
             manager,
-            session_id: status.session_id(),
-            target_id,
+            sessions,
+            capture_owner,
         });
         self.active_features = active_features;
         Ok(())
@@ -1264,16 +1326,16 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
-            manager,
-            session_id,
-            ..
+            manager, sessions, ..
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
-        manager
-            .update_with_runtime(*session_id, &publication)
-            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        for session_id in sessions.values().copied() {
+            manager
+                .update_with_runtime(session_id, &publication)
+                .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        }
         self.publication = publication;
         Ok(())
     }
@@ -1281,15 +1343,36 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
     pub fn control_capture(&mut self, paused: bool) -> Result<(), DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
             manager,
-            session_id,
-            ..
+            sessions,
+            capture_owner,
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
-        manager
-            .control_capture(*session_id, paused)
-            .map_err(|_| DesktopRuntimeError::SessionRejected)
+        if !paused {
+            capture_owner
+                .as_ref()
+                .ok_or(DesktopRuntimeError::InvalidState)?
+                .set_paused(false);
+        }
+        for session_id in sessions.values().copied() {
+            if manager.control_capture(session_id, paused).is_err() {
+                if !paused {
+                    capture_owner
+                        .as_ref()
+                        .ok_or(DesktopRuntimeError::InvalidState)?
+                        .set_paused(true);
+                }
+                return Err(DesktopRuntimeError::SessionRejected);
+            }
+        }
+        if paused {
+            capture_owner
+                .as_ref()
+                .ok_or(DesktopRuntimeError::InvalidState)?
+                .set_paused(true);
+        }
+        Ok(())
     }
 
     pub fn control_runtime_diagnostics(
@@ -1297,44 +1380,60 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         enabled: bool,
     ) -> Result<(), DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
-            manager,
-            session_id,
-            ..
+            manager, sessions, ..
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
-        manager
-            .control_runtime_diagnostics(*session_id, enabled)
-            .map_err(|_| DesktopRuntimeError::SessionRejected)
+        for session_id in sessions.values().copied() {
+            manager
+                .control_runtime_diagnostics(session_id, enabled)
+                .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        }
+        Ok(())
     }
 
     pub fn query_runtime_diagnostics(&mut self) -> Result<RuntimeTraceBatch, DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
-            manager,
-            session_id,
-            ..
+            manager, sessions, ..
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
+        let session_id = sessions
+            .values()
+            .next()
+            .copied()
+            .ok_or(DesktopRuntimeError::InvalidState)?;
         manager
-            .query_runtime_diagnostics(*session_id)
+            .query_runtime_diagnostics(session_id)
             .map_err(|_| DesktopRuntimeError::SessionRejected)
     }
 
     pub fn stop(&mut self) -> Result<(), DesktopRuntimeError> {
         let Some(RuntimePhase::Active {
             manager,
-            session_id,
-            ..
+            sessions,
+            capture_owner,
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
-        manager
-            .stop(*session_id)
-            .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        let active_sessions = sessions
+            .iter()
+            .map(|(target_id, session_id)| (*target_id, *session_id))
+            .collect::<Vec<_>>();
+        for (target_id, session_id) in active_sessions {
+            manager
+                .stop(session_id)
+                .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+            sessions.remove(&target_id);
+        }
+        if let Some(owner) = capture_owner.take() {
+            owner
+                .finish()
+                .map_err(|_| DesktopRuntimeError::SessionRejected)?;
+        }
         self.active_features.clear();
         self.phase = None;
         Ok(())
@@ -1350,27 +1449,40 @@ impl<T> Drop for DesktopRuntime<T> {
     fn drop(&mut self) {
         if let Some(RuntimePhase::Active {
             manager,
-            session_id,
-            ..
+            sessions,
+            capture_owner,
         }) = self.phase.as_mut()
         {
-            let _ = manager.stop(*session_id);
+            for session_id in sessions.values().copied() {
+                let _ = manager.stop(session_id);
+            }
+            if let Some(owner) = capture_owner.take() {
+                let _ = owner.finish();
+            }
         }
     }
 }
 
 struct PreparedController {
-    recipe: SessionRecipe,
+    recipes: BTreeMap<TargetInstanceId, SessionRecipe>,
 }
 
 impl PreparedController {
-    fn new(prepared: PreparedRecipe) -> Self {
-        let loss_policy = match prepared.controller_loss_policy() {
-            RecipeControllerLossPolicy::Continue => ControllerLossPolicy::Continue,
-            RecipeControllerLossPolicy::Degrade => ControllerLossPolicy::Degrade,
-        };
+    fn new(prepared: impl IntoIterator<Item = (TargetInstanceId, PreparedRecipe)>) -> Self {
         Self {
-            recipe: SessionRecipe::new(prepared.requirements().iter().cloned(), loss_policy),
+            recipes: prepared
+                .into_iter()
+                .map(|(target, prepared)| {
+                    let loss_policy = match prepared.controller_loss_policy() {
+                        RecipeControllerLossPolicy::Continue => ControllerLossPolicy::Continue,
+                        RecipeControllerLossPolicy::Degrade => ControllerLossPolicy::Degrade,
+                    };
+                    (
+                        target,
+                        SessionRecipe::new(prepared.requirements().iter().cloned(), loss_policy),
+                    )
+                })
+                .collect(),
         }
     }
 }
@@ -1378,10 +1490,13 @@ impl PreparedController {
 impl ControllerRecipePort for PreparedController {
     fn prepare(
         &mut self,
-        _target: &TargetInstance,
+        target: &TargetInstance,
         _requested_features: &BTreeSet<Feature>,
     ) -> Result<SessionRecipe, ControllerFailure> {
-        Ok(self.recipe.clone())
+        self.recipes
+            .get(target.id())
+            .cloned()
+            .ok_or(ControllerFailure::Unavailable)
     }
 
     fn health(&mut self, _target: &TargetInstance) -> ControllerHealth {
@@ -1518,7 +1633,7 @@ mod tests {
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     };
     use tempfile::tempdir;
 
@@ -1560,6 +1675,8 @@ mod tests {
                 application_id,
                 active_features: BTreeSet::new(),
                 generation: spec.publication().generation(),
+                target_ids: vec![1],
+                captured_target_ids: None,
             }))
         }
     }
@@ -1569,6 +1686,29 @@ mod tests {
         active_features: BTreeSet<Feature>,
         generation: Generation,
         stop_fails: bool,
+        target_ids: Vec<u64>,
+        captured_target_ids: Option<Arc<Mutex<Vec<u64>>>>,
+    }
+
+    struct FamilyCaptureFactory {
+        captured_target_ids: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl RuntimeFactory for FamilyCaptureFactory {
+        fn discover(
+            &mut self,
+            application_id: Box<str>,
+            spec: &DesktopRuntimeSpec,
+        ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+            Ok(Box::new(InMemoryRuntime {
+                application_id,
+                active_features: BTreeSet::new(),
+                generation: spec.publication().generation(),
+                stop_fails: false,
+                target_ids: vec![1, 2, 3],
+                captured_target_ids: Some(self.captured_target_ids.clone()),
+            }))
+        }
     }
 
     struct RetryRuntimeFactory {
@@ -1588,6 +1728,8 @@ mod tests {
                     active_features: BTreeSet::new(),
                     generation: spec.publication().generation(),
                     stop_fails: false,
+                    target_ids: vec![1],
+                    captured_target_ids: None,
                 },
                 reject_capture,
             }))
@@ -1634,7 +1776,7 @@ mod tests {
 
         fn start_capture(
             &mut self,
-            target_id: u64,
+            target_ids: &[u64],
             requested_features: &BTreeSet<Feature>,
             capture: CaptureConfiguration,
         ) -> Result<(), DesktopRuntimeError> {
@@ -1642,7 +1784,7 @@ mod tests {
                 return Err(DesktopRuntimeError::ProtocolRejected);
             }
             self.inner
-                .start_capture(target_id, requested_features, capture)
+                .start_capture(target_ids, requested_features, capture)
         }
 
         fn publish(
@@ -1678,10 +1820,13 @@ mod tests {
         }
 
         fn targets(&self) -> Vec<RuntimeTarget> {
-            vec![RuntimeTarget {
-                id: 1,
-                display_name: "合成目标".into(),
-            }]
+            self.target_ids
+                .iter()
+                .map(|target_id| RuntimeTarget {
+                    id: *target_id,
+                    display_name: format!("合成目标 {target_id}").into(),
+                })
+                .collect()
         }
 
         fn supported_features(&self) -> BTreeSet<Feature> {
@@ -1699,7 +1844,9 @@ mod tests {
         }
 
         fn active_target_id(&self) -> Option<u64> {
-            (!self.active_features.is_empty()).then_some(1)
+            (!self.active_features.is_empty())
+                .then(|| self.target_ids.first().copied())
+                .flatten()
         }
 
         fn applied_generation(&self) -> Option<Generation> {
@@ -1717,10 +1864,15 @@ mod tests {
 
         fn start_capture(
             &mut self,
-            _target_id: u64,
+            target_ids: &[u64],
             requested_features: &BTreeSet<Feature>,
             _capture: CaptureConfiguration,
         ) -> Result<(), DesktopRuntimeError> {
+            if let Some(captured) = &self.captured_target_ids {
+                *captured
+                    .lock()
+                    .map_err(|_| DesktopRuntimeError::InvalidState)? = target_ids.to_vec();
+            }
             self.active_features = requested_features.clone();
             Ok(())
         }
@@ -1920,6 +2072,48 @@ mod tests {
             .expect("start workflow after capture")
             .errors()
             .is_empty());
+    }
+
+    #[test]
+    fn process_family_capture_selects_every_discovered_target_when_not_narrowed() {
+        let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/local-test/evidence/desktop-runtime-family-capture");
+        fs::create_dir_all(&local_test).expect("family capture local-test root");
+        let root = tempfile::Builder::new()
+            .prefix("contract-")
+            .tempdir_in(local_test)
+            .expect("family capture product data");
+        let executable = root.path().join("SyntheticFamilyHost.exe");
+        fs::write(&executable, b"synthetic executable").expect("family capture executable");
+        let mut backend = open_test_backend(root.path());
+        let software_id = backend
+            .add_software(ExecutableSelection::new(executable))
+            .expect("register family capture software")
+            .selected_software_id()
+            .expect("selected family capture software")
+            .to_owned();
+        let spec = backend
+            .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+            .expect("family capture Runtime spec");
+        let captured_target_ids = Arc::new(Mutex::new(Vec::new()));
+        let mut pool = DesktopRuntimePool::with_factory(Box::new(FamilyCaptureFactory {
+            captured_target_ids: captured_target_ids.clone(),
+        }));
+        let capture = CaptureConfiguration::new(
+            glyphshift_capture::CaptureSessionId::new("family-capture")
+                .expect("family capture session id"),
+            root.path().join("capture.json"),
+            100,
+        )
+        .expect("family capture configuration");
+
+        pool.start_capture(software_id.clone(), &spec, None, capture)
+            .expect("start every family target");
+        assert_eq!(
+            *captured_target_ids.lock().expect("captured family targets"),
+            vec![1, 2, 3]
+        );
+        pool.stop_capture(software_id).expect("stop family capture");
     }
 
     #[test]

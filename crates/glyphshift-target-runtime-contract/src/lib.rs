@@ -4,14 +4,17 @@ use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
-use glyphshift_capture::{CaptureConfiguration, CaptureSessionId};
+use glyphshift_capture::{
+    CaptureConfiguration, CaptureProducerConfiguration, CaptureProducerId, CaptureSessionId,
+    MAX_OBSERVATION_BATCH_BYTES,
+};
 use glyphshift_decision::{DecisionTrace, DecisionTraceStatus, FontTrace, TextTrace};
 use glyphshift_domain::{AbiVersion, AdapterId, ApplyModel, Feature, Placement};
 use glyphshift_runtime_contract::{RuntimePublication, RuntimeWireError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/2";
+const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/3";
 const TRACE_BATCH_SCHEMA: &str = "glyphshift.runtime-trace/1";
 pub const STATUS_TARGET_RUNTIME_OK: u32 = 0;
 pub const STATUS_TARGET_RUNTIME_INVALID_COMMAND: u32 = 1;
@@ -28,6 +31,7 @@ pub const STATUS_TARGET_RUNTIME_UPDATE_REJECTED: u32 = 16;
 pub const STATUS_TARGET_RUNTIME_CAPTURE_FAILED: u32 = 17;
 pub const STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL: u32 = 18;
 pub const MAX_RUNTIME_TRACE_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_RUNTIME_OBSERVATION_BYTES: usize = MAX_OBSERVATION_BATCH_BYTES;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -40,6 +44,15 @@ pub struct RuntimeCommandV1 {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct RuntimeDiagnosticsQueryV1 {
+    pub struct_size: u32,
+    pub output: *mut u8,
+    pub output_capacity: u32,
+    pub output_len: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RuntimeObservationQueryV1 {
     pub struct_size: u32,
     pub output: *mut u8,
     pub output_capacity: u32,
@@ -349,6 +362,7 @@ pub struct TargetRuntimeDeployment {
     publication: RuntimePublication,
     adapters: Vec<NativeAdapterDeployment>,
     capture: Option<CaptureConfiguration>,
+    observation_producer: Option<CaptureProducerConfiguration>,
 }
 
 impl TargetRuntimeDeployment {
@@ -361,12 +375,21 @@ impl TargetRuntimeDeployment {
             publication,
             adapters: adapters.into_iter().collect(),
             capture: None,
+            observation_producer: None,
         }
     }
 
     #[must_use]
     pub fn with_capture(mut self, capture: CaptureConfiguration) -> Self {
         self.capture = Some(capture);
+        self.observation_producer = None;
+        self
+    }
+
+    #[must_use]
+    pub fn with_observation_producer(mut self, producer: CaptureProducerConfiguration) -> Self {
+        self.capture = None;
+        self.observation_producer = Some(producer);
         self
     }
 
@@ -383,6 +406,11 @@ impl TargetRuntimeDeployment {
     #[must_use]
     pub const fn capture(&self) -> Option<&CaptureConfiguration> {
         self.capture.as_ref()
+    }
+
+    #[must_use]
+    pub const fn observation_producer(&self) -> Option<&CaptureProducerConfiguration> {
+        self.observation_producer.as_ref()
     }
 
     pub fn encode_json(&self) -> Result<String, DeploymentError> {
@@ -404,6 +432,12 @@ impl TargetRuntimeDeployment {
                 output_path: capture.output_path().to_path_buf(),
                 max_entries: capture.max_entries(),
             }),
+            observation_producer: self.observation_producer.as_ref().map(|producer| {
+                WireObservationProducer {
+                    producer_id: producer.producer_id().as_str().into(),
+                    generation: producer.generation(),
+                }
+            }),
         })
         .map_err(|_| DeploymentError::InvalidJson)
     }
@@ -422,6 +456,9 @@ impl TargetRuntimeDeployment {
             .map(WireAdapterDeployment::into_deployment)
             .collect::<Result<Vec<_>, _>>()?;
         let mut deployment = Self::new(publication, adapters);
+        if wire.capture.is_some() && wire.observation_producer.is_some() {
+            return Err(DeploymentError::InvalidCapture);
+        }
         if let Some(capture) = wire.capture {
             deployment = deployment.with_capture(
                 CaptureConfiguration::new(
@@ -429,6 +466,16 @@ impl TargetRuntimeDeployment {
                         .map_err(|_| DeploymentError::InvalidCapture)?,
                     capture.output_path,
                     capture.max_entries,
+                )
+                .map_err(|_| DeploymentError::InvalidCapture)?,
+            );
+        }
+        if let Some(producer) = wire.observation_producer {
+            deployment = deployment.with_observation_producer(
+                CaptureProducerConfiguration::new(
+                    CaptureProducerId::new(producer.producer_id)
+                        .map_err(|_| DeploymentError::InvalidCapture)?,
+                    producer.generation,
                 )
                 .map_err(|_| DeploymentError::InvalidCapture)?,
             );
@@ -448,12 +495,15 @@ pub enum DeploymentError {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireDeployment {
     schema: Box<str>,
     publication: String,
     adapters: Vec<WireAdapterDeployment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     capture: Option<WireCapture>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observation_producer: Option<WireObservationProducer>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -461,6 +511,13 @@ struct WireCapture {
     session_id: Box<str>,
     output_path: PathBuf,
     max_entries: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireObservationProducer {
+    producer_id: Box<str>,
+    generation: u64,
 }
 
 #[derive(Serialize, Deserialize)]

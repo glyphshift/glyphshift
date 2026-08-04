@@ -1,5 +1,12 @@
 [
   {
+    "id": "windows.console.write-console",
+    "name": "WriteConsoleW 观察器",
+    "summary": "观察 Console 客户端通过 Unicode API 输出的文本；用于探针采集，不执行翻译写回",
+    "technology": "Windows Console",
+    "technicalTarget": "KernelBase!WriteConsoleW"
+  },
+  {
     "id": "windows.gdi.ext-text-out",
     "name": "ExtTextOutW",
     "summary": "拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制",

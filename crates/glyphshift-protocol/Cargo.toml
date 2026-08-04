@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-extension = { path = "../glyphshift-extension" }
 

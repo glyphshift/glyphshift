@@ -2,7 +2,9 @@ use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
-use glyphshift_capture::{CaptureConfiguration, CaptureSessionId};
+use glyphshift_capture::{
+    CaptureConfiguration, CaptureProducerConfiguration, CaptureProducerId, CaptureSessionId,
+};
 use glyphshift_domain::{
     AbiVersion, AdapterId, ApplyModel, Feature, Generation, Placement, RouteProgram,
 };
@@ -57,11 +59,46 @@ fn trc_001_round_trips_verified_binding_evidence_and_publication() {
     let decoded = TargetRuntimeDeployment::decode_json(&encoded).expect("deployment decode");
 
     assert_eq!(decoded, deployment);
-    assert!(encoded.contains("glyphshift.target-runtime/2"));
+    assert!(encoded.contains("glyphshift.target-runtime/3"));
     assert!(encoded.contains("windows"));
     assert!(encoded.contains("capture-contract"));
     assert!(!encoded.contains("process_id"));
     assert!(!encoded.contains("driver"));
+}
+
+#[test]
+fn trc_003_round_trips_an_observation_producer_without_a_checkpoint_path() {
+    let deployment = TargetRuntimeDeployment::new(
+        RuntimePublication::new(
+            RouteProgram::direct("capture"),
+            TranslationSnapshot::empty(Generation::new(1)),
+            FontPolicy::empty(),
+        ),
+        std::iter::empty(),
+    )
+    .with_observation_producer(
+        CaptureProducerConfiguration::new(
+            CaptureProducerId::new("target-12").expect("producer id"),
+            4,
+        )
+        .expect("producer configuration"),
+    );
+
+    let encoded = deployment.encode_json().expect("producer encode");
+    let decoded = TargetRuntimeDeployment::decode_json(&encoded).expect("producer decode");
+
+    assert_eq!(decoded, deployment);
+    assert!(decoded.capture().is_none());
+    assert_eq!(
+        decoded
+            .observation_producer()
+            .expect("observation producer")
+            .producer_id()
+            .as_str(),
+        "target-12"
+    );
+    assert!(!encoded.contains("output_path"));
+    assert!(!encoded.contains("SyntheticFixtures"));
 }
 
 fn synthetic_capture_path() -> std::path::PathBuf {

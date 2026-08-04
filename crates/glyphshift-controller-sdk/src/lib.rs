@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
 
-pub const PROTOCOL_SCHEMA: &str = "glyphshift.controller/2";
+pub const PROTOCOL_SCHEMA: &str = "glyphshift.controller/4";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -41,6 +41,9 @@ pub enum Request {
         target_token: String,
         requested_features: Vec<WireFeature>,
     },
+    AuthorizeWorkerTarget {
+        target_token: String,
+    },
     ActivateRuntime {
         target_token: String,
         deployment: WireRuntimeDeployment,
@@ -59,6 +62,9 @@ pub enum Request {
         enabled: bool,
     },
     QueryDiagnostics {
+        target_token: String,
+    },
+    QueryObservations {
         target_token: String,
     },
     DeactivateRuntime {
@@ -101,6 +107,9 @@ pub enum Response {
     Recipe {
         recipe: WireRecipe,
     },
+    WorkerTargetAuthorized {
+        grant: WireWorkerTargetGrant,
+    },
     RuntimeActivated {
         generation: u64,
         publication_identity: [u8; 32],
@@ -117,6 +126,9 @@ pub enum Response {
     },
     RuntimeDiagnostics {
         batch: WireRuntimeTraceBatch,
+    },
+    RuntimeObservations {
+        batch: WireCaptureObservationBatch,
     },
     RuntimeDeactivated,
     Cancelled,
@@ -153,6 +165,12 @@ pub struct WireTarget {
     pub display_name: String,
     pub operating_system: String,
     pub architecture: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireWorkerTargetGrant {
+    pub platform: String,
+    pub payload: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +255,21 @@ pub struct WireRuntimeTraceBatch {
     pub dropped: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireCaptureObservationRecord {
+    pub sequence: u64,
+    pub adapter_id: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireCaptureObservationBatch {
+    pub producer_id: String,
+    pub generation: u64,
+    pub dropped_total: u64,
+    pub records: Vec<WireCaptureObservationRecord>,
+}
+
 pub trait ControllerPlugin {
     fn configure(
         &mut self,
@@ -255,6 +288,13 @@ pub trait ControllerPlugin {
         target_token: &str,
         requested_features: &[WireFeature],
     ) -> Result<WireRecipe, PluginError>;
+
+    fn authorize_worker_target(
+        &mut self,
+        _target_token: &str,
+    ) -> Result<WireWorkerTargetGrant, PluginError> {
+        Err(PluginError::new("worker_target_authorization_unsupported"))
+    }
 
     fn activate_runtime(
         &mut self,
@@ -290,6 +330,13 @@ pub trait ControllerPlugin {
         _target_token: &str,
     ) -> Result<WireRuntimeTraceBatch, PluginError> {
         Err(PluginError::new("runtime_diagnostics_unsupported"))
+    }
+
+    fn query_observations(
+        &mut self,
+        _target_token: &str,
+    ) -> Result<WireCaptureObservationBatch, PluginError> {
+        Err(PluginError::new("runtime_observations_unsupported"))
     }
 
     fn deactivate_runtime(&mut self, _target_token: &str) -> Result<(), PluginError> {
@@ -364,6 +411,10 @@ pub fn serve(
                 .prepare(&target_token, &requested_features)
                 .map(|recipe| Response::Recipe { recipe })
                 .unwrap_or_else(plugin_error),
+            Request::AuthorizeWorkerTarget { target_token } => plugin
+                .authorize_worker_target(&target_token)
+                .map(|grant| Response::WorkerTargetAuthorized { grant })
+                .unwrap_or_else(plugin_error),
             Request::ActivateRuntime {
                 target_token,
                 deployment,
@@ -402,6 +453,10 @@ pub fn serve(
             Request::QueryDiagnostics { target_token } => plugin
                 .query_diagnostics(&target_token)
                 .map(|batch| Response::RuntimeDiagnostics { batch })
+                .unwrap_or_else(plugin_error),
+            Request::QueryObservations { target_token } => plugin
+                .query_observations(&target_token)
+                .map(|batch| Response::RuntimeObservations { batch })
                 .unwrap_or_else(plugin_error),
             Request::DeactivateRuntime { target_token } => plugin
                 .deactivate_runtime(&target_token)

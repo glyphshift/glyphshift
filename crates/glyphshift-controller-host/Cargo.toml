@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-controller-sdk = { path = "../glyphshift-controller-sdk" }
 glyphshift-domain = { path = "../glyphshift-domain" }
 glyphshift-extension = { path = "../glyphshift-extension" }

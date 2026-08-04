@@ -5,7 +5,7 @@ use command_error::CommandError;
 use glyphshift_capture::{
     CaptureConfiguration, ProbeDictionaryEntry, ProbeDictionarySnapshot, ProbeEntryPage,
     ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus, ProbeRunStore,
-    ProbeRunSummary, DEFAULT_MAX_ENTRIES,
+    ProbeRunSummary, ProbeRunUpdate, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
     foreground_windows_executable, inspect_windows_executable, WindowsExecutable,
@@ -228,6 +228,15 @@ struct ProbeRunCreateRequest {
     adapter_ids: Vec<Box<str>>,
     live_preview_enabled: bool,
     dictionary: ProbeDictionaryBindingRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProbeRunUpdateRequest {
+    run_id: Box<str>,
+    name: Box<str>,
+    adapter_ids: Vec<Box<str>>,
+    live_preview_enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -755,7 +764,7 @@ impl DesktopApplication {
             .as_ref()
             .map(|bundle| {
                 bundle
-                    .translation_adapter_options()
+                    .adapter_options()
                     .iter()
                     .map(|adapter| AdapterView {
                         id: adapter.id().into(),
@@ -947,6 +956,71 @@ impl DesktopApplication {
             self.probe_runs.delete(run_id).map_err(probe_run_error)?;
         }
         Ok(())
+    }
+
+    fn update_probe_run(
+        &mut self,
+        request: ProbeRunUpdateRequest,
+    ) -> Result<ProbeRunView, CommandError> {
+        let current = self
+            .probe_runs
+            .summary(&request.run_id)
+            .map_err(probe_run_error)?;
+        let configuration_changed = current.adapter_ids() != request.adapter_ids.as_slice()
+            || current.live_preview_enabled() != request.live_preview_enabled;
+        if configuration_changed {
+            self.backend
+                .capture_runtime_spec(current.software_id(), &request.adapter_ids)
+                .map_err(capture_backend_error)?;
+            if request.live_preview_enabled && !self.adapters_support_preview(&request.adapter_ids)
+            {
+                return Err(CommandError::new("capture.preview_unavailable"));
+            }
+        }
+        let update = ProbeRunUpdate::new(
+            request.name,
+            request.adapter_ids,
+            request.live_preview_enabled,
+        )
+        .map_err(probe_run_error)?;
+        let summary = self
+            .probe_runs
+            .update(&request.run_id, update)
+            .map_err(probe_run_error)?;
+        self.probe_run_view(summary)
+    }
+
+    fn clear_probe_run_entries(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        if self.active_probe_run_id.as_deref() == Some(run_id) {
+            return Err(CommandError::new("capture.invalid_state"));
+        }
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if matches!(
+            summary.status(),
+            ProbeRunStatus::Running | ProbeRunStatus::Paused
+        ) {
+            return Err(CommandError::new("capture.invalid_state"));
+        }
+        self.probe_runs
+            .clear_observations(run_id)
+            .map_err(probe_run_error)?;
+        let dictionary = self
+            .backend
+            .dictionary(summary.dictionary_id())
+            .cloned()
+            .map_err(|_| CommandError::new("dictionary.not_found"))?;
+        let sources = dictionary
+            .entries()
+            .iter()
+            .map(|entry| Box::<str>::from(entry.source()))
+            .collect::<Vec<_>>();
+        if !sources.is_empty() {
+            self.backend
+                .delete_dictionary_entries(dictionary.id(), sources, dictionary.revision())
+                .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+            self.reconcile_enabled_workflows()?;
+        }
+        self.probe_run_summary(run_id)
     }
 
     fn resume_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
@@ -1186,16 +1260,23 @@ impl DesktopApplication {
     }
 
     fn adapters_support_preview(&self, adapter_ids: &[Box<str>]) -> bool {
-        !adapter_ids.is_empty()
-            && adapter_ids.iter().all(|adapter_id| {
+        !self.preview_adapter_ids(adapter_ids).is_empty()
+    }
+
+    fn preview_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
+        adapter_ids
+            .iter()
+            .filter(|adapter_id| {
                 self.adapters.iter().any(|adapter| {
-                    adapter.id == *adapter_id
+                    adapter.id.as_ref() == adapter_id.as_ref()
                         && adapter
                             .features
                             .iter()
                             .any(|feature| feature.as_ref() == "textReplace")
                 })
             })
+            .cloned()
+            .collect()
     }
 
     fn publish_probe_preview_if_active(&mut self, run_id: &str) -> Result<(), CommandError> {
@@ -1234,6 +1315,10 @@ impl DesktopApplication {
             .probe_runs
             .preview_entries(run_id, &dictionary)
             .map_err(probe_run_error)?;
+        let preview_adapter_ids = self.preview_adapter_ids(summary.adapter_ids());
+        if preview_adapter_ids.is_empty() {
+            return Err(CommandError::new("capture.preview_unavailable"));
+        }
         let mut snapshot = TranslationSnapshot::empty(Generation::new(generation));
         for location in locations {
             for entry in &entries {
@@ -1241,7 +1326,7 @@ impl DesktopApplication {
                     location.clone(),
                     entry.source(),
                     entry.translation(),
-                    summary.adapter_ids().iter().cloned(),
+                    preview_adapter_ids.iter().cloned(),
                 );
             }
         }
@@ -1812,7 +1897,8 @@ fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandE
         DesktopRuntimeError::ActivationRejected(reason) if enabling => match reason {
             HostOperationFailure::TargetProcessUnavailable
             | HostOperationFailure::RemoteMemoryUnavailable
-            | HostOperationFailure::RemoteThreadUnavailable => {
+            | HostOperationFailure::RemoteThreadUnavailable
+            | HostOperationFailure::IsolatedWorkerPermissionDenied => {
                 CommandError::new("runtime.target_access_failed")
             }
             HostOperationFailure::RuntimeModuleUnavailable => {
@@ -1822,7 +1908,8 @@ fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandE
             | HostOperationFailure::TargetRuntimeRejected(_) => {
                 CommandError::new("runtime.component_incompatible")
             }
-            HostOperationFailure::RemoteThreadTimeout => {
+            HostOperationFailure::RemoteThreadTimeout
+            | HostOperationFailure::IsolatedWorkerTimeout => {
                 CommandError::new("runtime.activation_timed_out")
             }
             HostOperationFailure::ControllerRejected => {
@@ -2230,6 +2317,28 @@ fn desktop_delete_probe_runs(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .delete_probe_runs(&run_ids)
+}
+
+#[tauri::command]
+fn desktop_update_probe_run(
+    request: ProbeRunUpdateRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .update_probe_run(request)
+}
+
+#[tauri::command]
+fn desktop_clear_probe_run_entries(
+    run_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .clear_probe_run_entries(&run_id)
 }
 
 #[tauri::command]
@@ -2751,6 +2860,8 @@ pub fn run() {
             desktop_probe_runs,
             desktop_create_probe_run,
             desktop_delete_probe_runs,
+            desktop_update_probe_run,
+            desktop_clear_probe_run_entries,
             desktop_resume_probe_run,
             desktop_set_probe_run_paused,
             desktop_disconnect_probe_run,
@@ -3418,6 +3529,25 @@ mod tests {
     }
 
     #[test]
+    fn isolated_worker_permission_and_timeout_reach_actionable_command_errors() {
+        let denied = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::ActivationRejected(
+                HostOperationFailure::IsolatedWorkerPermissionDenied,
+            ),
+            true,
+        ))
+        .expect("serialize isolated Worker permission rejection");
+        let timeout = serde_json::to_value(runtime_command_error(
+            DesktopRuntimeError::ActivationRejected(HostOperationFailure::IsolatedWorkerTimeout),
+            true,
+        ))
+        .expect("serialize isolated Worker timeout");
+
+        assert_eq!(denied["code"], "runtime.target_access_failed");
+        assert_eq!(timeout["code"], "runtime.activation_timed_out");
+    }
+
+    #[test]
     fn workflow_enable_and_disable_share_one_product_command_path() {
         let (mut application, calls, software_id, _data_root) = workflow_application();
 
@@ -3618,6 +3748,44 @@ mod tests {
     }
 
     #[test]
+    fn probe_preview_uses_replacement_adapters_without_rejecting_collection_adapters() {
+        let (mut application, _calls, _software_id, _data_root) = workflow_application();
+        application.adapters = vec![
+            AdapterView {
+                id: TEST_ADAPTER_ID.into(),
+                name: "Replacement adapter".into(),
+                version: "1.0.0".into(),
+                summary: "Synthetic replacement adapter".into(),
+                platforms: vec!["windows".into()],
+                technologies: vec!["Synthetic".into()],
+                features: vec!["textObserve".into(), "textReplace".into()],
+                technical_target: "SyntheticReplace".into(),
+                configuration: "none".into(),
+            },
+            AdapterView {
+                id: "test.observe-only".into(),
+                name: "Collection adapter".into(),
+                version: "1.0.0".into(),
+                summary: "Synthetic collection adapter".into(),
+                platforms: vec!["windows".into()],
+                technologies: vec!["Synthetic".into()],
+                features: vec!["textObserve".into()],
+                technical_target: "SyntheticObserve".into(),
+                configuration: "none".into(),
+            },
+        ];
+        let mixed = vec![TEST_ADAPTER_ID.into(), "test.observe-only".into()];
+        let collection_only = vec![Box::<str>::from("test.observe-only")];
+
+        assert!(application.adapters_support_preview(&mixed));
+        assert_eq!(
+            application.preview_adapter_ids(&mixed),
+            vec![Box::<str>::from(TEST_ADAPTER_ID)]
+        );
+        assert!(!application.adapters_support_preview(&collection_only));
+    }
+
+    #[test]
     fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
         let (mut application, _calls, software_id, _data_root) = workflow_application();
         let first = application
@@ -3686,6 +3854,52 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary() {
+        let (mut application, _calls, software_id, _data_root) = workflow_application();
+        let run = application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-settings".into(),
+                name: "Probe settings".into(),
+                software_id,
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("create settings probe");
+
+        let renamed = application
+            .update_probe_run(ProbeRunUpdateRequest {
+                run_id: run.summary.id().into(),
+                name: "Renamed probe".into(),
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+            })
+            .expect("rename connected probe");
+        assert_eq!(renamed.summary.name(), "Renamed probe");
+        assert_eq!(
+            application.clear_probe_run_entries(run.summary.id()),
+            Err(CommandError::new("capture.invalid_state"))
+        );
+
+        application
+            .disconnect_probe_run(run.summary.id())
+            .expect("release probe");
+        let cleared = application
+            .clear_probe_run_entries(run.summary.id())
+            .expect("clear probe entries");
+        assert_eq!(cleared.summary.id(), run.summary.id());
+        assert_eq!(cleared.dictionary_entry_count, 0);
+        assert!(application
+            .backend
+            .dictionary("dictionary.product")
+            .expect("cleared dictionary")
+            .entries()
+            .is_empty());
     }
 
     #[test]

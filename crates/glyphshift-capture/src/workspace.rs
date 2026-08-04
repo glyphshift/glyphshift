@@ -76,6 +76,36 @@ impl ProbeRunCreate {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProbeRunUpdate {
+    name: Box<str>,
+    adapter_ids: Vec<Box<str>>,
+    live_preview_enabled: bool,
+}
+
+impl ProbeRunUpdate {
+    pub fn new(
+        name: impl Into<Box<str>>,
+        adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
+        live_preview_enabled: bool,
+    ) -> Result<Self, ProbeRunError> {
+        let name = name.into();
+        let adapter_ids = adapter_ids.into_iter().map(Into::into).collect::<Vec<_>>();
+        if name.trim().is_empty()
+            || adapter_ids.is_empty()
+            || adapter_ids.iter().any(|id| !safe_identifier(id))
+            || adapter_ids.iter().collect::<BTreeSet<_>>().len() != adapter_ids.len()
+        {
+            return Err(ProbeRunError::InvalidInput);
+        }
+        Ok(Self {
+            name: name.trim().into(),
+            adapter_ids,
+            live_preview_enabled,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProbeRunSummary {
@@ -109,6 +139,11 @@ impl ProbeRunSummary {
     #[must_use]
     pub fn dictionary_id(&self) -> &str {
         &self.dictionary_id
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     #[must_use]
@@ -356,6 +391,67 @@ impl ProbeRunStore {
         }
         let directory = self.run_directory(run_id);
         fs::remove_dir_all(directory).map_err(|_| ProbeRunError::Storage)
+    }
+
+    pub fn update(
+        &mut self,
+        run_id: &str,
+        update: ProbeRunUpdate,
+    ) -> Result<ProbeRunSummary, ProbeRunError> {
+        let mut document = self.synchronized_document(run_id)?;
+        let configuration_changed = document.summary.adapter_ids != update.adapter_ids
+            || document.summary.live_preview_enabled != update.live_preview_enabled;
+        if configuration_changed
+            && matches!(
+                document.summary.status,
+                ProbeRunStatus::Running | ProbeRunStatus::Paused
+            )
+        {
+            return Err(ProbeRunError::InvalidState);
+        }
+        if document.summary.name == update.name
+            && document.summary.adapter_ids == update.adapter_ids
+            && document.summary.live_preview_enabled == update.live_preview_enabled
+        {
+            return Ok(document.summary);
+        }
+        document.summary.name = update.name;
+        document.summary.adapter_ids = update.adapter_ids;
+        document.summary.live_preview_enabled = update.live_preview_enabled;
+        self.touch(&mut document);
+        self.write_document(&document)?;
+        Ok(document.summary)
+    }
+
+    pub fn clear_observations(&mut self, run_id: &str) -> Result<ProbeRunSummary, ProbeRunError> {
+        let mut document = self.synchronized_document(run_id)?;
+        if matches!(
+            document.summary.status,
+            ProbeRunStatus::Running | ProbeRunStatus::Paused
+        ) {
+            return Err(ProbeRunError::InvalidState);
+        }
+        let observation_path = self.observation_path(run_id);
+        for slot in [
+            observation_path.with_extension("a.json"),
+            observation_path.with_extension("b.json"),
+        ] {
+            for path in [slot.clone(), slot.with_extension("pending")] {
+                if path.exists() {
+                    fs::remove_file(path).map_err(|_| ProbeRunError::Storage)?;
+                }
+            }
+        }
+        document.catalog_revision = 0;
+        document.ignored_sources.clear();
+        document.summary.observation_revision =
+            document.summary.observation_revision.saturating_add(1);
+        document.summary.observed_count = 0;
+        document.summary.ignored_count = 0;
+        document.summary.dropped_observations = 0;
+        self.touch(&mut document);
+        self.write_document(&document)?;
+        Ok(document.summary)
     }
 
     pub fn list(&mut self) -> Result<Vec<ProbeRunSummary>, ProbeRunError> {
@@ -1049,5 +1145,102 @@ mod tests {
                 .expect("observation index after filtering"),
             observations_before
         );
+    }
+
+    #[test]
+    fn run_settings_allow_rename_while_connected_but_protect_runtime_configuration() {
+        let (_root, mut store) = run_store();
+        let summary = create_run(&mut store);
+        store
+            .set_status(summary.id(), ProbeRunStatus::Running)
+            .expect("mark running");
+
+        let renamed = store
+            .update(
+                summary.id(),
+                ProbeRunUpdate::new("Renamed probe", ["windows.gdi.text-out"], true)
+                    .expect("rename update"),
+            )
+            .expect("rename connected run");
+        assert_eq!(renamed.name(), "Renamed probe");
+        assert_eq!(renamed.status(), ProbeRunStatus::Running);
+
+        assert_eq!(
+            store.update(
+                summary.id(),
+                ProbeRunUpdate::new("Renamed probe", ["windows.gdi.draw-text"], false)
+                    .expect("configuration update"),
+            ),
+            Err(ProbeRunError::InvalidState)
+        );
+
+        store
+            .set_status(summary.id(), ProbeRunStatus::Ready)
+            .expect("release run");
+        let updated = store
+            .update(
+                summary.id(),
+                ProbeRunUpdate::new("Renamed probe", ["windows.gdi.draw-text"], false)
+                    .expect("configuration update"),
+            )
+            .expect("update released run");
+        assert_eq!(
+            updated.adapter_ids(),
+            &[Box::<str>::from("windows.gdi.draw-text")]
+        );
+        assert!(!updated.live_preview_enabled());
+    }
+
+    #[test]
+    fn clearing_observations_resets_evidence_and_allows_a_fresh_capture() {
+        let (_root, mut store) = run_store();
+        let summary = create_run(&mut store);
+        let sink = FileCaptureSink::start(
+            store
+                .capture_configuration(summary.id(), 100)
+                .expect("capture config"),
+        )
+        .expect("capture sink");
+        sink.observe("windows.gdi.text-out", "Old text");
+        sink.finish().expect("finish capture");
+        store
+            .set_ignored(summary.id(), &[Box::<str>::from("Old text")], true)
+            .expect("ignore old text");
+
+        let cleared = store
+            .clear_observations(summary.id())
+            .expect("clear observations");
+        assert_eq!(cleared.observed_count, 0);
+        assert_eq!(cleared.ignored_count, 0);
+        assert_eq!(cleared.dropped_observations, 0);
+        assert!(CaptureCatalog::read_current(&store.observation_path(summary.id())).is_err());
+
+        let empty_dictionary = ProbeDictionarySnapshot::new(1, []).expect("empty dictionary");
+        let empty_page = store
+            .query_entries(
+                summary.id(),
+                &ProbeQuery::new("", 1, 20).expect("empty query"),
+                &empty_dictionary,
+            )
+            .expect("empty page");
+        assert_eq!(empty_page.total, 0);
+
+        let sink = FileCaptureSink::start(
+            store
+                .capture_configuration(summary.id(), 100)
+                .expect("fresh capture config"),
+        )
+        .expect("fresh capture sink");
+        sink.observe("windows.gdi.text-out", "Fresh text");
+        sink.finish().expect("finish fresh capture");
+        let fresh_page = store
+            .query_entries(
+                summary.id(),
+                &ProbeQuery::new("", 1, 20).expect("fresh query"),
+                &empty_dictionary,
+            )
+            .expect("fresh page");
+        assert_eq!(fresh_page.total, 1);
+        assert_eq!(fresh_page.rows[0].source.as_ref(), "Fresh text");
     }
 }

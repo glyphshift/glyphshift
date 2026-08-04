@@ -1,10 +1,11 @@
 //! Generic Windows target discovery behind the isolated Controller protocol.
 
 use glyphshift_controller_sdk::{
-    ControllerPlugin, PluginError, WireAdapterRequirement, WireControllerConfiguration,
-    WireControllerLossPolicy, WireFeature, WireInventory, WireRecipe, WireRuntimeAck,
-    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch,
-    WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget,
+    ControllerPlugin, PluginError, WireAdapterRequirement, WireCaptureObservationBatch,
+    WireCaptureObservationRecord, WireControllerConfiguration, WireControllerLossPolicy,
+    WireFeature, WireInventory, WireRecipe, WireRuntimeAck, WireRuntimeDeployment,
+    WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch, WireRuntimeTraceRecord,
+    WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
@@ -367,6 +368,23 @@ impl ControllerPlugin for WindowsController {
         })
     }
 
+    fn authorize_worker_target(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireWorkerTargetGrant, PluginError> {
+        let target = self
+            .targets
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("target_not_found"))?;
+        let started_at = target
+            .started_at
+            .ok_or_else(|| PluginError::new("target_instance_unavailable"))?;
+        Ok(WireWorkerTargetGrant {
+            platform: "windows-process-v1".into(),
+            payload: format!("{}:{started_at}", target.process_id),
+        })
+    }
+
     fn activate_runtime(
         &mut self,
         target_token: &str,
@@ -543,6 +561,38 @@ impl ControllerPlugin for WindowsController {
                 })
                 .collect(),
             dropped: batch.dropped(),
+        })
+    }
+
+    fn query_observations(
+        &mut self,
+        target_token: &str,
+    ) -> Result<WireCaptureObservationBatch, PluginError> {
+        let target = self
+            .targets
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("unknown_target"))?;
+        let runtime_library = self
+            .runtime_libraries
+            .get(target_token)
+            .ok_or_else(|| PluginError::new("runtime_not_active"))?;
+        let batch =
+            remote::query_observations(target.process_id, runtime_library).map_err(|error| {
+                PluginError::new(format!("runtime_observations_failed:{}", error.code()))
+            })?;
+        Ok(WireCaptureObservationBatch {
+            producer_id: batch.producer_id().as_str().into(),
+            generation: batch.generation(),
+            dropped_total: batch.dropped_total(),
+            records: batch
+                .records()
+                .iter()
+                .map(|record| WireCaptureObservationRecord {
+                    sequence: record.sequence(),
+                    adapter_id: record.adapter_id().into(),
+                    source: record.source().into(),
+                })
+                .collect(),
         })
     }
 

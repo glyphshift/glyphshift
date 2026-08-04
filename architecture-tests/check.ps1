@@ -68,6 +68,28 @@ Assert-Dependencies `
         'libloading'
     )
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-console' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-console-native' `
+    -Expected @(
+        'glyphshift-adapter-console',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-direct2d' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-direct2d-native' `
+    -Expected @(
+        'glyphshift-adapter-direct2d',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdi' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -107,12 +129,26 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdiplus-native' `
     -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-uia' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-uia-worker' `
+    -Expected @(
+        'glyphshift-adapter-uia',
+        'glyphshift-capture',
+        'glyphshift-isolated-worker-sdk',
+        'windows',
+        'windows-core',
+        'windows-sys'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-controller-sdk' `
     -Expected @('serde', 'serde_json')
 Assert-Dependencies `
     -PackageName 'glyphshift-controller-host' `
     -Expected @(
         'glyphshift-adapter-registry',
+        'glyphshift-capture',
         'glyphshift-controller-sdk',
         'glyphshift-domain',
         'glyphshift-extension',
@@ -123,12 +159,29 @@ Assert-Dependencies `
 Assert-Dependencies `
     -PackageName 'glyphshift-controller-windows' `
     -Expected @(
+        'glyphshift-capture',
         'glyphshift-controller-sdk',
         'glyphshift-runtime-contract',
         'glyphshift-target-runtime-contract',
         'sha2',
         'windows',
         'windows-sys'
+    )
+Assert-Dependencies `
+    -PackageName 'glyphshift-isolated-worker-sdk' `
+    -Expected @('serde', 'serde_json')
+Assert-Dependencies `
+    -PackageName 'glyphshift-isolated-worker-host' `
+    -Expected @(
+        'glyphshift-adapter-registry',
+        'glyphshift-capture',
+        'glyphshift-domain',
+        'glyphshift-isolated-worker-sdk',
+        'glyphshift-protocol',
+        'glyphshift-runtime-contract',
+        'glyphshift-session',
+        'glyphshift-target-process-host',
+        'serde_json'
     )
 Assert-Dependencies `
     -PackageName 'glyphshift-translation' `
@@ -141,7 +194,12 @@ Assert-Dependencies `
     -Expected @('glyphshift-adapter-registry', 'glyphshift-domain')
 Assert-Dependencies `
     -PackageName 'glyphshift-protocol' `
-    -Expected @('glyphshift-adapter-registry', 'glyphshift-domain', 'glyphshift-extension')
+    -Expected @(
+        'glyphshift-adapter-registry',
+        'glyphshift-capture',
+        'glyphshift-domain',
+        'glyphshift-extension'
+    )
 Assert-Dependencies `
     -PackageName 'glyphshift-runtime-contract' `
     -Expected @('glyphshift-domain', 'glyphshift-translation', 'serde', 'serde_json', 'sha2')
@@ -214,11 +272,19 @@ Assert-Dependencies `
         'glyphshift-adapter-gdiplus',
         'glyphshift-adapter-sdk',
         'glyphshift-domain',
+        'windows',
         'windows-sys'
     )
 Assert-Dependencies `
     -PackageName 'glyphshift-test-controller-plugin' `
     -Expected @('glyphshift-controller-sdk')
+Assert-Dependencies `
+    -PackageName 'glyphshift-test-isolated-worker' `
+    -Expected @(
+        'glyphshift-adapter-uia',
+        'glyphshift-capture',
+        'glyphshift-isolated-worker-sdk'
+    )
 Assert-Dependencies `
     -PackageName 'glyphshift-dictionary-package' `
     -Expected @('serde', 'serde_json')
@@ -261,6 +327,7 @@ Assert-Dependencies `
         'glyphshift-desktop-backend',
         'glyphshift-domain',
         'glyphshift-extension',
+        'glyphshift-isolated-worker-host',
         'glyphshift-protocol',
         'glyphshift-runtime-contract',
         'glyphshift-session',
@@ -295,6 +362,8 @@ $productionSourceRoots = @(
     'crates/glyphshift-adapter-sdk/src',
     'crates/glyphshift-adapter-native-abi/src',
     'crates/glyphshift-adapter-native-host/src',
+    'crates/glyphshift-adapter-uia/src',
+    'crates/glyphshift-adapter-uia-worker/src',
     'crates/glyphshift-controller-sdk/src',
     'crates/glyphshift-controller-host/src',
     'crates/glyphshift-controller-windows/src',
@@ -303,6 +372,8 @@ $productionSourceRoots = @(
     'crates/glyphshift-desktop-runtime/src',
     'crates/glyphshift-domain/src',
     'crates/glyphshift-extension/src',
+    'crates/glyphshift-isolated-worker-host/src',
+    'crates/glyphshift-isolated-worker-sdk/src',
     'crates/glyphshift-translation/src',
     'crates/glyphshift-decision/src',
     'crates/glyphshift-session/src',

@@ -16,7 +16,23 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_GdiPlus",
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Foundation_Numerics",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+]
 
 [lints.rust]
 unsafe_code = "allow"

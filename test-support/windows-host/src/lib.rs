@@ -12,6 +12,33 @@ mod windows {
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::{null, null_mut};
+    use windows::core::w;
+    use windows::Win32::Foundation::RECT as WindowsRect;
+    use windows::Win32::Graphics::Direct2D::Common::{
+        D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+        D2D_RECT_F,
+    };
+    use windows::Win32::Graphics::Direct2D::{
+        D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE,
+        D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
+        D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1_RENDER_TARGET_USAGE_NONE,
+    };
+    use windows::Win32::Graphics::DirectWrite::{
+        DWriteCreateFactory, IDWriteFactory, DWRITE_FACTORY_TYPE_SHARED,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_MEASURING_MODE_NATURAL,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+    use windows::Win32::Graphics::Gdi::HDC as WindowsHdc;
+    use windows::Win32::Graphics::Imaging::{
+        CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
+        WICBitmapCacheOnLoad,
+    };
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_MULTITHREADED,
+    };
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
         CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject,
@@ -25,12 +52,33 @@ mod windows {
         GdipGraphicsClear, GdiplusShutdown, GdiplusStartup, GdiplusStartupInput, GpBrush, GpFont,
         GpFontFamily, GpGraphics, GpSolidFill, RectF,
     };
+    use windows_sys::Win32::System::Console::{GetStdHandle, WriteConsoleW, STD_OUTPUT_HANDLE};
 
     const WIDTH: i32 = 360;
     const HEIGHT: i32 = 96;
     const PIXEL_COUNT: usize = WIDTH as usize * HEIGHT as usize;
     const WHITE: u32 = 0xffff_ffff;
     const BLACK: u32 = 0xff00_0000;
+
+    /// Attempts one Unicode Console write without falling back to a byte-oriented API.
+    ///
+    /// The synthetic process-family contract intentionally permits a redirected output handle:
+    /// the return value records whether Windows accepted the write, while a target-process
+    /// observer can still prove which process entered `WriteConsoleW`.
+    #[must_use]
+    pub fn write_raw_console(text: &str) -> bool {
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let mut written = 0_u32;
+        unsafe {
+            WriteConsoleW(
+                GetStdHandle(STD_OUTPUT_HANDLE),
+                units.as_ptr().cast(),
+                units.len() as u32,
+                &mut written,
+                null(),
+            ) != 0
+        }
+    }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct PixelEvidence {
@@ -47,6 +95,40 @@ mod windows {
         #[must_use]
         pub const fn signature(self) -> u64 {
             self.signature
+        }
+
+        fn from_bgra_bytes(bytes: &[u8]) -> Self {
+            let mut signature = 0xcbf2_9ce4_8422_2325_u64;
+            let mut ink_pixels = 0;
+            for pixel in bytes.chunks_exact(4) {
+                let pixel = u32::from_le_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]);
+                if pixel & 0x00ff_ffff != 0x00ff_ffff {
+                    ink_pixels += 1;
+                }
+                signature ^= u64::from(pixel);
+                signature = signature.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            Self {
+                ink_pixels,
+                signature,
+            }
+        }
+    }
+
+    struct ComApartment;
+
+    impl ComApartment {
+        fn enter() -> Result<Self, String> {
+            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+                .ok()
+                .map_err(|error| format!("CoInitializeEx failed: {error}"))?;
+            Ok(Self)
+        }
+    }
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
         }
     }
 
@@ -595,11 +677,391 @@ mod windows {
     pub fn render_gdiplus(decision: RenderDecision) -> Result<PixelEvidence, String> {
         render_gdiplus_text("Open", decision)
     }
+
+    fn direct2d_target_properties() -> D2D1_RENDER_TARGET_PROPERTIES {
+        D2D1_RENDER_TARGET_PROPERTIES {
+            r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_IGNORE,
+            },
+            dpiX: 0.0,
+            dpiY: 0.0,
+            usage: D2D1_RENDER_TARGET_USAGE_NONE,
+            minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
+        }
+    }
+
+    fn direct2d_wic_target_properties() -> D2D1_RENDER_TARGET_PROPERTIES {
+        let mut properties = direct2d_target_properties();
+        properties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+        properties
+    }
+
+    pub fn render_raw_direct2d_text(text: &str) -> Result<PixelEvidence, String> {
+        let canvas = DibCanvas::new()?;
+        let direct2d: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
+                .map_err(|error| format!("D2D1CreateFactory failed: {error}"))?;
+        let target = unsafe { direct2d.CreateDCRenderTarget(&direct2d_target_properties()) }
+            .map_err(|error| format!("CreateDCRenderTarget failed: {error}"))?;
+        let bounds = WindowsRect {
+            left: 0,
+            top: 0,
+            right: WIDTH,
+            bottom: HEIGHT,
+        };
+        unsafe { target.BindDC(WindowsHdc(canvas.hdc), &bounds) }
+            .map_err(|error| format!("ID2D1DCRenderTarget::BindDC failed: {error}"))?;
+
+        let directwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
+                .map_err(|error| format!("DWriteCreateFactory failed: {error}"))?;
+        let format = unsafe {
+            directwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                30.0,
+                w!("en-US"),
+            )
+        }
+        .map_err(|error| format!("CreateTextFormat failed: {error}"))?;
+        let brush = unsafe {
+            target.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                None,
+            )
+        }
+        .map_err(|error| format!("CreateSolidColorBrush failed: {error}"))?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let layout = D2D_RECT_F {
+            left: 12.0,
+            top: 12.0,
+            right: (WIDTH - 12) as f32,
+            bottom: (HEIGHT - 12) as f32,
+        };
+        let white = D2D1_COLOR_F {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        };
+        unsafe {
+            target.BeginDraw();
+            target.Clear(Some(&white));
+            target.DrawText(
+                &units,
+                &format,
+                &layout,
+                &brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                DWRITE_MEASURING_MODE_NATURAL,
+            );
+            target.EndDraw(None, None)
+        }
+        .map_err(|error| format!("ID2D1RenderTarget::EndDraw failed: {error}"))?;
+        Ok(canvas.evidence())
+    }
+
+    pub fn render_raw_direct2d_wic_text(text: &str) -> Result<PixelEvidence, String> {
+        let _apartment = ComApartment::enter()?;
+        let imaging: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
+                .map_err(|error| format!("CoCreateInstance(WIC) failed: {error}"))?;
+        let bitmap = unsafe {
+            imaging.CreateBitmap(
+                WIDTH as u32,
+                HEIGHT as u32,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )
+        }
+        .map_err(|error| format!("IWICImagingFactory::CreateBitmap failed: {error}"))?;
+        let direct2d: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
+                .map_err(|error| format!("D2D1CreateFactory failed: {error}"))?;
+        let target = unsafe {
+            direct2d.CreateWicBitmapRenderTarget(&bitmap, &direct2d_wic_target_properties())
+        }
+        .map_err(|error| format!("CreateWicBitmapRenderTarget failed: {error}"))?;
+        let directwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
+                .map_err(|error| format!("DWriteCreateFactory failed: {error}"))?;
+        let format = unsafe {
+            directwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                30.0,
+                w!("en-US"),
+            )
+        }
+        .map_err(|error| format!("CreateTextFormat failed: {error}"))?;
+        let brush = unsafe {
+            target.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                None,
+            )
+        }
+        .map_err(|error| format!("CreateSolidColorBrush failed: {error}"))?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let layout = D2D_RECT_F {
+            left: 12.0,
+            top: 12.0,
+            right: (WIDTH - 12) as f32,
+            bottom: (HEIGHT - 12) as f32,
+        };
+        let white = D2D1_COLOR_F {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        };
+        unsafe {
+            target.BeginDraw();
+            target.Clear(Some(&white));
+            target.DrawText(
+                &units,
+                &format,
+                &layout,
+                &brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                DWRITE_MEASURING_MODE_NATURAL,
+            );
+            target.EndDraw(None, None)
+        }
+        .map_err(|error| format!("ID2D1RenderTarget::EndDraw failed: {error}"))?;
+
+        let mut pixels = vec![0_u8; PIXEL_COUNT * 4];
+        unsafe { bitmap.CopyPixels(std::ptr::null(), (WIDTH * 4) as u32, &mut pixels) }
+            .map_err(|error| format!("IWICBitmap::CopyPixels failed: {error}"))?;
+        Ok(PixelEvidence::from_bgra_bytes(&pixels))
+    }
+
+    /// Runs a deterministic standard-control UIA target over a line-oriented stdin contract.
+    ///
+    /// Commands: `update` changes the public label/edit/document values; `recreate` replaces the
+    /// top-level window and controls; `exit` closes the window. A password edit is also changed so
+    /// the observer contract can prove that sensitive text never reaches capture output.
+    pub fn run_uia_standard_control_server() -> std::io::Result<()> {
+        use std::io::{BufRead, Write};
+        use std::ptr::{null, null_mut};
+        use std::sync::mpsc::{self, TryRecvError};
+        use std::time::Duration;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, DispatchMessageW, PeekMessageW, SetWindowTextW,
+            ShowWindow, TranslateMessage, ES_AUTOHSCROLL, ES_AUTOVSCROLL, ES_MULTILINE,
+            ES_PASSWORD, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, WS_BORDER, WS_CHILD, WS_EX_TOOLWINDOW,
+            WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        };
+
+        fn wide(value: &str) -> Vec<u16> {
+            value.encode_utf16().chain(std::iter::once(0)).collect()
+        }
+
+        unsafe fn create(
+            class_name: &str,
+            text: &str,
+            style: u32,
+            bounds: (i32, i32, i32, i32),
+            parent: windows_sys::Win32::Foundation::HWND,
+        ) -> windows_sys::Win32::Foundation::HWND {
+            let class_name = wide(class_name);
+            let text = wide(text);
+            CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                text.as_ptr(),
+                style,
+                bounds.0,
+                bounds.1,
+                bounds.2,
+                bounds.3,
+                parent,
+                null_mut(),
+                null_mut(),
+                null(),
+            )
+        }
+
+        #[derive(Clone, Copy)]
+        struct Controls {
+            window: windows_sys::Win32::Foundation::HWND,
+            label: windows_sys::Win32::Foundation::HWND,
+            value: windows_sys::Win32::Foundation::HWND,
+            document: windows_sys::Win32::Foundation::HWND,
+            password: windows_sys::Win32::Foundation::HWND,
+        }
+
+        unsafe fn create_controls(recreated: bool) -> Option<Controls> {
+            let class_name = wide("Static");
+            let title = wide(if recreated {
+                "GlyphShift recreated UIA fixture"
+            } else {
+                "GlyphShift UIA fixture"
+            });
+            let window = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                class_name.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                40,
+                40,
+                520,
+                260,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null(),
+            );
+            if window.is_null() {
+                return None;
+            }
+            let label = create(
+                "Static",
+                if recreated {
+                    "Recreated label"
+                } else {
+                    "Fixture label"
+                },
+                WS_CHILD | WS_VISIBLE,
+                (16, 16, 450, 24),
+                window,
+            );
+            let value = create(
+                "Edit",
+                if recreated {
+                    "Recreated value"
+                } else {
+                    "Fixture value"
+                },
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL as u32,
+                (16, 52, 450, 28),
+                window,
+            );
+            let document = create(
+                "Edit",
+                if recreated {
+                    "Recreated document"
+                } else {
+                    "Fixture document"
+                },
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE as u32 | ES_AUTOVSCROLL as u32,
+                (16, 92, 450, 64),
+                window,
+            );
+            let password = create(
+                "Edit",
+                if recreated {
+                    "Recreated secret"
+                } else {
+                    "Fixture secret"
+                },
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_PASSWORD as u32,
+                (16, 168, 450, 28),
+                window,
+            );
+            if [label, value, document, password]
+                .into_iter()
+                .any(|handle| handle.is_null())
+            {
+                DestroyWindow(window);
+                return None;
+            }
+            ShowWindow(window, SW_SHOWNOACTIVATE);
+            Some(Controls {
+                window,
+                label,
+                value,
+                document,
+                password,
+            })
+        }
+
+        let mut controls = unsafe { create_controls(false) }
+            .ok_or_else(|| std::io::Error::other("uia fixture control unavailable"))?;
+
+        let (commands, incoming) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lock().lines() {
+                let Ok(line) = line else {
+                    break;
+                };
+                if commands.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "uia-ready")?;
+        stdout.flush()?;
+        let mut running = true;
+        while running {
+            let mut message = MSG::default();
+            unsafe {
+                while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+            match incoming.try_recv() {
+                Ok(command) if command.trim() == "update" => {
+                    unsafe {
+                        SetWindowTextW(controls.label, wide("Updated label").as_ptr());
+                        SetWindowTextW(controls.value, wide("Updated value").as_ptr());
+                        SetWindowTextW(controls.document, wide("Updated document").as_ptr());
+                        SetWindowTextW(controls.password, wide("Updated secret").as_ptr());
+                    }
+                    writeln!(stdout, "uia-updated")?;
+                    stdout.flush()?;
+                }
+                Ok(command) if command.trim() == "recreate" => {
+                    unsafe {
+                        DestroyWindow(controls.window);
+                    }
+                    controls = unsafe { create_controls(true) }.ok_or_else(|| {
+                        std::io::Error::other("recreated uia fixture unavailable")
+                    })?;
+                    writeln!(stdout, "uia-recreated")?;
+                    stdout.flush()?;
+                }
+                Ok(command) if command.trim() == "exit" => {
+                    writeln!(stdout, "uia-exiting")?;
+                    stdout.flush()?;
+                    running = false;
+                }
+                Ok(_) | Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => running = false,
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        unsafe {
+            DestroyWindow(controls.window);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
 pub use windows::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
-    render_raw_draw_text, render_raw_gdi_glyph_indices, render_raw_gdi_symbol,
-    render_raw_gdi_unicode, render_raw_gdiplus_symbol, render_raw_text_out, PixelEvidence,
+    render_raw_direct2d_text, render_raw_direct2d_wic_text, render_raw_draw_text,
+    render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
+    render_raw_gdiplus_symbol, render_raw_text_out, run_uia_standard_control_server,
+    write_raw_console, PixelEvidence,
 };

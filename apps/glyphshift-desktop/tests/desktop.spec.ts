@@ -40,6 +40,9 @@ const model = {
   }, {
     id: 'synthetic.gdip-draw-string', name: 'GdipDrawString', summary: '拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面',
     version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', configuration: 'none',
+  }, {
+    id: 'synthetic.console-observer', name: 'WriteConsoleW 观察器', summary: '观察 Console 客户端 Unicode 输出；不执行翻译写回',
+    version: '1.0.0', platforms: ['windows'], technologies: ['Windows Console'], features: ['textObserve'], technicalTarget: 'KernelBase!WriteConsoleW', configuration: 'none',
   }],
   workflows: [{
     id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5,
@@ -790,7 +793,10 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(dialog.getByText('界面基础词典', { exact: true })).toBeVisible()
   await expect(dialog.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
-  await expect(dialog.getByText('实时预览')).toBeVisible()
+  await expect(dialog.getByText('可实时翻译', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('仅采集原文', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('可在 Glyphshift 中编辑、导出和用于 AI 翻译，暂不写回目标软件。', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('实时预览', { exact: true })).toBeVisible()
   await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/位置|语境/)).toHaveCount(0)
 
@@ -802,6 +808,98 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('还没有捕获到文字')).toBeVisible()
   await expect(page.getByText('每页')).toBeVisible()
   await expect(page.getByRole('button', { name: /开始监听|停止并生成/ })).toHaveCount(0)
+})
+
+test('probe detail edits settings and clears all joined entries behind confirmation', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    let cleared = false
+    let summary = {
+      id: 'probe-settings', name: '可配置探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'],
+      status: 'ready', livePreviewEnabled: true, observationRevision: 4, observedCount: 1,
+      ignoredCount: 0, droppedObservations: 0, previewGeneration: 2,
+      createdAtMs: 1, updatedAtMs: 2,
+      dictionaryRevision: 3, dictionaryEntryCount: 2,
+    }
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_update_probe_run') {
+          const request = structuredClone(args?.request)
+          ;(window as unknown as { __probeSettingsRequest?: unknown }).__probeSettingsRequest = request
+          summary = {
+            ...summary,
+            name: request.name,
+            adapterIds: request.adapterIds,
+            livePreviewEnabled: request.livePreviewEnabled,
+            updatedAtMs: summary.updatedAtMs + 1,
+          }
+          return summary
+        }
+        if (command === 'desktop_clear_probe_run_entries') {
+          cleared = true
+          ;(window as unknown as { __probeClearCount?: number }).__probeClearCount = ((window as unknown as { __probeClearCount?: number }).__probeClearCount ?? 0) + 1
+          summary = {
+            ...summary,
+            observationRevision: summary.observationRevision + 1,
+            observedCount: 0,
+            ignoredCount: 0,
+            dictionaryRevision: summary.dictionaryRevision + 1,
+            dictionaryEntryCount: 0,
+            updatedAtMs: summary.updatedAtMs + 1,
+          }
+          return summary
+        }
+        if (command === 'desktop_probe_run_entries') {
+          return {
+            observationRevision: summary.observationRevision,
+            dictionaryRevision: summary.dictionaryRevision,
+            page: 1,
+            pageSize: 50,
+            total: cleared ? 0 : 1,
+            rows: cleared
+              ? []
+              : [{
+                  source: 'Open', translation: '打开', state: 'translated',
+                  adapterIds: ['synthetic.text-out'], count: 3, firstSeenMs: 1, lastSeenMs: 2,
+                }],
+          }
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', 'probe-settings')
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  await page.getByRole('button', { name: '探针设置' }).click()
+  const settings = page.getByRole('dialog', { name: '探针设置' })
+  await settings.getByRole('textbox', { name: '任务名称' }).fill('整理后的探针')
+  await settings.getByRole('checkbox', { name: /WriteConsoleW 观察器/ }).check()
+  await settings.getByRole('button', { name: '保存设置' }).click()
+  await expect(page.getByRole('heading', { name: '整理后的探针' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __probeSettingsRequest?: { adapterIds: string[]; livePreviewEnabled: boolean } }).__probeSettingsRequest
+  ))).toMatchObject({
+    adapterIds: ['synthetic.text-out', 'synthetic.console-observer'],
+    livePreviewEnabled: true,
+  })
+
+  await page.getByRole('button', { name: '探针设置' }).click()
+  await page.getByTestId('capture-clear-all').click()
+  const confirmation = page.getByRole('dialog', { name: '清空全部探针条目' })
+  await expect(confirmation.getByText(/界面基础词典/)).toBeVisible()
+  await confirmation.getByRole('button', { name: '确认清空' }).click()
+  await expect(page.getByText('还没有捕获到文字')).toBeVisible()
+  await expect(page.getByText('0 条已观察 · 词典 0 条')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __probeClearCount?: number }).__probeClearCount
+  ))).toBe(1)
 })
 
 test('probe run keeps backend paging while adapter filters and view state recover', async ({ page }) => {
@@ -1090,6 +1188,7 @@ test('workflow target independently selects adapters dictionaries and one font p
   await expect(dialog.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('GdipDrawString', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('WriteConsoleW 观察器', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
 
   await dialog.getByRole('tab', { name: '翻译词典' }).click()
@@ -1102,6 +1201,20 @@ test('workflow target independently selects adapters dictionaries and one font p
   await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('仅词典命中')
   await expect(dialog.getByPlaceholder('搜索本机字体')).toBeVisible()
   await expect(dialog.getByText(/位置|main-ui/)).toHaveCount(0)
+})
+
+test('observe-only adapter stays available and disables live preview only when selected alone', async ({ page }) => {
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+
+  const form = page.getByRole('dialog', { name: '新建探针任务' })
+  await expect(form.getByText('WriteConsoleW 观察器', { exact: true })).toBeVisible()
+  await expect(form.getByRole('switch', { name: '实时预览' })).toBeEnabled()
+  for (const name of ['ExtTextOutW', 'TextOutW', 'DrawTextW / DrawTextExW', 'GdipDrawString']) {
+    await form.getByRole('checkbox', { name, exact: true }).uncheck()
+  }
+  await expect(form.getByRole('switch', { name: '实时预览' })).toBeDisabled()
+  await expect(form.getByText('所选技术中没有可写回目标软件的技术，无法开启实时预览。')).toBeVisible()
 })
 
 test('font policy uses a compact coverage selector and an explicit cached refresh', async ({ page }) => {

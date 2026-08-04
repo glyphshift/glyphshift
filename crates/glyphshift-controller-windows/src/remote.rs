@@ -1,5 +1,7 @@
+use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_target_runtime_contract::{
-    RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1, RuntimeTraceBatch,
+    RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
+    RuntimeObservationQueryV1, RuntimeTraceBatch, MAX_RUNTIME_OBSERVATION_BYTES,
     MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
 };
 use std::ffi::c_void;
@@ -215,42 +217,78 @@ pub fn query_diagnostics(
     process_id: u32,
     runtime_library: &Path,
 ) -> Result<RuntimeTraceBatch, RemoteError> {
+    let json = query_json_export(
+        process_id,
+        runtime_library,
+        "glyphshift_runtime_diagnostics_query_v1",
+        MAX_RUNTIME_TRACE_BYTES,
+        size_of::<RuntimeDiagnosticsQueryV1>(),
+    )?;
+    RuntimeTraceBatch::decode_json(&json).map_err(|_| RemoteError::ReadFailed)
+}
+
+pub fn query_observations(
+    process_id: u32,
+    runtime_library: &Path,
+) -> Result<CaptureObservationBatch, RemoteError> {
+    let json = query_json_export(
+        process_id,
+        runtime_library,
+        "glyphshift_runtime_observation_query_v1",
+        MAX_RUNTIME_OBSERVATION_BYTES,
+        size_of::<RuntimeObservationQueryV1>(),
+    )?;
+    CaptureObservationBatch::decode_json(&json).map_err(|_| RemoteError::ReadFailed)
+}
+
+#[repr(C)]
+struct RemoteJsonQueryV1 {
+    struct_size: u32,
+    output: *mut u8,
+    output_capacity: u32,
+    output_len: u32,
+}
+
+fn query_json_export(
+    process_id: u32,
+    runtime_library: &Path,
+    export: &str,
+    max_output_bytes: usize,
+    expected_struct_size: usize,
+) -> Result<String, RemoteError> {
+    if size_of::<RemoteJsonQueryV1>() != expected_struct_size {
+        return Err(RemoteError::ReadFailed);
+    }
     let process = ProcessHandle::open(process_id)?;
-    let remote_output = RemoteAllocation::allocate(process.0, MAX_RUNTIME_TRACE_BYTES)?;
-    let query = RuntimeDiagnosticsQueryV1 {
-        struct_size: size_of::<RuntimeDiagnosticsQueryV1>() as u32,
+    let remote_output = RemoteAllocation::allocate(process.0, max_output_bytes)?;
+    let query = RemoteJsonQueryV1 {
+        struct_size: size_of::<RemoteJsonQueryV1>() as u32,
         output: remote_output.address.cast(),
-        output_capacity: MAX_RUNTIME_TRACE_BYTES as u32,
+        output_capacity: max_output_bytes as u32,
         output_len: 0,
     };
     let query_bytes = unsafe {
         std::slice::from_raw_parts(
-            (&query as *const RuntimeDiagnosticsQueryV1).cast::<u8>(),
-            size_of::<RuntimeDiagnosticsQueryV1>(),
+            (&query as *const RemoteJsonQueryV1).cast::<u8>(),
+            size_of::<RemoteJsonQueryV1>(),
         )
     };
     let remote_query = RemoteAllocation::write(process.0, query_bytes)?;
-    let function = remote_export(
-        process_id,
-        runtime_library,
-        "glyphshift_runtime_diagnostics_query_v1",
-    )?;
+    let function = remote_export(process_id, runtime_library, export)?;
     let status = run_remote_thread(process.0, function, Some(remote_query.address.cast_const()))?;
     if status != STATUS_TARGET_RUNTIME_OK {
         return Err(RemoteError::RemoteRejected(status));
     }
-    let mut returned_query = vec![0_u8; size_of::<RuntimeDiagnosticsQueryV1>()];
+    let mut returned_query = vec![0_u8; size_of::<RemoteJsonQueryV1>()];
     remote_query.read(&mut returned_query)?;
-    let returned_query = unsafe {
-        std::ptr::read_unaligned(returned_query.as_ptr().cast::<RuntimeDiagnosticsQueryV1>())
-    };
-    if returned_query.output_len as usize > MAX_RUNTIME_TRACE_BYTES {
+    let returned_query =
+        unsafe { std::ptr::read_unaligned(returned_query.as_ptr().cast::<RemoteJsonQueryV1>()) };
+    if returned_query.output_len as usize > max_output_bytes {
         return Err(RemoteError::ReadFailed);
     }
     let mut output = vec![0_u8; returned_query.output_len as usize];
     remote_output.read(&mut output)?;
-    let json = std::str::from_utf8(&output).map_err(|_| RemoteError::ReadFailed)?;
-    RuntimeTraceBatch::decode_json(json).map_err(|_| RemoteError::ReadFailed)
+    String::from_utf8(output).map_err(|_| RemoteError::ReadFailed)
 }
 
 pub fn deactivate(process_id: u32, runtime_library: &Path) -> Result<(), RemoteError> {

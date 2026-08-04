@@ -12,6 +12,7 @@ name = "glyphshift-controller-windows"
 path = "src/main.rs"
 
 [dependencies]
+glyphshift-capture = { path = "../glyphshift-capture" }
 glyphshift-controller-sdk = { path = "../glyphshift-controller-sdk" }
 glyphshift-runtime-contract = { path = "../glyphshift-runtime-contract" }
 glyphshift-target-runtime-contract = { path = "../glyphshift-target-runtime-contract" }
@@ -39,6 +40,7 @@ features = [
 ]
 
 [dev-dependencies]
+glyphshift-adapter-console = { path = "../glyphshift-adapter-console" }
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-registry = { path = "../glyphshift-adapter-registry" }
 glyphshift-domain = { path = "../glyphshift-domain" }

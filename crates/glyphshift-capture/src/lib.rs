@@ -1,12 +1,12 @@
 //! Bounded text observations and resumable probe runs.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::Arc;
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,9 +15,13 @@ mod workspace;
 pub use workspace::*;
 
 pub const CAPTURE_CATALOG_SCHEMA: &str = "glyphshift.capture-catalog/2";
+pub const CAPTURE_OBSERVATION_BATCH_SCHEMA: &str = "glyphshift.capture-observation-batch/1";
 pub const DEFAULT_MAX_ENTRIES: u32 = 50_000;
 const MAX_ENTRIES: u32 = 250_000;
 const MAX_SOURCE_UNITS: usize = 16 * 1024;
+const MAX_PRODUCER_ID_BYTES: usize = 256;
+const MAX_OBSERVATION_BATCH_RECORDS: usize = 256;
+pub const MAX_OBSERVATION_BATCH_BYTES: usize = 4 * 1024 * 1024;
 const QUEUE_CAPACITY: usize = 8_192;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -25,6 +29,7 @@ const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 pub enum CaptureError {
     InvalidConfiguration,
     InvalidCatalog,
+    InvalidObservationBatch,
     Storage,
     WorkerUnavailable,
 }
@@ -86,6 +91,386 @@ impl CaptureConfiguration {
     #[must_use]
     pub const fn max_entries(&self) -> u32 {
         self.max_entries
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CaptureProducerId(Box<str>);
+
+impl CaptureProducerId {
+    pub fn new(value: impl Into<Box<str>>) -> Result<Self, CaptureError> {
+        let value = value.into();
+        if value.len() <= MAX_PRODUCER_ID_BYTES && safe_identifier(&value) {
+            Ok(Self(value))
+        } else {
+            Err(CaptureError::InvalidObservationBatch)
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureProducerConfiguration {
+    producer_id: CaptureProducerId,
+    generation: u64,
+}
+
+impl CaptureProducerConfiguration {
+    pub fn new(producer_id: CaptureProducerId, generation: u64) -> Result<Self, CaptureError> {
+        if generation == 0 {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        Ok(Self {
+            producer_id,
+            generation,
+        })
+    }
+
+    #[must_use]
+    pub const fn producer_id(&self) -> &CaptureProducerId {
+        &self.producer_id
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CaptureObservationRecord {
+    sequence: u64,
+    adapter_id: Box<str>,
+    source: Box<str>,
+}
+
+impl CaptureObservationRecord {
+    pub fn new(
+        sequence: u64,
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+    ) -> Result<Self, CaptureError> {
+        let record = Self {
+            sequence,
+            adapter_id: adapter_id.into(),
+            source: source.into(),
+        };
+        record.validate()?;
+        Ok(record)
+    }
+
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[must_use]
+    pub fn adapter_id(&self) -> &str {
+        &self.adapter_id
+    }
+
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    fn validate(&self) -> Result<(), CaptureError> {
+        if self.sequence == 0
+            || !safe_identifier(&self.adapter_id)
+            || self.source.trim().is_empty()
+            || self.source.encode_utf16().count() > MAX_SOURCE_UNITS
+        {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        Ok(())
+    }
+}
+
+/// Versioned, bounded handoff from one supervised observation producer.
+///
+/// `generation` is assigned by the producer supervisor and changes whenever
+/// the producer restarts. `sequence` is local to that generation and is
+/// allocated before the producer's bounded queue, so consumers can diagnose
+/// gaps. `dropped_total` is the cumulative producer-side drop count for the
+/// generation, not an instruction to mutate a checkpoint directly.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CaptureObservationBatch {
+    schema: Box<str>,
+    producer_id: CaptureProducerId,
+    generation: u64,
+    dropped_total: u64,
+    records: Vec<CaptureObservationRecord>,
+}
+
+impl CaptureObservationBatch {
+    pub fn new(
+        producer_id: CaptureProducerId,
+        generation: u64,
+        dropped_total: u64,
+        records: impl IntoIterator<Item = CaptureObservationRecord>,
+    ) -> Result<Self, CaptureError> {
+        let batch = Self {
+            schema: CAPTURE_OBSERVATION_BATCH_SCHEMA.into(),
+            producer_id,
+            generation,
+            dropped_total,
+            records: records.into_iter().collect(),
+        };
+        batch.validate()?;
+        Ok(batch)
+    }
+
+    #[must_use]
+    pub const fn producer_id(&self) -> &CaptureProducerId {
+        &self.producer_id
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn dropped_total(&self) -> u64 {
+        self.dropped_total
+    }
+
+    #[must_use]
+    pub fn records(&self) -> &[CaptureObservationRecord] {
+        &self.records
+    }
+
+    pub fn encode_json(&self) -> Result<String, CaptureError> {
+        self.validate()?;
+        let encoded =
+            serde_json::to_string(self).map_err(|_| CaptureError::InvalidObservationBatch)?;
+        if encoded.len() > MAX_OBSERVATION_BATCH_BYTES {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        Ok(encoded)
+    }
+
+    pub fn decode_json(source: &str) -> Result<Self, CaptureError> {
+        if source.len() > MAX_OBSERVATION_BATCH_BYTES {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        let batch: Self =
+            serde_json::from_str(source).map_err(|_| CaptureError::InvalidObservationBatch)?;
+        batch.validate()?;
+        Ok(batch)
+    }
+
+    fn validate(&self) -> Result<(), CaptureError> {
+        let records_valid = self.records.len() <= MAX_OBSERVATION_BATCH_RECORDS
+            && self.records.iter().all(|record| record.validate().is_ok())
+            && self
+                .records
+                .windows(2)
+                .all(|records| records[0].sequence() < records[1].sequence());
+        if self.schema.as_ref() != CAPTURE_OBSERVATION_BATCH_SCHEMA
+            || self.generation == 0
+            || !records_valid
+        {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        Ok(())
+    }
+}
+
+/// Stateful validator for one supervised producer generation.
+///
+/// Individual batches validate their own bounds. This cursor additionally
+/// rejects producer swaps, generation reuse, replayed records, and sequence
+/// gaps that are not explained by the producer's cumulative drop counter.
+pub struct CaptureObservationCursor {
+    producer_id: CaptureProducerId,
+    generation: u64,
+    last_sequence: u64,
+    dropped_total: u64,
+}
+
+impl CaptureObservationCursor {
+    #[must_use]
+    pub fn new(configuration: &CaptureProducerConfiguration) -> Self {
+        Self {
+            producer_id: configuration.producer_id().clone(),
+            generation: configuration.generation(),
+            last_sequence: 0,
+            dropped_total: 0,
+        }
+    }
+
+    /// Accepts the next batch and returns newly reported producer-side drops.
+    pub fn accept(&mut self, batch: &CaptureObservationBatch) -> Result<u64, CaptureError> {
+        if batch.producer_id() != &self.producer_id || batch.generation() != self.generation {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        let dropped_delta = batch
+            .dropped_total()
+            .checked_sub(self.dropped_total)
+            .ok_or(CaptureError::InvalidObservationBatch)?;
+        let next_sequence = batch
+            .records()
+            .first()
+            .map_or(self.last_sequence, CaptureObservationRecord::sequence);
+        if next_sequence <= self.last_sequence && !batch.records().is_empty() {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        let last_sequence = batch
+            .records()
+            .last()
+            .map_or(self.last_sequence, CaptureObservationRecord::sequence);
+        let sequence_span = last_sequence
+            .checked_sub(self.last_sequence)
+            .ok_or(CaptureError::InvalidObservationBatch)?;
+        let sequence_gaps = sequence_span
+            .checked_sub(batch.records().len() as u64)
+            .ok_or(CaptureError::InvalidObservationBatch)?;
+        if dropped_delta < sequence_gaps {
+            return Err(CaptureError::InvalidObservationBatch);
+        }
+        self.last_sequence = last_sequence;
+        self.dropped_total = batch.dropped_total();
+        Ok(dropped_delta)
+    }
+}
+
+/// Hot-path input owned by one [`CaptureBatchProducer`].
+///
+/// The read lock is acquired with `try_read`, so a concurrent drain never
+/// blocks the observed application thread. Contention is reported through the
+/// cumulative producer drop count.
+#[derive(Clone)]
+pub struct CaptureBatchIngress {
+    sender: SyncSender<CaptureObservationRecord>,
+    sequence: Arc<AtomicU64>,
+    dropped: Arc<AtomicU64>,
+    paused: Arc<AtomicBool>,
+    accepting: Arc<AtomicBool>,
+    drain_gate: Arc<RwLock<()>>,
+}
+
+impl CaptureBatchIngress {
+    #[must_use]
+    pub fn try_observe(
+        &self,
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+    ) -> CaptureIngressStatus {
+        if !self.accepting.load(Ordering::Acquire) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        }
+        if self.paused.load(Ordering::Relaxed) {
+            return CaptureIngressStatus::Paused;
+        }
+        let Ok(_permit) = self.drain_gate.try_read() else {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        };
+        if !self.accepting.load(Ordering::Acquire) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        }
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let Ok(record) = CaptureObservationRecord::new(sequence, adapter_id, source) else {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        };
+        match self.sender.try_send(record) {
+            Ok(()) => CaptureIngressStatus::Accepted,
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                CaptureIngressStatus::Dropped
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn dropped_total(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+}
+
+/// Bounded observation producer drained by an out-of-process transport.
+pub struct CaptureBatchProducer {
+    producer_id: CaptureProducerId,
+    generation: u64,
+    receiver: Receiver<CaptureObservationRecord>,
+    pending: VecDeque<CaptureObservationRecord>,
+    dropped: Arc<AtomicU64>,
+    paused: Arc<AtomicBool>,
+    accepting: Arc<AtomicBool>,
+    drain_gate: Arc<RwLock<()>>,
+}
+
+impl CaptureBatchProducer {
+    pub fn start(
+        configuration: CaptureProducerConfiguration,
+    ) -> Result<(Self, CaptureBatchIngress), CaptureError> {
+        let (sender, receiver) = sync_channel(QUEUE_CAPACITY);
+        let sequence = Arc::new(AtomicU64::new(1));
+        let dropped = Arc::new(AtomicU64::new(0));
+        let paused = Arc::new(AtomicBool::new(false));
+        let accepting = Arc::new(AtomicBool::new(true));
+        let drain_gate = Arc::new(RwLock::new(()));
+        let ingress = CaptureBatchIngress {
+            sender,
+            sequence,
+            dropped: dropped.clone(),
+            paused: paused.clone(),
+            accepting: accepting.clone(),
+            drain_gate: drain_gate.clone(),
+        };
+        Ok((
+            Self {
+                producer_id: configuration.producer_id,
+                generation: configuration.generation,
+                receiver,
+                pending: VecDeque::new(),
+                dropped,
+                paused,
+                accepting,
+                drain_gate,
+            },
+            ingress,
+        ))
+    }
+
+    pub fn drain(&mut self) -> Result<CaptureObservationBatch, CaptureError> {
+        let _permit = self
+            .drain_gate
+            .write()
+            .map_err(|_| CaptureError::WorkerUnavailable)?;
+        let mut received = self.receiver.try_iter().collect::<Vec<_>>();
+        received.sort_by_key(CaptureObservationRecord::sequence);
+        self.pending.extend(received);
+        let records = (0..MAX_OBSERVATION_BATCH_RECORDS)
+            .filter_map(|_| self.pending.pop_front())
+            .collect::<Vec<_>>();
+        CaptureObservationBatch::new(
+            self.producer_id.clone(),
+            self.generation,
+            self.dropped.load(Ordering::Relaxed),
+            records,
+        )
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+}
+
+impl Drop for CaptureBatchProducer {
+    fn drop(&mut self) {
+        self.accepting.store(false, Ordering::Release);
     }
 }
 
@@ -333,9 +718,80 @@ enum CaptureCommand {
     Finish,
 }
 
-pub struct FileCaptureSink {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureIngressStatus {
+    Accepted,
+    Paused,
+    Dropped,
+}
+
+/// Cloneable, non-blocking input for a single capture owner.
+///
+/// Producers can live on different threads, but they never own the checkpoint
+/// file or its revision. The [`FileCaptureSink`] that created the ingress
+/// remains the only writer and controls pause, checkpoint, and finish.
+#[derive(Clone)]
+pub struct CaptureIngress {
     sender: SyncSender<CaptureCommand>,
     dropped: Arc<AtomicU64>,
+    paused: Arc<AtomicBool>,
+    accepting: Arc<AtomicBool>,
+    in_flight: Arc<AtomicU64>,
+}
+
+impl CaptureIngress {
+    #[must_use]
+    pub fn try_observe(
+        &self,
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+    ) -> CaptureIngressStatus {
+        if !self.accepting.load(Ordering::Acquire) {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        }
+        if self.paused.load(Ordering::Relaxed) {
+            return CaptureIngressStatus::Paused;
+        }
+        let command = CaptureCommand::Observe {
+            adapter_id: adapter_id.into(),
+            source: source.into(),
+            observed_at_ms: unix_time_millis(),
+        };
+        self.in_flight.fetch_add(1, Ordering::AcqRel);
+        if !self.accepting.load(Ordering::Acquire) {
+            self.in_flight.fetch_sub(1, Ordering::AcqRel);
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+            return CaptureIngressStatus::Dropped;
+        }
+        let status = match self.sender.try_send(command) {
+            Ok(()) => CaptureIngressStatus::Accepted,
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                CaptureIngressStatus::Dropped
+            }
+        };
+        self.in_flight.fetch_sub(1, Ordering::AcqRel);
+        status
+    }
+
+    #[must_use]
+    pub fn dropped_observations(&self) -> u64 {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Adds drops reported by an upstream supervised producer.
+    pub fn report_dropped(&self, count: u64) {
+        let _ = self
+            .dropped
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_add(count))
+            });
+    }
+}
+
+pub struct FileCaptureSink {
+    ingress: CaptureIngress,
     paused: Arc<AtomicBool>,
     worker: Option<JoinHandle<Result<CaptureCatalog, CaptureError>>>,
 }
@@ -351,6 +807,8 @@ impl FileCaptureSink {
         let (sender, receiver) = sync_channel(QUEUE_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(initial_dropped));
         let paused = Arc::new(AtomicBool::new(false));
+        let accepting = Arc::new(AtomicBool::new(true));
+        let in_flight = Arc::new(AtomicU64::new(0));
         let worker_dropped = dropped.clone();
         let worker = thread::Builder::new()
             .name("glyphshift-capture".into())
@@ -395,25 +853,25 @@ impl FileCaptureSink {
             })
             .map_err(|_| CaptureError::WorkerUnavailable)?;
         Ok(Self {
-            sender,
-            dropped,
+            ingress: CaptureIngress {
+                sender,
+                dropped,
+                paused: paused.clone(),
+                accepting,
+                in_flight,
+            },
             paused,
             worker: Some(worker),
         })
     }
 
+    #[must_use]
+    pub fn ingress(&self) -> CaptureIngress {
+        self.ingress.clone()
+    }
+
     pub fn observe(&self, adapter_id: impl Into<Box<str>>, source: impl Into<Box<str>>) {
-        if self.paused.load(Ordering::Relaxed) {
-            return;
-        }
-        let command = CaptureCommand::Observe {
-            adapter_id: adapter_id.into(),
-            source: source.into(),
-            observed_at_ms: unix_time_millis(),
-        };
-        if matches!(self.sender.try_send(command), Err(TrySendError::Full(_))) {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+        let _ = self.ingress.try_observe(adapter_id, source);
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -421,7 +879,9 @@ impl FileCaptureSink {
     }
 
     pub fn finish(mut self) -> Result<CaptureCatalog, CaptureError> {
-        self.sender
+        self.close_ingress();
+        self.ingress
+            .sender
             .send(CaptureCommand::Finish)
             .map_err(|_| CaptureError::WorkerUnavailable)?;
         self.worker
@@ -429,6 +889,22 @@ impl FileCaptureSink {
             .ok_or(CaptureError::WorkerUnavailable)?
             .join()
             .map_err(|_| CaptureError::WorkerUnavailable)?
+    }
+
+    fn close_ingress(&self) {
+        self.ingress.accepting.store(false, Ordering::Release);
+        while self.ingress.in_flight.load(Ordering::Acquire) != 0 {
+            std::thread::yield_now();
+        }
+    }
+}
+
+impl Drop for FileCaptureSink {
+    fn drop(&mut self) {
+        if self.worker.is_some() {
+            self.close_ingress();
+            let _ = self.ingress.sender.send(CaptureCommand::Finish);
+        }
     }
 }
 
@@ -467,6 +943,214 @@ fn safe_identifier(value: &str) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn observation_batch_round_trips_generation_sequence_gap_and_drop_evidence() {
+        let batch = CaptureObservationBatch::new(
+            CaptureProducerId::new("target-1").expect("producer id"),
+            7,
+            1,
+            [
+                CaptureObservationRecord::new(4, "windows.gdi.text-out", "Open")
+                    .expect("first observation"),
+                CaptureObservationRecord::new(6, "windows.console.write-console", "File")
+                    .expect("second observation"),
+            ],
+        )
+        .expect("observation batch");
+
+        let encoded = batch.encode_json().expect("batch json");
+        assert_eq!(
+            CaptureObservationBatch::decode_json(&encoded).expect("decoded batch"),
+            batch
+        );
+        assert_eq!(batch.producer_id().as_str(), "target-1");
+        assert_eq!(batch.generation(), 7);
+        assert_eq!(batch.dropped_total(), 1);
+        assert_eq!(batch.records()[0].sequence(), 4);
+        assert!(!encoded.contains("outputPath"));
+        assert!(!encoded.contains("translation"));
+    }
+
+    #[test]
+    fn observation_batch_rejects_unknown_unbounded_or_ambiguous_input() {
+        let producer = || CaptureProducerId::new("worker-1").expect("producer id");
+        let record = |sequence| {
+            CaptureObservationRecord::new(sequence, "windows.uia.observe", "Name")
+                .expect("observation")
+        };
+
+        assert_eq!(
+            CaptureProducerId::new("target:1"),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            CaptureObservationRecord::new(
+                1,
+                "windows.uia.observe",
+                "x".repeat(MAX_SOURCE_UNITS + 1),
+            ),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            CaptureObservationBatch::new(producer(), 0, 0, [record(1)]),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            CaptureObservationBatch::new(producer(), 1, 0, [record(2), record(2)]),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            CaptureObservationBatch::new(
+                producer(),
+                1,
+                0,
+                (1..=MAX_OBSERVATION_BATCH_RECORDS + 1).map(|sequence| record(sequence as u64)),
+            ),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+
+        let valid = CaptureObservationBatch::new(producer(), 1, 0, [record(1)])
+            .expect("valid batch")
+            .encode_json()
+            .expect("valid json");
+        let unknown = valid.replacen("\"records\"", "\"unknown\":true,\"records\"", 1);
+        assert_eq!(
+            CaptureObservationBatch::decode_json(&unknown),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            CaptureObservationBatch::decode_json(&"x".repeat(MAX_OBSERVATION_BATCH_BYTES + 1)),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+    }
+
+    #[test]
+    fn observation_cursor_rejects_replay_swaps_and_unexplained_sequence_gaps() {
+        let configuration = CaptureProducerConfiguration::new(
+            CaptureProducerId::new("target-1").expect("producer id"),
+            7,
+        )
+        .expect("producer configuration");
+        let mut cursor = CaptureObservationCursor::new(&configuration);
+        let batch = |producer: &str, generation, dropped, sequence| {
+            CaptureObservationBatch::new(
+                CaptureProducerId::new(producer).expect("batch producer id"),
+                generation,
+                dropped,
+                [
+                    CaptureObservationRecord::new(sequence, "windows.gdi.text-out", "Open")
+                        .expect("observation"),
+                ],
+            )
+            .expect("observation batch")
+        };
+
+        assert_eq!(cursor.accept(&batch("target-1", 7, 0, 1)), Ok(0));
+        assert_eq!(cursor.accept(&batch("target-1", 7, 1, 3)), Ok(1));
+        assert_eq!(
+            cursor.accept(&batch("target-1", 7, 1, 3)),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            cursor.accept(&batch("target-2", 7, 2, 4)),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+        assert_eq!(
+            cursor.accept(&batch("target-1", 8, 2, 4)),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+
+        let mut unexplained = CaptureObservationCursor::new(&configuration);
+        assert_eq!(
+            unexplained.accept(&batch("target-1", 7, 0, 2)),
+            Err(CaptureError::InvalidObservationBatch)
+        );
+    }
+
+    #[test]
+    fn batch_producer_drains_bounded_sorted_batches_without_blocking_ingress() {
+        let (mut producer, ingress) = CaptureBatchProducer::start(
+            CaptureProducerConfiguration::new(
+                CaptureProducerId::new("target-7").expect("producer id"),
+                3,
+            )
+            .expect("producer configuration"),
+        )
+        .expect("batch producer");
+        let second_ingress = ingress.clone();
+        let first = std::thread::spawn(move || ingress.try_observe("windows.gdi.text-out", "Open"));
+        let second = std::thread::spawn(move || {
+            second_ingress.try_observe("windows.console.write-console", "File")
+        });
+        assert_eq!(
+            first.join().expect("first producer"),
+            CaptureIngressStatus::Accepted
+        );
+        assert_eq!(
+            second.join().expect("second producer"),
+            CaptureIngressStatus::Accepted
+        );
+
+        let batch = producer.drain().expect("first batch");
+        assert_eq!(batch.producer_id().as_str(), "target-7");
+        assert_eq!(batch.generation(), 3);
+        assert_eq!(batch.records().len(), 2);
+        assert!(batch.records()[0].sequence() < batch.records()[1].sequence());
+        assert!(producer.drain().expect("empty batch").records().is_empty());
+    }
+
+    #[test]
+    fn batch_producer_preserves_pending_records_gaps_pause_and_owner_lifetime() {
+        let (mut producer, ingress) = CaptureBatchProducer::start(
+            CaptureProducerConfiguration::new(
+                CaptureProducerId::new("worker-4").expect("producer id"),
+                9,
+            )
+            .expect("producer configuration"),
+        )
+        .expect("batch producer");
+        for index in 0..300 {
+            assert_eq!(
+                ingress.try_observe("windows.uia.observe", format!("Source {index}")),
+                CaptureIngressStatus::Accepted
+            );
+        }
+        assert_eq!(
+            ingress.try_observe("windows.uia.observe", " "),
+            CaptureIngressStatus::Dropped
+        );
+        assert_eq!(
+            ingress.try_observe("windows.uia.observe", "After gap"),
+            CaptureIngressStatus::Accepted
+        );
+
+        let first = producer.drain().expect("bounded first batch");
+        let second = producer.drain().expect("pending second batch");
+        assert_eq!(first.records().len(), MAX_OBSERVATION_BATCH_RECORDS);
+        assert_eq!(second.records().len(), 45);
+        assert!(
+            first.records().last().expect("first tail").sequence()
+                < second.records().first().expect("second head").sequence()
+        );
+        assert_eq!(second.dropped_total(), 1);
+        assert!(second
+            .records()
+            .windows(2)
+            .any(|records| records[1].sequence() > records[0].sequence() + 1));
+
+        producer.set_paused(true);
+        assert_eq!(
+            ingress.try_observe("windows.uia.observe", "Paused"),
+            CaptureIngressStatus::Paused
+        );
+        producer.set_paused(false);
+        drop(producer);
+        assert_eq!(
+            ingress.try_observe("windows.uia.observe", "Too late"),
+            CaptureIngressStatus::Dropped
+        );
+    }
 
     #[test]
     fn capture_sink_deduplicates_observations_by_source_and_adapter() {
@@ -508,6 +1192,58 @@ mod tests {
     }
 
     #[test]
+    fn cloned_ingresses_merge_multiple_producers_through_one_checkpoint_owner() {
+        let root = tempdir().expect("capture root");
+        let output = root.path().join("capture.json");
+        let sink = FileCaptureSink::start(
+            CaptureConfiguration::new(
+                CaptureSessionId::new("capture-ingress").expect("session id"),
+                &output,
+                10,
+            )
+            .expect("configuration"),
+        )
+        .expect("capture sink");
+        let target_process = sink.ingress();
+        let isolated_worker = sink.ingress();
+        let stopped_worker = sink.ingress();
+
+        let target_thread = std::thread::spawn(move || {
+            target_process.try_observe("windows.gdi.text-out", "Target text")
+        });
+        let worker_thread = std::thread::spawn(move || {
+            isolated_worker.try_observe("windows.uia.observe", "Worker text")
+        });
+
+        assert_eq!(
+            target_thread.join().expect("target producer"),
+            CaptureIngressStatus::Accepted
+        );
+        assert_eq!(
+            worker_thread.join().expect("worker producer"),
+            CaptureIngressStatus::Accepted
+        );
+        let catalog = sink.finish().expect("single capture owner");
+
+        assert_eq!(catalog.entries().len(), 2);
+        assert!(catalog.entries().iter().any(|entry| {
+            entry.adapter_id() == "windows.gdi.text-out" && entry.source() == "Target text"
+        }));
+        assert!(catalog.entries().iter().any(|entry| {
+            entry.adapter_id() == "windows.uia.observe" && entry.source() == "Worker text"
+        }));
+        assert_eq!(
+            CaptureCatalog::read_current(&output).expect("single checkpoint"),
+            catalog
+        );
+        assert_eq!(
+            stopped_worker.try_observe("windows.uia.observe", "Too late"),
+            CaptureIngressStatus::Dropped
+        );
+        assert_eq!(stopped_worker.dropped_observations(), 1);
+    }
+
+    #[test]
     fn capture_sink_caps_unique_entries_without_blocking_the_observer() {
         let root = tempdir().expect("capture root");
         let output = root.path().join("capture.json");
@@ -546,10 +1282,17 @@ mod tests {
         let live = CaptureCatalog::read_current(&output).expect("live checkpoint");
         assert_eq!(live.entries().len(), 1);
 
+        let ingress = sink.ingress();
         sink.set_paused(true);
-        sink.observe("windows.gdi.text-out", "Ignored while paused");
+        assert_eq!(
+            ingress.try_observe("windows.gdi.text-out", "Ignored while paused"),
+            CaptureIngressStatus::Paused
+        );
         sink.set_paused(false);
-        sink.observe("windows.gdi.text-out", "After resume");
+        assert_eq!(
+            ingress.try_observe("windows.gdi.text-out", "After resume"),
+            CaptureIngressStatus::Accepted
+        );
         let finished = sink.finish().expect("finish capture");
         assert_eq!(finished.entries().len(), 2);
         assert!(finished

@@ -121,8 +121,29 @@ fn ctl_windows_004_prefers_the_full_executable_path_over_an_ambiguous_name() {
 }
 
 #[test]
+fn ctl_windows_005_mints_a_process_instance_grant_only_for_an_authorized_target() {
+    let mut controller = configured_controller();
+    let inventory = controller.inventory().expect("process inventory");
+    let target = inventory.targets.first().expect("authorized target");
+
+    let grant = controller
+        .authorize_worker_target(&target.token)
+        .expect("worker target grant");
+    assert_eq!(grant.platform, "windows-process-v1");
+    let (process_id, started_at) = grant
+        .payload
+        .split_once(':')
+        .expect("process instance payload");
+    assert_eq!(process_id.parse::<u32>(), Ok(std::process::id()));
+    assert!(started_at.parse::<u64>().is_ok_and(|value| value > 0));
+    assert!(controller
+        .authorize_worker_target("target:missing")
+        .is_err());
+}
+
+#[test]
 #[ignore = "requires an explicitly authorized local executable and descendant allowlist"]
-fn ctl_windows_005_discovers_an_authorized_process_family_without_exposing_process_ids() {
+fn ctl_windows_006_discovers_an_authorized_process_family_without_exposing_process_ids() {
     let executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
         .map(std::path::PathBuf::from)
         .expect("authorized executable path");

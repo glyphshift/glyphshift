@@ -44,6 +44,7 @@ $cargoArguments = @(
     '--manifest-path', $manifestPath,
     '-p', 'glyphshift-controller-windows',
     '-p', 'glyphshift-target-runtime',
+    '-p', 'glyphshift-adapter-console-native',
     '-p', 'glyphshift-adapter-draw-text-native',
     '-p', 'glyphshift-adapter-gdi-native',
     '-p', 'glyphshift-adapter-gdi-text-out-native',
@@ -91,6 +92,8 @@ $controllerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-controller-windows.exe' 'controller' 'exe'
 $runtimeBundle = Copy-VersionedBundleArtifact `
     'glyphshift_target_runtime.dll' 'runtime' 'dll'
+$consoleBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdi_native.dll' 'adapter-gdi' 'dll'
 $textOutBundle = Copy-VersionedBundleArtifact `
@@ -122,6 +125,7 @@ function Get-AdapterPresentation([string]$AdapterId) {
 }
 
 $extTextOutPresentation = Get-AdapterPresentation 'windows.gdi.ext-text-out'
+$consolePresentation = Get-AdapterPresentation 'windows.console.write-console'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
@@ -140,6 +144,14 @@ $runtimeManifest = [ordered]@{
         sha256 = $runtimeBundle.sha256
     }
     adapters = @(
+        [ordered]@{
+            file = $consoleBundle.file
+            sha256 = $consoleBundle.sha256
+            name = $consolePresentation.name
+            summary = $consolePresentation.summary
+            technology = $consolePresentation.technology
+            technicalTarget = $consolePresentation.technicalTarget
+        },
         [ordered]@{
             file = $gdiBundle.file
             sha256 = $gdiBundle.sha256

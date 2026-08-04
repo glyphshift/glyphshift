@@ -18,6 +18,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
 import ManagementTableFrame from './ManagementTableFrame.vue'
+import ProbeAdapterPicker from './ProbeAdapterPicker.vue'
 
 const props = defineProps<{
   software: SoftwareRecord[]
@@ -64,6 +65,11 @@ const newDictionaryName = ref('')
 const newDictionaryDescription = ref('')
 const newSourceLocale = ref('en-US')
 const newTargetLocale = ref('zh-CN')
+const settingsOpen = ref(false)
+const settingsName = ref('')
+const settingsAdapterIds = ref<string[]>([])
+const settingsLivePreview = ref(false)
+const clearAllOpen = ref(false)
 const translationValues = ref<Record<string, string>>({})
 const tableShell = ref<HTMLElement>()
 const tableScrollState = ref({ top: 0, clientHeight: 0, scrollHeight: 0 })
@@ -77,6 +83,17 @@ const observableAdapters = computed(() => props.adapters.filter(adapter => adapt
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
+const selectedRunMetadata = computed(() => {
+  const run = selectedRun.value
+  if (!run) return ''
+  const parts = [
+    selectedSoftware.value?.name ?? run.softwareId,
+    selectedDictionary.value?.metadata.name ?? run.dictionaryId,
+    t('capture.runSummary', { observed: run.observedCount, entries: run.dictionaryEntryCount }),
+  ]
+  if (run.livePreviewEnabled) parts.push(t('capture.previewGeneration', { generation: run.previewGeneration }))
+  return parts.join(' · ')
+})
 const selectedRunAdapters = computed(() => (selectedRun.value?.adapterIds ?? []).map(id => ({
   id,
   name: adapterName(id),
@@ -90,7 +107,24 @@ const currentSources = computed(() => entryPage.value.rows.map(row => row.source
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
 const createPreviewAvailable = computed(() => Boolean(createAdapterIds.value.length)
-  && createAdapterIds.value.every(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
+  && createAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
+const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
+  && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
+const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
+const settingsValid = computed(() => Boolean(
+  settingsName.value.trim()
+  && settingsAdapterIds.value.length
+  && (!settingsLivePreview.value || settingsPreviewAvailable.value),
+))
+const settingsChanged = computed(() => {
+  const run = selectedRun.value
+  if (!run) return false
+  return (
+    settingsName.value.trim() !== run.name
+    || JSON.stringify(settingsAdapterIds.value) !== JSON.stringify(run.adapterIds)
+    || settingsLivePreview.value !== run.livePreviewEnabled
+  )
+})
 const createValid = computed(() => Boolean(
   createName.value.trim()
   && createSoftwareId.value
@@ -175,6 +209,10 @@ const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
 
 watch(createAdapterIds, () => {
   createLivePreview.value = createPreviewAvailable.value
+}, { deep: true })
+
+watch(settingsAdapterIds, () => {
+  if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
 }, { deep: true })
 
 watch(() => probe.selectedRunId.value, async (id, previous) => {
@@ -296,6 +334,15 @@ function openCreate() {
   creating.value = true
 }
 
+function openSettings() {
+  const run = selectedRun.value
+  if (!run) return
+  settingsName.value = run.name
+  settingsAdapterIds.value = [...run.adapterIds]
+  settingsLivePreview.value = run.livePreviewEnabled
+  settingsOpen.value = true
+}
+
 async function createRun() {
   if (!createValid.value) return
   const dictionary = createDictionaryMode.value === 'existing'
@@ -329,11 +376,41 @@ async function closeDetail() {
   selected.value = new Set()
 }
 
-function toggleCreateAdapter(id: string, checked: boolean | 'indeterminate') {
-  const next = new Set(createAdapterIds.value)
-  if (checked === true) next.add(id)
-  else next.delete(id)
-  createAdapterIds.value = [...next]
+async function applySettings() {
+  const run = selectedRun.value
+  if (!run || !settingsValid.value || !settingsChanged.value) return
+  const updated = await probe.update({
+    runId: run.id,
+    name: settingsName.value.trim(),
+    adapterIds: [...settingsAdapterIds.value],
+    livePreviewEnabled: settingsLivePreview.value,
+  })
+  if (!updated) return
+  adapterFilterIds.value = adapterFilterIds.value.filter(id => updated.adapterIds.includes(id))
+  settingsOpen.value = false
+  await loadPage()
+}
+
+function requestClearAll() {
+  settingsOpen.value = false
+  clearAllOpen.value = true
+}
+
+async function confirmClearAll() {
+  const run = selectedRun.value
+  if (!run) return
+  await Promise.all([...dirtyTranslations].map(saveTranslation))
+  if (dirtyTranslations.size) return
+  const cleared = await probe.clearEntries(run.id)
+  if (!cleared) return
+  for (const timer of editTimers.values()) clearTimeout(timer)
+  editTimers.clear()
+  dirtyTranslations.clear()
+  translationValues.value = {}
+  selected.value = new Set()
+  page.value = 1
+  clearAllOpen.value = false
+  await loadPage()
 }
 
 function toggleAdapterFilter(id: string, checked: boolean) {
@@ -568,10 +645,23 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       v-if="selectedRun"
       title-id="capture-title"
       :title="selectedRun.name"
-      :description="t('capture.detailDescription', { dictionary: selectedDictionary?.metadata.name ?? selectedRun.dictionaryId })"
+      :description="selectedRunMetadata"
       :back-label="t('capture.backToRuns')"
       @back="closeDetail"
-    />
+    >
+      <template #status>
+        <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
+      </template>
+      <template #actions>
+        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('capture.settings')" @click="openSettings" />
+        <UDropdownMenu :items="exportItems" :content="{ align: 'end' }">
+          <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-download" trailing-icon="i-tabler-chevron-down" :label="t('capture.export')" />
+        </UDropdownMenu>
+        <UButton v-if="['running', 'paused'].includes(selectedRun.status)" color="neutral" variant="ghost" size="sm" icon="i-tabler-plug-off" :aria-label="t('capture.disconnect')" @click="probe.disconnect(selectedRun.id)" />
+        <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
+        <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+      </template>
+    </ManagementDetailHeader>
     <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
       <template #actions>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
@@ -581,22 +671,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
 
     <template v-if="selectedRun">
-      <div class="mb-3 flex min-h-12 shrink-0 items-center gap-3 rounded-[8px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-        <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
-        <span class="truncate text-[10px] text-[var(--text-secondary)]">{{ selectedSoftware?.name ?? selectedRun.softwareId }}</span>
-        <span class="truncate text-[10px] text-[var(--text-secondary)]">{{ selectedDictionary?.metadata.name ?? selectedRun.dictionaryId }}</span>
-        <span class="text-[9px] tabular-nums text-[var(--text-muted)]">{{ t('capture.runSummary', { observed: selectedRun.observedCount, entries: selectedRun.dictionaryEntryCount }) }}</span>
-        <span v-if="selectedRun.livePreviewEnabled" class="text-[9px] tabular-nums text-[var(--text-muted)]">{{ t('capture.previewGeneration', { generation: selectedRun.previewGeneration }) }}</span>
-        <div class="ml-auto flex items-center gap-2">
-          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
-          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
-          <UDropdownMenu :items="exportItems" :content="{ align: 'end' }">
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-download" trailing-icon="i-tabler-chevron-down" :label="t('capture.export')" />
-          </UDropdownMenu>
-          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" color="neutral" variant="ghost" size="sm" icon="i-tabler-plug-off" :aria-label="t('capture.disconnect')" @click="probe.disconnect(selectedRun.id)" />
-        </div>
-      </div>
-
       <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')">
         <template #toolbar-actions>
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
@@ -672,16 +746,55 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             <div class="grid grid-cols-2 gap-2"><UInput v-model="newSourceLocale" :placeholder="t('capture.sourceLocale')" /><UInput v-model="newTargetLocale" :placeholder="t('capture.targetLocale')" /></div>
           </div>
         </UFormField>
-        <UFormField :label="t('capture.adapters')" :hint="t('capture.adaptersHint')" required>
-          <div class="max-h-40 space-y-1 overflow-auto rounded-[6px] border border-[var(--border)] p-2">
-            <label v-for="adapter in observableAdapters" :key="adapter.id" class="flex min-h-9 items-center gap-2 rounded-[5px] px-2 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="createAdapterIds.includes(adapter.id)" @update:model-value="toggleCreateAdapter(adapter.id, $event)" /><span class="min-w-0 flex-1 truncate text-[10px] font-medium">{{ adapter.name }}</span><span class="truncate text-[9px] text-[var(--text-muted)]">{{ adapter.technologies.join(' · ') }}</span></label>
-          </div>
-        </UFormField>
+        <UFormField :label="t('capture.adapters')" :hint="t('capture.adaptersHint')" required><ProbeAdapterPicker v-model="createAdapterIds" :adapters="observableAdapters" /></UFormField>
         <UFormField :label="t('capture.livePreview')" :hint="createPreviewAvailable ? t('capture.livePreviewHint') : t('capture.livePreviewUnavailable')"><USwitch v-model="createLivePreview" :disabled="!createPreviewAvailable" /></UFormField>
       </div>
     </ManagementFormModal>
 
+    <ManagementFormModal
+      :open="settingsOpen"
+      :title="t('capture.settingsTitle')"
+      :description="t('capture.settingsDescription')"
+      :confirm-label="t('capture.saveSettings')"
+      :confirm-disabled="probe.busy.value || !settingsValid || !settingsChanged"
+      :busy="probe.busy.value"
+      width="md"
+      @update:open="$event || (settingsOpen = false)"
+      @confirm="applySettings"
+    >
+      <div class="space-y-4">
+        <UFormField :label="t('capture.runName')" required>
+          <UInput v-model="settingsName" :maxlength="128" class="w-full" />
+        </UFormField>
+
+        <UFormField :label="t('capture.adapters')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : t('capture.adaptersHint')" required><ProbeAdapterPicker v-model="settingsAdapterIds" :adapters="observableAdapters" :disabled="settingsConfigurationLocked" /></UFormField>
+
+        <UFormField :label="t('capture.livePreview')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : settingsPreviewAvailable ? t('capture.livePreviewHint') : t('capture.livePreviewUnavailable')">
+          <USwitch v-model="settingsLivePreview" :disabled="settingsConfigurationLocked || !settingsPreviewAvailable" />
+        </UFormField>
+
+        <section class="border-t border-[var(--border)] pt-4" :aria-labelledby="'capture-danger-title'">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h3 id="capture-danger-title" class="m-0 text-[11px] font-semibold text-[var(--text)]">{{ t('capture.dangerTitle') }}</h3>
+              <p class="mt-1 mb-0 max-w-[42ch] text-[9px] leading-4 text-[var(--text-muted)]">{{ settingsConfigurationLocked ? t('capture.clearAllLocked') : t('capture.clearAllHint') }}</p>
+            </div>
+            <UButton data-testid="capture-clear-all" color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.clearAll')" :disabled="settingsConfigurationLocked || (!selectedRun?.observedCount && !selectedRun?.dictionaryEntryCount)" @click="requestClearAll" />
+          </div>
+        </section>
+      </div>
+    </ManagementFormModal>
+
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
+    <ConfirmDialog
+      :open="clearAllOpen"
+      :title="t('capture.clearAllTitle')"
+      :description="t('capture.clearAllDescription', { dictionary: selectedDictionary?.metadata.name ?? selectedRun?.dictionaryId ?? '' })"
+      :confirm-label="t('capture.clearAllConfirm')"
+      :busy="probe.busy.value"
+      @update:open="$event || (clearAllOpen = false)"
+      @confirm="confirmClearAll"
+    />
   </section>
 </template>
 

@@ -2,6 +2,10 @@ use glyphshift_adapter_registry::{
     AdapterBinding, AdapterHostBinding, ArtifactHash, PackageArtifactId,
 };
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
+use glyphshift_capture::{
+    CaptureCatalog, CaptureConfiguration, CaptureObservationBatch, CaptureObservationRecord,
+    CaptureProducerId, CaptureSessionId, FileCaptureSink,
+};
 use glyphshift_domain::{
     AdapterId, ApplyModel, Feature, Generation, Placement, RouteProgram, TargetFacts,
 };
@@ -23,6 +27,7 @@ use glyphshift_target_process_host::{RuntimeArtifact, TargetArtifactCatalog, Tar
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 struct ContractTransport {
     activation_ack: u64,
@@ -390,4 +395,225 @@ fn tph_003_rejects_a_controller_ack_for_the_wrong_publication_identity() {
         host.activate_runtime(&target, &[binding], &publication(4, "First")),
         Err(glyphshift_session::HostFailure::HandshakeRejected)
     );
+}
+
+#[derive(Default)]
+struct CaptureTransportState {
+    queries: u64,
+    paused: bool,
+    deactivated: bool,
+}
+
+struct CaptureTransport {
+    state: Arc<Mutex<CaptureTransportState>>,
+}
+
+impl ControllerTransport for CaptureTransport {
+    fn handshake(
+        &mut self,
+        expected_extension: &ExtensionId,
+        version: ProtocolVersion,
+        nonce: ControllerNonce,
+    ) -> Result<ControllerHello, TransportFailure> {
+        Ok(ControllerHello::new(
+            expected_extension.clone(),
+            version,
+            nonce,
+        ))
+    }
+
+    fn inventory(&mut self) -> Result<ControllerInventory, TransportFailure> {
+        Ok(ControllerInventory::new(
+            [],
+            [ControllerTarget::new(
+                ControllerTargetToken::new("capture-target"),
+                "Synthetic capture target",
+                TargetFacts::new("windows", "x86_64"),
+            )],
+        ))
+    }
+
+    fn activate_runtime(
+        &mut self,
+        _target: &ControllerTargetToken,
+        deployment: &ControllerRuntimeDeployment,
+    ) -> Result<ControllerRuntimeAck, TransportFailure> {
+        let decoded = TargetRuntimeDeployment::decode_json(deployment.deployment_json())
+            .map_err(|_| TransportFailure::MalformedMessage)?;
+        let producer = decoded
+            .observation_producer()
+            .ok_or(TransportFailure::MalformedMessage)?;
+        if decoded.capture().is_some()
+            || producer.producer_id().as_str() != "target-1"
+            || producer.generation() != 1
+        {
+            return Err(TransportFailure::MalformedMessage);
+        }
+        let identity = decoded
+            .publication()
+            .identity()
+            .map_err(|_| TransportFailure::MalformedMessage)?
+            .as_bytes();
+        Ok(ControllerRuntimeAck::new(deployment.generation(), identity))
+    }
+
+    fn control_capture(
+        &mut self,
+        _target: &ControllerTargetToken,
+        paused: bool,
+    ) -> Result<(), TransportFailure> {
+        self.state
+            .lock()
+            .map_err(|_| TransportFailure::MalformedMessage)?
+            .paused = paused;
+        Ok(())
+    }
+
+    fn query_observations(
+        &mut self,
+        _target: &ControllerTargetToken,
+    ) -> Result<CaptureObservationBatch, TransportFailure> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| TransportFailure::MalformedMessage)?;
+        state.queries += 1;
+        let (dropped, records) = match state.queries {
+            1 => (
+                0,
+                vec![
+                    CaptureObservationRecord::new(1, "example.synthetic.observe", "Open")
+                        .map_err(|_| TransportFailure::MalformedMessage)?,
+                ],
+            ),
+            2 => (
+                1,
+                vec![
+                    CaptureObservationRecord::new(3, "example.synthetic.observe", "File")
+                        .map_err(|_| TransportFailure::MalformedMessage)?,
+                ],
+            ),
+            _ => (1, Vec::new()),
+        };
+        CaptureObservationBatch::new(
+            CaptureProducerId::new("target-1").map_err(|_| TransportFailure::MalformedMessage)?,
+            1,
+            dropped,
+            records,
+        )
+        .map_err(|_| TransportFailure::MalformedMessage)
+    }
+
+    fn deactivate_runtime(
+        &mut self,
+        _target: &ControllerTargetToken,
+    ) -> Result<(), TransportFailure> {
+        self.state
+            .lock()
+            .map_err(|_| TransportFailure::MalformedMessage)?
+            .deactivated = true;
+        Ok(())
+    }
+
+    fn terminate(&mut self) {}
+}
+
+#[test]
+fn tph_004_owns_one_checkpoint_outside_the_target_and_drains_before_stop() {
+    let state = Arc::new(Mutex::new(CaptureTransportState::default()));
+    let mut connection = ControllerConnection::connect(
+        CaptureTransport {
+            state: state.clone(),
+        },
+        ExtensionId::new("org.example.capture-owner"),
+        ProtocolVersion::new(1, 0),
+        ControllerNonce::new([0x54; 32]),
+        &mut NonceLedger::new(),
+    )
+    .expect("capture controller connection");
+    let controller_target = connection
+        .inventory()
+        .expect("capture controller inventory")
+        .targets()[0]
+        .id();
+    let artifacts = TargetArtifactCatalog::new(
+        RuntimeArtifact::new(local_artifact("runtime-capture-owner.dll"), [0x61; 32]),
+        [(
+            PackageArtifactId::new("adapters/capture-owner"),
+            local_artifact("adapter-capture-owner.dll"),
+        )],
+    )
+    .expect("capture owner artifacts");
+    let output = local_artifact("capture-owner.json");
+    for checkpoint in [
+        output.with_extension("a.json"),
+        output.with_extension("b.json"),
+    ] {
+        let _ = std::fs::remove_file(checkpoint);
+    }
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("capture-owner").expect("capture session id"),
+        &output,
+        10,
+    )
+    .expect("capture configuration");
+    let target = TargetInstance::new(
+        TargetInstanceId::new("capture-target-instance"),
+        TargetFacts::new("windows", "x86_64"),
+    );
+    let sink = FileCaptureSink::start(capture).expect("Desktop capture owner");
+    let mut host =
+        TargetProcessHost::new(connection, artifacts).with_capture_ingress(sink.ingress());
+    host.register_target(target.id().clone(), controller_target);
+    let adapter_id = AdapterId::new("example.synthetic.observe");
+    let version = AdapterVersion::new(1, 0, 0);
+    let binding = AdapterBinding {
+        descriptor: AdapterDescriptor::new(
+            adapter_id.clone(),
+            version,
+            ApplyModel::ObserveOnly,
+            Placement::TargetProcess,
+            [Feature::TextObserve],
+        ),
+        adapter_id: adapter_id.clone(),
+        version,
+        apply_model: ApplyModel::ObserveOnly,
+        artifact_hash: ArtifactHash::sha256([0x62; 32]),
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/capture-owner"),
+        },
+        features: vec![Feature::TextObserve],
+    };
+
+    host.activate_runtime(
+        &target,
+        std::slice::from_ref(&binding),
+        &publication(4, "Unused"),
+    )
+    .expect("activate capture producer");
+    host.control_capture(SessionId::new(1), &target, true)
+        .expect("pause after draining producer");
+    assert!(state.lock().expect("capture state").paused);
+    host.control_capture(SessionId::new(1), &target, false)
+        .expect("resume central capture owner");
+    assert!(!state.lock().expect("capture state").paused);
+    host.deactivate(SessionId::new(1), &target, &[binding], &[])
+        .expect("drain then deactivate capture producer");
+    sink.finish().expect("finish Desktop capture owner");
+
+    let catalog = CaptureCatalog::read_current(&output).expect("central capture checkpoint");
+    assert_eq!(catalog.entries().len(), 2);
+    assert_eq!(catalog.dropped_observations(), 1);
+    assert!(catalog
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Open"));
+    assert!(catalog
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "File"));
+    let state = state.lock().expect("final capture state");
+    assert!(state.queries >= 3);
+    assert!(state.paused);
+    assert!(state.deactivated);
 }

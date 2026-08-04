@@ -78,6 +78,11 @@ fn ctl_process_001_verified_process_runs_inventory_launch_and_authorized_recipe(
     let inventory = connection.inventory().expect("inventory");
     assert_eq!(inventory.installations().len(), 1);
     assert_eq!(inventory.targets().len(), 3);
+    let grant = connection
+        .authorize_worker_target(inventory.targets()[0].id())
+        .expect("authorized worker target grant");
+    assert_eq!(grant.platform(), "synthetic-process-v1");
+    assert_eq!(grant.payload(), "target:authorized");
     connection
         .control_runtime_diagnostics(inventory.targets()[0].id(), true)
         .expect("enable diagnostics through the process transport");
@@ -87,6 +92,14 @@ fn ctl_process_001_verified_process_runs_inventory_launch_and_authorized_recipe(
     assert_eq!(diagnostics.records().len(), 1);
     assert_eq!(diagnostics.records()[0].source_text(), "Open");
     assert_eq!(diagnostics.dropped(), 2);
+    let observations = connection
+        .query_observations(inventory.targets()[0].id())
+        .expect("query observations through the process transport");
+    assert_eq!(observations.producer_id().as_str(), "synthetic-target");
+    assert_eq!(observations.generation(), 7);
+    assert_eq!(observations.dropped_total(), 3);
+    assert_eq!(observations.records()[0].sequence(), 11);
+    assert_eq!(observations.records()[0].source(), "Open");
 
     let receipt = connection
         .launch(inventory.installations()[0].id())
@@ -166,5 +179,14 @@ fn ctl_process_004_preserves_a_controller_rejection_instead_of_calling_it_malfor
         ControllerProtocolError::Transport(TransportFailure::Rejected(
             ControllerRejection::RuntimeModuleUnavailable
         ))
+    );
+    assert_eq!(connection.health(), ControllerHealth::Available);
+    assert_eq!(
+        connection
+            .inventory()
+            .expect("controller remains usable after a target rejection")
+            .targets()
+            .len(),
+        3
     );
 }

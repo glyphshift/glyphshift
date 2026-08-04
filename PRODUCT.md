@@ -53,6 +53,8 @@ Glyphshift 让用户在不修改软件安装文件的前提下，为多个桌面
   unsigned candidate，不自动安装，也不冒充公共发行版。
 - Dictionary 是唯一翻译内容资产；Probe Run 只保存任务状态与 Dictionary 引用，Observation Index
   单独保存可恢复的技术证据。二者在探针详情联合展示，但不转换、不同步、不复制词条。
+- Probe 将 Adapter 明确区分为“可实时翻译”和“仅采集原文”。仅采集 Adapter 仍可支持词典编辑、
+  导出与未来 AI 建议；与写回 Adapter 混合运行时，只把实时预览发布给具备 `TextReplace` 的 Adapter。
 - Dictionary 编辑使用一份显式草稿：设置、行内词条、新增与删除共享未保存状态；只有保存成功才
   更新持久基线，离开编辑器或关闭窗口前必须保护未保存更改。
 
