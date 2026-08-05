@@ -50,7 +50,8 @@ Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流
 - **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
   Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
 - **帮助：** 由标题栏图标进入，使用紧凑表格展示当前 Runtime Bundle 的 Adapter 名称、说明、
-  Platform、Technology、Capability、配置要求与版本；不展示内部 ID 或 DLL target。
+  Platform、Technology、Capability、配置要求与版本；每行可在系统默认浏览器打开该 Adapter
+  presentation 提供的官方技术文档，不展示内部 ID、DLL target 或原始 URL。
 - **设置：** 只在标题栏提供图标入口，不占主导航文字位置。设置页不提供在线翻译器或服务地址，
   展示真实生效的界面语言、主题、开机启动、关闭行为与当前权限；各项立即应用并持久化。管理员
   启动使用默认关闭的持久开关；开启后立即请求 UAC 重启，之后每次启动继续请求，关闭后从下一次

@@ -52,7 +52,8 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-gdiplus-native',
     '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
-    '-p', 'glyphshift-adapter-qt-painter-native'
+    '-p', 'glyphshift-adapter-qt-painter-native',
+    '-p', 'glyphshift-adapter-raylib-native'
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
@@ -114,6 +115,8 @@ $gtk3PangoBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
+$raylibBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -133,6 +136,15 @@ function Get-AdapterPresentation([string]$AdapterId) {
     if ($null -eq $presentation) {
         throw "Missing Runtime Adapter presentation for $AdapterId"
     }
+    try {
+        $documentationUri = [System.Uri]$presentation.documentationUrl
+    }
+    catch {
+        throw "Invalid Runtime Adapter documentation URL for $AdapterId"
+    }
+    if (-not $documentationUri.IsAbsoluteUri -or $documentationUri.Scheme -ne 'https') {
+        throw "Runtime Adapter documentation URL must use HTTPS for $AdapterId"
+    }
     return $presentation
 }
 
@@ -145,6 +157,7 @@ $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
 $directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-layout'
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
+$raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/2'
@@ -167,6 +180,7 @@ $runtimeManifest = [ordered]@{
             summary = $consolePresentation.summary
             technology = $consolePresentation.technology
             technicalTarget = $consolePresentation.technicalTarget
+            documentationUrl = $consolePresentation.documentationUrl
         },
         [ordered]@{
             file = $gdiBundle.file
@@ -175,6 +189,7 @@ $runtimeManifest = [ordered]@{
             summary = $extTextOutPresentation.summary
             technology = $extTextOutPresentation.technology
             technicalTarget = $extTextOutPresentation.technicalTarget
+            documentationUrl = $extTextOutPresentation.documentationUrl
         },
         [ordered]@{
             file = $textOutBundle.file
@@ -183,6 +198,7 @@ $runtimeManifest = [ordered]@{
             summary = $textOutPresentation.summary
             technology = $textOutPresentation.technology
             technicalTarget = $textOutPresentation.technicalTarget
+            documentationUrl = $textOutPresentation.documentationUrl
         },
         [ordered]@{
             file = $drawTextBundle.file
@@ -191,6 +207,7 @@ $runtimeManifest = [ordered]@{
             summary = $drawTextPresentation.summary
             technology = $drawTextPresentation.technology
             technicalTarget = $drawTextPresentation.technicalTarget
+            documentationUrl = $drawTextPresentation.documentationUrl
         },
         [ordered]@{
             file = $gdiPlusBundle.file
@@ -199,6 +216,7 @@ $runtimeManifest = [ordered]@{
             summary = $gdiPlusPresentation.summary
             technology = $gdiPlusPresentation.technology
             technicalTarget = $gdiPlusPresentation.technicalTarget
+            documentationUrl = $gdiPlusPresentation.documentationUrl
         },
         [ordered]@{
             file = $directWriteBundle.file
@@ -207,6 +225,7 @@ $runtimeManifest = [ordered]@{
             summary = $directWritePresentation.summary
             technology = $directWritePresentation.technology
             technicalTarget = $directWritePresentation.technicalTarget
+            documentationUrl = $directWritePresentation.documentationUrl
         },
         [ordered]@{
             file = $gtk3PangoBundle.file
@@ -215,6 +234,7 @@ $runtimeManifest = [ordered]@{
             summary = $gtk3PangoPresentation.summary
             technology = $gtk3PangoPresentation.technology
             technicalTarget = $gtk3PangoPresentation.technicalTarget
+            documentationUrl = $gtk3PangoPresentation.documentationUrl
         },
         [ordered]@{
             file = $qtPainterBundle.file
@@ -223,6 +243,16 @@ $runtimeManifest = [ordered]@{
             summary = $qtPainterPresentation.summary
             technology = $qtPainterPresentation.technology
             technicalTarget = $qtPainterPresentation.technicalTarget
+            documentationUrl = $qtPainterPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $raylibBundle.file
+            sha256 = $raylibBundle.sha256
+            name = $raylibPresentation.name
+            summary = $raylibPresentation.summary
+            technology = $raylibPresentation.technology
+            technicalTarget = $raylibPresentation.technicalTarget
+            documentationUrl = $raylibPresentation.documentationUrl
         }
     )
     isolated_workers = @(
@@ -238,6 +268,7 @@ $runtimeManifest = [ordered]@{
             summary = $uiaPresentation.summary
             technology = $uiaPresentation.technology
             technicalTarget = $uiaPresentation.technicalTarget
+            documentationUrl = $uiaPresentation.documentationUrl
         }
     )
 }

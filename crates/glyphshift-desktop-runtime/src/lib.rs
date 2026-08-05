@@ -125,6 +125,8 @@ struct ArtifactManifest {
     #[serde(default)]
     #[serde(alias = "technicalTarget")]
     technical_target: Option<Box<str>>,
+    #[serde(default, alias = "documentationUrl")]
+    documentation_url: Option<Box<str>>,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +146,8 @@ struct IsolatedWorkerManifest {
     technology: Option<Box<str>>,
     #[serde(default, alias = "technicalTarget")]
     technical_target: Option<Box<str>>,
+    #[serde(default, alias = "documentationUrl")]
+    documentation_url: Option<Box<str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,6 +160,7 @@ pub struct RuntimeAdapterOption {
     technologies: Vec<Box<str>>,
     features: Vec<Feature>,
     technical_target: Box<str>,
+    documentation_url: Option<Box<str>>,
     configuration: Box<str>,
 }
 
@@ -198,6 +203,11 @@ impl RuntimeAdapterOption {
     #[must_use]
     pub fn technical_target(&self) -> &str {
         &self.technical_target
+    }
+
+    #[must_use]
+    pub fn documentation_url(&self) -> Option<&str> {
+        self.documentation_url.as_deref()
     }
 
     #[must_use]
@@ -310,6 +320,9 @@ impl RuntimeBundle {
                         .technical_target
                         .clone()
                         .unwrap_or_else(|| descriptor.adapter_id().as_str().into()),
+                    documentation_url: parse_documentation_url(
+                        adapter.documentation_url.as_deref(),
+                    )?,
                     configuration: "none".into(),
                 });
             }
@@ -390,6 +403,7 @@ impl RuntimeBundle {
                     .technical_target
                     .clone()
                     .unwrap_or_else(|| adapter_id.as_str().into()),
+                documentation_url: parse_documentation_url(worker.documentation_url.as_deref())?,
                 configuration: "none".into(),
             });
             packages.push(AdapterPackage::new(
@@ -1771,6 +1785,24 @@ fn parse_hash(value: &str) -> Result<[u8; 32], DesktopRuntimeError> {
     Ok(hash)
 }
 
+fn parse_documentation_url(value: Option<&str>) -> Result<Option<Box<str>>, DesktopRuntimeError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() || value.trim() != value {
+        return Err(DesktopRuntimeError::InvalidManifest);
+    }
+    let parsed = url::Url::parse(value).map_err(|_| DesktopRuntimeError::InvalidManifest)?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(DesktopRuntimeError::InvalidManifest);
+    }
+    Ok(Some(value.into()))
+}
+
 fn next_nonce(sequence: u64) -> ControllerNonce {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2677,6 +2709,27 @@ mod tests {
             Err(DesktopRuntimeError::InvalidArtifactHash)
         );
         assert_eq!(parse_hash(&"f".repeat(64)), Ok([0xff; 32]));
+    }
+
+    #[test]
+    fn adapter_documentation_accepts_only_absolute_https_urls() {
+        assert_eq!(parse_documentation_url(None), Ok(None));
+        assert_eq!(
+            parse_documentation_url(Some("https://example.invalid/reference")),
+            Ok(Some("https://example.invalid/reference".into()))
+        );
+        for invalid in [
+            "",
+            " https://example.invalid/reference",
+            "http://example.invalid/reference",
+            "https://user@example.invalid/reference",
+            "reference/index.html",
+        ] {
+            assert_eq!(
+                parse_documentation_url(Some(invalid)),
+                Err(DesktopRuntimeError::InvalidManifest)
+            );
+        }
     }
 
     #[test]

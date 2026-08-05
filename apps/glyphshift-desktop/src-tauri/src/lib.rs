@@ -625,6 +625,7 @@ struct AdapterView {
     technologies: Vec<Box<str>>,
     features: Vec<Box<str>>,
     technical_target: Box<str>,
+    documentation_url: Option<Box<str>>,
     configuration: Box<str>,
 }
 
@@ -860,6 +861,7 @@ impl DesktopApplication {
                             .map(|feature| adapter_feature_id(*feature).into())
                             .collect(),
                         technical_target: adapter.technical_target().into(),
+                        documentation_url: adapter.documentation_url().map(Into::into),
                         configuration: adapter.configuration().into(),
                     })
                     .collect()
@@ -2941,7 +2943,9 @@ fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init());
     #[cfg(windows)]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
@@ -2971,11 +2975,10 @@ pub fn run() {
                 .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
             if settings.current().is_ok_and(|current| {
                 current.should_request_elevation(current_process_is_elevated().ok())
-            }) {
-                if launch_current_process_elevated().is_ok() {
-                    app.handle().exit(0);
-                    return Ok(());
-                }
+            }) && launch_current_process_elevated().is_ok()
+            {
+                app.handle().exit(0);
+                return Ok(());
             }
             let application =
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
@@ -3072,8 +3075,8 @@ mod tests {
     #[test]
     fn elevated_restart_preserves_explicit_desktop_roots() {
         let context = DesktopLaunchContext {
-            data_root: Some(PathBuf::from(r"X:\synthetic-test\workspace")),
-            runtime_root: Some(PathBuf::from(r"X:\synthetic-test\runtime bundle")),
+            data_root: Some(PathBuf::from("<synthetic-data-root>")),
+            runtime_root: Some(PathBuf::from("<synthetic-runtime-root>")),
         };
 
         let restored = DesktopLaunchContext::from_args(context.elevation_arguments());
@@ -3781,6 +3784,7 @@ mod tests {
             technologies: vec!["GDI".into()],
             features: vec!["text-replace".into()],
             technical_target: "Synthetic".into(),
+            documentation_url: None,
             configuration: "none".into(),
         });
         application
@@ -3931,6 +3935,31 @@ mod tests {
     }
 
     #[test]
+    fn desktop_snapshot_exposes_adapter_documentation_as_presentation_metadata() {
+        let (mut application, _calls, _software_id, _data_root) = workflow_application();
+        application.adapters.push(AdapterView {
+            id: TEST_ADAPTER_ID.into(),
+            name: "Synthetic adapter".into(),
+            version: "1.0.0".into(),
+            summary: "Synthetic adapter presentation".into(),
+            platforms: vec!["windows".into()],
+            technologies: vec!["Synthetic".into()],
+            features: vec!["textObserve".into()],
+            technical_target: "SyntheticTarget".into(),
+            documentation_url: Some("https://example.invalid/adapter".into()),
+            configuration: "none".into(),
+        });
+
+        let json =
+            serde_json::to_value(application.snapshot()).expect("serialize product snapshot");
+
+        assert_eq!(
+            json["adapters"][0]["documentationUrl"],
+            "https://example.invalid/adapter"
+        );
+    }
+
+    #[test]
     fn probe_preview_uses_replacement_adapters_without_rejecting_collection_adapters() {
         let (mut application, _calls, _software_id, _data_root) = workflow_application();
         application.adapters = vec![
@@ -3943,6 +3972,7 @@ mod tests {
                 technologies: vec!["Synthetic".into()],
                 features: vec!["textObserve".into(), "textReplace".into()],
                 technical_target: "SyntheticReplace".into(),
+                documentation_url: None,
                 configuration: "none".into(),
             },
             AdapterView {
@@ -3954,6 +3984,7 @@ mod tests {
                 technologies: vec!["Synthetic".into()],
                 features: vec!["textObserve".into()],
                 technical_target: "SyntheticObserve".into(),
+                documentation_url: None,
                 configuration: "none".into(),
             },
         ];
@@ -3980,6 +4011,7 @@ mod tests {
             technologies: vec!["Synthetic".into()],
             features: vec!["textObserve".into(), "textReplace".into()],
             technical_target: "SyntheticReplace".into(),
+            documentation_url: None,
             configuration: "none".into(),
         }];
 

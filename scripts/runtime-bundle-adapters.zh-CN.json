@@ -4,62 +4,79 @@
     "name": "WriteConsoleW 观察器",
     "summary": "观察 Console 客户端通过 Unicode API 输出的文本；用于探针采集，不执行翻译写回",
     "technology": "Windows Console",
-    "technicalTarget": "KernelBase!WriteConsoleW"
+    "technicalTarget": "KernelBase!WriteConsoleW",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/console/writeconsole"
   },
   {
     "id": "windows.uia.observe",
     "name": "UI Automation 观察器",
     "summary": "观察标准 Windows 控件公开的可访问性文本；用于探针采集，不执行翻译写回",
     "technology": "Windows UI Automation",
-    "technicalTarget": "授权进程的 UI Automation 控件树"
+    "technicalTarget": "授权进程的 UI Automation 控件树",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/winauto/entry-uiautocore-overview"
   },
   {
     "id": "windows.gdi.ext-text-out",
     "name": "ExtTextOutW",
     "summary": "拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制",
     "technology": "GDI",
-    "technicalTarget": "gdi32.dll!ExtTextOutW"
+    "technicalTarget": "gdi32.dll!ExtTextOutW",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw"
   },
   {
     "id": "windows.gdi.text-out",
     "name": "TextOutW",
     "summary": "拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面",
     "technology": "GDI",
-    "technicalTarget": "gdi32.dll!TextOutW"
+    "technicalTarget": "gdi32.dll!TextOutW",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-textoutw"
   },
   {
     "id": "windows.user32.draw-text",
     "name": "DrawTextW / DrawTextExW",
     "summary": "拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面",
     "technology": "USER32 / GDI",
-    "technicalTarget": "user32.dll!DrawTextW + DrawTextExW"
+    "technicalTarget": "user32.dll!DrawTextW + DrawTextExW",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-drawtextw"
   },
   {
     "id": "windows.gdiplus.draw-string",
     "name": "GdipDrawString",
     "summary": "拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面",
     "technology": "GDI+",
-    "technicalTarget": "gdiplus.dll!GdipDrawString"
+    "technicalTarget": "gdiplus.dll!GdipDrawString",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-drawing-text-use"
   },
   {
     "id": "windows.directwrite.text-layout",
     "name": "DirectWrite TextLayout",
     "summary": "拦截 DirectWrite 文本布局创建与 Direct2D 布局绘制；支持单一格式文本的字典替换，复杂分段格式安全放行",
     "technology": "DirectWrite / Direct2D",
-    "technicalTarget": "IDWriteFactory::CreateTextLayout + ID2D1RenderTarget::DrawTextLayout"
+    "technicalTarget": "IDWriteFactory::CreateTextLayout + ID2D1RenderTarget::DrawTextLayout",
+    "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwritefactory-createtextlayout"
   },
   {
     "id": "windows.qt.painter-draw-text",
     "name": "Qt Painter drawText",
     "summary": "拦截动态链接 Qt 5/6 Widgets 的常见文本绘制并应用字典译文；不适用于静态 Qt 或 QML",
     "technology": "Qt 5 / Qt 6 Widgets",
-    "technicalTarget": "QtGui!QPainter::drawText"
+    "technicalTarget": "QtGui!QPainter::drawText",
+    "documentationUrl": "https://doc.qt.io/qt-6/qpainter.html#drawText"
   },
   {
     "id": "windows.gtk3.pango-render-layout",
     "name": "GTK 3 / Pango 绘制",
     "summary": "拦截动态链接 GTK 3 的常见文本布局绘制并应用字典译文；局部样式文本安全放行，不适用于 GTK 4",
     "technology": "GTK 3 / Pango",
-    "technicalTarget": "GTK 3!gtk_render_layout"
+    "technicalTarget": "GTK 3!gtk_render_layout",
+    "documentationUrl": "https://docs.gtk.org/gtk3/func.render_layout.html"
+  },
+  {
+    "id": "windows.raylib.draw-text-ex",
+    "name": "raylib DrawTextEx",
+    "summary": "拦截动态 raylib 5.5 兼容文字绘制并使用已验证的中文 fallback atlas；不适用于静态链接、复制绘制实现或纹理缓存文字",
+    "technology": "raylib 5.5",
+    "technicalTarget": "raylib.dll!DrawTextEx",
+    "documentationUrl": "https://www.raylib.com/cheatsheet/raylib_cheatsheet_v5.5.pdf"
   }
 ]

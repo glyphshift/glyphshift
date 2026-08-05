@@ -134,6 +134,7 @@ export interface AdapterOption {
   technologies: string[]
   features: string[]
   technicalTarget: string
+  documentationUrl: string | null
   configuration: 'none'
 }
 

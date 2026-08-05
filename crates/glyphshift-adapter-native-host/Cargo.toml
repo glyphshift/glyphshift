@@ -21,6 +21,7 @@ glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
 glyphshift-adapter-gtk3-pango = { path = "../glyphshift-adapter-gtk3-pango" }
 glyphshift-adapter-qt-painter = { path = "../glyphshift-adapter-qt-painter" }
+glyphshift-adapter-raylib = { path = "../glyphshift-adapter-raylib" }
 glyphshift-windows-host = { path = "../../test-support/windows-host" }
 
 [target.'cfg(windows)'.dev-dependencies]

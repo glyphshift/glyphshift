@@ -140,6 +140,12 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdiplus-native' `
     -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-raylib' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-raylib-native' `
+    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-raylib', 'retour', 'windows')
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-uia' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -345,7 +351,8 @@ Assert-Dependencies `
         'glyphshift-target-process-host',
         'serde',
         'serde_json',
-        'sha2'
+        'sha2',
+        'url'
     )
 Assert-Dependencies `
     -PackageName 'glyphshift-desktop-shell' `
@@ -364,6 +371,7 @@ Assert-Dependencies `
         'tauri',
         'tauri-plugin-dialog',
         'tauri-plugin-global-shortcut',
+        'tauri-plugin-opener',
         'tempfile',
         'winreg'
     )

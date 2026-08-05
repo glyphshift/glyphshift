@@ -30,19 +30,19 @@ const model = {
   }],
   adapters: [{
     id: 'synthetic.ext-text-out', name: 'ExtTextOutW', summary: '拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制',
-    version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!ExtTextOutW', configuration: 'none',
+    version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!ExtTextOutW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw', configuration: 'none',
   }, {
     id: 'synthetic.text-out', name: 'TextOutW', summary: '拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面',
-    version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!TextOutW', configuration: 'none',
+    version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!TextOutW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-textoutw', configuration: 'none',
   }, {
     id: 'synthetic.draw-text', name: 'DrawTextW / DrawTextExW', summary: '拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面',
-    version: '1.0.0', platforms: ['windows'], technologies: ['USER32 / GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'user32.dll!DrawTextW + DrawTextExW', configuration: 'none',
+    version: '1.0.0', platforms: ['windows'], technologies: ['USER32 / GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'user32.dll!DrawTextW + DrawTextExW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-drawtextw', configuration: 'none',
   }, {
     id: 'synthetic.gdip-draw-string', name: 'GdipDrawString', summary: '拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面',
-    version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', configuration: 'none',
+    version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-drawing-text-use', configuration: 'none',
   }, {
     id: 'synthetic.console-observer', name: 'WriteConsoleW 观察器', summary: '观察 Console 客户端 Unicode 输出；不执行翻译写回',
-    version: '1.0.0', platforms: ['windows'], technologies: ['Windows Console'], features: ['textObserve'], technicalTarget: 'KernelBase!WriteConsoleW', configuration: 'none',
+    version: '1.0.0', platforms: ['windows'], technologies: ['Windows Console'], features: ['textObserve'], technicalTarget: 'KernelBase!WriteConsoleW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/console/writeconsole', configuration: 'none',
   }],
   workflows: [{
     id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5,
@@ -1303,6 +1303,17 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('字体替换', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('无需配置', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('v1.0.0', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(5)
+  await page.evaluate(() => {
+    window.open = ((url?: string | URL) => {
+      ;(window as unknown as { __openedAdapterDocumentation?: string }).__openedAdapterDocumentation = String(url)
+      return window
+    }) as typeof window.open
+  })
+  await page.getByRole('button', { name: '查看 ExtTextOutW 技术文档' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __openedAdapterDocumentation?: string }
+  ).__openedAdapterDocumentation)).toBe('https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw')
   await expect(page.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
 })
@@ -1340,6 +1351,7 @@ test('settings applies and persists the real locale and theme preferences', asyn
   await page.getByRole('button', { name: 'Help', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Available adapters' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'View technical documentation for ExtTextOutW' })).toBeVisible()
   await page.getByRole('button', { name: 'Software', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Software' })).toBeVisible()
   await page.getByRole('button', { name: 'Dictionaries', exact: true }).click()

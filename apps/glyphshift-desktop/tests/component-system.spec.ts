@@ -97,6 +97,48 @@ test('modal layers stay above sticky tables and transient menus', () => {
   expect(viteConfig).toContain("content: 'z-[81]")
 })
 
+test('native close requests can destroy the accepted window', () => {
+  const capability = JSON.parse(readFileSync(
+    join(packageRoot, 'src-tauri', 'capabilities', 'default.json'),
+    'utf8',
+  )) as { permissions?: string[] }
+
+  expect(capability.permissions).toEqual(expect.arrayContaining([
+    'core:window:allow-close',
+    'core:window:allow-destroy',
+  ]))
+})
+
+test('adapter documentation opens through a scoped system-browser capability', () => {
+  const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+  }
+  const cargoManifest = readFileSync(join(packageRoot, 'src-tauri/Cargo.toml'), 'utf8')
+  const shellSource = readFileSync(join(packageRoot, 'src-tauri/src/lib.rs'), 'utf8')
+  const capability = JSON.parse(readFileSync(join(packageRoot, 'src-tauri/capabilities/default.json'), 'utf8')) as {
+    permissions?: Array<string | { identifier: string; allow?: Array<{ url?: string }> }>
+  }
+
+  expect(packageJson.dependencies?.['@tauri-apps/plugin-opener']).toBeTruthy()
+  expect(cargoManifest).toContain('tauri-plugin-opener')
+  expect(shellSource).toContain('tauri_plugin_opener::init()')
+
+  const opener = capability.permissions?.find(permission => (
+    typeof permission !== 'string' && permission.identifier === 'opener:allow-open-url'
+  ))
+  expect(opener).toEqual({
+    identifier: 'opener:allow-open-url',
+    allow: [
+      { url: 'https://learn.microsoft.com/*' },
+      { url: 'https://doc.qt.io/*' },
+      { url: 'https://docs.gtk.org/*' },
+      { url: 'https://www.raylib.com/*' },
+    ],
+  })
+  expect(capability.permissions).not.toContain('opener:default')
+  expect(capability.permissions).not.toContain('opener:allow-default-urls')
+})
+
 test('probe run keeps the 5000-entry path behind backend paging and revision polling', () => {
   const captureView = readFileSync(join(sourceRoot, 'components', 'CaptureView.vue'), 'utf8')
   const probeRuns = readFileSync(join(sourceRoot, 'useProbeRuns.ts'), 'utf8')

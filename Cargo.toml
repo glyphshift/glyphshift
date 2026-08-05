@@ -20,6 +20,8 @@ members = [
     "crates/glyphshift-adapter-gtk3-pango-native",
     "crates/glyphshift-adapter-qt-painter",
     "crates/glyphshift-adapter-qt-painter-native",
+    "crates/glyphshift-adapter-raylib",
+    "crates/glyphshift-adapter-raylib-native",
     "crates/glyphshift-adapter-native-abi",
     "crates/glyphshift-adapter-native-host",
     "crates/glyphshift-adapter-sdk",

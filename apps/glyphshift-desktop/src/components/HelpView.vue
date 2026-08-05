@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
-import { computed } from 'vue'
+import { openUrl } from '@tauri-apps/plugin-opener'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdapterOption } from '../model'
 
@@ -10,10 +11,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const openingDocumentationId = ref<string | null>(null)
+const documentationError = ref<string | null>(null)
 const columns = computed<TableColumn<AdapterOption>[]>(() => [
   { id: 'adapter', header: t('help.columns.adapter'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
   { id: 'platform', header: t('help.columns.platform'), meta: { class: { th: 'w-28', td: 'w-28' } } },
   { id: 'technology', header: t('help.columns.technology'), meta: { class: { th: 'w-28', td: 'w-28' } } },
+  { id: 'documentation', header: t('help.columns.documentation'), meta: { class: { th: 'w-28', td: 'w-28' } } },
   { id: 'features', header: t('help.columns.features') },
   { id: 'configuration', header: t('help.columns.configuration'), meta: { class: { th: 'w-28', td: 'w-28' } } },
   { id: 'version', header: t('help.columns.version'), meta: { class: { th: 'w-24', td: 'w-24' } } },
@@ -29,6 +33,22 @@ function featureLabel(value: string) {
   return ['textObserve', 'textReplace', 'fontSubstitute', 'layoutAdjust', 'resourceReplace'].includes(value)
     ? t(`help.features.${value}`)
     : value
+}
+
+async function openDocumentation(adapter: AdapterOption) {
+  if (!adapter.documentationUrl || openingDocumentationId.value) return
+  documentationError.value = null
+  openingDocumentationId.value = adapter.id
+  try {
+    if ('__TAURI_INTERNALS__' in window) await openUrl(adapter.documentationUrl)
+    else window.open(adapter.documentationUrl, '_blank', 'noopener,noreferrer')
+  }
+  catch {
+    documentationError.value = t('help.documentationOpenFailed')
+  }
+  finally {
+    openingDocumentationId.value = null
+  }
 }
 </script>
 
@@ -65,11 +85,27 @@ function featureLabel(value: string) {
 
         <section class="mt-5" aria-labelledby="adapter-help-title">
           <div class="mb-2 flex items-end justify-between gap-4"><div><h2 id="adapter-help-title" class="m-0 text-[13px] font-semibold">{{ t('help.adaptersTitle') }}</h2><p class="mb-0 mt-1 text-[10px] text-[var(--text-muted)]">{{ t('help.adaptersDescription') }}</p></div><span class="text-[10px] tabular-nums text-[var(--text-muted)]">{{ t('help.availableCount', { count: adapters.length }) }}</span></div>
+          <p v-if="documentationError" class="mb-2 mt-0 text-[10px] text-[var(--danger)]" role="alert">{{ documentationError }}</p>
           <div class="overflow-hidden rounded-[7px] border border-[var(--border)] bg-[var(--surface)]">
-            <UTable :data="adapters" :columns="columns" :ui="{ base: 'min-w-[880px]' }">
+            <UTable :data="adapters" :columns="columns" :ui="{ base: 'min-w-[980px]' }">
               <template #adapter-cell="{ row }"><div class="font-semibold">{{ row.original.name }}</div><div class="mt-0.5 max-w-[58ch] text-[9px] leading-4 text-[var(--text-muted)]">{{ row.original.summary }}</div></template>
               <template #platform-cell="{ row }"><div class="flex flex-wrap gap-1"><UBadge v-for="platform in row.original.platforms" :key="platform" color="neutral" variant="soft" size="sm" :label="platformLabel(platform)" /></div></template>
               <template #technology-cell="{ row }"><div class="flex flex-wrap gap-1"><UBadge v-for="technology in row.original.technologies" :key="technology" color="neutral" variant="outline" size="sm" :label="technology" /></div></template>
+              <template #documentation-cell="{ row }">
+                <UButton
+                  v-if="row.original.documentationUrl"
+                  color="neutral"
+                  variant="link"
+                  size="xs"
+                  icon="i-tabler-external-link"
+                  class="-ml-1 px-1"
+                  :label="t('help.openDocumentation')"
+                  :aria-label="t('help.openDocumentationFor', { name: row.original.name })"
+                  :loading="openingDocumentationId === row.original.id"
+                  @click="openDocumentation(row.original)"
+                />
+                <span v-else class="text-[10px] text-[var(--text-muted)]">{{ t('help.documentationUnavailable') }}</span>
+              </template>
               <template #features-cell="{ row }"><div class="flex flex-wrap gap-1"><UBadge v-for="feature in row.original.features" :key="feature" color="neutral" variant="soft" size="sm" :label="featureLabel(feature)" /></div></template>
               <template #configuration-cell="{ row }"><span>{{ row.original.configuration === 'none' ? t('help.noConfiguration') : row.original.configuration }}</span></template>
               <template #version-cell="{ row }"><span class="tabular-nums">v{{ row.original.version }}</span></template>

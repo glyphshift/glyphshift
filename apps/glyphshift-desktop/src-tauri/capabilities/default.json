@@ -8,8 +8,18 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://learn.microsoft.com/*" },
+        { "url": "https://doc.qt.io/*" },
+        { "url": "https://docs.gtk.org/*" },
+        { "url": "https://www.raylib.com/*" }
+      ]
+    }
   ]
 }

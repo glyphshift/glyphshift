@@ -1271,14 +1271,14 @@ mod tests {
     fn elevated_launch_quotes_internal_arguments_as_one_windows_command_line() {
         let parameters = elevated_launch_parameters(&[
             OsString::from("--glyphshift-data-root"),
-            OsString::from(r"X:\synthetic root\workspace"),
+            OsString::from(r"<synthetic-root>\workspace"),
         ]);
         let parameters = String::from_utf16(&parameters[..parameters.len() - 1])
             .expect("synthetic parameters are valid UTF-16");
 
         assert_eq!(
             parameters,
-            r#""--glyphshift-data-root" "X:\synthetic root\workspace""#
+            r#""--glyphshift-data-root" "<synthetic-root>\workspace""#
         );
     }
 }
