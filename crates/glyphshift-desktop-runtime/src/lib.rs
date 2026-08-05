@@ -1453,7 +1453,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             hybrid_host,
             RunningTarget,
         );
-        let active_features = requested_features.iter().copied().collect();
+        let mut active_features = BTreeSet::new();
         let mut sessions = BTreeMap::new();
         for (target_id, _, _, _, target_instance) in runtime_targets {
             let status = match manager.start_with_runtime(
@@ -1472,6 +1472,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
                     return Err(map_session_runtime_error(error));
                 }
             };
+            active_features.extend(status.active_features());
             sessions.insert(target_id, status.session_id());
         }
         self.phase = Some(RuntimePhase::Active {

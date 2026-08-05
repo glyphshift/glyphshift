@@ -385,6 +385,27 @@ struct ProbeRunView {
     summary: ProbeRunSummary,
     dictionary_revision: u64,
     dictionary_entry_count: usize,
+    runtime_capability: Option<ProbeRuntimeCapability>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ProbeRuntimeCapability {
+    DirectReplace,
+    CollectionOnly,
+    NoSignal,
+}
+
+impl ProbeRuntimeCapability {
+    fn from_status(status: &DesktopRuntimeStatus) -> Self {
+        if status.is_feature_active(Feature::TextReplace) {
+            Self::DirectReplace
+        } else if status.is_feature_active(Feature::TextObserve) {
+            Self::CollectionOnly
+        } else {
+            Self::NoSignal
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -641,7 +662,7 @@ trait WorkflowRuntimeService: Send {
         software_id: &str,
         spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
         configuration: CaptureConfiguration,
-    ) -> Result<(), DesktopRuntimeError>;
+    ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError>;
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 
@@ -702,8 +723,9 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
         software_id: &str,
         spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
         configuration: CaptureConfiguration,
-    ) -> Result<(), DesktopRuntimeError> {
-        DesktopRuntimePool::start_capture(self, software_id, spec, None, configuration).map(|_| ())
+    ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError> {
+        DesktopRuntimePool::start_capture(self, software_id, spec, None, configuration)
+            .map(|status| ProbeRuntimeCapability::from_status(&status))
     }
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
@@ -752,6 +774,7 @@ struct DesktopApplication {
     font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
     active_probe_run_id: Option<Box<str>>,
+    active_probe_capability: Option<ProbeRuntimeCapability>,
 }
 
 impl DesktopApplication {
@@ -806,6 +829,7 @@ impl DesktopApplication {
             font_cache_root: data_root.clone(),
             probe_runs,
             active_probe_run_id: None,
+            active_probe_capability: None,
         };
         application
             .restore_enabled_workflows()
@@ -868,6 +892,9 @@ impl DesktopApplication {
                     .with_arg("dictionaryId", summary.dictionary_id())
             })?;
         Ok(ProbeRunView {
+            runtime_capability: (self.active_probe_run_id.as_deref() == Some(summary.id()))
+                .then_some(self.active_probe_capability)
+                .flatten(),
             summary,
             dictionary_revision: dictionary.revision(),
             dictionary_entry_count: dictionary.entries().len(),
@@ -1055,14 +1082,15 @@ impl DesktopApplication {
             .as_mut()
             .ok_or_else(|| CommandError::new("runtime.unavailable"))?
             .start_capture(summary.software_id(), &spec, configuration);
-        match start_result {
-            Ok(()) => {}
+        let runtime_capability = match start_result {
+            Ok(capability) => capability,
             Err(DesktopRuntimeError::UnknownTarget) if allow_offline_target => {
                 return self.probe_run_view(summary);
             }
             Err(error) => return Err(runtime_command_error(error, true)),
-        }
+        };
         self.active_probe_run_id = Some(run_id.into());
+        self.active_probe_capability = Some(runtime_capability);
         self.probe_runs
             .set_status(run_id, ProbeRunStatus::Running)
             .map_err(probe_run_error)?;
@@ -1070,10 +1098,9 @@ impl DesktopApplication {
             if let Some(runtimes) = self.runtimes.as_mut() {
                 let _ = runtimes.stop_capture(summary.software_id());
             }
-            let _ = self
-                .probe_runs
-                .set_status(run_id, ProbeRunStatus::Interrupted);
+            let _ = self.probe_runs.set_status(run_id, ProbeRunStatus::Ready);
             self.active_probe_run_id = None;
+            self.active_probe_capability = None;
             return Err(error);
         }
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
@@ -1119,6 +1146,7 @@ impl DesktopApplication {
             .stop_capture(summary.software_id())
             .map_err(|error| runtime_command_error(error, false))?;
         self.active_probe_run_id = None;
+        self.active_probe_capability = None;
         let summary = self
             .probe_runs
             .set_status(run_id, ProbeRunStatus::Ready)
@@ -1350,7 +1378,7 @@ impl DesktopApplication {
             .as_mut()
             .ok_or_else(|| CommandError::new("runtime.unavailable"))?
             .publish_capture(summary.software_id(), publication)
-            .map_err(|error| runtime_command_error(error, false))?;
+            .map_err(capture_preview_publish_error)?;
         self.probe_runs
             .set_preview_generation(run_id, generation)
             .map_err(probe_run_error)?;
@@ -1930,6 +1958,10 @@ fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandE
         _ if enabling => CommandError::new("runtime.activation_failed"),
         _ => CommandError::new("runtime.stop_unconfirmed"),
     }
+}
+
+fn capture_preview_publish_error(_error: DesktopRuntimeError) -> CommandError {
+    CommandError::new("capture.preview_publish_failed")
 }
 
 fn runtime_diagnostics_error(error: DesktopRuntimeError, software_id: &str) -> CommandError {
@@ -3184,6 +3216,7 @@ mod tests {
     struct RecordingWorkflowRuntime {
         calls: Arc<StdMutex<WorkflowRuntimeCalls>>,
         start_capture_error: Option<DesktopRuntimeError>,
+        capture_capability: ProbeRuntimeCapability,
     }
 
     impl WorkflowRuntimeService for RecordingWorkflowRuntime {
@@ -3279,7 +3312,7 @@ mod tests {
             software_id: &str,
             _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
             configuration: CaptureConfiguration,
-        ) -> Result<(), DesktopRuntimeError> {
+        ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError> {
             self.calls
                 .lock()
                 .expect("runtime call log")
@@ -3290,7 +3323,7 @@ mod tests {
             }
             glyphshift_capture::FileCaptureSink::start(configuration)
                 .and_then(glyphshift_capture::FileCaptureSink::finish)
-                .map(|_| ())
+                .map(|_| self.capture_capability)
                 .map_err(|_| DesktopRuntimeError::SessionRejected)
         }
 
@@ -3409,6 +3442,7 @@ mod tests {
         let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
             calls: Arc::clone(&calls),
             start_capture_error: None,
+            capture_capability: ProbeRuntimeCapability::DirectReplace,
         });
         (
             DesktopApplication {
@@ -3423,6 +3457,7 @@ mod tests {
                 probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
                     .expect("probe run store"),
                 active_probe_run_id: None,
+                active_probe_capability: None,
             },
             calls,
             software_id,
@@ -3548,6 +3583,16 @@ mod tests {
         .expect("serialize Runtime module rejection");
 
         assert_eq!(error["code"], "runtime.component_load_failed");
+    }
+
+    #[test]
+    fn probe_preview_publish_failure_does_not_masquerade_as_a_stop_failure() {
+        let error = serde_json::to_value(capture_preview_publish_error(
+            DesktopRuntimeError::SessionRejected,
+        ))
+        .expect("serialize probe preview publish failure");
+
+        assert_eq!(error["code"], "capture.preview_publish_failed");
     }
 
     #[test]
@@ -3885,6 +3930,7 @@ mod tests {
         application.runtimes = Some(Box::new(RecordingWorkflowRuntime {
             calls,
             start_capture_error: Some(DesktopRuntimeError::UnknownTarget),
+            capture_capability: ProbeRuntimeCapability::DirectReplace,
         }));
 
         let created = application
@@ -3909,6 +3955,38 @@ mod tests {
             .expect_err("explicit reconnect should still explain the offline target");
         let error_json = serde_json::to_value(resume_error).expect("serialize reconnect error");
         assert_eq!(error_json["code"], "runtime.target_not_found");
+    }
+
+    #[test]
+    fn probe_view_reports_actual_collection_only_capability_without_persisting_it() {
+        let (mut application, calls, software_id, _data_root) = workflow_application();
+        application.runtimes = Some(Box::new(RecordingWorkflowRuntime {
+            calls,
+            start_capture_error: None,
+            capture_capability: ProbeRuntimeCapability::CollectionOnly,
+        }));
+
+        let created = application
+            .create_probe_run(ProbeRunCreateRequest {
+                id: "probe-collection-only".into(),
+                name: "Collection-only probe".into(),
+                software_id,
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::Existing {
+                    dictionary_id: "dictionary.product".into(),
+                },
+            })
+            .expect("create collection-only probe");
+
+        assert_eq!(
+            created.runtime_capability,
+            Some(ProbeRuntimeCapability::CollectionOnly)
+        );
+        let disconnected = application
+            .disconnect_probe_run(created.summary.id())
+            .expect("disconnect collection-only probe");
+        assert_eq!(disconnected.runtime_capability, None);
     }
 
     #[test]
@@ -4238,6 +4316,7 @@ mod tests {
         let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
             calls: Arc::clone(&calls),
             start_capture_error: None,
+            capture_capability: ProbeRuntimeCapability::DirectReplace,
         });
         let mut reopened = DesktopApplication {
             backend,
@@ -4251,6 +4330,7 @@ mod tests {
             probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
                 .expect("probe run store"),
             active_probe_run_id: None,
+            active_probe_capability: None,
         };
 
         reopened

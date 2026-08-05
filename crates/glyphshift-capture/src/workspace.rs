@@ -344,7 +344,7 @@ impl ProbeRunStore {
         }
         fs::create_dir_all(&root).map_err(|_| ProbeRunError::Storage)?;
         let mut store = Self { root };
-        store.recover_interrupted()?;
+        store.recover_disconnected()?;
         Ok(store)
     }
 
@@ -758,7 +758,7 @@ impl ProbeRunStore {
         Ok(aggregate.into_values().collect())
     }
 
-    fn recover_interrupted(&mut self) -> Result<(), ProbeRunError> {
+    fn recover_disconnected(&mut self) -> Result<(), ProbeRunError> {
         let ids = fs::read_dir(&self.root)
             .map_err(|_| ProbeRunError::Storage)?
             .filter_map(Result::ok)
@@ -772,9 +772,9 @@ impl ProbeRunStore {
             };
             if matches!(
                 document.summary.status,
-                ProbeRunStatus::Running | ProbeRunStatus::Paused
+                ProbeRunStatus::Running | ProbeRunStatus::Paused | ProbeRunStatus::Interrupted
             ) {
-                document.summary.status = ProbeRunStatus::Interrupted;
+                document.summary.status = ProbeRunStatus::Ready;
                 self.touch(&mut document);
                 self.write_document(&document)?;
             }
@@ -986,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn run_recovers_interrupted_state_and_ignore_keeps_dictionary_unchanged() {
+    fn run_recovers_disconnected_state_and_ignore_keeps_dictionary_unchanged() {
         let (root, mut store) = run_store();
         let summary = create_run(&mut store);
         let paused_summary = store
@@ -1002,6 +1002,19 @@ mod tests {
                 .expect("paused probe create"),
             )
             .expect("create paused run");
+        let interrupted_summary = store
+            .create(
+                ProbeRunCreate::new(
+                    "probe-interrupted",
+                    "Interrupted probe",
+                    "software-three",
+                    "dictionary-three",
+                    ["windows.gdi.text-out"],
+                    false,
+                )
+                .expect("interrupted probe create"),
+            )
+            .expect("create interrupted run");
         let sink = FileCaptureSink::start(
             store
                 .capture_configuration(summary.id(), 10)
@@ -1016,6 +1029,9 @@ mod tests {
         store
             .set_status(paused_summary.id(), ProbeRunStatus::Paused)
             .expect("mark paused");
+        store
+            .set_status(interrupted_summary.id(), ProbeRunStatus::Interrupted)
+            .expect("mark interrupted");
         store
             .set_ignored(summary.id(), &[Box::<str>::from("Open")], true)
             .expect("ignore observed source");
@@ -1036,11 +1052,15 @@ mod tests {
 
         let mut reopened = ProbeRunStore::open(root.path()).expect("reopen store");
         let recovered = reopened.summary(summary.id()).expect("summary");
-        assert_eq!(recovered.status(), ProbeRunStatus::Interrupted);
+        assert_eq!(recovered.status(), ProbeRunStatus::Ready);
         let recovered_paused = reopened
             .summary(paused_summary.id())
             .expect("paused summary");
-        assert_eq!(recovered_paused.status(), ProbeRunStatus::Interrupted);
+        assert_eq!(recovered_paused.status(), ProbeRunStatus::Ready);
+        let recovered_interrupted = reopened
+            .summary(interrupted_summary.id())
+            .expect("interrupted summary");
+        assert_eq!(recovered_interrupted.status(), ProbeRunStatus::Ready);
         let page = reopened
             .query_entries(
                 summary.id(),

@@ -107,13 +107,24 @@ export function useProbeRuns() {
             updatedAtMs: Date.now(),
             dictionaryRevision: 1,
             dictionaryEntryCount: 0,
+            runtimeCapability: null,
           }
       upsert(summary)
-      selectRun(summary.id)
       return summary
     }
     catch (error) {
       message.value = translateCommandError(error)
+      if (hasDesktopRuntime()) {
+        try {
+          const refreshed = await invoke<ProbeRunSummary[]>('desktop_probe_runs')
+          runs.value = refreshed.sort((left, right) => right.updatedAtMs - left.updatedAtMs || left.name.localeCompare(right.name))
+          const persisted = runs.value.find(run => run.id === input.id)
+          if (persisted) return persisted
+        }
+        catch {
+          // Keep the original connection failure; a later refresh can recover the run list.
+        }
+      }
       return null
     }
     finally {

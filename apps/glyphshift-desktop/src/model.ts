@@ -138,6 +138,7 @@ export interface AdapterOption {
 }
 
 export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
+export type ProbeRuntimeCapability = 'direct_replace' | 'collection_only' | 'no_signal'
 
 export interface ProbeRunSummary {
   id: string
@@ -156,6 +157,7 @@ export interface ProbeRunSummary {
   updatedAtMs: number
   dictionaryRevision: number
   dictionaryEntryCount: number
+  runtimeCapability: ProbeRuntimeCapability | null
 }
 
 export interface ProbeEntryRow {

@@ -802,6 +802,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
 
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
   await dialog.getByRole('button', { name: '创建并连接' }).click()
+  await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Vector Studio 探针', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '返回探针管理' })).toBeVisible()
   await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toBeVisible()
@@ -809,6 +810,117 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('还没有捕获到文字')).toBeVisible()
   await expect(page.getByText('每页')).toBeVisible()
   await expect(page.getByRole('button', { name: /开始监听|停止并生成/ })).toHaveCount(0)
+})
+
+test('probe list hides technical detail behind one accessible hover target and uses binary connection status', async ({ page }) => {
+  const probeRuns = [{
+    id: 'probe-detail',
+    name: 'Vector Studio 探针',
+    softwareId: 'software-proof',
+    dictionaryId: 'dictionary-proof',
+    adapterIds: ['synthetic.ext-text-out', 'synthetic.text-out', 'synthetic.draw-text', 'synthetic.gdip-draw-string'],
+    status: 'interrupted',
+    livePreviewEnabled: true,
+    observationRevision: 4,
+    observedCount: 37,
+    ignoredCount: 0,
+    droppedObservations: 0,
+    previewGeneration: 2,
+    createdAtMs: 1,
+    updatedAtMs: 2,
+    dictionaryRevision: 3,
+    dictionaryEntryCount: 2,
+  }]
+  await page.addInitScript(({ snapshot, runs }) => {
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return runs
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { snapshot: model, runs: probeRuns })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: 'Vector Studio 探针' })
+  await expect(row).toContainText('未连接')
+  await expect(row).not.toContainText('ExtTextOutW · TextOutW')
+  await expect(page.getByText('连接已中断', { exact: true })).toHaveCount(0)
+
+  const details = row.getByRole('button', { name: /查看 Vector Studio 探针.*技术详情/ })
+  await details.hover()
+  await expect(page.getByText('程序位置', { exact: true })).toBeVisible()
+  await expect(page.getByText('X:\\SyntheticFixtures\\VectorStudio.exe', { exact: true })).toBeVisible()
+  await expect(page.getByText('探针技术', { exact: true })).toBeVisible()
+  await expect(page.getByText('GDI · ExtTextOutW', { exact: true })).toBeVisible()
+  await expect(page.getByText('GDI+ · GdipDrawString', { exact: true })).toBeVisible()
+})
+
+test('persisted probe closes creation modal even when its initial connection fails', async ({ page }) => {
+  const persistedRun = {
+    id: 'probe-persisted-after-connect-error',
+    name: '离线软件探针',
+    softwareId: 'software-proof',
+    dictionaryId: 'dictionary-proof',
+    adapterIds: ['synthetic.ext-text-out'],
+    status: 'ready',
+    livePreviewEnabled: true,
+    observationRevision: 0,
+    observedCount: 0,
+    ignoredCount: 0,
+    droppedObservations: 0,
+    previewGeneration: 0,
+    createdAtMs: 1,
+    updatedAtMs: 1,
+    dictionaryRevision: 3,
+    dictionaryEntryCount: 2,
+  }
+  await page.addInitScript(({ snapshot, persisted }) => {
+    let creationAttempted = false
+    let createdRun = persisted
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
+        if (command === 'desktop_probe_run_summary') return createdRun
+        if (command === 'desktop_create_probe_run') {
+          creationAttempted = true
+          createdRun = {
+            ...persisted,
+            id: args?.request.id,
+            name: args?.request.name,
+            softwareId: args?.request.softwareId,
+            adapterIds: args?.request.adapterIds,
+          }
+          throw { schemaVersion: 1, code: 'runtime.component_incompatible', args: {} }
+        }
+        if (command === 'desktop_probe_run_entries') return {
+          observationRevision: 0, dictionaryRevision: 3, page: 1, pageSize: 50, total: 0, rows: [],
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { snapshot: model, persisted: persistedRun })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  const dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  await dialog.getByRole('textbox', { name: '任务名称' }).fill('离线软件探针')
+  await dialog.getByRole('button', { name: '创建并连接' }).click()
+
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '离线软件探针', exact: true })).toBeVisible()
+  await expect(page.getByRole('alert')).toContainText('所选探针技术不适用于当前软件')
+  await expect(page.getByRole('alert')).not.toContainText('升级')
+  await expect(page.getByRole('alert')).not.toContainText('重启')
 })
 
 test('new probe discards a cancelled inline dictionary draft', async ({ page }) => {
@@ -966,6 +1078,38 @@ test('probe detail edits settings and clears all joined entries behind confirmat
   ))).toBe(1)
 })
 
+test('probe detail states when the active runtime can only collect text', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const summary = {
+      id: 'probe-collection-only', name: '仅采集任务', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.console-observer'], status: 'running', livePreviewEnabled: false,
+      observationRevision: 1, observedCount: 12, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 0, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 3,
+      dictionaryEntryCount: 2, runtimeCapability: 'collection_only',
+    }
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_probe_run_entries') return {
+          observationRevision: 1, dictionaryRevision: 3, page: 1, pageSize: 50, total: 0, rows: [],
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', summary.id)
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  await expect(page.getByTestId('probe-runtime-capability')).toHaveText('仅采集')
+  await expect(page.getByText(/只采集原文，目标软件界面不会被修改/)).toBeVisible()
+})
+
 test('probe run keeps backend paging while adapter filters and view state recover', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     const translations: Record<string, string> = {}
@@ -1042,6 +1186,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   const initialThumbTransform = await page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)
   await expect(page.locator('tbody tr')).toHaveCount(50)
   await expect(page.locator('tbody input')).toHaveCount(50)
+  await expect(page.locator('tbody tr').first()).toContainText('词典未命中')
   const firstTranslation = page.getByLabel('“Source 0001”的译文')
   await firstTranslation.fill('即时译文')
   await firstTranslation.blur()

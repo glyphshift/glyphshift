@@ -106,6 +106,7 @@ const messageKeys: Record<string, string> = {
   'capture.invalid_state': 'errors.capture.invalidState',
   'capture.invalid_workspace': 'errors.capture.invalidWorkspace',
   'capture.preview_unavailable': 'errors.capture.previewUnavailable',
+  'capture.preview_publish_failed': 'errors.capture.previewPublishFailed',
   'capture.export_failed': 'errors.capture.exportFailed',
 }
 

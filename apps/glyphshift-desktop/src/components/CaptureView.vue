@@ -90,6 +90,7 @@ const selectedRunMetadata = computed(() => {
     t('capture.runSummary', { observed: run.observedCount, entries: run.dictionaryEntryCount }),
   ]
   if (run.livePreviewEnabled) parts.push(t('capture.previewGeneration', { generation: run.previewGeneration }))
+  if (run.runtimeCapability) parts.push(runtimeCapabilityDescription(run.runtimeCapability))
   return parts.join(' · ')
 })
 const selectedRunAdapters = computed(() => (selectedRun.value?.adapterIds ?? []).map(id => ({
@@ -376,6 +377,8 @@ async function createRun() {
   })
   if (created) {
     closeCreate()
+    await nextTick()
+    probe.selectRun(created.id)
     await loadPage()
   }
 }
@@ -593,6 +596,10 @@ function softwareName(id: string) {
   return props.software.find(item => item.id === id)?.name ?? id
 }
 
+function softwarePath(id: string) {
+  return props.software.find(item => item.id === id)?.executablePath ?? t('capture.pathUnavailable')
+}
+
 function dictionaryName(id: string) {
   return props.dictionaries.find(item => item.metadata.id === id)?.metadata.name ?? id
 }
@@ -601,15 +608,37 @@ function adapterName(id: string) {
   return props.adapters.find(adapter => adapter.id === id)?.name ?? id
 }
 
+function adapterDetails(run: ProbeRunSummary) {
+  return run.adapterIds.map(id => {
+    const adapter = props.adapters.find(item => item.id === id)
+    return {
+      id,
+      name: adapter?.name ?? id,
+      technologies: adapter?.technologies.join(' · ') || t('capture.technologyUnavailable'),
+    }
+  })
+}
+
 function statusLabel(status: string) {
-  return t(`capture.status.${status}`)
+  return t(['running', 'paused'].includes(status) ? 'capture.status.connected' : 'capture.status.disconnected')
 }
 
 function statusColor(status: string) {
-  if (status === 'running') return 'success'
-  if (status === 'paused') return 'warning'
-  if (status === 'interrupted') return 'error'
-  return 'neutral'
+  return ['running', 'paused'].includes(status) ? 'success' : 'neutral'
+}
+
+function runtimeCapabilityLabel(capability: NonNullable<ProbeRunSummary['runtimeCapability']>) {
+  return t(`capture.runtimeCapability.${capability}.label`)
+}
+
+function runtimeCapabilityDescription(capability: NonNullable<ProbeRunSummary['runtimeCapability']>) {
+  return t(`capture.runtimeCapability.${capability}.description`)
+}
+
+function runtimeCapabilityColor(capability: NonNullable<ProbeRunSummary['runtimeCapability']>) {
+  if (capability === 'direct_replace') return 'success'
+  if (capability === 'collection_only') return 'warning'
+  return 'error'
 }
 
 function stateLabel(state: string) {
@@ -661,7 +690,17 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @back="closeDetail"
     >
       <template #status>
-        <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
+        <div class="flex items-center gap-1.5">
+          <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
+          <UBadge
+            v-if="selectedRun.runtimeCapability"
+            data-testid="probe-runtime-capability"
+            :color="runtimeCapabilityColor(selectedRun.runtimeCapability)"
+            variant="soft"
+            size="sm"
+            :label="runtimeCapabilityLabel(selectedRun.runtimeCapability)"
+          />
+        </div>
       </template>
       <template #actions>
         <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('capture.settings')" @click="openSettings" />
@@ -729,10 +768,39 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <UTable :data="listPageItems" :columns="runColumns" sticky :ui="{ base: 'min-w-[920px]' }" @dblclick="openRunOnDoubleClick">
         <template #select-header><UCheckbox :model-value="listPageSelected" :aria-label="t('capture.selectRunPage')" @update:model-value="toggleListPageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="listSelected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleListSelection(row.original.id)" /></template>
-        <template #run-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ row.original.adapterIds.map(adapterName).join(' · ') }}</div></template>
+        <template #run-cell="{ row }">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <div class="truncate font-semibold">{{ row.original.name }}</div>
+            <UPopover mode="hover" :open-delay="150" :close-delay="100" :content="{ side: 'right', align: 'start', sideOffset: 6 }" :ui="{ content: 'z-[80] w-80 p-0' }">
+              <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-info-circle" class="shrink-0" :aria-label="t('capture.viewTechnicalDetails', { name: row.original.name })" />
+              <template #content>
+                <div class="space-y-3 p-3">
+                  <div>
+                    <div class="text-[9px] font-medium text-[var(--text-secondary)]">{{ t('capture.executablePath') }}</div>
+                    <div class="mt-1 break-all text-[10px] leading-4 text-[var(--text)]">{{ softwarePath(row.original.softwareId) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-[9px] font-medium text-[var(--text-secondary)]">{{ t('capture.adapters') }}</div>
+                    <ul class="m-0 mt-1 space-y-1 p-0" role="list">
+                      <li v-for="adapter in adapterDetails(row.original)" :key="adapter.id" class="list-none text-[10px] leading-4 text-[var(--text)]">
+                        <span class="text-[var(--text-secondary)]">{{ adapter.technologies }}</span>
+                        <span aria-hidden="true"> · </span>{{ adapter.name }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </template>
+            </UPopover>
+          </div>
+        </template>
         <template #software-cell="{ row }"><div class="truncate">{{ softwareName(row.original.softwareId) }}</div></template>
         <template #dictionary-cell="{ row }"><div class="truncate font-medium">{{ dictionaryName(row.original.dictionaryId) }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: row.original.dictionaryEntryCount }) }}</div></template>
-        <template #status-cell="{ row }"><UBadge :color="statusColor(row.original.status)" variant="soft" size="sm" :label="statusLabel(row.original.status)" /></template>
+        <template #status-cell="{ row }">
+          <div class="flex flex-col items-start gap-1">
+            <UBadge :color="statusColor(row.original.status)" variant="soft" size="sm" :label="statusLabel(row.original.status)" />
+            <UBadge v-if="row.original.runtimeCapability" :color="runtimeCapabilityColor(row.original.runtimeCapability)" variant="soft" size="sm" :label="runtimeCapabilityLabel(row.original.runtimeCapability)" />
+          </div>
+        </template>
         <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
         <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>

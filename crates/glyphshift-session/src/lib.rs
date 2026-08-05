@@ -663,6 +663,16 @@ impl SessionStatus {
         self.features.get(feature).copied()
     }
 
+    /// Capabilities the target host actually acknowledged for this session.
+    ///
+    /// Requested, starting, degraded, and failed features are intentionally excluded so callers
+    /// do not mistake configuration intent for a working runtime capability.
+    pub fn active_features(&self) -> impl Iterator<Item = Feature> + '_ {
+        self.features.iter().filter_map(|(feature, phase)| {
+            (*phase == FeaturePhase::Active).then_some(feature.feature)
+        })
+    }
+
     #[must_use]
     pub fn generation(&self, feature: &BoundFeature) -> Option<GenerationPhase> {
         self.generations.get(feature).copied()

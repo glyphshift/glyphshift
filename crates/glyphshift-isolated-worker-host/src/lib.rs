@@ -816,10 +816,58 @@ impl AdapterHostPort for IsolatedWorkerHost {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ActivePlacements {
     target_process: bool,
     isolated_worker: bool,
+}
+
+fn resolve_runtime_activation(
+    target_process: Option<Result<(), HostFailure>>,
+    isolated_worker: Option<Result<(), HostFailure>>,
+    target_process_features: Vec<BoundFeature>,
+    isolated_worker_features: Vec<BoundFeature>,
+) -> Result<(ActivePlacements, HostActivation), HostFailure> {
+    let mut acknowledged = Vec::new();
+    let mut failed = Vec::new();
+    let mut first_error = None;
+
+    let target_process_active = match target_process {
+        Some(Ok(())) => {
+            acknowledged.extend(target_process_features);
+            true
+        }
+        Some(Err(error)) => {
+            failed.extend(target_process_features);
+            first_error = Some(error);
+            false
+        }
+        None => false,
+    };
+    let isolated_worker_active = match isolated_worker {
+        Some(Ok(())) => {
+            acknowledged.extend(isolated_worker_features);
+            true
+        }
+        Some(Err(error)) => {
+            failed.extend(isolated_worker_features);
+            first_error.get_or_insert(error);
+            false
+        }
+        None => false,
+    };
+
+    let active = ActivePlacements {
+        target_process: target_process_active,
+        isolated_worker: isolated_worker_active,
+    };
+    if !active.target_process && !active.isolated_worker {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+    }
+
+    Ok((active, HostActivation::reported(acknowledged, failed)))
 }
 
 /// One Session-facing host that routes each binding to its declared placement.
@@ -859,6 +907,21 @@ impl<T> HybridAdapterHost<T> {
     fn features(bindings: &[AdapterBinding]) -> Vec<BoundFeature> {
         bindings
             .iter()
+            .flat_map(|binding| {
+                binding.features.iter().copied().map(|feature| {
+                    BoundFeature::new(binding.adapter_id.clone(), binding.version, feature)
+                })
+            })
+            .collect()
+    }
+
+    fn features_for(
+        bindings: &[AdapterBinding],
+        placement: fn(&AdapterHostBinding) -> bool,
+    ) -> Vec<BoundFeature> {
+        bindings
+            .iter()
+            .filter(|binding| placement(&binding.host))
             .flat_map(|binding| {
                 binding.features.iter().copied().map(|feature| {
                     BoundFeature::new(binding.adapter_id.clone(), binding.version, feature)
@@ -909,28 +972,30 @@ impl<T: ControllerTransport + Send + 'static> AdapterHostPort for HybridAdapterH
         if self.active.contains_key(target.id()) {
             return Err(HostFailure::Unavailable);
         }
-        if placements.target_process {
+        let target_process = placements.target_process.then(|| {
             self.target_process
-                .activate_runtime(target, bindings, publication)?;
-        }
-        if placements.isolated_worker {
-            let isolated = self
-                .isolated_worker
+                .activate_runtime(target, bindings, publication)
+                .map(|_| ())
+        });
+        let isolated_worker = placements.isolated_worker.then(|| {
+            self.isolated_worker
                 .as_mut()
-                .ok_or(HostFailure::Unavailable);
-            if let Err(error) =
-                isolated.and_then(|host| host.activate_runtime(target, bindings, publication))
-            {
-                if placements.target_process {
-                    let _ =
-                        self.target_process
-                            .deactivate(SessionId::new(0), target, bindings, &[]);
-                }
-                return Err(error);
-            }
-        }
-        self.active.insert(target.id().clone(), placements);
-        Ok(HostActivation::connected(Self::features(bindings)))
+                .ok_or(HostFailure::Unavailable)
+                .and_then(|host| host.activate_runtime(target, bindings, publication))
+                .map(|_| ())
+        });
+        let (active, activation) = resolve_runtime_activation(
+            target_process,
+            isolated_worker,
+            Self::features_for(bindings, |host| {
+                matches!(host, AdapterHostBinding::TargetProcess { .. })
+            }),
+            Self::features_for(bindings, |host| {
+                matches!(host, AdapterHostBinding::IsolatedWorker { .. })
+            }),
+        )?;
+        self.active.insert(target.id().clone(), active);
+        Ok(activation)
     }
 
     fn update(
@@ -984,17 +1049,29 @@ impl<T: ControllerTransport + Send + 'static> AdapterHostPort for HybridAdapterH
                 .ok_or(HostFailure::Unavailable)?
                 .update_runtime(session_id, target, bindings, publication)?;
         }
-        let isolated = bindings
-            .iter()
-            .filter(|binding| matches!(binding.host, AdapterHostBinding::IsolatedWorker { .. }))
-            .flat_map(|binding| {
-                binding.features.iter().copied().map(|feature| {
-                    (
-                        BoundFeature::new(binding.adapter_id.clone(), binding.version, feature),
-                        publication.generation(),
-                    )
-                })
-            });
+        let isolated = placements
+            .isolated_worker
+            .then(|| {
+                bindings
+                    .iter()
+                    .filter(|binding| {
+                        matches!(binding.host, AdapterHostBinding::IsolatedWorker { .. })
+                    })
+                    .flat_map(|binding| {
+                        binding.features.iter().copied().map(|feature| {
+                            (
+                                BoundFeature::new(
+                                    binding.adapter_id.clone(),
+                                    binding.version,
+                                    feature,
+                                ),
+                                publication.generation(),
+                            )
+                        })
+                    })
+            })
+            .into_iter()
+            .flatten();
         Ok(HostGenerationReport::reported(
             placements
                 .target_process
@@ -1348,6 +1425,35 @@ fn hide_window(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_activation_keeps_isolated_features_when_target_process_fails() {
+        let target_feature = BoundFeature::new(
+            AdapterId::new("windows.gdi.text-out"),
+            glyphshift_adapter_registry::AdapterVersion::new(1, 0, 0),
+            glyphshift_domain::Feature::TextReplace,
+        );
+        let isolated_feature = BoundFeature::new(
+            AdapterId::new("windows.uia.observe"),
+            glyphshift_adapter_registry::AdapterVersion::new(1, 0, 0),
+            glyphshift_domain::Feature::TextObserve,
+        );
+
+        let (active, activation) = resolve_runtime_activation(
+            Some(Err(HostFailure::HandshakeRejected)),
+            Some(Ok(())),
+            vec![target_feature.clone()],
+            vec![isolated_feature.clone()],
+        )
+        .expect("the healthy isolated placement should keep the session alive");
+
+        assert!(!active.target_process);
+        assert!(active.isolated_worker);
+        assert_eq!(
+            activation,
+            HostActivation::reported([isolated_feature], [target_feature])
+        );
+    }
 
     #[test]
     fn worker_permission_and_timeout_have_stable_host_operation_failures() {

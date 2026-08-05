@@ -674,6 +674,10 @@ fn ses_004_preserves_each_adapter_feature_phase_independently() {
         status.phase(&combined_font_active),
         Some(FeaturePhase::Active)
     );
+    assert_eq!(
+        status.active_features().collect::<BTreeSet<_>>(),
+        BTreeSet::from([Feature::TextReplace, Feature::FontSubstitute])
+    );
 }
 
 #[test]
