@@ -397,7 +397,17 @@ impl ControllerTransport for ProcessControllerTransport {
             Response::RuntimeActivated {
                 generation,
                 publication_identity,
-            } => Ok(ControllerRuntimeAck::new(generation, publication_identity)),
+                active_adapter_ids,
+            } => Ok(active_adapter_ids.map_or_else(
+                || ControllerRuntimeAck::new(generation, publication_identity),
+                |active_adapter_ids| {
+                    ControllerRuntimeAck::reported(
+                        generation,
+                        publication_identity,
+                        active_adapter_ids.into_iter().map(AdapterId::new),
+                    )
+                },
+            )),
             _ => Err(TransportFailure::MalformedMessage),
         }
     }

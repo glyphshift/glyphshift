@@ -12,14 +12,16 @@ mod windows {
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::ptr::{null, null_mut};
-    use windows::core::w;
+    use windows::core::{w, Interface};
     use windows::Win32::Foundation::RECT as WindowsRect;
     use windows::Win32::Graphics::Direct2D::Common::{
         D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
-        D2D_RECT_F,
+        D2D_POINT_2F, D2D_RECT_F,
     };
     use windows::Win32::Graphics::Direct2D::{
-        D2D1CreateFactory, ID2D1Factory, D2D1_DRAW_TEXT_OPTIONS_NONE,
+        D2D1CreateFactory, ID2D1Factory, ID2D1RenderTarget,
+        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+        D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
         D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
         D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1_RENDER_TARGET_USAGE_NONE,
@@ -782,6 +784,132 @@ mod windows {
         Ok(canvas.evidence())
     }
 
+    pub fn render_raw_directwrite_layout(text: &str) -> Result<PixelEvidence, String> {
+        render_raw_directwrite_layout_on_target(text, false)
+    }
+
+    pub fn render_raw_directwrite_compatible_layout(text: &str) -> Result<PixelEvidence, String> {
+        render_raw_directwrite_layout_on_target(text, true)
+    }
+
+    fn render_raw_directwrite_layout_on_target(
+        text: &str,
+        compatible: bool,
+    ) -> Result<PixelEvidence, String> {
+        let canvas = DibCanvas::new()?;
+        let direct2d: ID2D1Factory =
+            unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
+                .map_err(|error| format!("D2D1CreateFactory failed: {error}"))?;
+        let parent = unsafe { direct2d.CreateDCRenderTarget(&direct2d_target_properties()) }
+            .map_err(|error| format!("CreateDCRenderTarget failed: {error}"))?;
+        let bounds = WindowsRect {
+            left: 0,
+            top: 0,
+            right: WIDTH,
+            bottom: HEIGHT,
+        };
+        unsafe { parent.BindDC(WindowsHdc(canvas.hdc), &bounds) }
+            .map_err(|error| format!("ID2D1DCRenderTarget::BindDC failed: {error}"))?;
+        let parent_target: ID2D1RenderTarget = parent
+            .cast()
+            .map_err(|error| format!("ID2D1RenderTarget cast failed: {error}"))?;
+        let draw_target = if compatible {
+            let target = unsafe {
+                parent_target.CreateCompatibleRenderTarget(
+                    None,
+                    None,
+                    None,
+                    D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+                )
+            }
+            .map_err(|error| format!("CreateCompatibleRenderTarget failed: {error}"))?;
+            target
+                .cast::<ID2D1RenderTarget>()
+                .map_err(|error| format!("compatible ID2D1RenderTarget cast failed: {error}"))?
+        } else {
+            parent_target.clone()
+        };
+
+        let directwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
+                .map_err(|error| format!("DWriteCreateFactory failed: {error}"))?;
+        let format = unsafe {
+            directwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                30.0,
+                w!("en-US"),
+            )
+        }
+        .map_err(|error| format!("CreateTextFormat failed: {error}"))?;
+        let units = text.encode_utf16().collect::<Vec<_>>();
+        let layout = unsafe {
+            directwrite.CreateTextLayout(&units, &format, (WIDTH - 24) as f32, (HEIGHT - 24) as f32)
+        }
+        .map_err(|error| format!("CreateTextLayout failed: {error}"))?;
+        let brush = unsafe {
+            draw_target.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                None,
+            )
+        }
+        .map_err(|error| format!("CreateSolidColorBrush failed: {error}"))?;
+        let white = D2D1_COLOR_F {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        };
+        unsafe {
+            draw_target.BeginDraw();
+            draw_target.Clear(Some(&white));
+            draw_target.DrawTextLayout(
+                D2D_POINT_2F { x: 12.0, y: 12.0 },
+                &layout,
+                &brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+            );
+            draw_target.EndDraw(None, None)
+        }
+        .map_err(|error| format!("TextLayout EndDraw failed: {error}"))?;
+
+        if compatible {
+            let bitmap_target = draw_target
+                .cast::<windows::Win32::Graphics::Direct2D::ID2D1BitmapRenderTarget>()
+                .map_err(|error| format!("ID2D1BitmapRenderTarget cast failed: {error}"))?;
+            let bitmap = unsafe { bitmap_target.GetBitmap() }
+                .map_err(|error| format!("GetBitmap failed: {error}"))?;
+            let destination = D2D_RECT_F {
+                left: 0.0,
+                top: 0.0,
+                right: WIDTH as f32,
+                bottom: HEIGHT as f32,
+            };
+            unsafe {
+                parent_target.BeginDraw();
+                parent_target.Clear(Some(&white));
+                parent_target.DrawBitmap(
+                    &bitmap,
+                    Some(&destination),
+                    1.0,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    None,
+                );
+                parent_target.EndDraw(None, None)
+            }
+            .map_err(|error| format!("compatible copy EndDraw failed: {error}"))?;
+        }
+        Ok(canvas.evidence())
+    }
+
     pub fn render_raw_direct2d_wic_text(text: &str) -> Result<PixelEvidence, String> {
         let _apartment = ComApartment::enter()?;
         let imaging: IWICImagingFactory =
@@ -1103,7 +1231,8 @@ mod windows {
 #[cfg(windows)]
 pub use windows::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
-    render_raw_direct2d_text, render_raw_direct2d_wic_text, render_raw_draw_text,
+    render_raw_direct2d_text, render_raw_direct2d_wic_text,
+    render_raw_directwrite_compatible_layout, render_raw_directwrite_layout, render_raw_draw_text,
     render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
     render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, render_raw_text_out,
     run_uia_standard_control_server, write_raw_console, PixelEvidence,

@@ -113,6 +113,8 @@ pub enum Response {
     RuntimeActivated {
         generation: u64,
         publication_identity: [u8; 32],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        active_adapter_ids: Option<Vec<String>>,
     },
     RuntimeUpdated {
         generation: u64,
@@ -203,10 +205,11 @@ pub enum WireControllerLossPolicy {
     Degrade,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireRuntimeAck {
     pub generation: u64,
     pub publication_identity: [u8; 32],
+    pub active_adapter_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -423,6 +426,7 @@ pub fn serve(
                 .map(|ack| Response::RuntimeActivated {
                     generation: ack.generation,
                     publication_identity: ack.publication_identity,
+                    active_adapter_ids: ack.active_adapter_ids,
                 })
                 .unwrap_or_else(plugin_error),
             Request::UpdateRuntime {

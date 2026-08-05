@@ -405,7 +405,14 @@ impl<T: ControllerTransport + Send + 'static> AdapterHostPort for TargetProcessH
                 }
             }
         }
-        Ok(HostActivation::connected(Self::target_features(bindings)))
+        if let Some(active_adapter_ids) = ack.active_adapter_ids() {
+            let (acknowledged, failed): (Vec<_>, Vec<_>) = Self::target_features(bindings)
+                .into_iter()
+                .partition(|feature| active_adapter_ids.contains(feature.adapter_id()));
+            Ok(HostActivation::reported(acknowledged, failed))
+        } else {
+            Ok(HostActivation::connected(Self::target_features(bindings)))
+        }
     }
 
     fn update_runtime(

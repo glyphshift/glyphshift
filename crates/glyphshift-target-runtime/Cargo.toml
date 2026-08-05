@@ -30,6 +30,7 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
+glyphshift-adapter-qt-painter = { path = "../glyphshift-adapter-qt-painter" }
 glyphshift-adapter-sdk = { path = "../glyphshift-adapter-sdk" }
 glyphshift-translation = { path = "../glyphshift-translation" }
 glyphshift-windows-host = { path = "../../test-support/windows-host" }

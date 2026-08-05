@@ -55,8 +55,8 @@ function statusLabel(record: WorkflowRuntimeTrace) {
   return t(`workflows.diagnostics.status.${record.status}`)
 }
 
-function statusColor(record: WorkflowRuntimeTrace): 'success' | 'warning' | 'error' | 'neutral' {
-  if (record.status === 'matched') return 'success'
+function statusColor(record: WorkflowRuntimeTrace): 'primary' | 'error' | 'neutral' {
+  if (record.status === 'matched') return 'primary'
   if (record.status === 'no_match' || record.status === 'context_recorded') return 'neutral'
   return 'error'
 }
@@ -190,8 +190,8 @@ onBeforeUnmount(() => {
           <template #decision-cell="{ row }">
             <div class="flex flex-wrap gap-1">
               <UBadge :color="statusColor(row.original)" variant="soft" size="sm" :label="statusLabel(row.original)" />
-              <UBadge v-if="row.original.text === 'replaced'" color="success" variant="outline" size="sm" :label="t('workflows.diagnostics.text.replaced')" />
-              <UBadge v-if="row.original.font !== 'unmatched'" color="warning" variant="outline" size="sm" :label="t(`workflows.diagnostics.font.${row.original.font}`)" />
+              <UBadge v-if="row.original.text === 'replaced'" color="primary" variant="outline" size="sm" :label="t('workflows.diagnostics.text.replaced')" />
+              <UBadge v-if="row.original.font !== 'unmatched'" :color="row.original.font === 'substituted' ? 'primary' : 'neutral'" variant="outline" size="sm" :label="t(`workflows.diagnostics.font.${row.original.font}`)" />
             </div>
           </template>
           <template #publication-cell="{ row }">

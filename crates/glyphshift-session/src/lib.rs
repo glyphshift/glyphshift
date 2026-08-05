@@ -166,6 +166,11 @@ impl BoundFeature {
         }
     }
 
+    #[must_use]
+    pub const fn adapter_id(&self) -> &AdapterId {
+        &self.adapter_id
+    }
+
     fn from_binding(binding: &AdapterBinding, feature: Feature) -> Self {
         Self::new(binding.adapter_id.clone(), binding.version, feature)
     }

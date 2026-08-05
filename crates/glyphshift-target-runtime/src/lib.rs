@@ -14,9 +14,10 @@ use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
-    CaptureRuntimeControl, RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
-    RuntimeObservationQueryV1, RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment,
-    MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
+    CaptureRuntimeControl, RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1,
+    RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1, RuntimeObservationQueryV1,
+    RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment,
+    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     STATUS_TARGET_RUNTIME_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
     STATUS_TARGET_RUNTIME_ADAPTER_CHANGED, STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
     STATUS_TARGET_RUNTIME_ALREADY_ACTIVE, STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
@@ -53,6 +54,7 @@ struct RuntimeState {
     adapter_libraries: Vec<PathBuf>,
     adapters: Vec<Arc<LoadedNativeAdapter>>,
     native_hosts: Vec<usize>,
+    active_adapters: Vec<bool>,
     capture: Option<RuntimeCapture>,
     active: bool,
 }
@@ -282,26 +284,31 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 adapter_libraries,
                 adapters: adapters.clone(),
                 native_hosts: native_hosts.clone(),
+                active_adapters: vec![false; adapters.len()],
                 capture,
                 active: false,
             });
             (adapters, native_hosts)
         }
     };
-    let mut all_active = true;
-    for ((adapter, deployment), native_host) in
-        adapters.iter().zip(deployment.adapters()).zip(native_hosts)
+    let mut active_adapters = vec![false; adapters.len()];
+    for (index, ((adapter, deployment), native_host)) in adapters
+        .iter()
+        .zip(deployment.adapters())
+        .zip(native_hosts)
+        .enumerate()
     {
         let requested = deployment.binding().features.iter().copied();
         let expected = deployment.binding().features.clone();
         let host = unsafe { &*(native_host as *const NativeRuntimeHostV1) };
         let active = adapter.activate(host, requested, expected.iter().copied());
-        if active.as_deref() != Ok(expected.as_slice()) {
-            all_active = false;
-            break;
+        if active.as_deref() == Ok(expected.as_slice()) {
+            active_adapters[index] = true;
+        } else {
+            let _ = adapter.deactivate();
         }
     }
-    if !all_active {
+    if !adapters.is_empty() && !active_adapters.iter().any(|active| *active) {
         for adapter in &adapters {
             let _ = adapter.deactivate();
         }
@@ -318,10 +325,11 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
-        state
+        let runtime = state
             .as_mut()
-            .ok_or(TargetRuntimeError::RuntimeUnavailable)?
-            .active = true;
+            .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        runtime.active_adapters = active_adapters;
+        runtime.active = true;
     }
     request_current_process_redraw();
     Ok(())
@@ -453,6 +461,24 @@ pub fn query_diagnostics() -> Result<RuntimeTraceBatch, TargetRuntimeError> {
     ))
 }
 
+pub fn query_activation() -> Result<RuntimeActivationReport, TargetRuntimeError> {
+    let state = runtime_state()
+        .lock()
+        .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+    let runtime = state
+        .as_ref()
+        .filter(|runtime| runtime.active)
+        .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+    Ok(RuntimeActivationReport::new(
+        runtime
+            .bindings
+            .iter()
+            .zip(&runtime.active_adapters)
+            .filter(|(_, active)| **active)
+            .map(|(binding, _)| binding.adapter_id.as_str()),
+    ))
+}
+
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
     let capture = {
         let mut state = runtime_state()
@@ -467,9 +493,12 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         if runtime
             .adapters
             .iter()
-            .all(|adapter| adapter.deactivate().is_ok())
+            .zip(&runtime.active_adapters)
+            .filter(|(_, active)| **active)
+            .all(|(adapter, _)| adapter.deactivate().is_ok())
         {
             runtime.active = false;
+            runtime.active_adapters.fill(false);
         } else {
             return Err(TargetRuntimeError::AdapterActivation);
         }
@@ -755,6 +784,41 @@ pub unsafe extern "system" fn glyphshift_runtime_observation_query_v1(
     let encoded = match std::panic::catch_unwind(|| {
         query_observations().and_then(|batch| {
             batch
+                .encode_json()
+                .map_err(|_| TargetRuntimeError::RuntimeUnavailable)
+        })
+    }) {
+        Ok(Ok(encoded)) => encoded,
+        Ok(Err(error)) => return activation_status(error),
+        Err(_) => return STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    };
+    (*query).output_len = encoded.len() as u32;
+    if encoded.len() > (*query).output_capacity as usize {
+        return STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL;
+    }
+    std::ptr::copy_nonoverlapping(encoded.as_ptr(), (*query).output, encoded.len());
+    STATUS_TARGET_RUNTIME_OK
+}
+
+#[no_mangle]
+/// Reports the Adapter subset that is active in the current target Runtime deployment.
+///
+/// # Safety
+///
+/// `query` and its output buffer must remain writable for the duration of this call.
+pub unsafe extern "system" fn glyphshift_runtime_activation_query_v1(
+    query: *mut RuntimeActivationQueryV1,
+) -> u32 {
+    if query.is_null()
+        || (*query).struct_size != std::mem::size_of::<RuntimeActivationQueryV1>() as u32
+        || (*query).output.is_null()
+        || (*query).output_capacity as usize > MAX_RUNTIME_ACTIVATION_REPORT_BYTES
+    {
+        return STATUS_TARGET_RUNTIME_INVALID_COMMAND;
+    }
+    let encoded = match std::panic::catch_unwind(|| {
+        query_activation().and_then(|report| {
+            report
                 .encode_json()
                 .map_err(|_| TargetRuntimeError::RuntimeUnavailable)
         })

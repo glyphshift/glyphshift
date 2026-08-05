@@ -8,6 +8,8 @@ members = [
     "crates/glyphshift-adapter-draw-text-native",
     "crates/glyphshift-adapter-direct2d",
     "crates/glyphshift-adapter-direct2d-native",
+    "crates/glyphshift-adapter-directwrite",
+    "crates/glyphshift-adapter-directwrite-native",
     "crates/glyphshift-adapter-gdi",
     "crates/glyphshift-adapter-gdi-native",
     "crates/glyphshift-adapter-gdi-native-support",

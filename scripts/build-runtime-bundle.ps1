@@ -50,6 +50,7 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-gdi-native',
     '-p', 'glyphshift-adapter-gdi-text-out-native',
     '-p', 'glyphshift-adapter-gdiplus-native',
+    '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native'
 )
@@ -107,6 +108,8 @@ $drawTextBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text' 'dll'
 $gdiPlusBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdiplus_native.dll' 'adapter-gdiplus' 'dll'
+$directWriteBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_directwrite_native.dll' 'adapter-directwrite-text-layout' 'dll'
 $gtk3PangoBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
@@ -139,6 +142,7 @@ $uiaPresentation = Get-AdapterPresentation 'windows.uia.observe'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
+$directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-layout'
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 
@@ -195,6 +199,14 @@ $runtimeManifest = [ordered]@{
             summary = $gdiPlusPresentation.summary
             technology = $gdiPlusPresentation.technology
             technicalTarget = $gdiPlusPresentation.technicalTarget
+        },
+        [ordered]@{
+            file = $directWriteBundle.file
+            sha256 = $directWriteBundle.sha256
+            name = $directWritePresentation.name
+            summary = $directWritePresentation.summary
+            technology = $directWritePresentation.technology
+            technicalTarget = $directWritePresentation.technicalTarget
         },
         [ordered]@{
             file = $gtk3PangoBundle.file

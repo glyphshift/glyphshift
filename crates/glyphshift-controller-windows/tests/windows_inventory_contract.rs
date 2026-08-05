@@ -121,6 +121,37 @@ fn ctl_windows_004_prefers_the_full_executable_path_over_an_ambiguous_name() {
 }
 
 #[test]
+fn ctl_windows_004b_resolves_a_noncanonical_absolute_executable_path() {
+    let current_executable = std::env::current_exe().expect("test executable should have a path");
+    let executable_alias = current_executable
+        .parent()
+        .expect("test executable should have a parent")
+        .join(".")
+        .join(
+            current_executable
+                .file_name()
+                .expect("test executable should have a file name"),
+        );
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.windows-target",
+            &WireControllerConfiguration {
+                executable_names: vec!["intentionally-wrong-name.exe".into()],
+                executable_paths: vec![executable_alias.to_string_lossy().into_owned()],
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: Vec::new(),
+            },
+        )
+        .expect("an existing absolute executable alias should configure discovery");
+
+    let inventory = controller.inventory().expect("process inventory");
+
+    assert_eq!(inventory.targets.len(), 1);
+    assert_eq!(inventory.targets[0].token, "target:1");
+}
+
+#[test]
 fn ctl_windows_005_mints_a_process_instance_grant_only_for_an_authorized_target() {
     let mut controller = configured_controller();
     let inventory = controller.inventory().expect("process inventory");

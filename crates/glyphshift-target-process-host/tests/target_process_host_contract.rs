@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex};
 struct ContractTransport {
     activation_ack: u64,
     wrong_publication_identity: bool,
+    active_adapter_ids: Option<Vec<AdapterId>>,
 }
 
 impl ControllerTransport for ContractTransport {
@@ -73,8 +74,11 @@ impl ControllerTransport for ContractTransport {
         let decoded = TargetRuntimeDeployment::decode_json(deployment.deployment_json())
             .map_err(|_| TransportFailure::MalformedMessage)?;
         if decoded.publication().generation() != Generation::new(4)
-            || decoded.adapters().len() != 1
-            || decoded.adapters()[0].binding().artifact_hash != ArtifactHash::sha256([0x62; 32])
+            || decoded.adapters().is_empty()
+            || decoded
+                .adapters()
+                .iter()
+                .any(|adapter| adapter.binding().artifact_hash != ArtifactHash::sha256([0x62; 32]))
         {
             return Err(TransportFailure::MalformedMessage);
         }
@@ -86,7 +90,12 @@ impl ControllerTransport for ContractTransport {
         if self.wrong_publication_identity {
             identity = [0xFF; 32];
         }
-        Ok(ControllerRuntimeAck::new(self.activation_ack, identity))
+        Ok(self.active_adapter_ids.clone().map_or_else(
+            || ControllerRuntimeAck::new(self.activation_ack, identity),
+            |active_adapter_ids| {
+                ControllerRuntimeAck::reported(self.activation_ack, identity, active_adapter_ids)
+            },
+        ))
     }
 
     fn update_runtime(
@@ -183,6 +192,7 @@ fn tph_001_turns_controller_runtime_acks_into_session_host_facts() {
         ContractTransport {
             activation_ack: 4,
             wrong_publication_identity: false,
+            active_adapter_ids: None,
         },
         extension_id,
         ProtocolVersion::new(1, 0),
@@ -280,12 +290,87 @@ fn tph_001_turns_controller_runtime_acks_into_session_host_facts() {
 }
 
 #[test]
+fn tph_005_reports_the_active_target_adapter_subset_to_the_session() {
+    let active_id = AdapterId::new("example.synthetic.compatible");
+    let failed_id = AdapterId::new("example.synthetic.unavailable");
+    let extension_id = ExtensionId::new("org.example.synthetic");
+    let mut connection = ControllerConnection::connect(
+        ContractTransport {
+            activation_ack: 4,
+            wrong_publication_identity: false,
+            active_adapter_ids: Some(vec![active_id.clone()]),
+        },
+        extension_id,
+        ProtocolVersion::new(1, 0),
+        ControllerNonce::new([0x54; 32]),
+        &mut NonceLedger::new(),
+    )
+    .expect("controller connection");
+    let controller_target = connection
+        .inventory()
+        .expect("controller inventory")
+        .targets()[0]
+        .id();
+    let active_artifact = PackageArtifactId::new("adapters/compatible");
+    let failed_artifact = PackageArtifactId::new("adapters/unavailable");
+    let artifacts = TargetArtifactCatalog::new(
+        RuntimeArtifact::new(local_artifact("runtime-partial.dll"), [0x61; 32]),
+        [
+            (
+                active_artifact.clone(),
+                local_artifact("adapter-compatible.dll"),
+            ),
+            (
+                failed_artifact.clone(),
+                local_artifact("adapter-unavailable.dll"),
+            ),
+        ],
+    )
+    .expect("absolute local artifacts");
+    let target = TargetInstance::new(
+        TargetInstanceId::new("target-instance-partial"),
+        TargetFacts::new("windows", "x86_64"),
+    );
+    let mut host = TargetProcessHost::new(connection, artifacts);
+    host.register_target(target.id().clone(), controller_target);
+    let version = AdapterVersion::new(1, 0, 0);
+    let binding = |adapter_id: AdapterId, library: PackageArtifactId| AdapterBinding {
+        descriptor: AdapterDescriptor::new(
+            adapter_id.clone(),
+            version,
+            ApplyModel::InlineRender,
+            Placement::TargetProcess,
+            [Feature::TextReplace],
+        ),
+        adapter_id,
+        version,
+        apply_model: ApplyModel::InlineRender,
+        artifact_hash: ArtifactHash::sha256([0x62; 32]),
+        host: AdapterHostBinding::TargetProcess { library },
+        features: vec![Feature::TextReplace],
+    };
+    let bindings = [
+        binding(active_id.clone(), active_artifact),
+        binding(failed_id.clone(), failed_artifact),
+    ];
+
+    assert_eq!(
+        host.activate_runtime(&target, &bindings, &publication(4, "First")),
+        Ok(HostActivation::reported(
+            [BoundFeature::new(active_id, version, Feature::TextReplace,)],
+            [BoundFeature::new(failed_id, version, Feature::TextReplace,)],
+        ))
+    );
+}
+
+#[test]
 fn tph_002_rejects_a_controller_ack_for_the_wrong_generation() {
     let extension_id = ExtensionId::new("org.example.synthetic");
     let mut connection = ControllerConnection::connect(
         ContractTransport {
             activation_ack: 3,
             wrong_publication_identity: false,
+            active_adapter_ids: None,
         },
         extension_id,
         ProtocolVersion::new(1, 0),
@@ -345,6 +430,7 @@ fn tph_003_rejects_a_controller_ack_for_the_wrong_publication_identity() {
         ContractTransport {
             activation_ack: 4,
             wrong_publication_identity: true,
+            active_adapter_ids: None,
         },
         extension_id,
         ProtocolVersion::new(1, 0),

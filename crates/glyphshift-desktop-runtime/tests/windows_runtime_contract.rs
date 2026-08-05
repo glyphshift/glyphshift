@@ -900,6 +900,73 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
 
 #[test]
 #[ignore = "requires an explicitly authorized, already-running Windows host"]
+fn desktop_runtime_captures_an_authorized_real_host() {
+    let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
+        .map(std::path::PathBuf::from)
+        .expect("local Runtime bundle root");
+    let host_executable = std::env::var_os("GLYPHSHIFT_REAL_HOST_EXECUTABLE")
+        .map(std::path::PathBuf::from)
+        .expect("authorized host executable path");
+    let adapter_ids = std::env::var("GLYPHSHIFT_REAL_HOST_ADAPTER_IDS")
+        .expect("authorized capture Adapter ids")
+        .split(';')
+        .filter(|adapter_id| !adapter_id.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert!(!adapter_ids.is_empty(), "at least one Adapter is required");
+    let output = std::env::var_os("GLYPHSHIFT_REAL_HOST_CAPTURE_OUTPUT")
+        .map(std::path::PathBuf::from)
+        .expect("local capture output path");
+    let hold_ms = std::env::var("GLYPHSHIFT_REAL_HOST_HOLD_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5_000);
+    let evidence_root = output.parent().expect("capture output parent");
+    std::fs::create_dir_all(evidence_root).expect("capture evidence root");
+    let data = tempfile::Builder::new()
+        .prefix("contract-")
+        .tempdir_in(evidence_root)
+        .expect("isolated authorized capture data");
+    let mut backend = open_backend(data.path(), &runtime_root);
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(&host_executable))
+        .expect("register authorized host executable");
+    let application_id = snapshot.software()[0].id().to_owned();
+    let spec = backend
+        .capture_runtime_spec(
+            &application_id,
+            &adapter_ids
+                .iter()
+                .cloned()
+                .map(String::into_boxed_str)
+                .collect::<Vec<_>>(),
+        )
+        .expect("compiled authorized capture Runtime spec");
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("authorized-real-host").expect("capture session id"),
+        &output,
+        5_000,
+    )
+    .expect("capture configuration");
+    let bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
+    let mut pool = DesktopRuntimePool::new(bundle);
+
+    pool.start_capture(application_id.clone(), &spec, None, capture)
+        .expect("start authorized host capture");
+    println!("authorized host capture is active");
+    std::thread::sleep(Duration::from_millis(hold_ms));
+    pool.stop_capture(application_id)
+        .expect("stop authorized host capture");
+
+    let catalog = CaptureCatalog::read_current(&output).expect("authorized host capture catalog");
+    println!(
+        "authorized host captured unique entries: {}",
+        catalog.entries().len()
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly authorized, already-running Windows host"]
 fn desktop_runtime_applies_and_restores_font_policy_in_an_authorized_real_host() {
     let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
         .map(std::path::PathBuf::from)

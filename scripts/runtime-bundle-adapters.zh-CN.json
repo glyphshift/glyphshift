@@ -42,6 +42,13 @@
     "technicalTarget": "gdiplus.dll!GdipDrawString"
   },
   {
+    "id": "windows.directwrite.text-layout",
+    "name": "DirectWrite TextLayout",
+    "summary": "拦截 DirectWrite 文本布局创建与 Direct2D 布局绘制；支持单一格式文本的字典替换，复杂分段格式安全放行",
+    "technology": "DirectWrite / Direct2D",
+    "technicalTarget": "IDWriteFactory::CreateTextLayout + ID2D1RenderTarget::DrawTextLayout"
+  },
+  {
     "id": "windows.qt.painter-draw-text",
     "name": "Qt Painter drawText",
     "summary": "拦截动态链接 Qt 5/6 Widgets 的常见文本绘制并应用字典译文；不适用于静态 Qt 或 QML",

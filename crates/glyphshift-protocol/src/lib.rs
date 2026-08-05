@@ -192,10 +192,11 @@ impl ControllerRuntimeDeployment {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControllerRuntimeAck {
     generation: u64,
     publication_identity: [u8; 32],
+    active_adapter_ids: Option<BTreeSet<AdapterId>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -343,17 +344,36 @@ impl ControllerRuntimeAck {
         Self {
             generation,
             publication_identity,
+            active_adapter_ids: None,
         }
     }
 
     #[must_use]
-    pub const fn generation(self) -> u64 {
+    pub fn reported(
+        generation: u64,
+        publication_identity: [u8; 32],
+        active_adapter_ids: impl IntoIterator<Item = AdapterId>,
+    ) -> Self {
+        Self {
+            generation,
+            publication_identity,
+            active_adapter_ids: Some(active_adapter_ids.into_iter().collect()),
+        }
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
         self.generation
     }
 
     #[must_use]
-    pub const fn publication_identity(self) -> [u8; 32] {
+    pub const fn publication_identity(&self) -> [u8; 32] {
         self.publication_identity
+    }
+
+    #[must_use]
+    pub const fn active_adapter_ids(&self) -> Option<&BTreeSet<AdapterId>> {
+        self.active_adapter_ids.as_ref()
     }
 }
 

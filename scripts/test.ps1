@@ -11,6 +11,7 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
     --manifest-path $manifestPath `
     -p glyphshift-adapter-console-native `
     -p glyphshift-adapter-direct2d-native `
+    -p glyphshift-adapter-directwrite-native `
     -p glyphshift-adapter-draw-text-native `
     -p glyphshift-adapter-gdi-native `
     -p glyphshift-adapter-gdi-text-out-native `

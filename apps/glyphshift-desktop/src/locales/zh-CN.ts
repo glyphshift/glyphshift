@@ -310,7 +310,7 @@ export default {
     diagnostics: {
       openNamed: '诊断 {name}',
       title: '运行诊断 · {name}',
-      description: '仅在此窗口打开期间收集最近决策；关闭后立即停止，不写入词典或工作流。',
+      description: '显示目标 Runtime 最近生成的决策，用于确认原文、词典与发布代次是否命中；不代表目标界面已显示译文。关闭后停止收集。',
       error: '无法读取运行诊断',
       retry: '重试',
       search: '搜索原文、软件或拦截方式',
@@ -339,10 +339,10 @@ export default {
         execution_limit_exceeded: '执行超限',
         state_limit_exceeded: '状态超限',
       },
-      text: { replaced: '已替换' },
+      text: { replaced: '替换决策已生成' },
       font: {
-        protected: '字体已保护',
-        substituted: '字体已替换',
+        protected: '字体保持原样',
+        substituted: '字体替换决策已生成',
       },
     },
     noMatch: '没有匹配的工作流',

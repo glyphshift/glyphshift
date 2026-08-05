@@ -208,6 +208,10 @@ fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() 
         .expect("target Runtime activation");
     assert_eq!(first_ack.generation, 1);
     assert_eq!(first_ack.publication_identity, first_identity);
+    assert_eq!(
+        first_ack.active_adapter_ids,
+        Some(vec![glyphshift_adapter_gdi::ADAPTER_ID.into()])
+    );
     controller
         .control_diagnostics(&target_token, true)
         .expect("enable bounded runtime diagnostics");
@@ -245,6 +249,7 @@ fn ctl_windows_004_injects_hook_updates_translation_and_restores_pass_through() 
         .expect("target Runtime update");
     assert_eq!(second_ack.generation, 2);
     assert_eq!(second_ack.publication_identity, second_identity);
+    assert_eq!(second_ack.active_adapter_ids, None);
     let second = target.render();
     assert_ne!(second, first, "the hook should use the new translation");
 

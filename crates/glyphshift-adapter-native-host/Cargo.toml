@@ -16,6 +16,7 @@ libloading = "0.8"
 [dev-dependencies]
 glyphshift-adapter-console = { path = "../glyphshift-adapter-console" }
 glyphshift-adapter-direct2d = { path = "../glyphshift-adapter-direct2d" }
+glyphshift-adapter-directwrite = { path = "../glyphshift-adapter-directwrite" }
 glyphshift-adapter-gdi = { path = "../glyphshift-adapter-gdi" }
 glyphshift-adapter-gdiplus = { path = "../glyphshift-adapter-gdiplus" }
 glyphshift-adapter-gtk3-pango = { path = "../glyphshift-adapter-gtk3-pango" }

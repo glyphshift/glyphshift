@@ -1,8 +1,9 @@
 use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_target_runtime_contract::{
-    RuntimeCommandV1, RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1,
-    RuntimeObservationQueryV1, RuntimeTraceBatch, MAX_RUNTIME_OBSERVATION_BYTES,
-    MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
+    RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1, RuntimeDiagnosticsControl,
+    RuntimeDiagnosticsQueryV1, RuntimeObservationQueryV1, RuntimeTraceBatch,
+    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
+    STATUS_TARGET_RUNTIME_OK,
 };
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -148,7 +149,7 @@ pub fn activate(
     process_id: u32,
     runtime_library: &Path,
     deployment_json: &str,
-) -> Result<(), RemoteError> {
+) -> Result<RuntimeActivationReport, RemoteError> {
     let process = ProcessHandle::open(process_id)?;
     inject_library(process_id, process.0, runtime_library)?;
     invoke_json_export(
@@ -157,7 +158,21 @@ pub fn activate(
         runtime_library,
         "glyphshift_runtime_activate_v1",
         deployment_json,
+    )?;
+    let report = query_json_export(
+        process_id,
+        runtime_library,
+        "glyphshift_runtime_activation_query_v1",
+        MAX_RUNTIME_ACTIVATION_REPORT_BYTES,
+        size_of::<RuntimeActivationQueryV1>(),
     )
+    .and_then(|json| {
+        RuntimeActivationReport::decode_json(&json).map_err(|_| RemoteError::ReadFailed)
+    });
+    if report.is_err() {
+        let _ = deactivate(process_id, runtime_library);
+    }
+    report
 }
 
 pub fn update(

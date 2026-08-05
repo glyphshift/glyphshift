@@ -413,7 +413,7 @@ impl ControllerPlugin for WindowsController {
             .identity()
             .map_err(|_| PluginError::new("invalid_runtime_deployment"))?
             .as_bytes();
-        remote::activate(
+        let activation = remote::activate(
             target.process_id,
             &runtime_library,
             &deployment.deployment_json,
@@ -424,6 +424,7 @@ impl ControllerPlugin for WindowsController {
         Ok(WireRuntimeAck {
             generation: deployment.generation,
             publication_identity,
+            active_adapter_ids: Some(activation.active_adapter_ids().map(Into::into).collect()),
         })
     }
 
@@ -455,6 +456,7 @@ impl ControllerPlugin for WindowsController {
         Ok(WireRuntimeAck {
             generation,
             publication_identity,
+            active_adapter_ids: None,
         })
     }
 
@@ -647,7 +649,9 @@ fn validate_executable_path(path: &str) -> Result<String, PluginError> {
     {
         return Err(PluginError::new("invalid_executable_path"));
     }
-    Ok(normalize_executable_path(trimmed))
+    let canonical =
+        std::fs::canonicalize(path).map_err(|_| PluginError::new("invalid_executable_path"))?;
+    Ok(normalize_executable_path(&canonical.to_string_lossy()))
 }
 
 fn normalize_executable_path(path: &str) -> String {
@@ -829,9 +833,10 @@ fn process_executable_path(process_id: u32) -> Option<String> {
     if queried == 0 || length == 0 {
         return None;
     }
-    Some(normalize_executable_path(&String::from_utf16_lossy(
-        &buffer[..length as usize],
-    )))
+    let queried = String::from_utf16_lossy(&buffer[..length as usize]);
+    let resolved = std::fs::canonicalize(Path::new(queried.as_str()))
+        .unwrap_or_else(|_| Path::new(queried.as_str()).to_path_buf());
+    Some(normalize_executable_path(&resolved.to_string_lossy()))
 }
 
 #[cfg(windows)]

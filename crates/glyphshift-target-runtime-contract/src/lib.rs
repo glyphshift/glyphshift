@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 const DEPLOYMENT_SCHEMA: &str = "glyphshift.target-runtime/3";
+const ACTIVATION_REPORT_SCHEMA: &str = "glyphshift.target-runtime-activation/1";
 const TRACE_BATCH_SCHEMA: &str = "glyphshift.runtime-trace/1";
 pub const STATUS_TARGET_RUNTIME_OK: u32 = 0;
 pub const STATUS_TARGET_RUNTIME_INVALID_COMMAND: u32 = 1;
@@ -32,6 +33,7 @@ pub const STATUS_TARGET_RUNTIME_CAPTURE_FAILED: u32 = 17;
 pub const STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL: u32 = 18;
 pub const MAX_RUNTIME_TRACE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_RUNTIME_OBSERVATION_BYTES: usize = MAX_OBSERVATION_BATCH_BYTES;
+pub const MAX_RUNTIME_ACTIVATION_REPORT_BYTES: usize = 256 * 1024;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -57,6 +59,61 @@ pub struct RuntimeObservationQueryV1 {
     pub output: *mut u8,
     pub output_capacity: u32,
     pub output_len: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RuntimeActivationQueryV1 {
+    pub struct_size: u32,
+    pub output: *mut u8,
+    pub output_capacity: u32,
+    pub output_len: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeActivationReport {
+    active_adapter_ids: Vec<Box<str>>,
+}
+
+impl RuntimeActivationReport {
+    #[must_use]
+    pub fn new(active_adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>) -> Self {
+        let mut active_adapter_ids = active_adapter_ids
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        active_adapter_ids.sort_unstable();
+        active_adapter_ids.dedup();
+        Self { active_adapter_ids }
+    }
+
+    pub fn active_adapter_ids(&self) -> impl Iterator<Item = &str> {
+        self.active_adapter_ids.iter().map(AsRef::as_ref)
+    }
+
+    pub fn encode_json(&self) -> Result<String, DeploymentError> {
+        serde_json::to_string(&WireRuntimeActivationReport {
+            schema: ACTIVATION_REPORT_SCHEMA.into(),
+            active_adapter_ids: self.active_adapter_ids.clone(),
+        })
+        .map_err(|_| DeploymentError::InvalidJson)
+    }
+
+    pub fn decode_json(json: &str) -> Result<Self, DeploymentError> {
+        let wire: WireRuntimeActivationReport =
+            serde_json::from_str(json).map_err(|_| DeploymentError::InvalidJson)?;
+        if wire.schema.as_ref() != ACTIVATION_REPORT_SCHEMA {
+            return Err(DeploymentError::UnsupportedSchema);
+        }
+        Ok(Self::new(wire.active_adapter_ids))
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct WireRuntimeActivationReport {
+    schema: Box<str>,
+    active_adapter_ids: Vec<Box<str>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

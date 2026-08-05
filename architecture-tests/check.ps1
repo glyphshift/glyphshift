@@ -90,6 +90,17 @@ Assert-Dependencies `
         'windows'
     )
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-directwrite' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-directwrite-native' `
+    -Expected @(
+        'glyphshift-adapter-directwrite',
+        'glyphshift-adapter-native-abi',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdi' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `

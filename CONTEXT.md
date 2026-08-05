@@ -87,6 +87,10 @@ Technical Dictionary、Dictionary Draft。
 **替换决策（Replacement Decision）**：对一次观测产生 Pass、Text-only、Font-only 或
 Text+Font 的结果。所有失败路径必须 fail-open。
 
+**运行诊断（Runtime Diagnostics）**：目标 Runtime 最近生成的有界 Replacement Decision 证据。
+`Matched + Replaced` 只说明目标 Runtime 选中了词典译文，不证明绘制 API 接受调用或译文最终像素
+可见；普通界面必须称为“替换决策已生成”，不能称为“已替换”或“写回成功”。
+
 **Generation**：一份完整 Runtime Publication 的版本。只有目标 Runtime 的 ACK 才能推进
 实际应用代次。
 
@@ -95,7 +99,8 @@ Text+Font 的结果。所有失败路径必须 fail-open。
 
 **进程家族（Process Family）**：一个 Software Extension 对授权根进程及显式后代可执行文件
 allowlist 的声明。Windows Controller 根据真实父子关系解析当前目标实例；它不是 Dictionary、
-Workflow Target 或用户猜测的区域配置。
+Workflow Target 或用户猜测的区域配置。软件登记路径与进程报告路径在比较前必须解析到同一真实文件
+身份，不能因包管理器目录链接或路径别名把已运行实例误判为未启动。
 
 ## Translation
 
