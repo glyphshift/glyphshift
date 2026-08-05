@@ -8,7 +8,8 @@ use glyphshift_capture::{
     ProbeRunSummary, ProbeRunUpdate, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
-    foreground_windows_executable, inspect_windows_executable, WindowsExecutable,
+    current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,
+    launch_process_elevated, WindowsElevationError, WindowsExecutable,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
@@ -31,20 +32,77 @@ use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_workflow::ResolveError;
 use serde::{Deserialize, Serialize};
-use settings::{AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError};
+use settings::{
+    configure_launch_at_startup, AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError,
+};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 
-const DESKTOP_API_VERSION: u16 = 17;
+const DESKTOP_API_VERSION: u16 = 19;
 const WINDOWS_FONT_REGISTRY_KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts";
 const FONT_CACHE_SCHEMA: &str = "glyphshift.font-cache/1";
 const FONT_CACHE_FILE: &str = "font-families.json";
 const SOFTWARE_QUICK_CAPTURE_EVENT: &str = "software-quick-capture";
 const SOFTWARE_QUICK_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 const SUPPORTED_TARGET_ARCHITECTURE: &str = "x86_64";
+const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
+const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DesktopLaunchContext {
+    data_root: Option<PathBuf>,
+    runtime_root: Option<PathBuf>,
+}
+
+impl DesktopLaunchContext {
+    fn current() -> Self {
+        let mut context = Self::from_args(std::env::args_os().skip(1));
+        if context.data_root.is_none() {
+            context.data_root = std::env::var_os("GLYPHSHIFT_DATA_ROOT").map(PathBuf::from);
+        }
+        if context.runtime_root.is_none() {
+            context.runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT").map(PathBuf::from);
+        }
+        context
+    }
+
+    fn from_args(arguments: impl IntoIterator<Item = OsString>) -> Self {
+        let mut context = Self::default();
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            if argument == DATA_ROOT_ARGUMENT {
+                context.data_root = arguments.next().map(PathBuf::from);
+            } else if argument == RUNTIME_ROOT_ARGUMENT {
+                context.runtime_root = arguments.next().map(PathBuf::from);
+            }
+        }
+        context
+    }
+
+    fn elevation_arguments(&self) -> Vec<OsString> {
+        let mut arguments = Vec::new();
+        if let Some(data_root) = &self.data_root {
+            arguments.push(OsString::from(DATA_ROOT_ARGUMENT));
+            arguments.push(data_root.as_os_str().to_owned());
+        }
+        if let Some(runtime_root) = &self.runtime_root {
+            arguments.push(OsString::from(RUNTIME_ROOT_ARGUMENT));
+            arguments.push(runtime_root.as_os_str().to_owned());
+        }
+        arguments
+    }
+}
+
+fn launch_current_process_elevated() -> Result<(), WindowsElevationError> {
+    let executable =
+        std::env::current_exe().map_err(|_| WindowsElevationError::InvalidExecutable)?;
+    let arguments = DesktopLaunchContext::current().elevation_arguments();
+    launch_process_elevated(&executable, &arguments)
+}
 
 fn workflow_activation_command_error(error: BackendError) -> CommandError {
     match error {
@@ -2264,7 +2322,14 @@ fn settings_command_error(error: SettingsError) -> CommandError {
     match error {
         SettingsError::InvalidData => CommandError::new("settings.invalid_data"),
         SettingsError::Storage => CommandError::new("settings.write_failed"),
+        SettingsError::Startup => CommandError::new("settings.startup_failed"),
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopPrivilegeStatus {
+    elevated: bool,
 }
 
 fn workspace_unavailable() -> CommandError {
@@ -2290,11 +2355,41 @@ fn desktop_update_settings(
     update: AppSettingsUpdate,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<AppSettings, CommandError> {
-    settings
+    let mut settings = settings
         .lock()
-        .map_err(|_| CommandError::new("settings.unavailable"))?
-        .update(update)
-        .map_err(settings_command_error)
+        .map_err(|_| CommandError::new("settings.unavailable"))?;
+    let previous_launch_at_startup = settings.launch_at_startup();
+    let launch_at_startup_changed = previous_launch_at_startup != update.launch_at_startup();
+    if launch_at_startup_changed {
+        configure_launch_at_startup(update.launch_at_startup()).map_err(settings_command_error)?;
+    }
+    match settings.update(update) {
+        Ok(saved) => Ok(saved),
+        Err(error) => {
+            if launch_at_startup_changed {
+                let _ = configure_launch_at_startup(previous_launch_at_startup);
+            }
+            Err(settings_command_error(error))
+        }
+    }
+}
+
+#[tauri::command]
+fn desktop_privilege_status() -> Result<DesktopPrivilegeStatus, CommandError> {
+    current_process_is_elevated()
+        .map(|elevated| DesktopPrivilegeStatus { elevated })
+        .map_err(|_| CommandError::new("settings.privilege_unavailable"))
+}
+
+#[tauri::command]
+fn desktop_restart_elevated(app: tauri::AppHandle) -> Result<(), CommandError> {
+    if current_process_is_elevated().unwrap_or(false) {
+        return Ok(());
+    }
+    launch_current_process_elevated()
+        .map_err(|_| CommandError::new("settings.elevation_failed"))?;
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -2859,22 +2954,29 @@ pub fn run() {
     );
     builder
         .setup(|app| {
-            let data_root = std::env::var_os("GLYPHSHIFT_DATA_ROOT")
-                .map(PathBuf::from)
-                .map_or_else(
-                    || {
-                        app.path()
-                            .app_data_dir()
-                            .map(|path| path.join("workspace"))
-                            .map_err(|error| std::io::Error::other(error.to_string()))
-                    },
-                    Ok,
-                )?;
-            let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
-                .map(PathBuf::from)
+            let launch_context = DesktopLaunchContext::current();
+            let data_root = launch_context.data_root.map_or_else(
+                || {
+                    app.path()
+                        .app_data_dir()
+                        .map(|path| path.join("workspace"))
+                        .map_err(|error| std::io::Error::other(error.to_string()))
+                },
+                Ok,
+            )?;
+            let runtime_root = launch_context
+                .runtime_root
                 .unwrap_or(app.path().resource_dir()?.join("runtime"));
             let settings = AppSettingsStore::open(&data_root)
                 .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
+            if settings.current().is_ok_and(|current| {
+                current.should_request_elevation(current_process_is_elevated().ok())
+            }) {
+                if launch_current_process_elevated().is_ok() {
+                    app.handle().exit(0);
+                    return Ok(());
+                }
+            }
             let application =
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(settings));
@@ -2898,6 +3000,8 @@ pub fn run() {
             desktop_status,
             desktop_settings,
             desktop_update_settings,
+            desktop_privilege_status,
+            desktop_restart_elevated,
             desktop_snapshot,
             desktop_refresh_font_families,
             desktop_probe_runs,
@@ -2964,6 +3068,18 @@ mod tests {
 
     const TEST_ADAPTER_ID: &str = "test.inline";
     const TEST_DICTIONARY_URL: &str = "https://catalog.example/dictionary.json";
+
+    #[test]
+    fn elevated_restart_preserves_explicit_desktop_roots() {
+        let context = DesktopLaunchContext {
+            data_root: Some(PathBuf::from(r"X:\synthetic-test\workspace")),
+            runtime_root: Some(PathBuf::from(r"X:\synthetic-test\runtime bundle")),
+        };
+
+        let restored = DesktopLaunchContext::from_args(context.elevation_arguments());
+
+        assert_eq!(restored, context);
+    }
 
     fn fixture_dictionary_distribution(data_root: &std::path::Path) -> DictionaryDistribution {
         let payload = glyphshift_dictionary_package::DictionaryPackage::create(

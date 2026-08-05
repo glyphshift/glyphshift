@@ -5,17 +5,28 @@ import { translateCommandError } from './commandError'
 
 export type LocalePreference = 'system' | AppLocale
 export type ThemePreference = 'system' | 'dark' | 'light'
+export type CloseBehavior = 'minimize' | 'quit'
 export type EffectiveTheme = 'dark' | 'light'
 
 export interface AppSettings {
   settingsSchemaVersion: 1
   localePreference: LocalePreference
   themePreference: ThemePreference
+  launchAtStartup: boolean
+  launchElevated: boolean
+  closeBehavior: CloseBehavior
 }
 
 interface AppSettingsUpdate {
   localePreference: LocalePreference
   themePreference: ThemePreference
+  launchAtStartup: boolean
+  launchElevated: boolean
+  closeBehavior: CloseBehavior
+}
+
+interface DesktopPrivilegeStatus {
+  elevated: boolean
 }
 
 const BROWSER_STORAGE_KEY = 'glyphshift.app-settings.v1'
@@ -23,6 +34,9 @@ const fallbackSettings: AppSettings = {
   settingsSchemaVersion: 1,
   localePreference: 'system',
   themePreference: 'dark',
+  launchAtStartup: false,
+  launchElevated: false,
+  closeBehavior: 'quit',
 }
 
 const settings = ref<AppSettings>({ ...fallbackSettings })
@@ -30,24 +44,37 @@ const effectiveLocale = ref<AppLocale>('zh-CN')
 const effectiveTheme = ref<EffectiveTheme>('dark')
 const settingsError = ref('')
 const settingsBusy = ref(false)
+const elevated = ref(false)
+const privilegeBusy = ref(false)
 let listenersInstalled = false
 
 function hasDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
 }
 
-function isAppSettings(value: unknown): value is AppSettings {
-  if (!value || typeof value !== 'object') return false
+function normalizeAppSettings(value: unknown): AppSettings | null {
+  if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<AppSettings>
-  return candidate.settingsSchemaVersion === 1
-    && ['system', 'zh-CN', 'en-US'].includes(candidate.localePreference ?? '')
-    && ['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
+  if (candidate.settingsSchemaVersion !== 1
+    || !['system', 'zh-CN', 'en-US'].includes(candidate.localePreference ?? '')
+    || !['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
+    || (candidate.launchAtStartup !== undefined && typeof candidate.launchAtStartup !== 'boolean')
+    || (candidate.launchElevated !== undefined && typeof candidate.launchElevated !== 'boolean')
+    || (candidate.closeBehavior !== undefined && !['minimize', 'quit'].includes(candidate.closeBehavior))) return null
+  return {
+    settingsSchemaVersion: 1,
+    localePreference: candidate.localePreference as LocalePreference,
+    themePreference: candidate.themePreference as ThemePreference,
+    launchAtStartup: candidate.launchAtStartup ?? false,
+    launchElevated: candidate.launchElevated ?? false,
+    closeBehavior: candidate.closeBehavior ?? 'quit',
+  }
 }
 
 function readBrowserSettings(): AppSettings {
   try {
     const value = JSON.parse(localStorage.getItem(BROWSER_STORAGE_KEY) ?? 'null')
-    return isAppSettings(value) ? value : { ...fallbackSettings }
+    return normalizeAppSettings(value) ?? { ...fallbackSettings }
   }
   catch {
     return { ...fallbackSettings }
@@ -97,7 +124,7 @@ export async function initializeAppSettings() {
     const initial = hasDesktopRuntime()
       ? await invoke<AppSettings>('desktop_settings')
       : readBrowserSettings()
-    applySettings(isAppSettings(initial) ? initial : { ...fallbackSettings })
+    applySettings(normalizeAppSettings(initial) ?? { ...fallbackSettings })
   }
   catch (error) {
     applySettings({ ...fallbackSettings })
@@ -118,10 +145,11 @@ async function updateAppSettings(update: AppSettingsUpdate) {
       ? await invoke<AppSettings>('desktop_update_settings', { update })
       : { settingsSchemaVersion: 1 as const, ...update }
     if (!hasDesktopRuntime()) localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(saved))
-    if (!isAppSettings(saved)) {
+    const normalized = normalizeAppSettings(saved)
+    if (!normalized) {
       throw { schemaVersion: 1, code: 'settings.invalid_data', args: {} }
     }
-    applySettings(saved)
+    applySettings(normalized)
   }
   catch (error) {
     settingsError.value = translateCommandError(error)
@@ -133,25 +161,72 @@ async function updateAppSettings(update: AppSettingsUpdate) {
 }
 
 export function useAppSettings() {
+  function update(patch: Partial<AppSettingsUpdate>) {
+    return updateAppSettings({
+      localePreference: settings.value.localePreference,
+      themePreference: settings.value.themePreference,
+      launchAtStartup: settings.value.launchAtStartup,
+      launchElevated: settings.value.launchElevated,
+      closeBehavior: settings.value.closeBehavior,
+      ...patch,
+    })
+  }
+
   return {
     settings,
     effectiveLocale,
     effectiveTheme,
     settingsError,
     settingsBusy,
+    elevated,
+    privilegeBusy,
     localePreference: computed(() => settings.value.localePreference),
     themePreference: computed(() => settings.value.themePreference),
+    launchAtStartup: computed(() => settings.value.launchAtStartup),
+    launchElevated: computed(() => settings.value.launchElevated),
+    closeBehavior: computed(() => settings.value.closeBehavior),
     async setLocalePreference(localePreference: LocalePreference) {
-      await updateAppSettings({
-        localePreference,
-        themePreference: settings.value.themePreference,
-      })
+      await update({ localePreference })
     },
     async setThemePreference(themePreference: ThemePreference) {
-      await updateAppSettings({
-        localePreference: settings.value.localePreference,
-        themePreference,
-      })
+      await update({ themePreference })
+    },
+    async setLaunchAtStartup(launchAtStartup: boolean) {
+      await update({ launchAtStartup })
+    },
+    async setLaunchElevated(launchElevated: boolean) {
+      await update({ launchElevated })
+      if (!launchElevated || !hasDesktopRuntime() || elevated.value) return
+      privilegeBusy.value = true
+      settingsError.value = ''
+      try {
+        await invoke('desktop_restart_elevated')
+      }
+      catch (error) {
+        settingsError.value = translateCommandError(error)
+        throw error
+      }
+      finally {
+        privilegeBusy.value = false
+      }
+    },
+    async setCloseBehavior(closeBehavior: CloseBehavior) {
+      await update({ closeBehavior })
+    },
+    async refreshPrivilegeStatus() {
+      privilegeBusy.value = true
+      settingsError.value = ''
+      try {
+        elevated.value = hasDesktopRuntime()
+          ? (await invoke<DesktopPrivilegeStatus>('desktop_privilege_status')).elevated
+          : false
+      }
+      catch (error) {
+        settingsError.value = translateCommandError(error)
+      }
+      finally {
+        privilegeBusy.value = false
+      }
     },
   }
 }

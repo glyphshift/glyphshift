@@ -27,12 +27,26 @@ pub(crate) enum ThemePreference {
     Light,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CloseBehavior {
+    Minimize,
+    #[default]
+    Quit,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSettings {
     settings_schema_version: u16,
     locale_preference: LocalePreference,
     theme_preference: ThemePreference,
+    #[serde(default)]
+    launch_at_startup: bool,
+    #[serde(default)]
+    launch_elevated: bool,
+    #[serde(default)]
+    close_behavior: CloseBehavior,
 }
 
 impl Default for AppSettings {
@@ -41,7 +55,20 @@ impl Default for AppSettings {
             settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
             locale_preference: LocalePreference::default(),
             theme_preference: ThemePreference::default(),
+            launch_at_startup: false,
+            launch_elevated: false,
+            close_behavior: CloseBehavior::default(),
         }
+    }
+}
+
+impl AppSettings {
+    pub(crate) const fn launch_at_startup(&self) -> bool {
+        self.launch_at_startup
+    }
+
+    pub(crate) const fn should_request_elevation(&self, elevated: Option<bool>) -> bool {
+        self.launch_elevated && matches!(elevated, Some(false))
     }
 }
 
@@ -50,6 +77,15 @@ impl Default for AppSettings {
 pub(crate) struct AppSettingsUpdate {
     locale_preference: LocalePreference,
     theme_preference: ThemePreference,
+    launch_at_startup: bool,
+    launch_elevated: bool,
+    close_behavior: CloseBehavior,
+}
+
+impl AppSettingsUpdate {
+    pub(crate) const fn launch_at_startup(self) -> bool {
+        self.launch_at_startup
+    }
 }
 
 impl From<AppSettingsUpdate> for AppSettings {
@@ -58,6 +94,9 @@ impl From<AppSettingsUpdate> for AppSettings {
             settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
             locale_preference: update.locale_preference,
             theme_preference: update.theme_preference,
+            launch_at_startup: update.launch_at_startup,
+            launch_elevated: update.launch_elevated,
+            close_behavior: update.close_behavior,
         }
     }
 }
@@ -66,6 +105,37 @@ impl From<AppSettingsUpdate> for AppSettings {
 pub(crate) enum SettingsError {
     InvalidData,
     Storage,
+    Startup,
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn configure_launch_at_startup(enabled: bool) -> Result<(), SettingsError> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
+
+    const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const VALUE_NAME: &str = "Glyphshift";
+
+    let run = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(RUN_KEY, KEY_READ | KEY_WRITE)
+        .map_err(|_| SettingsError::Startup)?;
+    if enabled {
+        let executable = std::env::current_exe().map_err(|_| SettingsError::Startup)?;
+        let command = format!("\"{}\"", executable.display());
+        run.set_value(VALUE_NAME, &command)
+            .map_err(|_| SettingsError::Startup)
+    } else {
+        match run.delete_value(VALUE_NAME) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(SettingsError::Startup),
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) const fn configure_launch_at_startup(_enabled: bool) -> Result<(), SettingsError> {
+    Err(SettingsError::Startup)
 }
 
 pub(crate) struct AppSettingsStore {
@@ -98,6 +168,10 @@ impl AppSettingsStore {
     pub(crate) fn current(&self) -> Result<AppSettings, SettingsError> {
         self.load_error
             .map_or_else(|| Ok(self.current.clone()), Err)
+    }
+
+    pub(crate) const fn launch_at_startup(&self) -> bool {
+        self.current.launch_at_startup()
     }
 
     pub(crate) fn update(
@@ -162,10 +236,16 @@ mod tests {
             .update(AppSettingsUpdate {
                 locale_preference: LocalePreference::EnUs,
                 theme_preference: ThemePreference::Light,
+                launch_at_startup: true,
+                launch_elevated: true,
+                close_behavior: CloseBehavior::Minimize,
             })
             .expect("save settings");
         let reopened = AppSettingsStore::open(root.path()).expect("reopen settings store");
 
+        assert!(saved.should_request_elevation(Some(false)));
+        assert!(!saved.should_request_elevation(Some(true)));
+        assert!(!saved.should_request_elevation(None));
         assert_eq!(reopened.current(), Ok(saved));
     }
 
@@ -185,8 +265,31 @@ mod tests {
             .update(AppSettingsUpdate {
                 locale_preference: LocalePreference::ZhCn,
                 theme_preference: ThemePreference::Dark,
+                launch_at_startup: false,
+                launch_elevated: false,
+                close_behavior: CloseBehavior::Quit,
             })
             .expect("replace invalid settings");
         assert_eq!(store.current(), Ok(recovered));
+    }
+
+    #[test]
+    fn legacy_settings_gain_safe_application_behavior_defaults() {
+        let root = tempdir().expect("temporary settings root");
+        fs::write(
+            root.path().join(SETTINGS_FILE_NAME),
+            r#"{"settingsSchemaVersion":1,"localePreference":"zh-CN","themePreference":"dark"}"#,
+        )
+        .expect("write legacy settings");
+
+        let settings = AppSettingsStore::open(root.path())
+            .expect("open legacy settings")
+            .current()
+            .expect("legacy settings remain valid");
+
+        assert!(!settings.launch_at_startup);
+        assert!(!settings.launch_elevated);
+        assert!(!settings.should_request_elevation(Some(false)));
+        assert_eq!(settings.close_behavior, CloseBehavior::Quit);
     }
 }

@@ -284,7 +284,7 @@ test('software batch delete keeps a rejected record and explains why', async ({ 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_remove_software') {
           throw {
@@ -368,7 +368,7 @@ test('workflow keeps permission failures distinct from a stopped software', asyn
   const failedStatus = page.getByRole('button', { name: '权限不匹配', exact: true })
   await expect(failedStatus).toBeVisible()
   await failedStatus.click()
-  await expect(page.getByTestId('workflow-runtime-issues').getByText('无法写入目标软件。请确认目标软件仍在运行，并让 Glyphshift 与它使用相同的权限级别。')).toBeVisible()
+  await expect(page.getByTestId('workflow-runtime-issues').getByText('无法写入目标软件。它可能已经退出，或正以管理员权限运行。请确认软件仍在运行；若权限更高，请在设置中开启“始终以管理员身份启动”。')).toBeVisible()
 })
 
 test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
@@ -433,7 +433,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
         if (command === 'desktop_import_dictionary') {
@@ -481,7 +481,7 @@ test('dictionary export reports when the native save dialog cannot open', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
         return null
@@ -517,7 +517,9 @@ test('local management items support double-click editing while keeping explicit
 
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
-  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
+  const createProbe = page.getByRole('dialog', { name: '新建探针任务' })
+  await createProbe.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
+  await createProbe.getByRole('button', { name: '创建并连接' }).click()
   await page.getByRole('button', { name: '返回探针管理' }).click()
   await page.getByRole('row').filter({ hasText: 'Vector Studio 探针' }).dblclick()
   await expect(page.getByRole('heading', { name: 'Vector Studio 探针' })).toBeVisible()
@@ -562,7 +564,9 @@ test('escape returns from each independent item page and protects dirty forms', 
 
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
-  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
+  const createProbe = page.getByRole('dialog', { name: '新建探针任务' })
+  await createProbe.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
+  await createProbe.getByRole('button', { name: '创建并连接' }).click()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
 })
@@ -590,7 +594,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -646,7 +650,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -690,7 +694,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale
@@ -738,7 +742,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -836,7 +840,7 @@ test('probe list hides technical detail behind one accessible hover target and u
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         return null
@@ -886,7 +890,7 @@ test('persisted probe closes creation modal even when its initial connection fai
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
         if (command === 'desktop_probe_run_summary') return createdRun
@@ -1000,7 +1004,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -1091,7 +1095,7 @@ test('probe detail states when the active runtime can only collect text', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -1124,7 +1128,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -1251,7 +1255,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 17 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -1278,7 +1282,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
 
   await page.getByRole('button', { name: '连接并继续' }).click()
 
-  await expect(page.getByText('无法写入目标软件。请确认目标软件仍在运行，并让 Glyphshift 与它使用相同的权限级别。')).toBeVisible()
+  await expect(page.getByText('无法写入目标软件。它可能已经退出，或正以管理员权限运行。请确认软件仍在运行；若权限更高，请在设置中开启“始终以管理员身份启动”。')).toBeVisible()
   await expect(page.getByRole('button', { name: '连接并继续' })).toBeEnabled()
 })
 
@@ -1315,7 +1319,7 @@ test('settings applies and persists the real locale and theme preferences', asyn
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
   await expect(page.getByText(/在线翻译/)).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
-  await expect(page.getByRole('combobox')).toHaveCount(2)
+  await expect(page.getByRole('combobox')).toHaveCount(3)
 
   await page.getByRole('combobox', { name: '界面语言' }).click()
   await page.getByRole('option', { name: 'English', exact: true }).click()
@@ -1349,6 +1353,79 @@ test('settings applies and persists the real locale and theme preferences', asyn
   await page.getByRole('option', { name: 'Light', exact: true }).click()
   await expect(page.locator('html')).toHaveClass(/light/)
   await expect(page.locator('html')).not.toHaveClass(/dark/)
+})
+
+test('settings persists startup close behavior and the administrator launch preference', async ({ page }) => {
+  await page.getByRole('button', { name: '设置' }).click()
+
+  await expect(page.getByRole('heading', { name: '应用行为' })).toBeVisible()
+  const launchAtStartup = page.getByRole('switch', { name: '开机自动启动' })
+  await expect(launchAtStartup).not.toBeChecked()
+  await expect(page.getByRole('combobox', { name: '关闭窗口时' })).toContainText('彻底退出')
+
+  await expect(page.getByRole('heading', { name: '权限' })).toBeVisible()
+  await expect(page.getByText('普通权限', { exact: true })).toBeVisible()
+  const launchElevated = page.getByRole('switch', { name: '始终以管理员身份启动' })
+  await expect(launchElevated).not.toBeChecked()
+
+  await launchAtStartup.click()
+  await launchElevated.click()
+  await page.getByRole('combobox', { name: '关闭窗口时' }).click()
+  await page.getByRole('option', { name: '最小化到任务栏' }).click()
+  await page.reload()
+  await page.getByRole('button', { name: '设置' }).click()
+  await expect(page.getByRole('switch', { name: '开机自动启动' })).toBeChecked()
+  await expect(page.getByRole('switch', { name: '始终以管理员身份启动' })).toBeChecked()
+  await expect(page.getByRole('combobox', { name: '关闭窗口时' })).toContainText('最小化到任务栏')
+})
+
+test('administrator launch preference persists before elevation and disables without another restart', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const elevationCommands: Array<{ command: string; launchElevated?: boolean }> = []
+    const internals = {
+      invoke: async (command: string, args?: { update?: { launchElevated?: boolean } }) => {
+        if (command === 'desktop_settings') return {
+          settingsSchemaVersion: 1,
+          localePreference: 'zh-CN',
+          themePreference: 'dark',
+          launchAtStartup: false,
+          launchElevated: false,
+          closeBehavior: 'quit',
+        }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_privilege_status') return { elevated: false }
+        if (command === 'desktop_update_settings') {
+          elevationCommands.push({ command, launchElevated: args?.update?.launchElevated })
+          return { settingsSchemaVersion: 1, ...args?.update }
+        }
+        if (command === 'desktop_restart_elevated') elevationCommands.push({ command })
+        return null
+      },
+    }
+    ;(window as unknown as {
+      __TAURI_INTERNALS__: typeof internals
+      __elevationCommands: typeof elevationCommands
+    }).__TAURI_INTERNALS__ = internals
+    ;(window as unknown as { __elevationCommands: typeof elevationCommands }).__elevationCommands = elevationCommands
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '设置' }).click()
+
+  const launchElevated = page.getByRole('switch', { name: '始终以管理员身份启动' })
+  await launchElevated.click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __elevationCommands: Array<{ command: string }> }).__elevationCommands.map(entry => entry.command)
+  ))).toEqual(['desktop_update_settings', 'desktop_restart_elevated'])
+
+  await launchElevated.click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __elevationCommands: Array<{ command: string; launchElevated?: boolean }> }).__elevationCommands
+  ))).toEqual([
+    { command: 'desktop_update_settings', launchElevated: true },
+    { command: 'desktop_restart_elevated' },
+    { command: 'desktop_update_settings', launchElevated: false },
+  ])
 })
 
 test('title bar reports a theme persistence failure without changing the active theme', async ({ page }) => {

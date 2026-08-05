@@ -19,7 +19,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 17
+const desktopApiVersion = 19
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -32,6 +32,7 @@ const shellCompatibilityErrorKey = ref('')
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
 let unlistenSoftwareCapture: UnlistenFn | null = null
+let unlistenWindowClose: UnlistenFn | null = null
 
 async function openWorkflow(id: string) {
   await workspace.loadWorkflow(id)
@@ -63,12 +64,39 @@ async function closeWindow() {
   }
 }
 
+async function minimizeWindow() {
+  try {
+    await getCurrentWindow().minimize()
+  }
+  catch {
+    // Browser previews do not expose native window controls.
+  }
+}
+
 function requestWindowClose() {
+  if (appSettings.closeBehavior.value === 'minimize') {
+    void minimizeWindow()
+    return
+  }
   if (editorDirty.value) {
     pendingExit.value = 'close'
     return
   }
   void closeWindow()
+}
+
+async function connectWindowCloseBehavior() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  try {
+    unlistenWindowClose = await getCurrentWindow().onCloseRequested(event => {
+      if (appSettings.closeBehavior.value === 'quit' && !editorDirty.value) return
+      event.preventDefault()
+      requestWindowClose()
+    })
+  }
+  catch {
+    // The title-bar close action remains available if the native listener is unavailable.
+  }
 }
 
 function cancelDiscard() {
@@ -141,12 +169,14 @@ onMounted(() => {
   window.addEventListener('beforeunload', guardBrowserExit)
   void connectDesktopShell()
   void connectSoftwareQuickCaptureEvents()
+  void connectWindowCloseBehavior()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', guardBrowserExit)
   window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
   unlistenSoftwareCapture?.()
+  unlistenWindowClose?.()
 })
 </script>
 

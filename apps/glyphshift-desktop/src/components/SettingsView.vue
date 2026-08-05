@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppSettings, type LocalePreference, type ThemePreference } from '../appSettings'
+import { useAppSettings, type CloseBehavior, type LocalePreference, type ThemePreference } from '../appSettings'
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -16,6 +16,10 @@ const themeItems = computed(() => [
   { value: 'dark' as const, label: t('settings.themeOption.dark') },
   { value: 'light' as const, label: t('settings.themeOption.light') },
 ])
+const closeBehaviorItems = computed(() => [
+  { value: 'minimize' as const, label: t('settings.closeBehaviorOption.minimize') },
+  { value: 'quit' as const, label: t('settings.closeBehaviorOption.quit') },
+])
 function updateLocale(value: unknown) {
   void appSettings.setLocalePreference(value as LocalePreference).catch(() => undefined)
 }
@@ -23,6 +27,20 @@ function updateLocale(value: unknown) {
 function updateTheme(value: unknown) {
   void appSettings.setThemePreference(value as ThemePreference).catch(() => undefined)
 }
+
+function updateLaunchAtStartup(value: boolean) {
+  void appSettings.setLaunchAtStartup(value).catch(() => undefined)
+}
+
+function updateCloseBehavior(value: unknown) {
+  void appSettings.setCloseBehavior(value as CloseBehavior).catch(() => undefined)
+}
+
+function updateLaunchElevated(value: boolean) {
+  void appSettings.setLaunchElevated(value).catch(() => undefined)
+}
+
+onMounted(() => void appSettings.refreshPrivilegeStatus())
 </script>
 
 <template>
@@ -48,11 +66,12 @@ function updateTheme(value: unknown) {
       variant="soft"
       :title="t('settings.saveFailed')"
       :description="appSettings.settingsError.value"
-      class="mb-4 max-w-[760px]"
+      class="mx-auto mb-4 w-full max-w-[980px]"
     />
 
     <ManagementWorkspaceSurface variant="canvas">
       <div class="h-full overflow-y-auto p-5 [scrollbar-gutter:stable]">
+        <div class="space-y-4">
         <ManagementFormSection :title="t('settings.appearance')" :description="t('settings.appearanceDescription')">
           <ManagementFormRow
             :label="t('settings.language')"
@@ -90,6 +109,76 @@ function updateTheme(value: unknown) {
               />
           </ManagementFormRow>
         </ManagementFormSection>
+
+        <ManagementFormSection :title="t('settings.behavior')" :description="t('settings.behaviorDescription')">
+          <ManagementFormRow
+            :label="t('settings.launchAtStartup')"
+            :description="t('settings.launchAtStartupDescription')"
+            icon="i-tabler-rocket"
+            control-width="compact"
+          >
+            <div class="flex justify-end">
+              <USwitch
+                :model-value="appSettings.launchAtStartup.value"
+                :aria-label="t('settings.launchAtStartup')"
+                :disabled="appSettings.settingsBusy.value"
+                @update:model-value="updateLaunchAtStartup"
+              />
+            </div>
+          </ManagementFormRow>
+
+          <ManagementFormRow
+            :label="t('settings.closeBehavior')"
+            :description="t('settings.closeBehaviorDescription')"
+            icon="i-tabler-door-exit"
+            control-width="compact"
+          >
+            <USelect
+              :model-value="appSettings.closeBehavior.value"
+              :items="closeBehaviorItems"
+              value-key="value"
+              label-key="label"
+              :aria-label="t('settings.closeBehavior')"
+              :disabled="appSettings.settingsBusy.value"
+              class="w-full"
+              @update:model-value="updateCloseBehavior"
+            />
+          </ManagementFormRow>
+        </ManagementFormSection>
+
+        <ManagementFormSection :title="t('settings.privilege')" :description="t('settings.privilegeDescription')">
+          <ManagementFormRow
+            :label="t('settings.launchElevated')"
+            :description="t('settings.launchElevatedDescription')"
+            icon="i-tabler-shield-up"
+            control-width="compact"
+          >
+            <div class="flex justify-end">
+              <USwitch
+                :model-value="appSettings.launchElevated.value"
+                :aria-label="t('settings.launchElevated')"
+                :disabled="appSettings.settingsBusy.value || appSettings.privilegeBusy.value"
+                @update:model-value="updateLaunchElevated"
+              />
+            </div>
+          </ManagementFormRow>
+
+          <ManagementFormRow
+            :label="t('settings.currentPrivilege')"
+            :description="appSettings.elevated.value ? t('settings.elevatedDescription') : t('settings.standardDescription')"
+            icon="i-tabler-shield-lock"
+            control-width="compact"
+          >
+            <div class="flex justify-end">
+              <UBadge
+                :color="appSettings.elevated.value ? 'warning' : 'neutral'"
+                variant="soft"
+                :label="appSettings.elevated.value ? t('settings.elevated') : t('settings.standard')"
+              />
+            </div>
+          </ManagementFormRow>
+        </ManagementFormSection>
+        </div>
       </div>
     </ManagementWorkspaceSurface>
   </section>
