@@ -29,6 +29,13 @@ fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_transl
         .translation_adapter_ids()
         .iter()
         .any(|adapter_id| adapter_id.as_ref() == TEST_UIA_OBSERVER_ID));
+    assert_eq!(
+        bundle.acquisition_worker_ids(),
+        [Box::<str>::from("windows.uia.acquire")]
+    );
+    bundle
+        .acquisition_worker_host("windows.uia.acquire")
+        .expect("verified UIA acquisition worker host");
 }
 
 #[test]

@@ -99,6 +99,8 @@ $runtimeBundle = Copy-VersionedBundleArtifact `
     'glyphshift_target_runtime.dll' 'runtime' 'dll'
 $uiaWorkerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-adapter-uia-worker.exe' 'adapter-uia-worker' 'exe'
+$uiaAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
+    'glyphshift-adapter-uia-acquisition-worker.exe' 'adapter-uia-acquisition-worker' 'exe'
 $consoleBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
@@ -271,6 +273,13 @@ $runtimeManifest = [ordered]@{
             documentationUrl = $uiaPresentation.documentationUrl
         }
     )
+    acquisition_workers = @(
+        [ordered]@{
+            file = $uiaAcquisitionWorkerBundle.file
+            sha256 = $uiaAcquisitionWorkerBundle.sha256
+            adapter_id = 'windows.uia.acquire'
+        }
+    )
 }
 $runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 6
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
@@ -283,7 +292,8 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 $declaredArtifacts = @(
     $runtimeManifest.controller,
     $runtimeManifest.runtime
-) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers)
+) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers) +
+    @($runtimeManifest.acquisition_workers)
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
 if ($IncludeTestTarget) {
     $expectedFiles += 'test-target.exe'

@@ -319,6 +319,7 @@ impl ControllerTransport for InventoryController {
     fn terminate(&mut self) {}
 }
 
+mod acquisition;
 mod bundle;
 mod contract;
 mod pool;

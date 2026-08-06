@@ -390,6 +390,8 @@ Assert-Dependencies `
 Assert-Dependencies `
     -PackageName 'glyphshift-desktop-runtime' `
     -Expected @(
+        'glyphshift-acquisition',
+        'glyphshift-acquisition-worker-host',
         'glyphshift-adapter-native-host',
         'glyphshift-adapter-registry',
         'glyphshift-capture',

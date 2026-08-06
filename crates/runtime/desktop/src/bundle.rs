@@ -5,7 +5,7 @@ const FIRST_PARTY_BUNDLE_AUTHORITY: &str = "app.glyphshift.runtime.first-party";
 const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Deserialize)]
-struct BundleManifest {
+pub(super) struct BundleManifest {
     schema: Box<str>,
     authority: Box<str>,
     controller: ControllerManifest,
@@ -13,6 +13,7 @@ struct BundleManifest {
     adapters: Vec<ArtifactManifest>,
     #[serde(default)]
     isolated_workers: Vec<IsolatedWorkerManifest>,
+    pub(super) acquisition_workers: Vec<AcquisitionWorkerManifest>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +60,63 @@ struct IsolatedWorkerManifest {
     technical_target: Option<Box<str>>,
     #[serde(default, alias = "documentationUrl")]
     documentation_url: Option<Box<str>>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct AcquisitionWorkerManifest {
+    pub(super) file: Box<str>,
+    pub(super) sha256: Box<str>,
+    pub(super) adapter_id: Box<str>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct AcquisitionWorkerCatalog {
+    artifacts: BTreeMap<Box<str>, AcquisitionWorkerArtifact>,
+}
+
+impl AcquisitionWorkerCatalog {
+    pub(super) fn load(
+        root: &Path,
+        manifests: &[AcquisitionWorkerManifest],
+    ) -> Result<Self, DesktopRuntimeError> {
+        if manifests.len() > 64 {
+            return Err(DesktopRuntimeError::InvalidManifest);
+        }
+        let mut artifacts = BTreeMap::new();
+        for manifest in manifests {
+            if !valid_acquisition_adapter_id(&manifest.adapter_id) {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            let hash = parse_hash(&manifest.sha256)?;
+            let path = verified_artifact(root, &manifest.file, hash)?;
+            let artifact = AcquisitionWorkerArtifact::open(path)
+                .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+            if artifacts
+                .insert(manifest.adapter_id.clone(), artifact)
+                .is_some()
+            {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+        }
+        Ok(Self { artifacts })
+    }
+
+    pub(super) fn adapter_ids(&self) -> Vec<Box<str>> {
+        self.artifacts.keys().cloned().collect()
+    }
+
+    pub(super) fn host(
+        &self,
+        adapter_id: &str,
+    ) -> Result<AcquisitionWorkerHost, DesktopRuntimeError> {
+        let artifact = self
+            .artifacts
+            .get(adapter_id)
+            .cloned()
+            .ok_or(DesktopRuntimeError::AcquisitionWorkerUnavailable)?;
+        AcquisitionWorkerHost::new(artifact, ACQUISITION_WORKER_TIMEOUT)
+            .map_err(|_| DesktopRuntimeError::AcquisitionWorkerUnavailable)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,6 +192,7 @@ pub struct RuntimeBundle {
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
     worker_artifacts: WorkerArtifactCatalog,
+    acquisition_workers: AcquisitionWorkerCatalog,
     isolated_adapter_ids: BTreeSet<AdapterId>,
     discovered_requirements: Vec<AdapterRequirement>,
     adapter_options: Vec<RuntimeAdapterOption>,
@@ -338,6 +397,8 @@ impl RuntimeBundle {
             .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
         let worker_artifacts = WorkerArtifactCatalog::new(catalog_workers)
             .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
+        let acquisition_workers =
+            AcquisitionWorkerCatalog::load(&root, &manifest.acquisition_workers)?;
 
         Ok(Self {
             controller,
@@ -345,6 +406,7 @@ impl RuntimeBundle {
             registry,
             artifacts,
             worker_artifacts,
+            acquisition_workers,
             isolated_adapter_ids,
             discovered_requirements,
             adapter_options,
@@ -374,6 +436,18 @@ impl RuntimeBundle {
     #[must_use]
     pub fn adapter_requirements(&self) -> &[AdapterRequirement] {
         &self.discovered_requirements
+    }
+
+    #[must_use]
+    pub fn acquisition_worker_ids(&self) -> Vec<Box<str>> {
+        self.acquisition_workers.adapter_ids()
+    }
+
+    pub fn acquisition_worker_host(
+        &self,
+        adapter_id: &str,
+    ) -> Result<AcquisitionWorkerHost, DesktopRuntimeError> {
+        self.acquisition_workers.host(adapter_id)
     }
 
     pub fn discover(
@@ -407,6 +481,7 @@ impl RuntimeBundle {
             self.registry.clone(),
             self.artifacts.clone(),
             self.worker_artifacts.clone(),
+            Box::new(self.acquisition_workers.clone()),
             self.isolated_adapter_ids.clone(),
             self.controller_protocol,
             next_nonce(self.nonce_sequence),
@@ -493,4 +568,12 @@ fn next_nonce(sequence: u64) -> ControllerNonce {
     let process = u64::from(std::process::id());
     bytes[24..].copy_from_slice(&process.to_le_bytes());
     ControllerNonce::new(bytes)
+}
+
+fn valid_acquisition_adapter_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }

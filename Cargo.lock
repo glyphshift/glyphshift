@@ -1709,6 +1709,8 @@ dependencies = [
 name = "glyphshift-desktop-runtime"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-acquisition",
+ "glyphshift-acquisition-worker-host",
  "glyphshift-adapter-native-host",
  "glyphshift-adapter-registry",
  "glyphshift-capture",

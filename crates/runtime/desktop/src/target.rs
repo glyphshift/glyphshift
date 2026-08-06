@@ -1,4 +1,5 @@
 use super::*;
+use crate::acquisition::{map_acquisition_protocol_error, AcquisitionExecutor};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeTarget {
@@ -153,6 +154,7 @@ pub struct DesktopRuntime<T> {
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
     worker_artifacts: WorkerArtifactCatalog,
+    acquisition: Box<dyn AcquisitionExecutor>,
     isolated_adapter_ids: BTreeSet<AdapterId>,
     targets: Vec<TargetRecord>,
     active_features: BTreeSet<Feature>,
@@ -169,6 +171,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         registry: AdapterRegistry,
         artifacts: TargetArtifactCatalog,
         worker_artifacts: WorkerArtifactCatalog,
+        acquisition: Box<dyn AcquisitionExecutor>,
         isolated_adapter_ids: BTreeSet<AdapterId>,
         protocol: ProtocolVersion,
         nonce: ControllerNonce,
@@ -209,6 +212,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             registry,
             artifacts,
             worker_artifacts,
+            acquisition,
             isolated_adapter_ids,
             targets,
             active_features: BTreeSet::new(),
@@ -223,6 +227,34 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
 
     pub fn targets(&self) -> impl Iterator<Item = &RuntimeTarget> {
         self.targets.iter().map(|target| &target.view)
+    }
+
+    pub fn acquire_point(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        let target = self
+            .targets
+            .iter()
+            .find(|target| target.view.id == target_id)
+            .cloned()
+            .ok_or(DesktopAcquisitionError::UnknownTarget)?;
+        let Some(RuntimePhase::Discovered(connection)) = self.phase.as_mut() else {
+            return Err(DesktopAcquisitionError::InvalidState);
+        };
+        let grant = connection
+            .authorize_worker_target(target.controller_id)
+            .map_err(map_acquisition_protocol_error)?;
+        let authorized_target = AuthorizedTarget::new(format!("target-{}", target.view.id))
+            .map_err(|_| DesktopAcquisitionError::TargetUnavailable)?;
+        self.acquisition
+            .acquire_point(adapter_id, authorized_target, grant, point, cancellation)
     }
 
     #[must_use]

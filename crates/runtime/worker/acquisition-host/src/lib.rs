@@ -45,12 +45,15 @@ impl AcquisitionWorkerBinding {
     pub fn new(
         target: AuthorizedTarget,
         adapter_id: impl Into<Box<str>>,
-        target_grant: WorkerTargetGrant,
+        grant_platform: impl Into<Box<str>>,
+        grant_payload: impl Into<Box<str>>,
     ) -> Result<Self, AcquisitionWorkerHostError> {
         let adapter_id = adapter_id.into();
         if !valid_adapter_id(&adapter_id) {
             return Err(AcquisitionWorkerHostError::InvalidBinding);
         }
+        let target_grant = WorkerTargetGrant::new(grant_platform, grant_payload)
+            .map_err(|_| AcquisitionWorkerHostError::InvalidBinding)?;
         Ok(Self {
             target,
             adapter_id,

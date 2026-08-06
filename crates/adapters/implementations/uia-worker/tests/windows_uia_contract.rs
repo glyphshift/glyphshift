@@ -308,10 +308,12 @@ fn acquisition_host(timeout: Duration) -> AcquisitionWorkerHost {
 }
 
 fn acquisition_binding(target: &StandardControlTarget) -> AcquisitionWorkerBinding {
+    let grant = target.acquisition_process_grant();
     AcquisitionWorkerBinding::new(
         AuthorizedTarget::new("standard-control-target").expect("target identity"),
         ACQUISITION_ADAPTER_ID,
-        target.acquisition_process_grant(),
+        grant.platform(),
+        grant.payload(),
     )
     .expect("UIA acquisition binding")
 }

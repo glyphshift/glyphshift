@@ -27,6 +27,7 @@ fn desktop_contract_exposes_instances_without_controller_tokens_or_paths() {
         AdapterRegistry::new(AdapterTrustPolicy::new([], [])),
         artifacts,
         WorkerArtifactCatalog::default(),
+        Box::new(AcquisitionWorkerCatalog::default()),
         BTreeSet::new(),
         ProtocolVersion::new(1, 0),
         ControllerNonce::new([7; 32]),

@@ -6,7 +6,6 @@ use glyphshift_acquisition_worker_host::{
     AcquisitionWorkerArtifact, AcquisitionWorkerBinding, AcquisitionWorkerHost,
     AcquisitionWorkerHostError, CancellationToken,
 };
-use glyphshift_acquisition_worker_sdk::WorkerTargetGrant;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
@@ -36,7 +35,8 @@ fn binding(payload: &str) -> AcquisitionWorkerBinding {
     AcquisitionWorkerBinding::new(
         target("target-a"),
         "synthetic.acquisition",
-        WorkerTargetGrant::new("synthetic-process-v1", payload).expect("target grant"),
+        "synthetic-process-v1",
+        payload,
     )
     .expect("worker binding")
 }
@@ -166,7 +166,8 @@ fn acquisition_worker_006_requires_an_absolute_existing_artifact_and_valid_bindi
         AcquisitionWorkerBinding::new(
             target("target-a"),
             "invalid adapter id",
-            WorkerTargetGrant::new("synthetic-process-v1", "authorized").expect("grant"),
+            "synthetic-process-v1",
+            "authorized",
         ),
         Err(AcquisitionWorkerHostError::InvalidBinding)
     ));

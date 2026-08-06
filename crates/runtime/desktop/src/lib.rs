@@ -3,13 +3,26 @@
 //! The desktop shell sees only application instances and session state. Process tokens, artifact
 //! paths, deployment payloads, and controller acknowledgements stay behind this module boundary.
 
+mod acquisition;
 mod bundle;
 mod pool;
 mod target;
 
+pub use acquisition::{DesktopAcquisitionCancellation, DesktopAcquisitionError};
 #[cfg(test)]
-use bundle::{parse_documentation_url, parse_hash};
+use bundle::{
+    parse_documentation_url, parse_hash, AcquisitionWorkerCatalog, AcquisitionWorkerManifest,
+    BundleManifest,
+};
 pub use bundle::{RuntimeAdapterOption, RuntimeBundle};
+use glyphshift_acquisition::{
+    AcquisitionRequest, AuthorizedTarget, InteractiveSelection, SourcePolicy,
+};
+pub use glyphshift_acquisition::{AcquisitionResult, DesktopPoint};
+use glyphshift_acquisition_worker_host::{
+    AcquisitionWorkerArtifact, AcquisitionWorkerBinding, AcquisitionWorkerHost,
+    AcquisitionWorkerHostError, CancellationToken,
+};
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::{
     AdapterDescriptor, AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement,
@@ -32,7 +45,8 @@ use glyphshift_isolated_worker_host::{
 };
 use glyphshift_protocol::{
     ControllerConnection, ControllerNonce, ControllerProtocolError, ControllerTransport,
-    NonceLedger, OpaqueTargetId, PreparedRecipe, RecipeControllerLossPolicy,
+    ControllerWorkerTargetGrant, NonceLedger, OpaqueTargetId, PreparedRecipe,
+    RecipeControllerLossPolicy,
 };
 use glyphshift_session::{
     ControllerFailure, ControllerHealth, ControllerLossPolicy, ControllerRecipePort, HostFailure,
@@ -58,6 +72,7 @@ use target::ManagedRuntime;
 pub use target::{DesktopRuntime, RuntimeTarget, WindowsDesktopRuntime};
 
 const ISOLATED_WORKER_TIMEOUT: Duration = Duration::from_secs(2);
+const ACQUISITION_WORKER_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopRuntimeError {
@@ -72,6 +87,7 @@ pub enum DesktopRuntimeError {
     ControllerUnavailable,
     ProtocolRejected,
     UnknownTarget,
+    AcquisitionWorkerUnavailable,
     InvalidState,
     SessionRejected,
     ActivationRejected(HostOperationFailure),

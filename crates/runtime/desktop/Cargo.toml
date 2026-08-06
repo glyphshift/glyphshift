@@ -9,6 +9,8 @@ publish.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+glyphshift-acquisition = { path = "../acquisition" }
+glyphshift-acquisition-worker-host = { path = "../worker/acquisition-host" }
 glyphshift-adapter-native-host = { path = "../../adapters/platform/native-host" }
 glyphshift-adapter-registry = { path = "../../adapters/platform/registry" }
 glyphshift-controller-host = { path = "../controller/host" }
