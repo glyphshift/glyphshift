@@ -1,0 +1,32 @@
+[package]
+name = "glyphshift-adapter-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../native-abi" }
+glyphshift-adapter-sdk = { path = "../sdk" }
+glyphshift-domain = { path = "../../../core/domain" }
+libloading = "0.8"
+
+[dev-dependencies]
+glyphshift-adapter-console = { path = "../../implementations/console" }
+glyphshift-adapter-direct2d = { path = "../../implementations/direct2d" }
+glyphshift-adapter-directwrite = { path = "../../implementations/directwrite" }
+glyphshift-adapter-gdi = { path = "../../implementations/gdi" }
+glyphshift-adapter-gdiplus = { path = "../../implementations/gdiplus" }
+glyphshift-adapter-gtk3-pango = { path = "../../implementations/gtk3-pango" }
+glyphshift-adapter-qt-painter = { path = "../../implementations/qt-painter" }
+glyphshift-adapter-raylib = { path = "../../implementations/raylib" }
+glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.58", features = ["Win32_System_LibraryLoader"] }
+
+[lints.rust]
+unsafe_code = "allow"

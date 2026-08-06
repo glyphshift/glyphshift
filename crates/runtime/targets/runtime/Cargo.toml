@@ -1,0 +1,40 @@
+[package]
+name = "glyphshift-target-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../../../adapters/platform/native-abi" }
+glyphshift-adapter-native-host = { path = "../../../adapters/platform/native-host" }
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-runtime-contract = { path = "../../contract" }
+glyphshift-runtime-kernel = { path = "../../kernel" }
+glyphshift-target-runtime-contract = { path = "../contract" }
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+glyphshift-adapter-gdi = { path = "../../../adapters/implementations/gdi" }
+glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/gdiplus" }
+glyphshift-adapter-qt-painter = { path = "../../../adapters/implementations/qt-painter" }
+glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
+glyphshift-translation = { path = "../../../core/translation" }
+glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
+
+[lints.rust]
+unsafe_code = "allow"

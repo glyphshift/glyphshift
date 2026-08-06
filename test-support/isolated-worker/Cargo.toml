@@ -3,15 +3,16 @@ name = "glyphshift-test-isolated-worker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [[bin]]
 name = "glyphshift-test-isolated-worker"
 path = "src/main.rs"
 
 [dependencies]
-glyphshift-adapter-uia = { path = "../../crates/glyphshift-adapter-uia" }
-glyphshift-capture = { path = "../../crates/glyphshift-capture" }
-glyphshift-isolated-worker-sdk = { path = "../../crates/glyphshift-isolated-worker-sdk" }
+glyphshift-adapter-uia = { path = "../../crates/adapters/implementations/uia" }
+glyphshift-capture = { path = "../../crates/core/capture" }
+glyphshift-isolated-worker-sdk = { path = "../../crates/runtime/worker/sdk" }
 
 [lints]
 workspace = true

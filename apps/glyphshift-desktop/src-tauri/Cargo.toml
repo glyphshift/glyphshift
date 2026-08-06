@@ -3,6 +3,7 @@ name = "glyphshift-desktop-shell"
 version = "0.2.0"
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "Glyphshift desktop shell"
 
 [lib]
@@ -13,15 +14,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-glyphshift-capture = { path = "../../../crates/glyphshift-capture" }
-glyphshift-controller-windows = { path = "../../../crates/glyphshift-controller-windows" }
-glyphshift-desktop-backend = { path = "../../../crates/glyphshift-desktop-backend" }
-glyphshift-desktop-runtime = { path = "../../../crates/glyphshift-desktop-runtime" }
-glyphshift-dictionary-distribution = { path = "../../../crates/glyphshift-dictionary-distribution" }
-glyphshift-domain = { path = "../../../crates/glyphshift-domain" }
-glyphshift-runtime-contract = { path = "../../../crates/glyphshift-runtime-contract" }
-glyphshift-translation = { path = "../../../crates/glyphshift-translation" }
-glyphshift-workflow = { path = "../../../crates/glyphshift-workflow" }
+glyphshift-capture = { path = "../../../crates/core/capture" }
+glyphshift-controller-windows = { path = "../../../crates/runtime/controller/windows" }
+glyphshift-desktop-backend = { path = "../../../crates/product/desktop-backend" }
+glyphshift-desktop-runtime = { path = "../../../crates/runtime/desktop" }
+glyphshift-dictionary-distribution = { path = "../../../crates/dictionary/distribution" }
+glyphshift-domain = { path = "../../../crates/core/domain" }
+glyphshift-runtime-contract = { path = "../../../crates/runtime/contract" }
+glyphshift-translation = { path = "../../../crates/core/translation" }
+glyphshift-workflow = { path = "../../../crates/core/workflow" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.11.3", features = [] }
@@ -34,8 +35,8 @@ tempfile = "3.23.0"
 winreg = "0.55.0"
 
 [dev-dependencies]
-glyphshift-adapter-registry = { path = "../../../crates/glyphshift-adapter-registry" }
-glyphshift-dictionary-package = { path = "../../../crates/glyphshift-dictionary-package" }
+glyphshift-adapter-registry = { path = "../../../crates/adapters/platform/registry" }
+glyphshift-dictionary-package = { path = "../../../crates/dictionary/package" }
 sha2 = "0.10"
 
 [lints]

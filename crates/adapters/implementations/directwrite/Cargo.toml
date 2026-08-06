@@ -1,0 +1,16 @@
+[package]
+name = "glyphshift-adapter-directwrite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-adapter-sdk = { path = "../../platform/sdk" }
+glyphshift-domain = { path = "../../../core/domain" }
+
+[lints]
+workspace = true

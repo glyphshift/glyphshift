@@ -1,0 +1,28 @@
+[package]
+name = "glyphshift-isolated-worker-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-isolated-worker-sdk = { path = "../sdk" }
+glyphshift-protocol = { path = "../../protocol" }
+glyphshift-runtime-contract = { path = "../../contract" }
+glyphshift-session = { path = "../../session" }
+glyphshift-target-process-host = { path = "../../targets/process-host" }
+serde_json = "1.0"
+
+[dev-dependencies]
+glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
+glyphshift-translation = { path = "../../../core/translation" }
+tempfile = "3"
+
+[lints]
+workspace = true

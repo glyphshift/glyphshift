@@ -1,0 +1,25 @@
+[package]
+name = "glyphshift-adapter-raylib-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../../platform/native-abi" }
+glyphshift-adapter-raylib = { path = "../raylib" }
+retour = "0.3"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+]
+
+[lints.rust]
+unsafe_code = "allow"

@@ -1,0 +1,26 @@
+[package]
+name = "glyphshift-target-process-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-protocol = { path = "../../protocol" }
+glyphshift-runtime-contract = { path = "../../contract" }
+glyphshift-session = { path = "../../session" }
+glyphshift-target-runtime-contract = { path = "../contract" }
+
+[dev-dependencies]
+glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
+glyphshift-extension = { path = "../../../core/extension" }
+glyphshift-translation = { path = "../../../core/translation" }
+
+[lints.rust]
+unsafe_code = "forbid"

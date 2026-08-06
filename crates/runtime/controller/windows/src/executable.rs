@@ -1,0 +1,227 @@
+#[cfg(windows)]
+use crate::platform::process_executable_path;
+use crate::platform::windows_executable;
+use glyphshift_controller_sdk::PluginError;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowsExecutable {
+    pub(super) path: PathBuf,
+    pub(super) name: Box<str>,
+    pub(super) architecture: Box<str>,
+    pub(super) running: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsElevationError {
+    QueryFailed,
+    InvalidExecutable,
+    LaunchFailed,
+    UnsupportedOperatingSystem,
+}
+
+impl WindowsExecutable {
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn architecture(&self) -> &str {
+        &self.architecture
+    }
+
+    #[must_use]
+    pub const fn running(&self) -> bool {
+        self.running
+    }
+}
+
+pub fn inspect_windows_executable(
+    path: impl AsRef<Path>,
+) -> Result<WindowsExecutable, PluginError> {
+    windows_executable(path.as_ref(), None)
+}
+
+#[cfg(windows)]
+pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_null() {
+        return Err(PluginError::new("foreground_window_unavailable"));
+    }
+    let mut process_id = 0_u32;
+    unsafe {
+        GetWindowThreadProcessId(window, &mut process_id);
+    }
+    if process_id == 0 {
+        return Err(PluginError::new("foreground_process_unavailable"));
+    }
+    let path = process_executable_path(process_id)
+        .ok_or_else(|| PluginError::new("foreground_process_inaccessible"))?;
+    windows_executable(Path::new(&path), Some(true))
+}
+
+#[cfg(not(windows))]
+pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
+    Err(PluginError::new("unsupported_operating_system"))
+}
+
+#[cfg(windows)]
+pub fn current_process_is_elevated() -> Result<bool, WindowsElevationError> {
+    use std::mem::size_of;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(WindowsElevationError::QueryFailed);
+    }
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut returned = 0_u32;
+    let queried = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    } != 0;
+    unsafe {
+        CloseHandle(token);
+    }
+    queried
+        .then_some(elevation.TokenIsElevated != 0)
+        .ok_or(WindowsElevationError::QueryFailed)
+}
+
+#[cfg(not(windows))]
+pub const fn current_process_is_elevated() -> Result<bool, WindowsElevationError> {
+    Err(WindowsElevationError::UnsupportedOperatingSystem)
+}
+
+#[cfg(windows)]
+pub(super) const fn elevated_launch_mask() -> u32 {
+    use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS};
+
+    SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS
+}
+
+#[cfg(windows)]
+pub(super) fn elevated_launch_parameters(arguments: &[OsString]) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut parameters = Vec::new();
+    for (index, argument) in arguments.iter().enumerate() {
+        if index > 0 {
+            parameters.push(u16::from(b' '));
+        }
+        parameters.push(u16::from(b'"'));
+        let mut backslashes = 0;
+        for unit in argument.encode_wide() {
+            match unit {
+                value if value == u16::from(b'\\') => backslashes += 1,
+                value if value == u16::from(b'"') => {
+                    parameters.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes * 2 + 1));
+                    parameters.push(value);
+                    backslashes = 0;
+                }
+                value => {
+                    parameters.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes));
+                    parameters.push(value);
+                    backslashes = 0;
+                }
+            }
+        }
+        parameters.extend(std::iter::repeat_n(u16::from(b'\\'), backslashes * 2));
+        parameters.push(u16::from(b'"'));
+    }
+    if !parameters.is_empty() {
+        parameters.push(0);
+    }
+    parameters
+}
+
+#[cfg(windows)]
+pub fn launch_process_elevated(
+    executable: &Path,
+    arguments: &[OsString],
+) -> Result<(), WindowsElevationError> {
+    use std::mem::size_of;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{WaitForInputIdle, WaitForSingleObject};
+    use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    if !executable.is_absolute() || !executable.is_file() {
+        return Err(WindowsElevationError::InvalidExecutable);
+    }
+    let operation = "runas"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let directory = executable
+        .parent()
+        .ok_or(WindowsElevationError::InvalidExecutable)?
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let executable = executable
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let parameters = elevated_launch_parameters(arguments);
+    let mut execute_info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: elevated_launch_mask(),
+        hwnd: std::ptr::null_mut(),
+        lpVerb: operation.as_ptr(),
+        lpFile: executable.as_ptr(),
+        lpParameters: parameters
+            .first()
+            .map_or(std::ptr::null(), |_| parameters.as_ptr()),
+        lpDirectory: directory.as_ptr(),
+        nShow: SW_SHOWNORMAL,
+        ..Default::default()
+    };
+    if unsafe { ShellExecuteExW(&mut execute_info) } == 0 || execute_info.hProcess.is_null() {
+        return Err(WindowsElevationError::LaunchFailed);
+    }
+
+    // The caller exits as soon as this function succeeds. Wait for the elevated GUI process to
+    // create its message queue, then make sure it did not terminate during startup.
+    unsafe {
+        WaitForInputIdle(execute_info.hProcess, 10_000);
+    }
+    let child_exited = unsafe { WaitForSingleObject(execute_info.hProcess, 0) } == WAIT_OBJECT_0;
+    unsafe {
+        CloseHandle(execute_info.hProcess);
+    }
+    (!child_exited)
+        .then_some(())
+        .ok_or(WindowsElevationError::LaunchFailed)
+}
+
+#[cfg(not(windows))]
+pub fn launch_process_elevated(
+    _executable: &Path,
+    _arguments: &[OsString],
+) -> Result<(), WindowsElevationError> {
+    Err(WindowsElevationError::UnsupportedOperatingSystem)
+}

@@ -1,0 +1,16 @@
+[package]
+name = "glyphshift-runtime-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glyphshift-adapter-registry = { path = "../../adapters/platform/registry" }
+glyphshift-decision = { path = "../../core/decision" }
+glyphshift-domain = { path = "../../core/domain" }
+glyphshift-runtime-contract = { path = "../contract" }
+glyphshift-translation = { path = "../../core/translation" }
+
+[lints]
+workspace = true

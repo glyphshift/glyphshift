@@ -12,6 +12,7 @@ import type {
   SoftwareRecord,
 } from '../model'
 import { editableRowIndex } from '../tableInteraction'
+import { useCaptureScrollbar } from '../useCaptureScrollbar'
 import { useProbeRuns } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -69,13 +70,22 @@ const settingsAdapterIds = ref<string[]>([])
 const settingsLivePreview = ref(false)
 const clearAllOpen = ref(false)
 const translationValues = ref<Record<string, string>>({})
-const tableShell = ref<HTMLElement>()
-const tableScrollState = ref({ top: 0, clientHeight: 0, scrollHeight: 0 })
+const {
+  tableShell,
+  scrollThumbHeight,
+  scrollThumbTop,
+  updateScrollMetrics,
+  jumpScrollbar,
+  beginScrollbarDrag,
+  dragScrollbar,
+  endScrollbarDrag,
+  startScrollTracking,
+  stopScrollTracking,
+} = useCaptureScrollbar()
 const dirtyTranslations = new Set<string>()
 const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
-let scrollDrag: { pointerId: number; startY: number; startTop: number } | undefined
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
 const selectedRun = computed(() => probe.selectedRun.value)
@@ -150,18 +160,6 @@ const listPageItems = computed(() => filteredRuns.value.slice(
 ))
 const listPageSelected = computed(() => Boolean(listPageItems.value.length)
   && listPageItems.value.every(run => listSelected.value.has(run.id)))
-const scrollTrackHeight = computed(() => Math.max(0, tableScrollState.value.clientHeight - 16))
-const scrollThumbHeight = computed(() => {
-  const { clientHeight, scrollHeight } = tableScrollState.value
-  if (!clientHeight || scrollHeight <= clientHeight) return 0
-  return Math.max(32, scrollTrackHeight.value * clientHeight / scrollHeight)
-})
-const scrollThumbTop = computed(() => {
-  const { top, clientHeight, scrollHeight } = tableScrollState.value
-  const scrollRange = scrollHeight - clientHeight
-  const thumbRange = scrollTrackHeight.value - scrollThumbHeight.value
-  return scrollRange > 0 && thumbRange > 0 ? top / scrollRange * thumbRange : 0
-})
 
 const runColumns = computed<TableColumn<ProbeRunSummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
@@ -256,14 +254,14 @@ onMounted(async () => {
   await probe.connect()
   restoreViewState(probe.selectedRunId.value)
   await loadPage()
-  window.addEventListener('resize', updateScrollMetrics)
+  startScrollTracking()
   pollTimer = setInterval(() => void poll(), 1000)
 })
 
 onBeforeUnmount(() => {
   if (queryTimer) clearTimeout(queryTimer)
   if (pollTimer) clearInterval(pollTimer)
-  window.removeEventListener('resize', updateScrollMetrics)
+  stopScrollTracking()
   for (const [source, timer] of editTimers) {
     clearTimeout(timer)
     void saveTranslation(source)
@@ -543,53 +541,6 @@ function persistViewState() {
     page: page.value,
     pageSize: pageSize.value,
   }))
-}
-
-function tableScrollElement() {
-  return tableShell.value?.querySelector<HTMLElement>('[data-testid="capture-table-scroll"]')
-}
-
-function updateScrollMetrics() {
-  const element = tableScrollElement()
-  if (!element) return
-  tableScrollState.value = {
-    top: element.scrollTop,
-    clientHeight: element.clientHeight,
-    scrollHeight: element.scrollHeight,
-  }
-}
-
-function jumpScrollbar(event: PointerEvent) {
-  const element = tableScrollElement()
-  const track = event.currentTarget as HTMLElement
-  if (!element || !scrollThumbHeight.value) return
-  const bounds = track.getBoundingClientRect()
-  const thumbRange = Math.max(1, bounds.height - scrollThumbHeight.value)
-  const target = Math.min(thumbRange, Math.max(0, event.clientY - bounds.top - scrollThumbHeight.value / 2))
-  element.scrollTop = target / thumbRange * (element.scrollHeight - element.clientHeight)
-  updateScrollMetrics()
-}
-
-function beginScrollbarDrag(event: PointerEvent) {
-  const element = tableScrollElement()
-  if (!element) return
-  scrollDrag = { pointerId: event.pointerId, startY: event.clientY, startTop: element.scrollTop }
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
-}
-
-function dragScrollbar(event: PointerEvent) {
-  const element = tableScrollElement()
-  if (!element || !scrollDrag || scrollDrag.pointerId !== event.pointerId) return
-  const scrollRange = element.scrollHeight - element.clientHeight
-  const thumbRange = scrollTrackHeight.value - scrollThumbHeight.value
-  if (thumbRange <= 0) return
-  element.scrollTop = scrollDrag.startTop + (event.clientY - scrollDrag.startY) * scrollRange / thumbRange
-  updateScrollMetrics()
-}
-
-function endScrollbarDrag(event: PointerEvent) {
-  if (scrollDrag?.pointerId === event.pointerId) scrollDrag = undefined
 }
 
 function softwareName(id: string) {

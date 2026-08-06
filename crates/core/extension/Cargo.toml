@@ -1,0 +1,13 @@
+[package]
+name = "glyphshift-extension"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glyphshift-adapter-registry = { path = "../../adapters/platform/registry" }
+glyphshift-domain = { path = "../domain" }
+
+[lints]
+workspace = true

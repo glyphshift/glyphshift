@@ -1,0 +1,16 @@
+[package]
+name = "glyphshift-runtime-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glyphshift-domain = { path = "../../core/domain" }
+glyphshift-translation = { path = "../../core/translation" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[lints]
+workspace = true

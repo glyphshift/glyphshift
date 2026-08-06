@@ -3,13 +3,14 @@ name = "glyphshift-reference-adapters"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-glyphshift-adapter-sdk = { path = "../../crates/glyphshift-adapter-sdk" }
-glyphshift-domain = { path = "../../crates/glyphshift-domain" }
+glyphshift-adapter-sdk = { path = "../../crates/adapters/platform/sdk" }
+glyphshift-domain = { path = "../../crates/core/domain" }
 
 [lints]
 workspace = true

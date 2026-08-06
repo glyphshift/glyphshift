@@ -15,6 +15,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $metadata = $metadataJson | ConvertFrom-Json
+$publishablePackages = @(
+    $metadata.packages |
+        Where-Object { $null -eq $_.publish } |
+        ForEach-Object { $_.name } |
+        Sort-Object
+)
+if ($publishablePackages.Count -gt 0) {
+    throw "Workspace packages must opt out of registry publishing: $($publishablePackages -join ', ')"
+}
+
+$dependencyContractPackages = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::Ordinal
+)
 
 function Assert-Dependencies {
     param(
@@ -25,6 +38,10 @@ function Assert-Dependencies {
         [AllowEmptyCollection()]
         [string[]] $Expected
     )
+
+    if (-not $script:dependencyContractPackages.Add($PackageName)) {
+        throw "Duplicate dependency contract: $PackageName"
+    }
 
     $package = $metadata.packages |
         Where-Object { $_.name -eq $PackageName } |
@@ -140,6 +157,18 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gdiplus-native' `
     -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-gtk3-pango' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-gtk3-pango-native' `
+    -Expected @('glyphshift-adapter-gtk3-pango', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-qt-painter' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-qt-painter-native' `
+    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-painter', 'retour', 'windows')
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-raylib' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -203,6 +232,9 @@ Assert-Dependencies `
 Assert-Dependencies `
     -PackageName 'glyphshift-translation' `
     -Expected @('glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-workflow' `
+    -Expected @('glyphshift-domain', 'glyphshift-translation')
 Assert-Dependencies `
     -PackageName 'glyphshift-decision' `
     -Expected @('glyphshift-domain', 'glyphshift-translation')
@@ -303,6 +335,9 @@ Assert-Dependencies `
         'glyphshift-isolated-worker-sdk'
     )
 Assert-Dependencies `
+    -PackageName 'glyphshift-windows-runtime-target' `
+    -Expected @('glyphshift-windows-host')
+Assert-Dependencies `
     -PackageName 'glyphshift-dictionary-package' `
     -Expected @('serde', 'serde_json')
 Assert-Dependencies `
@@ -376,35 +411,310 @@ Assert-Dependencies `
         'winreg'
     )
 
-$productionSourceRoots = @(
-    'crates/glyphshift-adapter-registry/src',
-    'crates/glyphshift-adapter-sdk/src',
-    'crates/glyphshift-adapter-native-abi/src',
-    'crates/glyphshift-adapter-native-host/src',
-    'crates/glyphshift-adapter-uia/src',
-    'crates/glyphshift-adapter-uia-worker/src',
-    'crates/glyphshift-controller-sdk/src',
-    'crates/glyphshift-controller-host/src',
-    'crates/glyphshift-controller-windows/src',
-    'crates/glyphshift-capture/src',
-    'crates/glyphshift-desktop-backend/src',
-    'crates/glyphshift-desktop-runtime/src',
-    'crates/glyphshift-domain/src',
-    'crates/glyphshift-extension/src',
-    'crates/glyphshift-isolated-worker-host/src',
-    'crates/glyphshift-isolated-worker-sdk/src',
-    'crates/glyphshift-translation/src',
-    'crates/glyphshift-decision/src',
-    'crates/glyphshift-session/src',
-    'crates/glyphshift-runtime-contract/src',
-    'crates/glyphshift-runtime-kernel/src',
-    'crates/glyphshift-target-runtime-contract/src',
-    'crates/glyphshift-target-process-host/src',
-    'crates/glyphshift-target-runtime/src',
-    'apps/glyphshift-service/src',
-    'apps/glyphshift-desktop/src',
-    'apps/glyphshift-desktop/src-tauri/src'
+function Assert-PackageSet {
+    param(
+        [Parameter(Mandatory)]
+        [string] $SetName,
+
+        [Parameter(Mandatory)]
+        [string[]] $Actual
+    )
+
+    $workspacePackages = @(
+        $metadata.packages |
+            Where-Object { $metadata.workspace_members -contains $_.id } |
+            ForEach-Object { $_.name } |
+            Sort-Object -Unique
+    )
+    $actualSorted = @($Actual | Sort-Object -Unique)
+    $difference = Compare-Object -ReferenceObject $workspacePackages -DifferenceObject $actualSorted
+    if ($difference) {
+        $rendered = $difference |
+            ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+        throw "$SetName workspace coverage failed: $($rendered -join ', ')"
+    }
+}
+
+function Assert-PackagePartition {
+    param(
+        [Parameter(Mandatory)]
+        [string] $PartitionName,
+
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary] $Groups
+    )
+
+    $assigned = @(
+        foreach ($group in $Groups.Keys) {
+            foreach ($packageName in @($Groups[$group])) {
+                $packageName
+            }
+        }
+    )
+    $duplicates = @($assigned | Group-Object | Where-Object { $_.Count -ne 1 })
+    if ($duplicates) {
+        $rendered = $duplicates | ForEach-Object { "$($_.Name) x$($_.Count)" }
+        throw "$PartitionName contains duplicate packages: $($rendered -join ', ')"
+    }
+    Assert-PackageSet -SetName $PartitionName -Actual $assigned
+}
+
+$adapterImplementationPackages = @(
+    'glyphshift-adapter-console',
+    'glyphshift-adapter-console-native',
+    'glyphshift-adapter-direct2d',
+    'glyphshift-adapter-direct2d-native',
+    'glyphshift-adapter-directwrite',
+    'glyphshift-adapter-directwrite-native',
+    'glyphshift-adapter-draw-text-native',
+    'glyphshift-adapter-gdi',
+    'glyphshift-adapter-gdi-native',
+    'glyphshift-adapter-gdi-native-support',
+    'glyphshift-adapter-gdi-text-out-native',
+    'glyphshift-adapter-gdiplus',
+    'glyphshift-adapter-gdiplus-native',
+    'glyphshift-adapter-gtk3-pango',
+    'glyphshift-adapter-gtk3-pango-native',
+    'glyphshift-adapter-qt-painter',
+    'glyphshift-adapter-qt-painter-native',
+    'glyphshift-adapter-raylib',
+    'glyphshift-adapter-raylib-native',
+    'glyphshift-adapter-uia',
+    'glyphshift-adapter-uia-worker'
 )
+$testSupportPackages = @(
+    'glyphshift-reference-adapters',
+    'glyphshift-test-controller-plugin',
+    'glyphshift-test-isolated-worker',
+    'glyphshift-windows-host',
+    'glyphshift-windows-runtime-target'
+)
+
+$packageFamilies = @{
+    Core = @(
+        'glyphshift-capture',
+        'glyphshift-decision',
+        'glyphshift-domain',
+        'glyphshift-extension',
+        'glyphshift-translation',
+        'glyphshift-workflow'
+    )
+    Dictionary = @(
+        'glyphshift-dictionary-distribution',
+        'glyphshift-dictionary-package'
+    )
+    AdapterPlatform = @(
+        'glyphshift-adapter-native-abi',
+        'glyphshift-adapter-native-host',
+        'glyphshift-adapter-registry',
+        'glyphshift-adapter-sdk'
+    )
+    AdapterImplementation = $adapterImplementationPackages
+    Runtime = @(
+        'glyphshift-controller-host',
+        'glyphshift-controller-sdk',
+        'glyphshift-controller-windows',
+        'glyphshift-desktop-runtime',
+        'glyphshift-isolated-worker-host',
+        'glyphshift-isolated-worker-sdk',
+        'glyphshift-protocol',
+        'glyphshift-runtime-contract',
+        'glyphshift-runtime-kernel',
+        'glyphshift-session',
+        'glyphshift-target-process-host',
+        'glyphshift-target-runtime',
+        'glyphshift-target-runtime-contract'
+    )
+    Product = @('glyphshift-desktop-backend')
+    Application = @('glyphshift-desktop-shell', 'glyphshift-service')
+    TestSupport = $testSupportPackages
+}
+
+$dependencyLayers = @{
+    L0 = @(
+        'glyphshift-adapter-sdk',
+        'glyphshift-capture',
+        'glyphshift-controller-sdk',
+        'glyphshift-dictionary-package',
+        'glyphshift-domain',
+        'glyphshift-isolated-worker-sdk',
+        'glyphshift-translation'
+    )
+    L1 = @(
+        'glyphshift-adapter-registry',
+        'glyphshift-decision',
+        'glyphshift-dictionary-distribution',
+        'glyphshift-extension',
+        'glyphshift-runtime-contract',
+        'glyphshift-workflow'
+    )
+    L2 = @(
+        'glyphshift-adapter-native-abi',
+        'glyphshift-protocol',
+        'glyphshift-target-runtime-contract'
+    )
+    Adapter = $adapterImplementationPackages
+    L3 = @(
+        'glyphshift-adapter-native-host',
+        'glyphshift-controller-host',
+        'glyphshift-controller-windows',
+        'glyphshift-isolated-worker-host',
+        'glyphshift-runtime-kernel',
+        'glyphshift-session',
+        'glyphshift-target-process-host',
+        'glyphshift-target-runtime'
+    )
+    L4 = @(
+        'glyphshift-desktop-backend',
+        'glyphshift-desktop-runtime',
+        'glyphshift-service'
+    )
+    L5 = @('glyphshift-desktop-shell')
+    Test = $testSupportPackages
+}
+
+Assert-PackageSet `
+    -SetName 'Exact dependency contracts' `
+    -Actual @($dependencyContractPackages)
+Assert-PackagePartition -PartitionName 'Package families' -Groups $packageFamilies
+Assert-PackagePartition -PartitionName 'Dependency layers' -Groups $dependencyLayers
+
+$allowedDependencyLayers = @{
+    L0 = @('L0')
+    L1 = @('L0', 'L1')
+    L2 = @('L0', 'L1', 'L2')
+    Adapter = @('L0', 'L1', 'L2', 'Adapter')
+    L3 = @('L0', 'L1', 'L2', 'L3')
+    L4 = @('L0', 'L1', 'L2', 'L3', 'L4')
+    L5 = @('L0', 'L1', 'L2', 'L3', 'L4', 'L5')
+    Test = @('L0', 'L1', 'L2', 'Adapter', 'L3', 'L4', 'L5', 'Test')
+}
+
+function Assert-DependencyDirection {
+    param(
+        [Parameter(Mandatory)]
+        [string] $PackageName,
+
+        [Parameter(Mandatory)]
+        [string] $PackageLayer,
+
+        [Parameter(Mandatory)]
+        [string] $DependencyName,
+
+        [Parameter(Mandatory)]
+        [string] $DependencyLayer
+    )
+
+    if ($DependencyLayer -notin $allowedDependencyLayers[$PackageLayer]) {
+        throw "Forbidden dependency direction: $PackageName ($PackageLayer) -> $DependencyName ($DependencyLayer)"
+    }
+}
+
+$layerByPackage = @{}
+foreach ($layer in $dependencyLayers.Keys) {
+    foreach ($packageName in @($dependencyLayers[$layer])) {
+        $layerByPackage[$packageName] = $layer
+    }
+}
+
+foreach ($package in $metadata.packages | Where-Object { $metadata.workspace_members -contains $_.id }) {
+    $packageLayer = $layerByPackage[$package.name]
+    $internalDependencies = @(
+        $package.dependencies |
+            Where-Object {
+                ($null -eq $_.kind -or $_.kind -eq 'normal') -and
+                $layerByPackage.ContainsKey($_.name)
+            }
+    )
+    foreach ($dependency in $internalDependencies) {
+        Assert-DependencyDirection `
+            -PackageName $package.name `
+            -PackageLayer $packageLayer `
+            -DependencyName $dependency.name `
+            -DependencyLayer $layerByPackage[$dependency.name]
+    }
+}
+
+foreach ($validCase in @(
+    @('policy', 'L1', 'foundation', 'L0'),
+    @('adapter', 'Adapter', 'contract', 'L2'),
+    @('test', 'Test', 'shell', 'L5')
+)) {
+    Assert-DependencyDirection `
+        -PackageName $validCase[0] `
+        -PackageLayer $validCase[1] `
+        -DependencyName $validCase[2] `
+        -DependencyLayer $validCase[3]
+}
+
+foreach ($forbiddenCase in @(
+    @('foundation', 'L0', 'host', 'L3'),
+    @('host', 'L3', 'concrete-adapter', 'Adapter'),
+    @('product', 'L4', 'test-support', 'Test')
+)) {
+    $rejected = $false
+    try {
+        Assert-DependencyDirection `
+            -PackageName $forbiddenCase[0] `
+            -PackageLayer $forbiddenCase[1] `
+            -DependencyName $forbiddenCase[2] `
+            -DependencyLayer $forbiddenCase[3]
+    }
+    catch {
+        if ($_.Exception.Message -notlike 'Forbidden dependency direction:*') {
+            throw
+        }
+        $rejected = $true
+    }
+    if (-not $rejected) {
+        throw "Architecture self-test accepted a forbidden dependency: $($forbiddenCase -join ' ')"
+    }
+}
+
+$productionScanPackageNames = @(
+    'glyphshift-adapter-registry',
+    'glyphshift-adapter-sdk',
+    'glyphshift-adapter-native-abi',
+    'glyphshift-adapter-native-host',
+    'glyphshift-adapter-uia',
+    'glyphshift-adapter-uia-worker',
+    'glyphshift-controller-sdk',
+    'glyphshift-controller-host',
+    'glyphshift-controller-windows',
+    'glyphshift-capture',
+    'glyphshift-desktop-backend',
+    'glyphshift-desktop-runtime',
+    'glyphshift-domain',
+    'glyphshift-extension',
+    'glyphshift-isolated-worker-host',
+    'glyphshift-isolated-worker-sdk',
+    'glyphshift-translation',
+    'glyphshift-decision',
+    'glyphshift-session',
+    'glyphshift-runtime-contract',
+    'glyphshift-runtime-kernel',
+    'glyphshift-target-runtime-contract',
+    'glyphshift-target-process-host',
+    'glyphshift-target-runtime',
+    'glyphshift-service',
+    'glyphshift-desktop-shell'
+)
+
+$workspacePackagesByName = @{}
+foreach ($package in $metadata.packages | Where-Object { $metadata.workspace_members -contains $_.id }) {
+    $workspacePackagesByName[$package.name] = $package
+}
+
+$productionSourceRoots = @(
+    foreach ($packageName in $productionScanPackageNames) {
+        if (-not $workspacePackagesByName.ContainsKey($packageName)) {
+            throw "Production source scan package is missing from the workspace: $packageName"
+        }
+        $packageRoot = Split-Path -Parent $workspacePackagesByName[$packageName].manifest_path
+        [System.IO.Path]::GetRelativePath($workspaceRoot, (Join-Path $packageRoot 'src'))
+    }
+)
+$productionSourceRoots += 'apps/glyphshift-desktop/src'
 
 $forbiddenTokens = @(
     'After Effects',

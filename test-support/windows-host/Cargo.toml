@@ -3,15 +3,16 @@ name = "glyphshift-windows-host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-glyphshift-adapter-gdi = { path = "../../crates/glyphshift-adapter-gdi" }
-glyphshift-adapter-gdiplus = { path = "../../crates/glyphshift-adapter-gdiplus" }
-glyphshift-adapter-sdk = { path = "../../crates/glyphshift-adapter-sdk" }
-glyphshift-domain = { path = "../../crates/glyphshift-domain" }
+glyphshift-adapter-gdi = { path = "../../crates/adapters/implementations/gdi" }
+glyphshift-adapter-gdiplus = { path = "../../crates/adapters/implementations/gdiplus" }
+glyphshift-adapter-sdk = { path = "../../crates/adapters/platform/sdk" }
+glyphshift-domain = { path = "../../crates/core/domain" }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

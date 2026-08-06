@@ -1,0 +1,37 @@
+[package]
+name = "glyphshift-adapter-uia-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glyphshift-adapter-uia = { path = "../uia" }
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-isolated-worker-sdk = { path = "../../../runtime/worker/sdk" }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.58"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Accessibility",
+]
+
+[dev-dependencies]
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-isolated-worker-host = { path = "../../../runtime/worker/host" }
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "allow"

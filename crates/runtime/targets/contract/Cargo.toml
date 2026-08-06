@@ -1,0 +1,22 @@
+[package]
+name = "glyphshift-target-runtime-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-decision = { path = "../../../core/decision" }
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-runtime-contract = { path = "../../contract" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+glyphshift-translation = { path = "../../../core/translation" }
+
+[lints]
+workspace = true

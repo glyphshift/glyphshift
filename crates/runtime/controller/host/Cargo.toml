@@ -1,0 +1,25 @@
+[package]
+name = "glyphshift-controller-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+glyphshift-capture = { path = "../../../core/capture" }
+glyphshift-controller-sdk = { path = "../sdk" }
+glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-extension = { path = "../../../core/extension" }
+glyphshift-protocol = { path = "../../protocol" }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
+
+[lints]
+workspace = true

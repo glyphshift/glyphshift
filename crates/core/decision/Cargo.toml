@@ -1,0 +1,16 @@
+[package]
+name = "glyphshift-decision"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+glyphshift-domain = { path = "../domain" }
+glyphshift-translation = { path = "../translation" }
+
+[lints]
+workspace = true
