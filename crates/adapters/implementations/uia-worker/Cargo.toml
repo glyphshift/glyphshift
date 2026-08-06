@@ -20,6 +20,7 @@ glyphshift-acquisition-worker-sdk = { path = "../../../runtime/worker/acquisitio
 glyphshift-adapter-uia = { path = "../uia" }
 glyphshift-capture = { path = "../../../core/capture" }
 glyphshift-isolated-worker-sdk = { path = "../../../runtime/worker/sdk" }
+glyphshift-worker-process-grant = { path = "../../../runtime/worker/process-grant" }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",

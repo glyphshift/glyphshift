@@ -1,5 +1,5 @@
 use super::*;
-use crate::acquisition::{map_acquisition_host_error, AcquisitionExecutor};
+use crate::acquisition::{map_acquisition_host_error, source_policy_for, AcquisitionExecutor};
 use glyphshift_acquisition::{
     AcquisitionAdapter, AcquisitionCandidate, AcquisitionError, DesktopRect, Granularity,
     InteractiveTextAcquisition, Provenance,
@@ -65,7 +65,8 @@ struct AcquisitionCall {
     target: Box<str>,
     grant_platform: Box<str>,
     grant_payload: Box<str>,
-    point: DesktopPoint,
+    selection: InteractiveSelection,
+    source_policy: SourcePolicy,
 }
 
 struct RecordingExecutor {
@@ -73,14 +74,15 @@ struct RecordingExecutor {
 }
 
 impl AcquisitionExecutor for RecordingExecutor {
-    fn acquire_point(
+    fn acquire(
         &self,
         adapter_id: &str,
         target: AuthorizedTarget,
         grant: ControllerWorkerTargetGrant,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         _cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        let source_policy = source_policy_for(selection);
         self.calls
             .lock()
             .expect("acquisition calls")
@@ -89,26 +91,32 @@ impl AcquisitionExecutor for RecordingExecutor {
                 target: target.as_str().into(),
                 grant_platform: grant.platform().into(),
                 grant_payload: grant.payload().into(),
-                point,
+                selection,
+                source_policy,
             });
-        let request = AcquisitionRequest::new(
-            target,
-            InteractiveSelection::Point(point),
-            SourcePolicy::StructuredOnly,
-        );
+        let request = AcquisitionRequest::new(target, selection, source_policy);
+        let point = match selection {
+            InteractiveSelection::Point(point) => point,
+            InteractiveSelection::Region(region) => DesktopPoint::new(region.left(), region.top()),
+            InteractiveSelection::TextRange { start, .. } => start,
+        };
+        let provenance = match source_policy {
+            SourcePolicy::VisualOnly => Provenance::Visual,
+            SourcePolicy::Automatic | SourcePolicy::StructuredOnly => Provenance::Structured,
+        };
         InteractiveTextAcquisition::new([
-            Box::new(PointAdapter(point)) as Box<dyn AcquisitionAdapter>
+            Box::new(PointAdapter(point, provenance)) as Box<dyn AcquisitionAdapter>
         ])
         .acquire(&request)
         .map_err(|_| DesktopAcquisitionError::ProviderUnavailable)
     }
 }
 
-struct PointAdapter(DesktopPoint);
+struct PointAdapter(DesktopPoint, Provenance);
 
 impl AcquisitionAdapter for PointAdapter {
     fn provenance(&self) -> Provenance {
-        Provenance::Structured
+        self.1
     }
 
     fn acquire(
@@ -199,6 +207,40 @@ fn desktop_acquisition_authorizes_each_point_request_and_returns_only_bounded_re
     assert_eq!(calls[0].grant_platform.as_ref(), "synthetic-process-v1");
     assert_eq!(calls[0].grant_payload.as_ref(), "ephemeral-grant-1");
     assert_eq!(calls[1].grant_payload.as_ref(), "ephemeral-grant-2");
+    assert_eq!(
+        calls[0].selection,
+        InteractiveSelection::Point(DesktopPoint::new(-20, 30))
+    );
+    assert_eq!(calls[0].source_policy, SourcePolicy::StructuredOnly);
+}
+
+#[test]
+fn desktop_region_acquisition_uses_visual_only_with_a_fresh_grant() {
+    let authorizations = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut runtime = connect_acquisition_runtime(
+        GrantBehavior::Granted,
+        authorizations.clone(),
+        Box::new(RecordingExecutor {
+            calls: calls.clone(),
+        }),
+    );
+    let region = DesktopRect::new(-320, -120, 320, 120).expect("bounded OCR region");
+
+    runtime
+        .acquire_region(
+            1,
+            "windows.ocr.acquire",
+            region,
+            &DesktopAcquisitionCancellation::new(),
+        )
+        .expect("desktop region acquisition");
+
+    assert_eq!(authorizations.load(Ordering::SeqCst), 1);
+    let calls = calls.lock().expect("acquisition calls");
+    assert_eq!(calls[0].adapter_id.as_ref(), "windows.ocr.acquire");
+    assert_eq!(calls[0].selection, InteractiveSelection::Region(region));
+    assert_eq!(calls[0].source_policy, SourcePolicy::VisualOnly);
 }
 
 #[test]

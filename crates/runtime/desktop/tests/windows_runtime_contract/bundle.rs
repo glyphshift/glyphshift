@@ -36,13 +36,29 @@ fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_transl
         .translation_adapter_ids()
         .iter()
         .any(|adapter_id| adapter_id.as_ref() == TEST_UIA_OBSERVER_ID));
-    assert_eq!(
-        bundle.acquisition_worker_ids(),
-        [Box::<str>::from("windows.uia.acquire")]
-    );
+    let acquisition_worker_ids = bundle.acquisition_worker_ids();
+    assert!(acquisition_worker_ids
+        .iter()
+        .any(|adapter_id| adapter_id.as_ref() == "windows.uia.acquire"));
     bundle
         .acquisition_worker_host("windows.uia.acquire")
         .expect("verified UIA acquisition worker host");
+    if acquisition_worker_ids
+        .iter()
+        .any(|adapter_id| adapter_id.as_ref() == "windows.ocr.acquire")
+    {
+        bundle
+            .acquisition_worker_host("windows.ocr.acquire")
+            .expect("verified OCR acquisition worker host");
+    }
+    let pool = DesktopRuntimePool::new(bundle);
+    assert!(pool.supports_acquisition_adapter("windows.uia.acquire"));
+    assert_eq!(
+        pool.supports_acquisition_adapter("windows.ocr.acquire"),
+        acquisition_worker_ids
+            .iter()
+            .any(|adapter_id| adapter_id.as_ref() == "windows.ocr.acquire")
+    );
 }
 
 #[test]

@@ -94,6 +94,7 @@ struct WorkflowRuntimeCalls {
     capture_publications: Vec<(Box<str>, RuntimePublication)>,
     software_removed: Vec<Box<str>>,
     point_acquisitions: Vec<(Box<str>, u64, Box<str>, DesktopPoint)>,
+    region_acquisitions: Vec<(Box<str>, Box<str>, DesktopRect)>,
 }
 
 struct RecordingWorkflowRuntime {
@@ -103,6 +104,10 @@ struct RecordingWorkflowRuntime {
 }
 
 impl WorkflowRuntimeService for RecordingWorkflowRuntime {
+    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
+        matches!(adapter_id, "windows.uia.acquire" | "windows.ocr.acquire")
+    }
+
     fn activate_workflow(
         &mut self,
         intent: &glyphshift_desktop_backend::EffectiveWorkflowIntent,
@@ -249,6 +254,25 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
         Ok(fixture_acquisition_result("Open", point))
     }
 
+    fn acquire_primary_region(
+        &mut self,
+        software_id: &str,
+        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        region: DesktopRect,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        self.calls
+            .lock()
+            .map_err(|_| DesktopAcquisitionError::InvalidState)?
+            .region_acquisitions
+            .push((software_id.into(), adapter_id.into(), region));
+        Ok(fixture_region_acquisition_result("Open", region))
+    }
+
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         self.calls
             .lock()
@@ -314,11 +338,12 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
 
 struct FixtureAcquisitionAdapter {
     source: Box<str>,
+    provenance: Provenance,
 }
 
 impl AcquisitionAdapter for FixtureAcquisitionAdapter {
     fn provenance(&self) -> Provenance {
-        Provenance::Structured
+        self.provenance
     }
 
     fn acquire(
@@ -338,6 +363,7 @@ fn fixture_acquisition_result(source: &str, point: DesktopPoint) -> AcquisitionR
     let target = AuthorizedTarget::new("fixture-target").expect("fixture target");
     InteractiveTextAcquisition::new([Box::new(FixtureAcquisitionAdapter {
         source: source.into(),
+        provenance: Provenance::Structured,
     }) as Box<dyn AcquisitionAdapter>])
     .acquire(&AcquisitionRequest::new(
         target,
@@ -345,6 +371,20 @@ fn fixture_acquisition_result(source: &str, point: DesktopPoint) -> AcquisitionR
         SourcePolicy::StructuredOnly,
     ))
     .expect("fixture acquisition result")
+}
+
+fn fixture_region_acquisition_result(source: &str, region: DesktopRect) -> AcquisitionResult {
+    let target = AuthorizedTarget::new("fixture-target").expect("fixture target");
+    InteractiveTextAcquisition::new([Box::new(FixtureAcquisitionAdapter {
+        source: source.into(),
+        provenance: Provenance::Visual,
+    }) as Box<dyn AcquisitionAdapter>])
+    .acquire(&AcquisitionRequest::new(
+        target,
+        InteractiveSelection::Region(region),
+        SourcePolicy::VisualOnly,
+    ))
+    .expect("fixture visual acquisition result")
 }
 
 fn workflow_application() -> (

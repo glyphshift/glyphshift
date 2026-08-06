@@ -1,6 +1,8 @@
+mod ocr;
 mod render;
 mod uia;
 
+pub use ocr::run_ocr_capture_server;
 pub use render::{
     render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, render_gdiplus_text,
     render_raw_direct2d_text, render_raw_direct2d_wic_text,

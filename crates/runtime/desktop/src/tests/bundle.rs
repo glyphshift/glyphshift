@@ -6,7 +6,7 @@ fn rejects_a_manifest_that_self_authorizes_an_unknown_bundle_authority() {
     fs::write(
         root.path().join("runtime-bundle.json"),
         r#"{
-          "schema":"glyphshift.runtime-bundle/2",
+          "schema":"glyphshift.runtime-bundle/3",
           "authority":"example.untrusted",
           "controller":{"artifact":"windows","file":"controller.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":[1,0]},
           "runtime":{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
@@ -28,7 +28,7 @@ fn rejects_parent_paths_before_loading_native_code() {
     fs::write(
         root.path().join("runtime-bundle.json"),
         r#"{
-          "schema":"glyphshift.runtime-bundle/2",
+          "schema":"glyphshift.runtime-bundle/3",
           "authority":"app.glyphshift.runtime.first-party",
           "controller":{"artifact":"windows","file":"../controller.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":[1,0]},
           "runtime":{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
@@ -59,7 +59,7 @@ fn rejects_runtime_bytes_that_do_not_match_the_manifest_before_loading_adapters(
         root.path().join("runtime-bundle.json"),
         format!(
             r#"{{
-              "schema":"glyphshift.runtime-bundle/2",
+              "schema":"glyphshift.runtime-bundle/3",
               "authority":"app.glyphshift.runtime.first-party",
               "controller":{{"artifact":"windows","file":"controller.exe","sha256":"{controller_hash}","protocol":[1,0]}},
               "runtime":{{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}},
@@ -119,6 +119,7 @@ fn acquisition_manifest(file: &str, hash: Box<str>, adapter_id: &str) -> Acquisi
         file: file.into(),
         sha256: hash,
         adapter_id: adapter_id.into(),
+        support_files: Vec::new(),
     }
 }
 
@@ -195,19 +196,74 @@ fn acquisition_worker_catalog_rejects_duplicate_missing_tampered_and_parent_arti
             )],
         )
         .err(),
-        Some(DesktopRuntimeError::InvalidArtifactPath)
+        Some(DesktopRuntimeError::InvalidManifest)
     );
 }
 
 #[test]
-fn runtime_bundle_two_requires_acquisition_workers() {
+fn acquisition_worker_catalog_verifies_every_support_file() {
+    let root = tempdir().expect("bundle root");
+    let worker_bytes = b"synthetic acquisition worker";
+    let model_bytes = b"synthetic language model";
+    fs::write(root.path().join("worker.exe"), worker_bytes).expect("worker artifact");
+    fs::write(root.path().join("model.bin"), model_bytes).expect("support artifact");
+    let support = AcquisitionSupportFileManifest {
+        file: "model.bin".into(),
+        sha256: sha256(model_bytes),
+    };
+    let manifest = || AcquisitionWorkerManifest {
+        file: "worker.exe".into(),
+        sha256: sha256(worker_bytes),
+        adapter_id: "windows.ocr.acquire".into(),
+        support_files: vec![support.clone()],
+    };
+
+    AcquisitionWorkerCatalog::load(root.path(), &[manifest()]).expect("support artifact verified");
+
+    fs::write(root.path().join("model.bin"), b"tampered model").expect("tamper support");
+    assert_eq!(
+        AcquisitionWorkerCatalog::load(root.path(), &[manifest()]).err(),
+        Some(DesktopRuntimeError::ArtifactHashMismatch)
+    );
+
+    let mut duplicate = manifest();
+    duplicate
+        .support_files
+        .push(AcquisitionSupportFileManifest {
+            file: "MODEL.bin".into(),
+            ..support
+        });
+    assert_eq!(
+        AcquisitionWorkerCatalog::load(root.path(), &[duplicate]).err(),
+        Some(DesktopRuntimeError::InvalidManifest)
+    );
+}
+
+#[test]
+fn runtime_bundle_three_requires_acquisition_workers() {
     let result = serde_json::from_str::<BundleManifest>(
         r#"{
-          "schema":"glyphshift.runtime-bundle/2",
+          "schema":"glyphshift.runtime-bundle/3",
           "authority":"app.glyphshift.runtime.first-party",
           "controller":{"artifact":"windows","file":"controller.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":[1,0]},
           "runtime":{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
           "adapters":[]
+        }"#,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn runtime_bundle_three_requires_explicit_acquisition_support_files() {
+    let result = serde_json::from_str::<BundleManifest>(
+        r#"{
+          "schema":"glyphshift.runtime-bundle/3",
+          "authority":"app.glyphshift.runtime.first-party",
+          "controller":{"artifact":"windows","file":"controller.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","protocol":[1,0]},
+          "runtime":{"file":"runtime.dll","sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+          "adapters":[],
+          "acquisition_workers":[{"file":"worker.exe","sha256":"0000000000000000000000000000000000000000000000000000000000000000","adapter_id":"windows.uia.acquire"}]
         }"#,
     );
 

@@ -39,23 +39,23 @@ pub enum DesktopAcquisitionError {
 }
 
 pub(super) trait AcquisitionExecutor: Send {
-    fn acquire_point(
+    fn acquire(
         &self,
         adapter_id: &str,
         target: AuthorizedTarget,
         grant: ControllerWorkerTargetGrant,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
 }
 
 impl AcquisitionExecutor for AcquisitionWorkerCatalog {
-    fn acquire_point(
+    fn acquire(
         &self,
         adapter_id: &str,
         target: AuthorizedTarget,
         grant: ControllerWorkerTargetGrant,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         let host = self
@@ -68,13 +68,18 @@ impl AcquisitionExecutor for AcquisitionWorkerCatalog {
             grant.payload(),
         )
         .map_err(map_acquisition_host_error)?;
-        let request = AcquisitionRequest::new(
-            target,
-            InteractiveSelection::Point(point),
-            SourcePolicy::StructuredOnly,
-        );
+        let request = AcquisitionRequest::new(target, selection, source_policy_for(selection));
         host.acquire(&binding, &request, cancellation.worker_token())
             .map_err(map_acquisition_host_error)
+    }
+}
+
+pub(super) const fn source_policy_for(selection: InteractiveSelection) -> SourcePolicy {
+    match selection {
+        InteractiveSelection::Point(_) | InteractiveSelection::TextRange { .. } => {
+            SourcePolicy::StructuredOnly
+        }
+        InteractiveSelection::Region(_) => SourcePolicy::VisualOnly,
     }
 }
 

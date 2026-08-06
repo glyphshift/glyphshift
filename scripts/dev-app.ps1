@@ -1,10 +1,18 @@
 [CmdletBinding()]
 param(
-    [switch]$Detached
+    [switch]$Detached,
+
+    [switch]$IncludeOcrCandidate,
+
+    [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ($env:GLYPHSHIFT_DEV_INCLUDE_OCR_CANDIDATE -eq '1') {
+    $IncludeOcrCandidate = $true
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
@@ -21,6 +29,11 @@ if ($Detached) {
     $stderrPath = Join-Path $localTaskRoot 'stderr.log'
     $taskPath = Join-Path $localTaskRoot 'task.pid'
     $powershellPath = (Get-Process -Id $PID).Path
+
+    if ($IncludeOcrCandidate) {
+        $env:GLYPHSHIFT_DEV_INCLUDE_OCR_CANDIDATE = '1'
+        $env:GLYPHSHIFT_OCR_SUPPORT_ROOT = $OcrSupportRoot
+    }
 
     $task = Start-Process `
         -FilePath $powershellPath `
@@ -113,12 +126,18 @@ if ($dependenciesNeedRepair) {
 New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 $env:CARGO_TARGET_DIR = $cargoTargetDir
 
-& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') `
-    -Profile Debug `
-    -OutputRoot $runtimeBundleRoot `
-    -CargoTargetDir $cargoTargetDir `
-    -IncludeTestTarget `
-    -KeepExistingOutput
+$runtimeBundleArguments = @{
+    Profile = 'Debug'
+    OutputRoot = $runtimeBundleRoot
+    CargoTargetDir = $cargoTargetDir
+    IncludeTestTarget = $true
+    KeepExistingOutput = $true
+}
+if ($IncludeOcrCandidate) {
+    $runtimeBundleArguments.IncludeOcrCandidate = $true
+    $runtimeBundleArguments.OcrSupportRoot = $OcrSupportRoot
+}
+& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments
 $env:GLYPHSHIFT_RUNTIME_ROOT = $runtimeBundleRoot
 
 Write-Output 'Verifying the desktop Runtime against isolated target processes...'

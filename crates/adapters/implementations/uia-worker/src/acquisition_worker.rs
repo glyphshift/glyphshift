@@ -1,6 +1,4 @@
-use super::windows_support::{
-    authorize_process_target, process_started_at, ComApartment, ProcessInstance, WindowsTargetError,
-};
+use super::windows_support::ComApartment;
 use glyphshift_acquisition::{
     AcquisitionAdapter, AcquisitionError, AcquisitionRequest, AcquisitionResult, AuthorizedTarget,
     DesktopPoint, DesktopRect, InteractiveSelection, InteractiveTextAcquisition,
@@ -9,6 +7,9 @@ use glyphshift_acquisition_worker_sdk::{AcquisitionWorker, WorkerAcquisitionRequ
 use glyphshift_adapter_uia::{
     UiaAcquisitionAdapter, UiaAcquisitionSnapshot, UiaSelectionSource, UiaTextSelection,
     ACQUISITION_ADAPTER_ID,
+};
+use glyphshift_worker_process_grant::{
+    authorize_process_target, process_started_at, AuthorizedProcess, ProcessGrantError,
 };
 use std::ffi::c_void;
 use windows::core::BSTR;
@@ -42,7 +43,7 @@ impl AcquisitionWorker for WindowsUiaAcquisitionWorker {
             request.target_grant().payload(),
         )
         .map_err(map_target_error)?;
-        let apartment = ComApartment::enter().map_err(map_target_error)?;
+        let apartment = ComApartment::enter().map_err(|_| AcquisitionError::ProviderUnavailable)?;
         let automation = unsafe {
             CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
         }
@@ -64,7 +65,7 @@ impl AcquisitionWorker for WindowsUiaAcquisitionWorker {
 
 struct WindowsUiaSelectionSource {
     automation: IUIAutomation,
-    process: ProcessInstance,
+    process: AuthorizedProcess,
     local_target: AuthorizedTarget,
     _apartment: ComApartment,
 }
@@ -76,7 +77,7 @@ impl UiaSelectionSource for WindowsUiaSelectionSource {
         selection: InteractiveSelection,
     ) -> Result<UiaAcquisitionSnapshot, AcquisitionError> {
         if target != &self.local_target
-            || process_started_at(self.process.process_id) != Some(self.process.started_at)
+            || process_started_at(self.process.process_id()) != Some(self.process.started_at())
         {
             return Err(AcquisitionError::TargetMismatch);
         }
@@ -192,7 +193,7 @@ impl WindowsUiaSelectionSource {
     fn validate_element(&self, element: &IUIAutomationElement) -> Result<(), AcquisitionError> {
         let process_id =
             unsafe { element.CurrentProcessId() }.map_err(|error| map_read_error(&error))?;
-        if process_id <= 0 || process_id as u32 != self.process.process_id {
+        if process_id <= 0 || process_id as u32 != self.process.process_id() {
             return Err(AcquisitionError::TargetMismatch);
         }
         let password = unsafe { element.CurrentIsPassword() }
@@ -321,13 +322,12 @@ fn bstr_string(value: BSTR) -> String {
     value.to_string()
 }
 
-fn map_target_error(error: WindowsTargetError) -> AcquisitionError {
+fn map_target_error(error: ProcessGrantError) -> AcquisitionError {
     match error {
-        WindowsTargetError::ActivationRejected
-        | WindowsTargetError::InvalidGrant
-        | WindowsTargetError::TargetChanged => AcquisitionError::TargetMismatch,
-        WindowsTargetError::PermissionDenied => AcquisitionError::PermissionDenied,
-        WindowsTargetError::ComUnavailable => AcquisitionError::ProviderUnavailable,
+        ProcessGrantError::ActivationRejected
+        | ProcessGrantError::InvalidGrant
+        | ProcessGrantError::TargetChanged => AcquisitionError::TargetMismatch,
+        ProcessGrantError::PermissionDenied => AcquisitionError::PermissionDenied,
     }
 }
 

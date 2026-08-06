@@ -55,8 +55,9 @@ Glyphshift 让用户在不修改软件安装文件的前提下，为多个桌面
   保存软件记录，也不绕过同一套接入预检。
 - 软件支持行级与批量删除；仍被 Workflow 或 Probe Run 引用时必须保留记录并说明引用数量与解除
   方法，不静默失败、不级联删除相关资产，也不改变现有 Runtime 状态。
-- Runtime Bundle `/2` 只接受产品内置的第一方 authority，并在加载 Native artifact 前验证清单路径
-  与 SHA-256；Release Bundle 不携带合成测试宿主。清单 authority 不等同于在线签名或证书服务。
+- Runtime Bundle `/3` 只接受产品内置的第一方 authority，并在加载 Native artifact、Acquisition Worker
+  及其 `support_files` 前逐件验证清单路径与 SHA-256；Release Bundle 不携带合成测试宿主。清单
+  authority 不等同于在线签名或证书服务。
 - Windows 安装候选嵌入已验证的 Release Runtime Bundle；未配置代码签名时明确标记为本地
   unsigned candidate，不自动安装，也不冒充公共发行版。
 - Dictionary 是唯一翻译内容资产；Probe Run 只保存任务状态与 Dictionary 引用，Observation Index

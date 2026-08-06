@@ -12,6 +12,10 @@ import type {
 } from '../model'
 
 type Phase = 'setup' | 'armed' | 'capturing' | 'result' | 'error'
+type AcquisitionMode = 'structured' | 'visualOcr'
+interface InteractiveTranslationCapabilities {
+  visualOcrAvailable: boolean
+}
 
 const props = defineProps<{
   open: boolean
@@ -27,6 +31,9 @@ const dictionaryId = ref('')
 const shortcut = ref('Ctrl+Shift+F9')
 const result = ref<InteractiveTranslationResult | null>(null)
 const error = ref('')
+const errorCode = ref('')
+const acquisitionMode = ref<AcquisitionMode>('structured')
+const visualOcrAvailable = ref(false)
 const copiedIndex = ref<number | null>(null)
 const busy = ref(false)
 let unlistenNative: UnlistenFn | null = null
@@ -44,6 +51,9 @@ const selectedSoftware = computed(() => props.software.find(item => item.id === 
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === dictionaryId.value))
 const canArm = computed(() => Boolean(softwareId.value && dictionaryId.value && !busy.value))
 const translatedCount = computed(() => result.value?.blocks.filter(block => block.translationState === 'translated').length ?? 0)
+const visualResult = computed(() => result.value?.blocks.some(block => block.provenance === 'visual') ?? false)
+const uiaReturnedNoText = computed(() => phase.value === 'error' && errorCode.value === 'acquisition.no_text')
+const canRetryWithOcr = computed(() => uiaReturnedNoText.value && visualOcrAvailable.value && !busy.value)
 
 function hasDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
@@ -53,6 +63,9 @@ function reset() {
   phase.value = 'setup'
   result.value = null
   error.value = ''
+  errorCode.value = ''
+  acquisitionMode.value = 'structured'
+  visualOcrAvailable.value = false
   copiedIndex.value = null
   busy.value = false
 }
@@ -70,7 +83,22 @@ watch(() => props.open, open => {
   if (!open) return
   chooseDefaults()
   reset()
+  void refreshCapabilities()
 })
+
+async function refreshCapabilities() {
+  if (!hasDesktopRuntime()) {
+    visualOcrAvailable.value = true
+    return
+  }
+  try {
+    const capabilities = await invoke<InteractiveTranslationCapabilities>('desktop_interactive_translation_capabilities')
+    visualOcrAvailable.value = capabilities.visualOcrAvailable
+  }
+  catch {
+    visualOcrAvailable.value = false
+  }
+}
 
 function receive(event: InteractiveTranslationEvent) {
   shortcut.value = event.shortcut
@@ -78,14 +106,17 @@ function receive(event: InteractiveTranslationEvent) {
   if (event.state === 'capturing') {
     phase.value = 'capturing'
     error.value = ''
+    errorCode.value = ''
     return
   }
   if (event.state === 'presented') {
     result.value = event.result
     phase.value = 'result'
     error.value = ''
+    errorCode.value = ''
     return
   }
+  errorCode.value = event.error.code
   error.value = translateCommandError(event.error)
   phase.value = 'error'
 }
@@ -102,7 +133,7 @@ function browserResult(): InteractiveTranslationResult {
       source: 'Open',
       anchors: [{ left: 10, top: 20, right: 80, bottom: 44 }],
       granularity: 'control',
-      provenance: 'structured',
+      provenance: acquisitionMode.value === 'visualOcr' ? 'visual' : 'structured',
       translation: translated ? '打开' : undefined,
       translationState: translated ? 'translated' : 'missing',
       origin: translated ? 'dictionary' : undefined,
@@ -132,15 +163,21 @@ async function connectEvents() {
   }
 }
 
-async function arm() {
+async function arm(mode: AcquisitionMode = 'structured') {
   if (!canArm.value) return
   busy.value = true
   error.value = ''
+  errorCode.value = ''
   result.value = null
+  acquisitionMode.value = mode
   try {
     shortcut.value = hasDesktopRuntime()
       ? await invoke<string>('desktop_arm_interactive_translation', {
-          request: { softwareId: softwareId.value, dictionaryId: dictionaryId.value },
+          request: {
+            softwareId: softwareId.value,
+            dictionaryId: dictionaryId.value,
+            acquisitionMode: mode,
+          },
         })
       : 'Ctrl+Shift+F9'
     phase.value = 'armed'
@@ -155,7 +192,7 @@ async function arm() {
 }
 
 async function cancelNative() {
-  if (!hasDesktopRuntime() || !['armed', 'capturing'].includes(phase.value)) return
+  if (!hasDesktopRuntime()) return
   try {
     await invoke('desktop_cancel_interactive_translation')
   }
@@ -173,7 +210,12 @@ async function close() {
 async function retry() {
   await cancelNative()
   phase.value = 'setup'
-  await arm()
+  await arm('structured')
+}
+
+async function retryWithOcr() {
+  if (!canRetryWithOcr.value) return
+  await arm('visualOcr')
 }
 
 async function copyBlock(index: number) {
@@ -194,6 +236,7 @@ async function copyBlock(index: number) {
 onMounted(() => {
   window.addEventListener('keydown', handleBrowserShortcut)
   void connectEvents()
+  if (props.open) void refreshCapabilities()
 })
 
 onBeforeUnmount(() => {
@@ -270,8 +313,8 @@ onBeforeUnmount(() => {
 
       <div v-else-if="phase === 'armed'" class="py-6 text-center" data-testid="interactive-translation-armed">
         <span class="mx-auto grid h-12 w-12 place-items-center rounded-full border border-[var(--accent)]/30 bg-[var(--selection)] text-[var(--accent)]"><UIcon name="i-tabler-crosshair" class="size-6" /></span>
-        <h3 class="mt-4 text-[14px] font-semibold text-[var(--text)]">{{ t('interactiveTranslation.armedTitle') }}</h3>
-        <p class="mx-auto mt-2 max-w-[420px] text-[10px] leading-5 text-[var(--text-secondary)]">{{ t('interactiveTranslation.armedDescription', { software: selectedSoftware?.name }) }}</p>
+        <h3 class="mt-4 text-[14px] font-semibold text-[var(--text)]">{{ t(acquisitionMode === 'visualOcr' ? 'interactiveTranslation.ocrArmedTitle' : 'interactiveTranslation.armedTitle') }}</h3>
+        <p class="mx-auto mt-2 max-w-[420px] text-[10px] leading-5 text-[var(--text-secondary)]">{{ t(acquisitionMode === 'visualOcr' ? 'interactiveTranslation.ocrArmedDescription' : 'interactiveTranslation.armedDescription', { software: selectedSoftware?.name }) }}</p>
         <UKbd class="mt-4">{{ shortcut }}</UKbd>
         <p class="mt-3 text-[9px] text-[var(--text-muted)]">{{ t('interactiveTranslation.noMouseHook') }}</p>
       </div>
@@ -279,8 +322,8 @@ onBeforeUnmount(() => {
       <div v-else-if="phase === 'capturing'" class="grid min-h-52 place-items-center text-center" data-testid="interactive-translation-capturing">
         <div>
           <UIcon name="i-tabler-loader-2" class="mx-auto size-7 animate-spin text-[var(--accent)]" />
-          <h3 class="mt-4 text-[13px] font-semibold">{{ t('interactiveTranslation.capturingTitle') }}</h3>
-          <p class="mt-1 text-[10px] text-[var(--text-muted)]">{{ t('interactiveTranslation.capturingDescription') }}</p>
+          <h3 class="mt-4 text-[13px] font-semibold">{{ t(acquisitionMode === 'visualOcr' ? 'interactiveTranslation.ocrCapturingTitle' : 'interactiveTranslation.capturingTitle') }}</h3>
+          <p class="mt-1 text-[10px] text-[var(--text-muted)]">{{ t(acquisitionMode === 'visualOcr' ? 'interactiveTranslation.ocrCapturingDescription' : 'interactiveTranslation.capturingDescription') }}</p>
         </div>
       </div>
 
@@ -290,7 +333,7 @@ onBeforeUnmount(() => {
             <p class="m-0 text-[11px] font-semibold">{{ translatedCount ? t('interactiveTranslation.resultTitle') : t('interactiveTranslation.missingTitle') }}</p>
             <p class="m-0 mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('interactiveTranslation.resultSummary', { translated: translatedCount, total: result.blocks.length }) }}</p>
           </div>
-          <UBadge color="neutral" variant="outline" size="sm" icon="i-tabler-accessible" :label="t('interactiveTranslation.uiaSource')" />
+          <UBadge color="neutral" variant="outline" size="sm" :icon="visualResult ? 'i-tabler-scan' : 'i-tabler-accessible'" :label="t(visualResult ? 'interactiveTranslation.ocrSource' : 'interactiveTranslation.uiaSource')" />
         </div>
 
         <article v-for="(block, index) in result.blocks" :key="`${index}-${block.source}`" class="overflow-hidden rounded-[7px] border border-[var(--border)] bg-[var(--surface)]">
@@ -328,6 +371,7 @@ onBeforeUnmount(() => {
       <div v-else class="space-y-3 py-4" data-testid="interactive-translation-error">
         <UAlert role="alert" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('interactiveTranslation.errorTitle')" :description="error" />
         <p class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('interactiveTranslation.errorHint') }}</p>
+        <p v-if="uiaReturnedNoText && !visualOcrAvailable" class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('interactiveTranslation.ocrUnavailableHint') }}</p>
       </div>
     </template>
 
@@ -335,10 +379,11 @@ onBeforeUnmount(() => {
       <span v-if="phase === 'setup'" class="min-w-0 truncate text-[9px] text-[var(--text-muted)]">{{ selectedSoftware?.name || t('interactiveTranslation.noSelection') }} · {{ selectedDictionary?.metadata.name || t('interactiveTranslation.noSelection') }}</span>
       <span v-else-if="phase === 'armed'" class="text-[9px] text-[var(--text-muted)]">{{ t('interactiveTranslation.waiting') }}</span>
       <span v-else-if="phase === 'capturing'" class="text-[9px] text-[var(--text-muted)]">{{ t('interactiveTranslation.doNotClose') }}</span>
-      <UButton v-if="phase === 'setup'" class="ml-auto" color="primary" size="sm" icon="i-tabler-crosshair" :label="t('interactiveTranslation.start')" :loading="busy" :disabled="!canArm" @click="arm" />
+      <UButton v-if="phase === 'setup'" class="ml-auto" color="primary" size="sm" icon="i-tabler-crosshair" :label="t('interactiveTranslation.start')" :loading="busy" :disabled="!canArm" @click="arm()" />
       <UButton v-else-if="phase === 'armed'" class="ml-auto" color="neutral" variant="outline" size="sm" :label="t('common.cancel')" @click="close" />
       <template v-else-if="phase !== 'capturing'">
-        <UButton class="ml-auto" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('common.retry')" :loading="busy" @click="retry" />
+        <UButton v-if="canRetryWithOcr" class="ml-auto" color="warning" variant="soft" size="sm" icon="i-tabler-scan" :label="t('interactiveTranslation.tryOcr')" :loading="busy" @click="retryWithOcr" />
+        <UButton :class="canRetryWithOcr ? '' : 'ml-auto'" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('common.retry')" :loading="busy" @click="retry" />
         <UButton color="primary" size="sm" :label="t('interactiveTranslation.close')" @click="close" />
       </template>
     </template>

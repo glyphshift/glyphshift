@@ -202,15 +202,15 @@ impl ManagedRuntime for RetryRuntime {
             .start_capture(target_ids, requested_features, capture)
     }
 
-    fn acquire_point(
+    fn acquire(
         &mut self,
         target_id: u64,
         adapter_id: &str,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         self.inner
-            .acquire_point(target_id, adapter_id, point, cancellation)
+            .acquire(target_id, adapter_id, selection, cancellation)
     }
 
     fn publish(
@@ -300,11 +300,11 @@ impl ManagedRuntime for InMemoryRuntime {
         Ok(())
     }
 
-    fn acquire_point(
+    fn acquire(
         &mut self,
         target_id: u64,
         adapter_id: &str,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         if cancellation.is_cancelled() {
@@ -324,14 +324,15 @@ impl ManagedRuntime for InMemoryRuntime {
         }
         let target = AuthorizedTarget::new(format!("target-{target_id}"))
             .map_err(|_| DesktopAcquisitionError::TargetUnavailable)?;
+        let source_policy = crate::acquisition::source_policy_for(selection);
+        let provenance = match source_policy {
+            SourcePolicy::VisualOnly => Provenance::Visual,
+            SourcePolicy::Automatic | SourcePolicy::StructuredOnly => Provenance::Structured,
+        };
         InteractiveTextAcquisition::new([
-            Box::new(FixtureAcquisitionAdapter) as Box<dyn AcquisitionAdapter>
+            Box::new(FixtureAcquisitionAdapter(provenance)) as Box<dyn AcquisitionAdapter>
         ])
-        .acquire(&AcquisitionRequest::new(
-            target,
-            InteractiveSelection::Point(point),
-            SourcePolicy::StructuredOnly,
-        ))
+        .acquire(&AcquisitionRequest::new(target, selection, source_policy))
         .map_err(|_| DesktopAcquisitionError::NoText)
     }
 
@@ -377,11 +378,11 @@ impl ManagedRuntime for InMemoryRuntime {
     }
 }
 
-struct FixtureAcquisitionAdapter;
+struct FixtureAcquisitionAdapter(Provenance);
 
 impl AcquisitionAdapter for FixtureAcquisitionAdapter {
     fn provenance(&self) -> Provenance {
-        Provenance::Structured
+        self.0
     }
 
     fn acquire(

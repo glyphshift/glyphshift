@@ -1,8 +1,9 @@
 use super::*;
 
-const BUNDLE_SCHEMA: &str = "glyphshift.runtime-bundle/2";
+const BUNDLE_SCHEMA: &str = "glyphshift.runtime-bundle/3";
 const FIRST_PARTY_BUNDLE_AUTHORITY: &str = "app.glyphshift.runtime.first-party";
 const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(8);
+const MAX_ACQUISITION_SUPPORT_FILES: usize = 64;
 
 #[derive(Deserialize)]
 pub(super) struct BundleManifest {
@@ -67,6 +68,13 @@ pub(super) struct AcquisitionWorkerManifest {
     pub(super) file: Box<str>,
     pub(super) sha256: Box<str>,
     pub(super) adapter_id: Box<str>,
+    pub(super) support_files: Vec<AcquisitionSupportFileManifest>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(super) struct AcquisitionSupportFileManifest {
+    pub(super) file: Box<str>,
+    pub(super) sha256: Box<str>,
 }
 
 #[derive(Clone, Default)]
@@ -84,8 +92,26 @@ impl AcquisitionWorkerCatalog {
         }
         let mut artifacts = BTreeMap::new();
         for manifest in manifests {
-            if !valid_acquisition_adapter_id(&manifest.adapter_id) {
+            if !valid_acquisition_adapter_id(&manifest.adapter_id)
+                || !valid_acquisition_file_name(&manifest.file)
+                || manifest.support_files.len() > MAX_ACQUISITION_SUPPORT_FILES
+                || manifest
+                    .support_files
+                    .iter()
+                    .any(|support| !valid_acquisition_file_name(&support.file))
+            {
                 return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            let mut declared_files =
+                BTreeSet::from([manifest.file.to_ascii_lowercase().into_boxed_str()]);
+            for support in &manifest.support_files {
+                if !declared_files.insert(support.file.to_ascii_lowercase().into_boxed_str()) {
+                    return Err(DesktopRuntimeError::InvalidManifest);
+                }
+            }
+            for support in &manifest.support_files {
+                let hash = parse_hash(&support.sha256)?;
+                verified_artifact(root, &support.file, hash)?;
             }
             let hash = parse_hash(&manifest.sha256)?;
             let path = verified_artifact(root, &manifest.file, hash)?;
@@ -589,6 +615,14 @@ fn next_nonce(sequence: u64) -> ControllerNonce {
 fn valid_acquisition_adapter_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+fn valid_acquisition_file_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))

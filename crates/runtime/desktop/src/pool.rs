@@ -6,6 +6,10 @@ pub(super) trait RuntimeFactory: Send {
         application_id: Box<str>,
         spec: &DesktopRuntimeSpec,
     ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError>;
+
+    fn supports_acquisition_adapter(&self, _adapter_id: &str) -> bool {
+        false
+    }
 }
 
 impl RuntimeFactory for RuntimeBundle {
@@ -16,6 +20,12 @@ impl RuntimeFactory for RuntimeBundle {
     ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
         RuntimeBundle::discover(self, application_id, spec)
             .map(|runtime| Box::new(runtime) as Box<dyn ManagedRuntime>)
+    }
+
+    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
+        self.acquisition_worker_ids()
+            .iter()
+            .any(|candidate| candidate.as_ref() == adapter_id)
     }
 }
 
@@ -156,6 +166,11 @@ impl DesktopRuntimePool {
     }
 
     #[must_use]
+    pub fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
+        self.factory.supports_acquisition_adapter(adapter_id)
+    }
+
+    #[must_use]
     pub fn status(&self, application_id: &str) -> Option<DesktopRuntimeStatus> {
         self.sessions.get(application_id).map(|runtime| {
             runtime_status(
@@ -207,6 +222,25 @@ impl DesktopRuntimePool {
         point: DesktopPoint,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.acquire(
+            application_id,
+            spec,
+            target_id,
+            adapter_id,
+            InteractiveSelection::Point(point),
+            cancellation,
+        )
+    }
+
+    fn acquire(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        target_id: u64,
+        adapter_id: &str,
+        selection: InteractiveSelection,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         if cancellation.is_cancelled() {
             return Err(DesktopAcquisitionError::Cancelled);
         }
@@ -214,7 +248,7 @@ impl DesktopRuntimePool {
             .factory
             .discover(application_id.into(), spec)
             .map_err(map_runtime_acquisition_error)?;
-        runtime.acquire_point(target_id, adapter_id, point, cancellation)
+        runtime.acquire(target_id, adapter_id, selection, cancellation)
     }
 
     /// Acquires from the Pool's stable primary target selection without exposing target identity
@@ -225,6 +259,41 @@ impl DesktopRuntimePool {
         spec: &DesktopRuntimeSpec,
         adapter_id: &str,
         point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.acquire_primary(
+            application_id,
+            spec,
+            adapter_id,
+            InteractiveSelection::Point(point),
+            cancellation,
+        )
+    }
+
+    /// Acquires a bounded visual region from the Pool's stable primary target selection.
+    pub fn acquire_primary_region(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        adapter_id: &str,
+        region: DesktopRect,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.acquire_primary(
+            application_id,
+            spec,
+            adapter_id,
+            InteractiveSelection::Region(region),
+            cancellation,
+        )
+    }
+
+    fn acquire_primary(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        adapter_id: &str,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         if cancellation.is_cancelled() {
@@ -239,7 +308,7 @@ impl DesktopRuntimePool {
             .first()
             .map(RuntimeTarget::id)
             .ok_or(DesktopAcquisitionError::UnknownTarget)?;
-        runtime.acquire_point(target_id, adapter_id, point, cancellation)
+        runtime.acquire(target_id, adapter_id, selection, cancellation)
     }
 
     pub fn set_features(

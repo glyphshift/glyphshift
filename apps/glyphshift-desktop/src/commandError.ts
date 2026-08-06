@@ -139,6 +139,8 @@ const messageKeys: Record<string, string> = {
   'interactive_translation.invalid_request': 'errors.interactiveTranslation.invalidRequest',
   'interactive_translation.shortcut_unavailable': 'errors.interactiveTranslation.shortcutUnavailable',
   'interactive_translation.request_in_progress': 'errors.interactiveTranslation.requestInProgress',
+  'interactive_translation.ocr_not_eligible': 'errors.interactiveTranslation.ocrNotEligible',
+  'interactive_translation.ocr_unavailable': 'errors.interactiveTranslation.ocrUnavailable',
   'interactive_translation.state_unavailable': 'errors.interactiveTranslation.stateUnavailable',
   'interactive_translation.software_not_found': 'errors.interactiveTranslation.softwareNotFound',
   'interactive_translation.software_not_configured': 'errors.interactiveTranslation.softwareNotConfigured',

@@ -76,6 +76,44 @@ fn primary_point_acquisition_selects_the_first_opaque_target_inside_the_runtime_
 }
 
 #[test]
+fn primary_region_acquisition_uses_the_same_short_lived_runtime_boundary() {
+    let root = tempdir().expect("primary region Runtime data");
+    let executable = root.path().join("PrimaryRegionHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .runtime_spec(&software_id)
+        .expect("region acquisition Runtime spec");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::clone(&calls),
+    }));
+
+    let result = pool
+        .acquire_primary_region(
+            software_id.as_str(),
+            &spec,
+            "test.acquire",
+            DesktopRect::new(10, 20, 650, 260).expect("OCR region"),
+            &DesktopAcquisitionCancellation::new(),
+        )
+        .expect("primary region acquisition");
+
+    assert_eq!(result.blocks()[0].provenance(), Provenance::Visual);
+    assert_eq!(discoveries.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.lock().expect("acquisition calls")[0].1, 1);
+    assert!(pool.status(&software_id).is_none());
+}
+
+#[test]
 fn point_acquisition_does_not_reuse_or_mutate_an_active_workflow_runtime() {
     let root = tempdir().expect("workflow acquisition Runtime data");
     let executable = root.path().join("WorkflowPointHost.exe");

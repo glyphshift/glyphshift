@@ -9,6 +9,10 @@ param(
 
     [switch]$IncludeTestTarget,
 
+    [switch]$IncludeOcrCandidate,
+
+    [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT,
+
     [switch]$KeepExistingOutput
 )
 
@@ -58,6 +62,16 @@ $cargoArguments = @(
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
 }
+if ($IncludeOcrCandidate) {
+    if ([string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
+        throw 'OCR candidate packaging requires -OcrSupportRoot or GLYPHSHIFT_OCR_SUPPORT_ROOT.'
+    }
+    $OcrSupportRoot = (Resolve-Path -LiteralPath $OcrSupportRoot).Path
+    if (-not (Test-Path -LiteralPath $OcrSupportRoot -PathType Container)) {
+        throw 'OCR support root must be an existing directory.'
+    }
+    $cargoArguments += @('-p', 'glyphshift-adapter-ocr-worker')
+}
 if ($Profile -eq 'Release') {
     $cargoArguments += '--release'
 }
@@ -101,6 +115,51 @@ $uiaWorkerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-adapter-uia-worker.exe' 'adapter-uia-worker' 'exe'
 $uiaAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-adapter-uia-acquisition-worker.exe' 'adapter-uia-acquisition-worker' 'exe'
+$ocrAcquisitionWorkerBundle = $null
+$ocrSupportBundles = @()
+if ($IncludeOcrCandidate) {
+    $ocrAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
+        'glyphshift-adapter-ocr-acquisition-worker.exe' 'adapter-ocr-acquisition-worker' 'exe'
+    $requiredOcrSupportNames = @(
+        'tesseract55.dll',
+        'leptonica-1.87.0.dll',
+        'libpng16.dll',
+        'z.dll',
+        'chi_sim.traineddata',
+        'eng.traineddata',
+        'tesseract-LICENSE.txt',
+        'leptonica-LICENSE.txt',
+        'libpng-LICENSE.txt',
+        'zlib-LICENSE.txt',
+        'tessdata-fast-LICENSE.txt',
+        'THIRD-PARTY-NOTICES.txt',
+        'ocr-support.json'
+    )
+    foreach ($requiredName in $requiredOcrSupportNames) {
+        if (-not (Test-Path -LiteralPath (Join-Path $OcrSupportRoot $requiredName) -PathType Leaf)) {
+            throw "Missing required OCR support artifact: $requiredName"
+        }
+    }
+    $ocrSupportFiles = @($requiredOcrSupportNames | ForEach-Object {
+        Get-Item -LiteralPath (Join-Path $OcrSupportRoot $_)
+    } | Sort-Object Name)
+    if ($ocrSupportFiles.Count -gt 64) {
+        throw 'OCR support artifact count exceeds the Runtime Bundle limit.'
+    }
+    $seenOcrSupportNames = @{}
+    foreach ($supportFile in $ocrSupportFiles) {
+        if ($supportFile.Name -notmatch '^[A-Za-z0-9._-]{1,255}$') {
+            throw "Invalid OCR support artifact name: $($supportFile.Name)"
+        }
+        if ($seenOcrSupportNames.ContainsKey($supportFile.Name)) {
+            throw "Duplicate OCR support artifact name: $($supportFile.Name)"
+        }
+        $seenOcrSupportNames[$supportFile.Name] = $true
+        $hash = (Get-FileHash -LiteralPath $supportFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        Copy-Item -LiteralPath $supportFile.FullName -Destination (Join-Path $stagingRoot $supportFile.Name)
+        $ocrSupportBundles += [ordered]@{ file = $supportFile.Name; sha256 = $hash }
+    }
+}
 $consoleBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
@@ -161,8 +220,25 @@ $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layo
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 
+$acquisitionWorkers = @(
+    [ordered]@{
+        file = $uiaAcquisitionWorkerBundle.file
+        sha256 = $uiaAcquisitionWorkerBundle.sha256
+        adapter_id = 'windows.uia.acquire'
+        support_files = @()
+    }
+)
+if ($IncludeOcrCandidate) {
+    $acquisitionWorkers += [ordered]@{
+        file = $ocrAcquisitionWorkerBundle.file
+        sha256 = $ocrAcquisitionWorkerBundle.sha256
+        adapter_id = 'windows.ocr.acquire'
+        support_files = $ocrSupportBundles
+    }
+}
+
 $runtimeManifest = [ordered]@{
-    schema = 'glyphshift.runtime-bundle/2'
+    schema = 'glyphshift.runtime-bundle/3'
     authority = 'app.glyphshift.runtime.first-party'
     controller = [ordered]@{
         artifact = 'windows-generic-controller'
@@ -273,13 +349,7 @@ $runtimeManifest = [ordered]@{
             documentationUrl = $uiaPresentation.documentationUrl
         }
     )
-    acquisition_workers = @(
-        [ordered]@{
-            file = $uiaAcquisitionWorkerBundle.file
-            sha256 = $uiaAcquisitionWorkerBundle.sha256
-            adapter_id = 'windows.uia.acquire'
-        }
-    )
+    acquisition_workers = $acquisitionWorkers
 }
 $runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 6
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
@@ -289,11 +359,15 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
     $utf8WithoutBom
 )
 
+$acquisitionArtifacts = @($runtimeManifest.acquisition_workers | ForEach-Object {
+    $_
+    @($_.support_files)
+})
 $declaredArtifacts = @(
     $runtimeManifest.controller,
     $runtimeManifest.runtime
 ) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers) +
-    @($runtimeManifest.acquisition_workers)
+    $acquisitionArtifacts
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
 if ($IncludeTestTarget) {
     $expectedFiles += 'test-target.exe'

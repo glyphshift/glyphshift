@@ -32,8 +32,9 @@ use glyphshift_desktop_backend::{
 };
 use glyphshift_desktop_runtime::{
     AcquisitionResult, DesktopAcquisitionCancellation, DesktopAcquisitionError, DesktopPoint,
-    DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, HostOperationFailure,
-    RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord, WorkflowReconcileReport,
+    DesktopRect, DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus,
+    HostOperationFailure, RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord,
+    WorkflowReconcileReport,
 };
 use glyphshift_dictionary_distribution::{
     ArtifactStatement, ArtifactTrustVerifier, CatalogPage, CatalogPortError, CatalogQuery,
@@ -199,6 +200,8 @@ struct DesktopProductSnapshot {
 }
 
 trait WorkflowRuntimeService: Send {
+    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool;
+
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -237,6 +240,15 @@ trait WorkflowRuntimeService: Send {
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
 
+    fn acquire_primary_region(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        region: DesktopRect,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
+
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 
     fn control_capture(
@@ -264,6 +276,10 @@ trait WorkflowRuntimeService: Send {
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
+    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
+        DesktopRuntimePool::supports_acquisition_adapter(self, adapter_id)
+    }
+
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -335,6 +351,24 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
             spec,
             adapter_id,
             point,
+            cancellation,
+        )
+    }
+
+    fn acquire_primary_region(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        region: DesktopRect,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        DesktopRuntimePool::acquire_primary_region(
+            self,
+            software_id,
+            spec,
+            adapter_id,
+            region,
             cancellation,
         )
     }
@@ -699,6 +733,7 @@ pub fn run() {
             acquisition::desktop_cancel_point_acquisition,
             interactive_translation::desktop_arm_interactive_translation,
             interactive_translation::desktop_cancel_interactive_translation,
+            interactive_translation::desktop_interactive_translation_capabilities,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,
             probe::desktop_create_probe_run,

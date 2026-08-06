@@ -50,6 +50,27 @@ test('a dictionary miss preserves original text and explains the unavailable pro
   await expect(dialog.getByText('当前版本尚未配置在线翻译服务', { exact: false })).toBeVisible()
 })
 
+test('UIA no-text exposes an explicit bounded OCR retry and labels the visual result', async ({ page }) => {
+  await page.getByRole('button', { name: '取词翻译' }).click()
+  const dialog = page.getByRole('dialog', { name: '取词翻译' })
+  await dialog.getByRole('button', { name: '开始取词' }).click()
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:interactive-translation', {
+    detail: {
+      state: 'failed',
+      shortcut: 'Ctrl+Shift+F9',
+      error: { schemaVersion: 1, code: 'acquisition.no_text', args: {} },
+    },
+  })))
+
+  await expect(dialog.getByRole('button', { name: '尝试 OCR' })).toBeVisible()
+  await dialog.getByRole('button', { name: '尝试 OCR' }).click()
+  await expect(dialog.getByTestId('interactive-translation-armed')).toContainText('只截取这次授权窗口')
+  await page.keyboard.press('Control+Shift+F9')
+
+  await expect(dialog.getByTestId('interactive-translation-result')).toBeVisible()
+  await expect(dialog.getByText('OCR 视觉取词')).toBeVisible()
+})
+
 test('foreground mismatch remains actionable in compact English layout', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify({
     settingsSchemaVersion: 1,
@@ -74,5 +95,6 @@ test('foreground mismatch remains actionable in compact English layout', async (
 
   await expect(dialog.getByRole('alert')).toContainText('foreground application is not the selected software')
   await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Try OCR' })).toHaveCount(0)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/interactive-translation-compact-en.png' })
 })

@@ -63,6 +63,10 @@ impl CommandError {
         self.args.insert(name.into(), value.into());
         self
     }
+
+    pub(crate) fn code(&self) -> &str {
+        &self.code
+    }
 }
 
 #[cfg(test)]

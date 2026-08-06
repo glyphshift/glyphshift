@@ -14,10 +14,7 @@ pub use acquisition_worker::WindowsUiaAcquisitionWorker;
 
 #[cfg(windows)]
 mod windows_worker {
-    use super::windows_support::{
-        authorize_process_target, process_started_at, ComApartment, ProcessInstance,
-        WindowsTargetError,
-    };
+    use super::windows_support::ComApartment;
     use glyphshift_adapter_uia::{
         UiaElementSnapshot, UiaObservationOutcome, UiaObserver, ADAPTER_ID,
     };
@@ -27,6 +24,9 @@ mod windows_worker {
     };
     use glyphshift_isolated_worker_sdk::{
         IsolatedWorker, WireWorkerHealthReport, WorkerActivation, WorkerError,
+    };
+    use glyphshift_worker_process_grant::{
+        authorize_process_target, process_started_at, AuthorizedProcess, ProcessGrantError,
     };
     use std::collections::BTreeSet;
     use std::ffi::c_void;
@@ -142,7 +142,7 @@ mod windows_worker {
 
     struct UiaSession {
         automation: IUIAutomation,
-        target: ProcessInstance,
+        target: AuthorizedProcess,
         adapter_id: Box<str>,
         ingress: CaptureBatchIngress,
         pending: Arc<PendingEvents>,
@@ -155,7 +155,7 @@ mod windows_worker {
 
     impl UiaSession {
         fn start(
-            target: ProcessInstance,
+            target: AuthorizedProcess,
             adapter_id: impl Into<Box<str>>,
             ingress: CaptureBatchIngress,
         ) -> Result<Self, WorkerError> {
@@ -187,10 +187,10 @@ mod windows_worker {
         }
 
         fn refresh_roots(&mut self) -> Result<(), WorkerError> {
-            if process_started_at(self.target.process_id) != Some(self.target.started_at) {
+            if process_started_at(self.target.process_id()) != Some(self.target.started_at()) {
                 return Err(WorkerError::new("target_instance_changed"));
             }
-            let handles = visible_top_level_windows(self.target.process_id);
+            let handles = visible_top_level_windows(self.target.process_id());
             let active = handles.iter().copied().collect::<BTreeSet<_>>();
             let mut retained = Vec::with_capacity(self.roots.len());
             for root in self.roots.drain(..) {
@@ -336,7 +336,7 @@ mod windows_worker {
                     return None;
                 }
             };
-            if process_id < 0 || process_id as u32 != self.target.process_id {
+            if process_id < 0 || process_id as u32 != self.target.process_id() {
                 return None;
             }
             let element_key: Box<str> = match element_key(&self.automation, element) {
@@ -370,7 +370,7 @@ mod windows_worker {
         }
 
         fn health(&self) -> WireWorkerHealthReport {
-            if process_started_at(self.target.process_id) != Some(self.target.started_at) {
+            if process_started_at(self.target.process_id()) != Some(self.target.started_at()) {
                 return WireWorkerHealthReport::degraded("target_instance_changed");
             }
             if self.roots.is_empty() {
@@ -593,7 +593,7 @@ mod windows_worker {
         search.handles
     }
 
-    fn parse_target(activation: &WorkerActivation) -> Result<ProcessInstance, WorkerError> {
+    fn parse_target(activation: &WorkerActivation) -> Result<AuthorizedProcess, WorkerError> {
         authorize_process_target(
             &activation.adapter_id,
             ADAPTER_ID,
@@ -601,11 +601,10 @@ mod windows_worker {
             &activation.target_grant.payload,
         )
         .map_err(|error| match error {
-            WindowsTargetError::ActivationRejected => WorkerError::new("activation_rejected"),
-            WindowsTargetError::InvalidGrant => WorkerError::new("invalid_target_grant"),
-            WindowsTargetError::TargetChanged => WorkerError::new("target_instance_changed"),
-            WindowsTargetError::PermissionDenied => WorkerError::new("uia_permission_denied"),
-            WindowsTargetError::ComUnavailable => WorkerError::new("uia_com_initialization_failed"),
+            ProcessGrantError::ActivationRejected => WorkerError::new("activation_rejected"),
+            ProcessGrantError::InvalidGrant => WorkerError::new("invalid_target_grant"),
+            ProcessGrantError::TargetChanged => WorkerError::new("target_instance_changed"),
+            ProcessGrantError::PermissionDenied => WorkerError::new("uia_permission_denied"),
         })
     }
 

@@ -51,11 +51,11 @@ pub(super) trait ManagedRuntime: Send {
         requested_features: &BTreeSet<Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError>;
-    fn acquire_point(
+    fn acquire(
         &mut self,
         target_id: u64,
         adapter_id: &str,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
     fn publish(
@@ -137,14 +137,14 @@ impl ManagedRuntime for WindowsDesktopRuntime {
         )
     }
 
-    fn acquire_point(
+    fn acquire(
         &mut self,
         target_id: u64,
         adapter_id: &str,
-        point: DesktopPoint,
+        selection: InteractiveSelection,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        DesktopRuntime::acquire_point(self, target_id, adapter_id, point, cancellation)
+        DesktopRuntime::acquire(self, target_id, adapter_id, selection, cancellation)
     }
 
     fn publish(
@@ -274,6 +274,36 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         point: DesktopPoint,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.acquire(
+            target_id,
+            adapter_id,
+            InteractiveSelection::Point(point),
+            cancellation,
+        )
+    }
+
+    pub fn acquire_region(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        region: DesktopRect,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.acquire(
+            target_id,
+            adapter_id,
+            InteractiveSelection::Region(region),
+            cancellation,
+        )
+    }
+
+    fn acquire(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        selection: InteractiveSelection,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
         if cancellation.is_cancelled() {
             return Err(DesktopAcquisitionError::Cancelled);
         }
@@ -291,8 +321,13 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             .map_err(map_acquisition_protocol_error)?;
         let authorized_target = AuthorizedTarget::new(format!("target-{}", target.view.id))
             .map_err(|_| DesktopAcquisitionError::TargetUnavailable)?;
-        self.acquisition
-            .acquire_point(adapter_id, authorized_target, grant, point, cancellation)
+        self.acquisition.acquire(
+            adapter_id,
+            authorized_target,
+            grant,
+            selection,
+            cancellation,
+        )
     }
 
     #[must_use]

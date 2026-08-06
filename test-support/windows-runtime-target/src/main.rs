@@ -2,13 +2,14 @@
 
 use glyphshift_windows_host::{
     render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
-    render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, run_uia_standard_control_server,
-    write_raw_console,
+    render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, run_ocr_capture_server,
+    run_uia_standard_control_server, write_raw_console,
 };
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 const CONSOLE_CHILD_ARGUMENT: &str = "--console-child-server";
+const OCR_CAPTURE_TARGET_ARGUMENT: &str = "--ocr-capture-fixture";
 const UIA_TARGET_ARGUMENT: &str = "--uia-standard-controls";
 const PARENT_CONSOLE_TEXT: &str = "ParentConsoleText";
 const CHILD_CONSOLE_TEXT: &str = "ChildConsoleText";
@@ -109,6 +110,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|value| value.parse::<u64>().ok())
             .map(std::time::Duration::from_millis);
         return run_uia_standard_control_server(keepalive).map_err(Into::into);
+    }
+    if arguments
+        .iter()
+        .any(|argument| argument == OCR_CAPTURE_TARGET_ARGUMENT)
+    {
+        let protected = arguments.iter().any(|argument| argument == "--protected");
+        let negative_origin = arguments
+            .iter()
+            .any(|argument| argument == "--negative-origin");
+        return run_ocr_capture_server(protected, negative_origin).map_err(Into::into);
     }
     if arguments
         .iter()

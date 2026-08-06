@@ -9,13 +9,30 @@ use glyphshift_interactive_translation::{
 const INTERACTIVE_TRANSLATION_EVENT: &str = "interactive-translation";
 const INTERACTIVE_TRANSLATION_SHORTCUT: &str = "Ctrl+Shift+F9";
 const UIA_ACQUISITION_ADAPTER_ID: &str = "windows.uia.acquire";
+const OCR_ACQUISITION_ADAPTER_ID: &str = "windows.ocr.acquire";
+const OCR_REGION_HALF_WIDTH: i32 = 320;
+const OCR_REGION_HALF_HEIGHT: i32 = 120;
 const MAX_SELECTION_ID_BYTES: usize = 256;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum InteractiveTranslationAcquisitionMode {
+    Structured,
+    VisualOcr,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct InteractiveTranslationCapabilitiesView {
+    visual_ocr_available: bool,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct InteractiveTranslationArmRequest {
     software_id: Box<str>,
     dictionary_id: Box<str>,
+    acquisition_mode: InteractiveTranslationAcquisitionMode,
 }
 
 impl InteractiveTranslationArmRequest {
@@ -34,7 +51,24 @@ impl InteractiveTranslationArmRequest {
         Self {
             software_id: software_id.into(),
             dictionary_id: dictionary_id.into(),
+            acquisition_mode: InteractiveTranslationAcquisitionMode::Structured,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn visual_ocr(
+        software_id: impl Into<Box<str>>,
+        dictionary_id: impl Into<Box<str>>,
+    ) -> Self {
+        Self {
+            software_id: software_id.into(),
+            dictionary_id: dictionary_id.into(),
+            acquisition_mode: InteractiveTranslationAcquisitionMode::VisualOcr,
+        }
+    }
+
+    fn same_selection(&self, other: &Self) -> bool {
+        self.software_id == other.software_id && self.dictionary_id == other.dictionary_id
     }
 }
 
@@ -80,6 +114,7 @@ enum InteractiveTranslationEvent {
 #[derive(Clone)]
 struct ActiveInteractiveTranslation {
     generation: u64,
+    request: InteractiveTranslationArmRequest,
     cancellation: DesktopAcquisitionCancellation,
 }
 
@@ -88,6 +123,7 @@ pub(super) struct InteractiveTranslationCaptureState {
     shortcut_available: bool,
     armed: Option<InteractiveTranslationArmRequest>,
     active: Option<ActiveInteractiveTranslation>,
+    ocr_retry: Option<InteractiveTranslationArmRequest>,
     next_generation: u64,
 }
 
@@ -102,6 +138,21 @@ impl InteractiveTranslationCaptureState {
             return Err(CommandError::new(
                 "interactive_translation.request_in_progress",
             ));
+        }
+        match request.acquisition_mode {
+            InteractiveTranslationAcquisitionMode::Structured => self.ocr_retry = None,
+            InteractiveTranslationAcquisitionMode::VisualOcr => {
+                let eligible = self
+                    .ocr_retry
+                    .as_ref()
+                    .is_some_and(|previous| previous.same_selection(&request));
+                if !eligible {
+                    return Err(CommandError::new(
+                        "interactive_translation.ocr_not_eligible",
+                    ));
+                }
+                self.ocr_retry = None;
+            }
         }
         self.armed = Some(request);
         Ok(())
@@ -123,23 +174,26 @@ impl InteractiveTranslationCaptureState {
         let cancellation = DesktopAcquisitionCancellation::new();
         self.active = Some(ActiveInteractiveTranslation {
             generation,
+            request: request.clone(),
             cancellation: cancellation.clone(),
         });
         Some((generation, request, cancellation))
     }
 
-    fn finish(&mut self, generation: u64) {
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.generation == generation)
-        {
-            self.active = None;
+    fn finish(&mut self, generation: u64, ocr_eligible: bool) {
+        if self.active.as_ref().map(|active| active.generation) == Some(generation) {
+            if let Some(active) = self.active.take() {
+                self.ocr_retry = (ocr_eligible
+                    && active.request.acquisition_mode
+                        == InteractiveTranslationAcquisitionMode::Structured)
+                    .then_some(active.request);
+            }
         }
     }
 
     fn cancel(&mut self) {
         self.armed = None;
+        self.ocr_retry = None;
         if let Some(active) = self.active.take() {
             active.cancellation.cancel();
         }
@@ -160,9 +214,20 @@ struct PreparedInteractiveTranslation {
     dictionary_id: Box<str>,
     dictionary_entries: BTreeMap<Box<str>, Box<str>>,
     locales: TranslationLocales,
+    acquisition_mode: InteractiveTranslationAcquisitionMode,
 }
 
 impl DesktopApplication {
+    pub(super) fn interactive_translation_capabilities(
+        &self,
+    ) -> InteractiveTranslationCapabilitiesView {
+        InteractiveTranslationCapabilitiesView {
+            visual_ocr_available: self.runtimes.as_ref().is_some_and(|runtimes| {
+                runtimes.supports_acquisition_adapter(OCR_ACQUISITION_ADAPTER_ID)
+            }),
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn run_interactive_translation_request(
         &mut self,
@@ -219,6 +284,7 @@ impl DesktopApplication {
             dictionary_id: request.dictionary_id.clone(),
             dictionary_entries,
             locales,
+            acquisition_mode: request.acquisition_mode,
         })
     }
 
@@ -247,18 +313,24 @@ impl DesktopApplication {
         point: DesktopPoint,
         cancellation: &DesktopAcquisitionCancellation,
     ) -> Result<InteractiveTranslationResultView, CommandError> {
-        let acquisition = self
-            .runtimes
-            .as_mut()
-            .ok_or_else(runtime_unavailable)?
-            .acquire_primary_point(
+        let runtimes = self.runtimes.as_mut().ok_or_else(runtime_unavailable)?;
+        let acquisition = match prepared.acquisition_mode {
+            InteractiveTranslationAcquisitionMode::Structured => runtimes.acquire_primary_point(
                 &prepared.software_id,
                 &prepared.runtime_spec,
                 UIA_ACQUISITION_ADAPTER_ID,
                 point,
                 cancellation,
-            )
-            .map_err(acquisition::acquisition_command_error)?;
+            ),
+            InteractiveTranslationAcquisitionMode::VisualOcr => runtimes.acquire_primary_region(
+                &prepared.software_id,
+                &prepared.runtime_spec,
+                OCR_ACQUISITION_ADAPTER_ID,
+                ocr_region_around(point),
+                cancellation,
+            ),
+        }
+        .map_err(acquisition::acquisition_command_error)?;
         let acquisition_blocks = acquisition
             .blocks()
             .iter()
@@ -281,6 +353,16 @@ impl DesktopApplication {
             Err(error) => Err(interactive_translation_error(error)),
         }
     }
+}
+
+fn ocr_region_around(point: DesktopPoint) -> DesktopRect {
+    DesktopRect::new(
+        point.x().saturating_sub(OCR_REGION_HALF_WIDTH),
+        point.y().saturating_sub(OCR_REGION_HALF_HEIGHT),
+        point.x().saturating_add(OCR_REGION_HALF_WIDTH),
+        point.y().saturating_add(OCR_REGION_HALF_HEIGHT),
+    )
+    .expect("the bounded OCR region is non-empty for every desktop point")
 }
 
 struct SelectedDictionaryLookup {
@@ -418,15 +500,31 @@ pub(super) fn desktop_arm_interactive_translation(
     application: State<'_, Mutex<DesktopApplication>>,
     capture: State<'_, Mutex<InteractiveTranslationCaptureState>>,
 ) -> Result<&'static str, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .prepare_interactive_translation(&request)?;
+    let application = application.lock().map_err(|_| workspace_unavailable())?;
+    application.prepare_interactive_translation(&request)?;
+    if request.acquisition_mode == InteractiveTranslationAcquisitionMode::VisualOcr
+        && !application
+            .interactive_translation_capabilities()
+            .visual_ocr_available
+    {
+        return Err(CommandError::new("interactive_translation.ocr_unavailable"));
+    }
+    drop(application);
     capture
         .lock()
         .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?
         .arm(request)?;
     Ok(INTERACTIVE_TRANSLATION_SHORTCUT)
+}
+
+#[tauri::command]
+pub(super) fn desktop_interactive_translation_capabilities(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<InteractiveTranslationCapabilitiesView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())
+        .map(|application| application.interactive_translation_capabilities())
 }
 
 #[tauri::command]
@@ -478,11 +576,15 @@ pub(super) fn handle_interactive_translation_shortcut(app: &tauri::AppHandle) {
         .await
         .map_err(|_| CommandError::new("interactive_translation.execution_failed"))
         .and_then(|result| result);
+        let ocr_eligible = result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.code() == "acquisition.no_text");
         if let Ok(mut capture) = app_handle
             .state::<Mutex<InteractiveTranslationCaptureState>>()
             .lock()
         {
-            capture.finish(generation);
+            capture.finish(generation, ocr_eligible);
         }
         let event = match result {
             Ok(result) => InteractiveTranslationEvent::Presented {
@@ -554,7 +656,7 @@ mod tests {
         assert!(state.begin().is_none());
         state.cancel();
         assert!(cancellation.is_cancelled());
-        state.finish(generation);
+        state.finish(generation, false);
     }
 
     #[test]
@@ -571,5 +673,109 @@ mod tests {
         drop(state);
 
         assert!(cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn visual_ocr_can_only_be_armed_after_no_text_for_the_same_selection() {
+        let mut state = available_state();
+        assert_eq!(
+            state
+                .arm(InteractiveTranslationArmRequest::visual_ocr(
+                    "software.product",
+                    "dictionary.product",
+                ))
+                .err(),
+            Some(CommandError::new(
+                "interactive_translation.ocr_not_eligible"
+            ))
+        );
+
+        state
+            .arm(InteractiveTranslationArmRequest::new(
+                "software.product",
+                "dictionary.product",
+            ))
+            .expect("arm structured capture");
+        let (generation, _, _) = state.begin().expect("begin structured capture");
+        state.finish(generation, true);
+
+        assert_eq!(
+            state
+                .arm(InteractiveTranslationArmRequest::visual_ocr(
+                    "software.other",
+                    "dictionary.product",
+                ))
+                .err(),
+            Some(CommandError::new(
+                "interactive_translation.ocr_not_eligible"
+            ))
+        );
+        state
+            .arm(InteractiveTranslationArmRequest::visual_ocr(
+                "software.product",
+                "dictionary.product",
+            ))
+            .expect("arm eligible visual OCR retry");
+    }
+
+    #[test]
+    fn successful_or_cancelled_structured_requests_do_not_enable_ocr() {
+        for cancelled in [false, true] {
+            let mut state = available_state();
+            state
+                .arm(InteractiveTranslationArmRequest::new(
+                    "software.product",
+                    "dictionary.product",
+                ))
+                .expect("arm structured capture");
+            let (generation, _, _) = state.begin().expect("begin structured capture");
+            if cancelled {
+                state.cancel();
+            } else {
+                state.finish(generation, false);
+            }
+            assert!(state
+                .arm(InteractiveTranslationArmRequest::visual_ocr(
+                    "software.product",
+                    "dictionary.product",
+                ))
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn ocr_region_is_bounded_even_at_extreme_desktop_coordinates() {
+        for point in [
+            DesktopPoint::new(i32::MIN, i32::MIN),
+            DesktopPoint::new(i32::MAX, i32::MAX),
+        ] {
+            let region = ocr_region_around(point);
+            assert!(region.right() > region.left());
+            assert!(region.bottom() > region.top());
+            assert!(region.right().saturating_sub(region.left()) <= OCR_REGION_HALF_WIDTH * 2);
+            assert!(region.bottom().saturating_sub(region.top()) <= OCR_REGION_HALF_HEIGHT * 2);
+        }
+    }
+
+    #[test]
+    fn arm_request_requires_an_explicit_acquisition_mode() {
+        let missing =
+            serde_json::from_value::<InteractiveTranslationArmRequest>(serde_json::json!({
+                "softwareId": "software.product",
+                "dictionaryId": "dictionary.product"
+            }));
+        assert!(missing.is_err());
+
+        let visual =
+            serde_json::from_value::<InteractiveTranslationArmRequest>(serde_json::json!({
+                "softwareId": "software.product",
+                "dictionaryId": "dictionary.product",
+                "acquisitionMode": "visualOcr"
+            }))
+            .expect("explicit visual OCR arm request");
+        assert_eq!(
+            visual.acquisition_mode,
+            InteractiveTranslationAcquisitionMode::VisualOcr
+        );
     }
 }
