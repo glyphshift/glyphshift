@@ -1,0 +1,21 @@
+[package]
+name = "glyphshift-test-acquisition-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "glyphshift-test-acquisition-worker"
+path = "src/main.rs"
+
+[[bin]]
+name = "glyphshift-test-malformed-acquisition-worker"
+path = "src/malformed.rs"
+
+[dependencies]
+glyphshift-acquisition = { path = "../../crates/runtime/acquisition" }
+glyphshift-acquisition-worker-sdk = { path = "../../crates/runtime/worker/acquisition-sdk" }
+
+[lints]
+workspace = true

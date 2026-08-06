@@ -67,6 +67,16 @@ function Assert-Dependencies {
 }
 
 Assert-Dependencies -PackageName 'glyphshift-domain' -Expected @()
+Assert-Dependencies -PackageName 'glyphshift-acquisition' -Expected @()
+Assert-Dependencies `
+    -PackageName 'glyphshift-interactive-translation' `
+    -Expected @('glyphshift-acquisition')
+Assert-Dependencies `
+    -PackageName 'glyphshift-acquisition-worker-sdk' `
+    -Expected @('glyphshift-acquisition', 'serde', 'serde_json')
+Assert-Dependencies `
+    -PackageName 'glyphshift-acquisition-worker-host' `
+    -Expected @('glyphshift-acquisition', 'glyphshift-acquisition-worker-sdk')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-registry' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
@@ -163,6 +173,9 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-gtk3-pango-native' `
     -Expected @('glyphshift-adapter-gtk3-pango', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-ocr' `
+    -Expected @('glyphshift-acquisition')
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-qt-painter' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -176,10 +189,12 @@ Assert-Dependencies `
     -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-raylib', 'retour', 'windows')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-uia' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+    -Expected @('glyphshift-acquisition', 'glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-uia-worker' `
     -Expected @(
+        'glyphshift-acquisition',
+        'glyphshift-acquisition-worker-sdk',
         'glyphshift-adapter-uia',
         'glyphshift-capture',
         'glyphshift-isolated-worker-sdk',
@@ -335,6 +350,9 @@ Assert-Dependencies `
         'glyphshift-isolated-worker-sdk'
     )
 Assert-Dependencies `
+    -PackageName 'glyphshift-test-acquisition-worker' `
+    -Expected @('glyphshift-acquisition', 'glyphshift-acquisition-worker-sdk')
+Assert-Dependencies `
     -PackageName 'glyphshift-windows-runtime-target' `
     -Expected @('glyphshift-windows-host')
 Assert-Dependencies `
@@ -475,6 +493,7 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-gdiplus-native',
     'glyphshift-adapter-gtk3-pango',
     'glyphshift-adapter-gtk3-pango-native',
+    'glyphshift-adapter-ocr',
     'glyphshift-adapter-qt-painter',
     'glyphshift-adapter-qt-painter-native',
     'glyphshift-adapter-raylib',
@@ -484,6 +503,7 @@ $adapterImplementationPackages = @(
 )
 $testSupportPackages = @(
     'glyphshift-reference-adapters',
+    'glyphshift-test-acquisition-worker',
     'glyphshift-test-controller-plugin',
     'glyphshift-test-isolated-worker',
     'glyphshift-windows-host',
@@ -511,6 +531,9 @@ $packageFamilies = @{
     )
     AdapterImplementation = $adapterImplementationPackages
     Runtime = @(
+        'glyphshift-acquisition',
+        'glyphshift-acquisition-worker-host',
+        'glyphshift-acquisition-worker-sdk',
         'glyphshift-controller-host',
         'glyphshift-controller-sdk',
         'glyphshift-controller-windows',
@@ -525,13 +548,18 @@ $packageFamilies = @{
         'glyphshift-target-runtime',
         'glyphshift-target-runtime-contract'
     )
-    Product = @('glyphshift-desktop-backend')
+    Product = @(
+        'glyphshift-desktop-backend',
+        'glyphshift-interactive-translation'
+    )
     Application = @('glyphshift-desktop-shell', 'glyphshift-service')
     TestSupport = $testSupportPackages
 }
 
 $dependencyLayers = @{
     L0 = @(
+        'glyphshift-acquisition',
+        'glyphshift-acquisition-worker-sdk',
         'glyphshift-adapter-sdk',
         'glyphshift-capture',
         'glyphshift-controller-sdk',
@@ -545,6 +573,7 @@ $dependencyLayers = @{
         'glyphshift-decision',
         'glyphshift-dictionary-distribution',
         'glyphshift-extension',
+        'glyphshift-interactive-translation',
         'glyphshift-runtime-contract',
         'glyphshift-workflow'
     )
@@ -555,6 +584,7 @@ $dependencyLayers = @{
     )
     Adapter = $adapterImplementationPackages
     L3 = @(
+        'glyphshift-acquisition-worker-host',
         'glyphshift-adapter-native-host',
         'glyphshift-controller-host',
         'glyphshift-controller-windows',
@@ -672,10 +702,14 @@ foreach ($forbiddenCase in @(
 }
 
 $productionScanPackageNames = @(
+    'glyphshift-acquisition',
+    'glyphshift-acquisition-worker-host',
+    'glyphshift-acquisition-worker-sdk',
     'glyphshift-adapter-registry',
     'glyphshift-adapter-sdk',
     'glyphshift-adapter-native-abi',
     'glyphshift-adapter-native-host',
+    'glyphshift-adapter-ocr',
     'glyphshift-adapter-uia',
     'glyphshift-adapter-uia-worker',
     'glyphshift-controller-sdk',
@@ -688,6 +722,7 @@ $productionScanPackageNames = @(
     'glyphshift-extension',
     'glyphshift-isolated-worker-host',
     'glyphshift-isolated-worker-sdk',
+    'glyphshift-interactive-translation',
     'glyphshift-translation',
     'glyphshift-decision',
     'glyphshift-session',

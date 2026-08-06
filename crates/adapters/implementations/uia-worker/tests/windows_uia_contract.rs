@@ -1,6 +1,15 @@
 #![cfg(windows)]
 
-use glyphshift_adapter_uia::ADAPTER_ID;
+use glyphshift_acquisition::{
+    AcquisitionError, AcquisitionRequest, AuthorizedTarget, DesktopPoint, Granularity,
+    InteractiveSelection, SourcePolicy,
+};
+use glyphshift_acquisition_worker_host::{
+    AcquisitionWorkerArtifact, AcquisitionWorkerBinding, AcquisitionWorkerHost,
+    AcquisitionWorkerHostError, CancellationToken,
+};
+use glyphshift_acquisition_worker_sdk::WorkerTargetGrant as AcquisitionTargetGrant;
+use glyphshift_adapter_uia::{ACQUISITION_ADAPTER_ID, ADAPTER_ID};
 use glyphshift_capture::{
     CaptureCatalog, CaptureConfiguration, CaptureProducerConfiguration, CaptureProducerId,
     CaptureSessionId, FileCaptureSink,
@@ -13,6 +22,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -25,17 +35,31 @@ use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
+static STANDARD_CONTROL_TARGET_LOCK: Mutex<()> = Mutex::new(());
+
 struct StandardControlTarget {
+    _serial: MutexGuard<'static, ()>,
     child: Child,
     stdin: ChildStdin,
     responses: Receiver<String>,
     reader: Option<JoinHandle<()>>,
 }
 
+#[derive(Clone, Copy)]
+struct InteractiveGeometry {
+    label: DesktopPoint,
+    range_start: DesktopPoint,
+    range_end: DesktopPoint,
+    password: DesktopPoint,
+}
+
 impl StandardControlTarget {
     fn start() -> Self {
         use std::os::windows::process::CommandExt;
 
+        let serial = STANDARD_CONTROL_TARGET_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut child = Command::new(runtime_target_executable())
             .arg("--uia-standard-controls")
             .stdin(Stdio::piped())
@@ -58,6 +82,7 @@ impl StandardControlTarget {
             }
         });
         let target = Self {
+            _serial: serial,
             child,
             stdin,
             responses,
@@ -78,6 +103,32 @@ impl StandardControlTarget {
 
     fn process_id(&self) -> u32 {
         self.child.id()
+    }
+
+    fn acquisition_process_grant(&self) -> AcquisitionTargetGrant {
+        let process_id = self.child.id();
+        let started_at = process_started_at(process_id).expect("target start time");
+        AcquisitionTargetGrant::new("windows-process-v1", format!("{process_id}:{started_at}"))
+            .expect("acquisition target grant")
+    }
+
+    fn interactive_geometry(&mut self) -> InteractiveGeometry {
+        writeln!(self.stdin, "geometry").expect("request target geometry");
+        self.stdin.flush().expect("flush target geometry request");
+        let response = self.read_line(Duration::from_secs(3));
+        let values = response
+            .split_whitespace()
+            .skip(1)
+            .map(|value| value.parse::<i32>().expect("geometry coordinate"))
+            .collect::<Vec<_>>();
+        assert!(response.starts_with("uia-geometry "));
+        assert_eq!(values.len(), 8);
+        InteractiveGeometry {
+            label: DesktopPoint::new(values[0], values[1]),
+            range_start: DesktopPoint::new(values[2], values[3]),
+            range_end: DesktopPoint::new(values[4], values[5]),
+            password: DesktopPoint::new(values[6], values[7]),
+        }
     }
 
     fn update(&mut self) {
@@ -246,6 +297,122 @@ fn spawn_worker(
         1,
     )
     .expect("activate Windows UIA worker")
+}
+
+fn acquisition_host(timeout: Duration) -> AcquisitionWorkerHost {
+    let artifact = AcquisitionWorkerArtifact::open(PathBuf::from(env!(
+        "CARGO_BIN_EXE_glyphshift-adapter-uia-acquisition-worker"
+    )))
+    .expect("UIA acquisition worker artifact");
+    AcquisitionWorkerHost::new(artifact, timeout).expect("UIA acquisition host")
+}
+
+fn acquisition_binding(target: &StandardControlTarget) -> AcquisitionWorkerBinding {
+    AcquisitionWorkerBinding::new(
+        AuthorizedTarget::new("standard-control-target").expect("target identity"),
+        ACQUISITION_ADAPTER_ID,
+        target.acquisition_process_grant(),
+    )
+    .expect("UIA acquisition binding")
+}
+
+fn acquire_selection(
+    host: &AcquisitionWorkerHost,
+    binding: &AcquisitionWorkerBinding,
+    selection: InteractiveSelection,
+) -> Result<glyphshift_acquisition::AcquisitionResult, AcquisitionWorkerHostError> {
+    host.acquire(
+        binding,
+        &AcquisitionRequest::new(
+            AuthorizedTarget::new("standard-control-target").expect("target identity"),
+            selection,
+            SourcePolicy::StructuredOnly,
+        ),
+        &CancellationToken::new(),
+    )
+}
+
+#[test]
+fn uia_acquisition_worker_reads_point_control_word_and_multiline_text_range() {
+    let mut target = StandardControlTarget::start();
+    let geometry = target.interactive_geometry();
+    let binding = acquisition_binding(&target);
+    let host = acquisition_host(Duration::from_secs(3));
+
+    let control = acquire_selection(&host, &binding, InteractiveSelection::Point(geometry.label))
+        .expect("label control acquisition");
+    assert_eq!(control.blocks()[0].source(), "Fixture label");
+    assert_eq!(control.blocks()[0].granularity(), Granularity::Control);
+    assert!(control.blocks()[0].anchors()[0].contains(geometry.label));
+
+    let word = acquire_selection(
+        &host,
+        &binding,
+        InteractiveSelection::Point(geometry.range_start),
+    )
+    .expect("word acquisition");
+    assert!(
+        word.blocks()[0].source().contains("First"),
+        "unexpected point block: {:?}",
+        word.blocks()[0]
+    );
+    assert_eq!(word.blocks()[0].granularity(), Granularity::Word);
+    assert!(word.blocks()[0].anchors()[0].contains(geometry.range_start));
+
+    let range = acquire_selection(
+        &host,
+        &binding,
+        InteractiveSelection::TextRange {
+            start: geometry.range_start,
+            end: geometry.range_end,
+        },
+    )
+    .expect("text range acquisition");
+    assert!(
+        range.blocks()[0].source().contains("line\nSecond"),
+        "unexpected range block: {:?}",
+        range.blocks()[0]
+    );
+    assert!(range.blocks()[0].anchors().len() >= 2);
+
+    assert_eq!(
+        acquire_selection(
+            &host,
+            &binding,
+            InteractiveSelection::Point(geometry.password),
+        ),
+        Err(AcquisitionWorkerHostError::AcquisitionRejected(
+            AcquisitionError::PermissionDenied
+        ))
+    );
+    target.stop();
+}
+
+#[test]
+fn uia_acquisition_worker_times_out_a_blocked_provider_and_rejects_an_exited_target() {
+    let mut target = StandardControlTarget::start();
+    let geometry = target.interactive_geometry();
+    let binding = acquisition_binding(&target);
+    target.begin_provider_block();
+    let timeout = acquisition_host(Duration::from_millis(150));
+    assert_eq!(
+        acquire_selection(
+            &timeout,
+            &binding,
+            InteractiveSelection::Point(geometry.label),
+        ),
+        Err(AcquisitionWorkerHostError::Timeout)
+    );
+    target.unblock_provider();
+    target.stop();
+
+    let host = acquisition_host(Duration::from_secs(2));
+    assert_eq!(
+        acquire_selection(&host, &binding, InteractiveSelection::Point(geometry.label),),
+        Err(AcquisitionWorkerHostError::AcquisitionRejected(
+            AcquisitionError::TargetMismatch
+        ))
+    );
 }
 
 #[test]

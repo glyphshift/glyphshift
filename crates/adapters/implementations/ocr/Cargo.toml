@@ -1,5 +1,5 @@
 [package]
-name = "glyphshift-adapter-uia"
+name = "glyphshift-adapter-ocr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 glyphshift-acquisition = { path = "../../../runtime/acquisition" }
-glyphshift-adapter-sdk = { path = "../../platform/sdk" }
-glyphshift-domain = { path = "../../../core/domain" }
 
 [lints]
 workspace = true

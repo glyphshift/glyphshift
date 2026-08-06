@@ -1,11 +1,22 @@
 [package]
 name = "glyphshift-adapter-uia-worker"
+autobins = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "glyphshift-adapter-uia-worker"
+path = "src/main.rs"
+
+[[bin]]
+name = "glyphshift-adapter-uia-acquisition-worker"
+path = "src/acquisition_main.rs"
+
 [dependencies]
+glyphshift-acquisition = { path = "../../../runtime/acquisition" }
+glyphshift-acquisition-worker-sdk = { path = "../../../runtime/worker/acquisition-sdk" }
 glyphshift-adapter-uia = { path = "../uia" }
 glyphshift-capture = { path = "../../../core/capture" }
 glyphshift-isolated-worker-sdk = { path = "../../../runtime/worker/sdk" }
@@ -29,6 +40,7 @@ features = [
 ]
 
 [dev-dependencies]
+glyphshift-acquisition-worker-host = { path = "../../../runtime/worker/acquisition-host" }
 glyphshift-domain = { path = "../../../core/domain" }
 glyphshift-isolated-worker-host = { path = "../../../runtime/worker/host" }
 tempfile = "3"

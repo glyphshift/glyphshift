@@ -1358,6 +1358,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-acquisition"
+version = "0.1.0"
+
+[[package]]
+name = "glyphshift-acquisition-worker-host"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-acquisition",
+ "glyphshift-acquisition-worker-sdk",
+ "tempfile",
+]
+
+[[package]]
+name = "glyphshift-acquisition-worker-sdk"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-acquisition",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "glyphshift-adapter-console"
 version = "0.1.0"
 dependencies = [
@@ -1525,6 +1547,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-ocr"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-acquisition",
+]
+
+[[package]]
 name = "glyphshift-adapter-qt-painter"
 version = "0.1.0"
 dependencies = [
@@ -1579,6 +1608,7 @@ dependencies = [
 name = "glyphshift-adapter-uia"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-acquisition",
  "glyphshift-adapter-sdk",
  "glyphshift-domain",
 ]
@@ -1587,6 +1617,9 @@ dependencies = [
 name = "glyphshift-adapter-uia-worker"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-acquisition",
+ "glyphshift-acquisition-worker-host",
+ "glyphshift-acquisition-worker-sdk",
  "glyphshift-adapter-uia",
  "glyphshift-capture",
  "glyphshift-domain",
@@ -1757,6 +1790,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-interactive-translation"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-acquisition",
+]
+
+[[package]]
 name = "glyphshift-isolated-worker-host"
 version = "0.1.0"
 dependencies = [
@@ -1899,6 +1939,14 @@ dependencies = [
  "glyphshift-translation",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "glyphshift-test-acquisition-worker"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-acquisition",
+ "glyphshift-acquisition-worker-sdk",
 ]
 
 [[package]]

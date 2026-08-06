@@ -22,6 +22,7 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
     -p glyphshift-target-runtime `
     -p glyphshift-test-controller-plugin `
     -p glyphshift-test-isolated-worker `
+    -p glyphshift-test-acquisition-worker `
     -p glyphshift-adapter-uia-worker `
     -p glyphshift-windows-runtime-target
 if ($LASTEXITCODE -ne 0) {

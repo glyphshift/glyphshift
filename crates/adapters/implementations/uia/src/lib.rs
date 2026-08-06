@@ -1,10 +1,17 @@
 //! Host-independent UI Automation observation policy.
 
+mod acquisition;
+
+pub use acquisition::{
+    UiaAcquisitionAdapter, UiaAcquisitionSnapshot, UiaSelectionSource, UiaTextSelection,
+};
+
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
 use glyphshift_domain::{AdapterId, ApplyModel, Feature, Placement};
 use std::collections::BTreeMap;
 
 pub const ADAPTER_ID: &str = "windows.uia.observe";
+pub const ACQUISITION_ADAPTER_ID: &str = "windows.uia.acquire";
 const MAX_ELEMENT_KEY_BYTES: usize = 512;
 const MAX_TEXT_UNITS: usize = 16 * 1024;
 

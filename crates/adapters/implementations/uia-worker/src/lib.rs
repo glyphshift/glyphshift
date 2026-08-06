@@ -5,7 +5,19 @@
 //! the generic isolated-worker protocol.
 
 #[cfg(windows)]
+mod acquisition_worker;
+#[cfg(windows)]
+mod windows_support;
+
+#[cfg(windows)]
+pub use acquisition_worker::WindowsUiaAcquisitionWorker;
+
+#[cfg(windows)]
 mod windows_worker {
+    use super::windows_support::{
+        authorize_process_target, process_started_at, ComApartment, ProcessInstance,
+        WindowsTargetError,
+    };
     use glyphshift_adapter_uia::{
         UiaElementSnapshot, UiaObservationOutcome, UiaObserver, ADAPTER_ID,
     };
@@ -23,10 +35,7 @@ mod windows_worker {
     use std::time::{Duration, Instant};
     use windows::core::{implement, BSTR};
     use windows::Win32::Foundation::{E_ACCESSDENIED, HWND as WindowsHwnd};
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-        COINIT_MULTITHREADED, SAFEARRAY,
-    };
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, SAFEARRAY};
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement,
         IUIAutomationEventHandler, IUIAutomationEventHandler_Impl,
@@ -36,48 +45,17 @@ mod windows_worker {
         TreeScope_Subtree, UIA_NamePropertyId, UIA_TextPatternId, UIA_Text_TextChangedEventId,
         UIA_ValuePatternId, UIA_ValueValuePropertyId, UIA_EVENT_ID, UIA_PROPERTY_ID,
     };
-    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HWND, LPARAM};
-    use windows_sys::Win32::Security::{
-        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
-        TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
-    };
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::System::Ole::SafeArrayDestroy;
-    use windows_sys::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
     };
 
-    const TARGET_GRANT_PLATFORM: &str = "windows-process-v1";
     const MAX_PENDING_EVENTS: u64 = 2_048;
     const MAX_INITIAL_ELEMENTS: i32 = 4_096;
     const MAX_TEXT_UNITS: i32 = 16 * 1024;
     const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(1);
-
-    #[derive(Clone, Copy)]
-    struct ProcessInstance {
-        process_id: u32,
-        started_at: u64,
-    }
-
-    struct ComApartment;
-
-    impl ComApartment {
-        fn enter() -> Result<Self, WorkerError> {
-            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-                .ok()
-                .map_err(|_| WorkerError::new("uia_com_initialization_failed"))?;
-            Ok(Self)
-        }
-    }
-
-    impl Drop for ComApartment {
-        fn drop(&mut self) {
-            unsafe { CoUninitialize() };
-        }
-    }
 
     #[derive(Default)]
     struct PendingEvents {
@@ -615,99 +593,19 @@ mod windows_worker {
         search.handles
     }
 
-    fn process_started_at(process_id: u32) -> Option<u64> {
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
-        if process.is_null() {
-            return None;
-        }
-        let mut created = FILETIME::default();
-        let mut exited = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        let queried =
-            unsafe { GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) }
-                != 0;
-        unsafe { CloseHandle(process) };
-        queried.then_some(((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64)
-    }
-
-    fn process_integrity_rid(process_id: u32) -> Option<u32> {
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
-        if process.is_null() {
-            return None;
-        }
-        let mut token = std::ptr::null_mut();
-        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
-            unsafe { CloseHandle(process) };
-            return None;
-        }
-        let mut required = 0;
-        unsafe {
-            GetTokenInformation(
-                token,
-                TokenIntegrityLevel,
-                std::ptr::null_mut(),
-                0,
-                &mut required,
-            );
-        }
-        let mut buffer = vec![0_u8; required as usize];
-        let queried = required > 0
-            && unsafe {
-                GetTokenInformation(
-                    token,
-                    TokenIntegrityLevel,
-                    buffer.as_mut_ptr().cast(),
-                    required,
-                    &mut required,
-                )
-            } != 0;
-        let integrity = queried.then(|| unsafe {
-            let label = &*buffer.as_ptr().cast::<TOKEN_MANDATORY_LABEL>();
-            let count = *GetSidSubAuthorityCount(label.Label.Sid) as u32;
-            *GetSidSubAuthority(label.Label.Sid, count.saturating_sub(1))
-        });
-        unsafe {
-            CloseHandle(token);
-            CloseHandle(process);
-        }
-        integrity
-    }
-
     fn parse_target(activation: &WorkerActivation) -> Result<ProcessInstance, WorkerError> {
-        if activation.adapter_id != ADAPTER_ID
-            || activation.target_grant.platform != TARGET_GRANT_PLATFORM
-        {
-            return Err(WorkerError::new("activation_rejected"));
-        }
-        let (process_id, started_at) = activation
-            .target_grant
-            .payload
-            .split_once(':')
-            .ok_or_else(|| WorkerError::new("invalid_target_grant"))?;
-        let process_id = process_id
-            .parse::<u32>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| WorkerError::new("invalid_target_grant"))?;
-        let started_at = started_at
-            .parse::<u64>()
-            .ok()
-            .filter(|value| *value > 0)
-            .ok_or_else(|| WorkerError::new("invalid_target_grant"))?;
-        if process_started_at(process_id) != Some(started_at) {
-            return Err(WorkerError::new("target_instance_changed"));
-        }
-        let worker_integrity = process_integrity_rid(std::process::id())
-            .ok_or_else(|| WorkerError::new("uia_permission_denied"))?;
-        let target_integrity = process_integrity_rid(process_id)
-            .ok_or_else(|| WorkerError::new("uia_permission_denied"))?;
-        if target_integrity > worker_integrity {
-            return Err(WorkerError::new("uia_permission_denied"));
-        }
-        Ok(ProcessInstance {
-            process_id,
-            started_at,
+        authorize_process_target(
+            &activation.adapter_id,
+            ADAPTER_ID,
+            &activation.target_grant.platform,
+            &activation.target_grant.payload,
+        )
+        .map_err(|error| match error {
+            WindowsTargetError::ActivationRejected => WorkerError::new("activation_rejected"),
+            WindowsTargetError::InvalidGrant => WorkerError::new("invalid_target_grant"),
+            WindowsTargetError::TargetChanged => WorkerError::new("target_instance_changed"),
+            WindowsTargetError::PermissionDenied => WorkerError::new("uia_permission_denied"),
+            WindowsTargetError::ComUnavailable => WorkerError::new("uia_com_initialization_failed"),
         })
     }
 
@@ -752,7 +650,8 @@ mod windows_worker {
                     .map_err(|_| WorkerError::new("invalid_generation"))?;
             let (producer, ingress) = CaptureBatchProducer::start(configuration)
                 .map_err(|_| WorkerError::new("producer_unavailable"))?;
-            let apartment = ComApartment::enter()?;
+            let apartment = ComApartment::enter()
+                .map_err(|_| WorkerError::new("uia_com_initialization_failed"))?;
             let session = UiaSession::start(target, activation.adapter_id.clone(), ingress)?;
             self.producer_generation = activation.producer_generation;
             self.publication_generation = activation.publication_generation;
@@ -915,5 +814,19 @@ impl glyphshift_isolated_worker_sdk::IsolatedWorker for WindowsUiaWorker {
         Err(glyphshift_isolated_worker_sdk::WorkerError::new(
             "unsupported_operating_system",
         ))
+    }
+}
+
+#[cfg(not(windows))]
+pub struct WindowsUiaAcquisitionWorker;
+
+#[cfg(not(windows))]
+impl glyphshift_acquisition_worker_sdk::AcquisitionWorker for WindowsUiaAcquisitionWorker {
+    fn acquire(
+        &mut self,
+        _request: &glyphshift_acquisition_worker_sdk::WorkerAcquisitionRequest,
+    ) -> Result<glyphshift_acquisition::AcquisitionResult, glyphshift_acquisition::AcquisitionError>
+    {
+        Err(glyphshift_acquisition::AcquisitionError::ProviderUnavailable)
     }
 }
