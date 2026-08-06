@@ -11,6 +11,36 @@ fn probe_preview_publish_failure_does_not_masquerade_as_a_stop_failure() {
 }
 
 #[test]
+fn incompatible_probe_plan_is_rejected_before_its_draft_dictionary_is_created() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let error = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-incompatible".into(),
+            name: "Incompatible probe".into(),
+            software_id,
+            adapter_ids: vec!["test.incompatible".into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::New {
+                id: "dictionary.incompatible-draft".into(),
+                name: "Incompatible draft".into(),
+                description: "".into(),
+                source_locale: "en-US".into(),
+                target_locale: "zh-CN".into(),
+            },
+        })
+        .expect_err("incompatible plan must fail before persistence");
+
+    assert_eq!(
+        serde_json::to_value(error).expect("serialize incompatibility")["code"],
+        "capture.unknown_adapter"
+    );
+    assert!(application
+        .backend
+        .dictionary("dictionary.incompatible-draft")
+        .is_err());
+}
+
+#[test]
 fn probe_preview_uses_replacement_adapters_without_rejecting_collection_adapters() {
     let (mut application, _calls, _software_id, _data_root) = workflow_application();
     application.adapters = vec![

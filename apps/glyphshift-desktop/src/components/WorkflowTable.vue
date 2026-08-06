@@ -305,6 +305,7 @@ function runtimeIssueKind(item: WorkflowSummary) {
     'runtime.target_access_failed': 'accessFailed',
     'runtime.component_load_failed': 'componentLoadFailed',
     'runtime.component_incompatible': 'componentIncompatible',
+    'runtime.target_restart_required': 'targetRestartRequired',
     'runtime.activation_timed_out': 'activationTimedOut',
     'runtime.activation_failed': 'activationFailed',
     'runtime.stop_unconfirmed': 'stopUnconfirmed',

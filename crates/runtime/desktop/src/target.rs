@@ -33,6 +33,12 @@ pub(super) trait ManagedRuntime: Send {
     fn supported_features(&self) -> BTreeSet<Feature>;
     fn active_features(&self) -> BTreeSet<Feature>;
     fn active_target_id(&self) -> Option<u64>;
+    fn active_target_count(&self) -> usize {
+        usize::from(self.active_target_id().is_some())
+    }
+    fn failed_target_count(&self) -> usize {
+        0
+    }
     fn applied_generation(&self) -> Option<Generation>;
     fn start(
         &mut self,
@@ -45,6 +51,13 @@ pub(super) trait ManagedRuntime: Send {
         requested_features: &BTreeSet<Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError>;
+    fn acquire_point(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
     fn publish(
         &mut self,
         publication: glyphshift_runtime_contract::RuntimePublication,
@@ -84,6 +97,20 @@ impl ManagedRuntime for WindowsDesktopRuntime {
         DesktopRuntime::active_target_id(self)
     }
 
+    fn active_target_count(&self) -> usize {
+        match self.phase.as_ref() {
+            Some(RuntimePhase::Active { sessions, .. }) => sessions.len(),
+            _ => 0,
+        }
+    }
+
+    fn failed_target_count(&self) -> usize {
+        match self.phase.as_ref() {
+            Some(RuntimePhase::Active { failures, .. }) => failures.len(),
+            _ => 0,
+        }
+    }
+
     fn applied_generation(&self) -> Option<Generation> {
         self.is_active().then(|| self.publication.generation())
     }
@@ -108,6 +135,16 @@ impl ManagedRuntime for WindowsDesktopRuntime {
             requested_features.iter().copied(),
             capture,
         )
+    }
+
+    fn acquire_point(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        DesktopRuntime::acquire_point(self, target_id, adapter_id, point, cancellation)
     }
 
     fn publish(
@@ -142,6 +179,7 @@ enum RuntimePhase<T> {
     Active {
         manager: SessionManager,
         sessions: BTreeMap<u64, SessionId>,
+        failures: BTreeMap<u64, DesktopRuntimeError>,
         capture_owner: Option<FileCaptureSink>,
     },
 }
@@ -280,6 +318,22 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         }
     }
 
+    #[must_use]
+    pub fn active_target_count(&self) -> usize {
+        match self.phase.as_ref() {
+            Some(RuntimePhase::Active { sessions, .. }) => sessions.len(),
+            _ => 0,
+        }
+    }
+
+    #[must_use]
+    pub fn failed_target_count(&self) -> usize {
+        match self.phase.as_ref() {
+            Some(RuntimePhase::Active { failures, .. }) => failures.len(),
+            _ => 0,
+        }
+    }
+
     pub fn start(
         &mut self,
         target_id: u64,
@@ -335,14 +389,15 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         };
         let mut prepared = Vec::new();
         let mut runtime_targets = Vec::new();
+        let mut failures = BTreeMap::new();
         for target in targets {
             let recipe = match connection
                 .prepare(target.controller_id, requested_features.iter().copied())
             {
                 Ok(recipe) => recipe,
                 Err(error) => {
-                    self.phase = Some(RuntimePhase::Discovered(connection));
-                    return Err(map_protocol_error(error));
+                    failures.insert(target.view.id, map_protocol_error(error));
+                    continue;
                 }
             };
             let target_instance_id = TargetInstanceId::new(format!("target-{}", target.view.id));
@@ -351,15 +406,15 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
                 .iter()
                 .any(|requirement| self.isolated_adapter_ids.contains(requirement.adapter_id()));
             if requires_isolated_worker && !capture_requested {
-                self.phase = Some(RuntimePhase::Discovered(connection));
-                return Err(DesktopRuntimeError::SessionRejected);
+                failures.insert(target.view.id, DesktopRuntimeError::SessionRejected);
+                continue;
             }
             let worker_grant = if requires_isolated_worker {
                 let grant = match connection.authorize_worker_target(target.controller_id) {
                     Ok(grant) => grant,
                     Err(error) => {
-                        self.phase = Some(RuntimePhase::Discovered(connection));
-                        return Err(map_protocol_error(error));
+                        failures.insert(target.view.id, map_protocol_error(error));
+                        continue;
                     }
                 };
                 Some(WorkerTargetGrant {
@@ -377,6 +432,13 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
                 worker_grant,
                 TargetInstance::new(target_instance_id, target.facts),
             ));
+        }
+        if runtime_targets.is_empty() {
+            self.phase = Some(RuntimePhase::Discovered(connection));
+            return Err(failures
+                .into_values()
+                .next()
+                .unwrap_or(DesktopRuntimeError::SessionRejected));
         }
         let capture_owner = match capture.map(FileCaptureSink::start).transpose() {
             Ok(owner) => owner,
@@ -428,21 +490,26 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             ) {
                 Ok(status) => status,
                 Err(error) => {
-                    for session_id in sessions.values().copied() {
-                        let _ = manager.stop(session_id);
-                    }
-                    if let Some(owner) = capture_owner {
-                        let _ = owner.finish();
-                    }
-                    return Err(map_session_runtime_error(error));
+                    failures.insert(target_id, map_session_runtime_error(error));
+                    continue;
                 }
             };
             active_features.extend(status.active_features());
             sessions.insert(target_id, status.session_id());
         }
+        if sessions.is_empty() {
+            if let Some(owner) = capture_owner {
+                let _ = owner.finish();
+            }
+            return Err(failures
+                .into_values()
+                .next()
+                .unwrap_or(DesktopRuntimeError::SessionRejected));
+        }
         self.phase = Some(RuntimePhase::Active {
             manager,
             sessions,
+            failures,
             capture_owner,
         });
         self.active_features = active_features;
@@ -473,6 +540,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             manager,
             sessions,
             capture_owner,
+            ..
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
@@ -543,6 +611,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             manager,
             sessions,
             capture_owner,
+            ..
         }) = self.phase.as_mut()
         else {
             return Err(DesktopRuntimeError::InvalidState);
@@ -579,6 +648,7 @@ impl<T> Drop for DesktopRuntime<T> {
             manager,
             sessions,
             capture_owner,
+            ..
         }) = self.phase.as_mut()
         {
             for session_id in sessions.values().copied() {

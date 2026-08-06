@@ -16,7 +16,9 @@ use glyphshift_session::{
     RuntimeFontOutcome, RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceRecord,
     RuntimeTraceStatus, SessionId, TargetInstance, TargetInstanceId,
 };
-use glyphshift_target_runtime_contract::{NativeAdapterDeployment, TargetRuntimeDeployment};
+use glyphshift_target_runtime_contract::{
+    NativeAdapterDeployment, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
@@ -312,6 +314,9 @@ fn host_protocol_failure(error: ControllerProtocolError) -> HostFailure {
             HostOperationFailure::RemoteThreadUnavailable
         }
         ControllerRejection::RemoteThreadTimeout => HostOperationFailure::RemoteThreadTimeout,
+        ControllerRejection::TargetRuntimeRejected(STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT) => {
+            HostOperationFailure::TargetRuntimeRestartRequired
+        }
         ControllerRejection::TargetRuntimeRejected(status) => {
             HostOperationFailure::TargetRuntimeRejected(status)
         }

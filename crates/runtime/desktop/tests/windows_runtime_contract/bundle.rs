@@ -1,4 +1,5 @@
 use super::*;
+use glyphshift_domain::Placement;
 
 #[test]
 #[ignore = "requires the local Windows Runtime bundle built by scripts/build-runtime-bundle.ps1"]
@@ -14,6 +15,7 @@ fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_transl
         .find(|adapter| adapter.id() == TEST_CONSOLE_OBSERVER_ID)
         .expect("Console observer must be visible to the desktop Probe catalog");
     assert_eq!(observer.features(), [Feature::TextObserve]);
+    assert_eq!(observer.placement(), Placement::TargetProcess);
     assert!(!bundle
         .translation_adapter_ids()
         .iter()
@@ -25,6 +27,11 @@ fn runtime_bundle_exposes_observe_only_adapters_without_promoting_them_to_transl
         .find(|adapter| adapter.id() == TEST_UIA_OBSERVER_ID)
         .expect("UIA observer must be visible to the desktop Probe catalog");
     assert_eq!(uia.features(), [Feature::TextObserve]);
+    assert_eq!(uia.placement(), Placement::IsolatedWorker);
+    assert!(uia
+        .architectures()
+        .iter()
+        .any(|architecture| architecture.as_ref() == "x86"));
     assert!(!bundle
         .translation_adapter_ids()
         .iter()

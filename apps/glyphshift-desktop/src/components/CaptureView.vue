@@ -9,22 +9,34 @@ import type {
   ProbeEntryRow,
   ProbeExportFormat,
   ProbeRunSummary,
+  SoftwarePreflight,
   SoftwareRecord,
 } from '../model'
 import { editableRowIndex } from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
-import { useProbeRuns } from '../useProbeRuns'
+import { useProbeRuns, type QuickProbeCleanupResult } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
 import ManagementTableFrame from './ManagementTableFrame.vue'
 import ProbeAdapterPicker from './ProbeAdapterPicker.vue'
+import QuickProbeLauncher from './QuickProbeLauncher.vue'
 
 const props = defineProps<{
   software: SoftwareRecord[]
   dictionaries: DictionarySummary[]
   adapters: AdapterOption[]
+  captureArmed: boolean
+  captureShortcut: string
+  captureResult: SoftwarePreflight | null
+  captureError: string
+}>()
+
+const emit = defineEmits<{
+  'arm-capture': []
+  'cancel-capture': []
+  'workspace-changed': []
 }>()
 
 const { t, locale } = useI18n()
@@ -54,6 +66,9 @@ const listPage = ref(1)
 const listPageSize = ref(20)
 const listSelected = ref(new Set<string>())
 const pendingRemoval = ref<ProbeRunSummary[]>([])
+const quickProbeOpen = ref(false)
+const pendingQuickCleanup = ref<ProbeRunSummary | null>(null)
+const quickProbeNotice = ref('')
 const creating = ref(false)
 const createName = ref('')
 const createSoftwareId = ref('')
@@ -61,6 +76,8 @@ const createAdapterIds = ref<string[]>([])
 const createLivePreview = ref(false)
 const createDictionaryMode = ref<'existing' | 'new'>('existing')
 const createDictionaryId = ref('')
+const createCompatibleAdapterIds = ref<string[] | null>(null)
+const createCompatibilityLoading = ref(false)
 const newDictionaryName = ref('')
 const newSourceLocale = ref('en-US')
 const newTargetLocale = ref('zh-CN')
@@ -68,6 +85,8 @@ const settingsOpen = ref(false)
 const settingsName = ref('')
 const settingsAdapterIds = ref<string[]>([])
 const settingsLivePreview = ref(false)
+const settingsCompatibleAdapterIds = ref<string[] | null>(null)
+const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const translationValues = ref<Record<string, string>>({})
 const {
@@ -86,8 +105,16 @@ const dirtyTranslations = new Set<string>()
 const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let createCompatibilityRequest = 0
+let settingsCompatibilityRequest = 0
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
+const compatibleCreateAdapters = computed(() => createCompatibleAdapterIds.value === null
+  ? observableAdapters.value
+  : observableAdapters.value.filter(adapter => createCompatibleAdapterIds.value?.includes(adapter.id)))
+const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.value === null
+  ? observableAdapters.value
+  : observableAdapters.value.filter(adapter => settingsCompatibleAdapterIds.value?.includes(adapter.id)))
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
@@ -121,6 +148,8 @@ const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
 const settingsValid = computed(() => Boolean(
+  !settingsCompatibilityLoading.value
+  &&
   settingsName.value.trim()
   && settingsAdapterIds.value.length
   && (!settingsLivePreview.value || settingsPreviewAvailable.value),
@@ -135,7 +164,8 @@ const settingsChanged = computed(() => {
   )
 })
 const createValid = computed(() => Boolean(
-  createName.value.trim()
+  !createCompatibilityLoading.value
+  && createName.value.trim()
   && createSoftwareId.value
   && createAdapterIds.value.length
   && (createDictionaryMode.value === 'existing'
@@ -145,6 +175,10 @@ const createValid = computed(() => Boolean(
       && newTargetLocale.value.trim()),
 ))
 const activeRunExists = computed(() => probe.runs.value.some(run => ['running', 'paused'].includes(run.status)))
+const bulkRunDeletionBlocked = computed(() => [...listSelected.value].some((id) => {
+  const run = probe.runs.value.find(item => item.id === id)
+  return Boolean(run?.quickProbe) || ['running', 'paused'].includes(run?.status ?? '')
+}))
 const filteredRuns = computed(() => {
   const needle = listQuery.value.trim().toLowerCase()
   if (!needle) return probe.runs.value
@@ -207,6 +241,10 @@ watch(createAdapterIds, () => {
   createLivePreview.value = createPreviewAvailable.value
 }, { deep: true })
 
+watch(createSoftwareId, () => {
+  if (creating.value) void loadCompatibleCreateAdapters()
+})
+
 watch(settingsAdapterIds, () => {
   if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
 }, { deep: true })
@@ -262,6 +300,7 @@ onBeforeUnmount(() => {
   if (queryTimer) clearTimeout(queryTimer)
   if (pollTimer) clearInterval(pollTimer)
   stopScrollTracking()
+  if (props.captureArmed) emit('cancel-capture')
   for (const [source, timer] of editTimers) {
     clearTimeout(timer)
     void saveTranslation(source)
@@ -323,6 +362,8 @@ function resetCreateForm() {
   createLivePreview.value = false
   createDictionaryMode.value = 'existing'
   createDictionaryId.value = ''
+  createCompatibleAdapterIds.value = null
+  createCompatibilityLoading.value = false
   newDictionaryName.value = ''
   newSourceLocale.value = 'en-US'
   newTargetLocale.value = 'zh-CN'
@@ -333,7 +374,7 @@ function closeCreate() {
   resetCreateForm()
 }
 
-function openCreate() {
+async function openCreate() {
   resetCreateForm()
   const software = props.software[0]
   createSoftwareId.value = software?.id ?? ''
@@ -342,15 +383,49 @@ function openCreate() {
   createDictionaryMode.value = props.dictionaries.length ? 'existing' : 'new'
   createDictionaryId.value = props.dictionaries[0]?.metadata.id ?? ''
   creating.value = true
+  await loadCompatibleCreateAdapters()
 }
 
-function openSettings() {
+async function loadCompatibleCreateAdapters() {
+  const request = ++createCompatibilityRequest
+  const softwareId = createSoftwareId.value
+  if (!softwareId) {
+    createCompatibleAdapterIds.value = []
+    createAdapterIds.value = []
+    return
+  }
+  createCompatibilityLoading.value = true
+  createCompatibleAdapterIds.value = []
+  createAdapterIds.value = []
+  try {
+    const compatible = await probe.compatibleAdapters(softwareId)
+    if (request !== createCompatibilityRequest || softwareId !== createSoftwareId.value) return
+    createCompatibleAdapterIds.value = compatible
+    createAdapterIds.value = compatible ?? observableAdapters.value.map(adapter => adapter.id)
+  }
+  finally {
+    if (request === createCompatibilityRequest) createCompatibilityLoading.value = false
+  }
+}
+
+async function openSettings() {
   const run = selectedRun.value
   if (!run) return
   settingsName.value = run.name
   settingsAdapterIds.value = [...run.adapterIds]
   settingsLivePreview.value = run.livePreviewEnabled
+  settingsCompatibleAdapterIds.value = null
   settingsOpen.value = true
+  const request = ++settingsCompatibilityRequest
+  settingsCompatibilityLoading.value = true
+  const compatible = await probe.compatibleAdapters(run.softwareId)
+  if (request !== settingsCompatibilityRequest || run.id !== selectedRun.value?.id) {
+    if (request === settingsCompatibilityRequest) settingsCompatibilityLoading.value = false
+    return
+  }
+  settingsCompatibleAdapterIds.value = compatible
+  if (compatible) settingsAdapterIds.value = settingsAdapterIds.value.filter(id => compatible.includes(id))
+  settingsCompatibilityLoading.value = false
 }
 
 async function createRun() {
@@ -379,6 +454,39 @@ async function createRun() {
     probe.selectRun(created.id)
     await loadPage()
   }
+}
+
+async function handleQuickProbeStarted(runId: string) {
+  quickProbeNotice.value = ''
+  emit('workspace-changed')
+  probe.selectRun(runId)
+  await nextTick()
+  await loadPage()
+}
+
+async function retainQuickProbe() {
+  const run = selectedRun.value
+  if (!run?.quickProbe) return
+  if (await probe.retainQuickProbe(run.id)) emit('workspace-changed')
+}
+
+async function confirmQuickProbeCleanup() {
+  const run = pendingQuickCleanup.value
+  if (!run) return
+  const result = await probe.cleanupQuickProbe(run.id)
+  if (result) {
+    pendingQuickCleanup.value = null
+    quickProbeNotice.value = quickProbeCleanupNotice(result)
+    emit('workspace-changed')
+  }
+}
+
+function quickProbeCleanupNotice(result: QuickProbeCleanupResult) {
+  if (result.software === 'retained' || result.dictionary === 'retained') {
+    return t('capture.quickProbe.cleanupReferencedNotice')
+  }
+  if (result.software === 'reused') return t('capture.quickProbe.cleanupReusedNotice')
+  return t('capture.quickProbe.cleanupCompleteNotice')
 }
 
 async function closeDetail() {
@@ -654,22 +762,32 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </template>
       <template #actions>
-        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('capture.settings')" @click="openSettings" />
-        <UDropdownMenu :items="exportItems" :content="{ align: 'end' }">
-          <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-download" trailing-icon="i-tabler-chevron-down" :label="t('capture.export')" />
-        </UDropdownMenu>
-        <UButton v-if="['running', 'paused'].includes(selectedRun.status)" color="neutral" variant="ghost" size="sm" icon="i-tabler-plug-off" :aria-label="t('capture.disconnect')" @click="probe.disconnect(selectedRun.id)" />
-        <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
-        <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+        <template v-if="selectedRun.quickProbe">
+          <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-bookmark" :label="t('capture.quickProbe.retain')" :loading="probe.busy.value" @click="retainQuickProbe" />
+          <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.quickProbe.cleanup')" :disabled="probe.busy.value" @click="pendingQuickCleanup = selectedRun" />
+          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="ghost" size="sm" icon="i-tabler-player-pause" :aria-label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
+          <UButton v-else color="neutral" variant="ghost" size="sm" icon="i-tabler-player-play" :aria-label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+        </template>
+        <template v-else>
+          <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('capture.settings')" @click="openSettings" />
+          <UDropdownMenu :items="exportItems" :content="{ align: 'end' }">
+            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-download" trailing-icon="i-tabler-chevron-down" :label="t('capture.export')" />
+          </UDropdownMenu>
+          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" color="neutral" variant="ghost" size="sm" icon="i-tabler-plug-off" :aria-label="t('capture.disconnect')" @click="probe.disconnect(selectedRun.id)" />
+          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
+          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+        </template>
       </template>
     </ManagementDetailHeader>
     <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
       <template #actions>
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
+        <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-settings-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-bolt" :label="t('capture.quickProbe.action')" :disabled="activeRunExists" @click="quickProbeOpen = true" />
       </template>
     </ManagementPageHeader>
 
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
+    <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
 
     <template v-if="selectedRun">
       <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')">
@@ -714,7 +832,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
 
     <ManagementTableFrame v-else v-model:query="listQuery" v-model:page="listPage" v-model:page-size="listPageSize" :search-placeholder="t('capture.searchRuns')" :search-label="t('capture.searchRuns')" :selected-count="listSelected.size" :selected-label="t('capture.runItemLabel')" :total="filteredRuns.length" :item-label="t('capture.runItemLabel')">
       <template #bulk-actions>
-        <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('capture.bulkDelete')" :disabled="[...listSelected].some(id => ['running', 'paused'].includes(probe.runs.value.find(run => run.id === id)?.status ?? ''))" @click="pendingRemoval = probe.runs.value.filter(run => listSelected.has(run.id))" />
+        <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('capture.bulkDelete')" :disabled="bulkRunDeletionBlocked" @click="pendingRemoval = probe.runs.value.filter(run => listSelected.has(run.id))" />
       </template>
       <UTable :data="listPageItems" :columns="runColumns" sticky :ui="{ base: 'min-w-[920px]' }" @dblclick="openRunOnDoubleClick">
         <template #select-header><UCheckbox :model-value="listPageSelected" :aria-label="t('capture.selectRunPage')" @update:model-value="toggleListPageSelection" /></template>
@@ -722,6 +840,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         <template #run-cell="{ row }">
           <div class="flex min-w-0 items-center gap-1.5">
             <div class="truncate font-semibold">{{ row.original.name }}</div>
+            <UBadge v-if="row.original.quickProbe" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
             <UPopover mode="hover" :open-delay="150" :close-delay="100" :content="{ side: 'right', align: 'start', sideOffset: 6 }" :ui="{ content: 'z-[80] w-80 p-0' }">
               <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-info-circle" class="shrink-0" :aria-label="t('capture.viewTechnicalDetails', { name: row.original.name })" />
               <template #content>
@@ -754,10 +873,22 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </template>
         <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
-        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
+        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton v-if="row.original.quickProbe" color="error" variant="ghost" size="xs" icon="i-tabler-trash-x" :aria-label="t('capture.quickProbe.cleanupNamed', { name: row.original.name })" @click="pendingQuickCleanup = row.original" /><UButton v-else color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
         <template #empty><UEmpty icon="i-tabler-radar-off" :title="listQuery ? t('capture.noRunMatch') : t('capture.empty')" :description="listQuery ? t('capture.adjustSearch') : t('capture.emptyHint')" /></template>
       </UTable>
     </ManagementTableFrame>
+
+    <QuickProbeLauncher
+      v-model:open="quickProbeOpen"
+      :software="software"
+      :capture-armed="captureArmed"
+      :capture-shortcut="captureShortcut"
+      :capture-result="captureResult"
+      :capture-error="captureError"
+      @arm-capture="emit('arm-capture')"
+      @cancel-capture="emit('cancel-capture')"
+      @started="handleQuickProbeStarted"
+    />
 
     <ManagementFormModal :open="creating" :title="t('capture.createRun')" :description="t('capture.createDescription')" :confirm-label="t('capture.createConfirm')" :confirm-disabled="probe.busy.value || !createValid" :busy="probe.busy.value" width="lg" @update:open="$event || closeCreate()" @confirm="createRun">
       <div class="space-y-3">
@@ -797,7 +928,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             </div>
           </div>
         </UFormField>
-        <UFormField :label="t('capture.adapters')" :hint="t('capture.adaptersHint')" required><ProbeAdapterPicker v-model="createAdapterIds" :adapters="observableAdapters" /></UFormField>
+        <UFormField :label="t('capture.adapters')" :hint="createCompatibilityLoading ? t('capture.loadingCompatibleAdapters') : compatibleCreateAdapters.length ? t('capture.adaptersHint') : t('capture.noCompatibleAdapters')" required><ProbeAdapterPicker v-model="createAdapterIds" :adapters="compatibleCreateAdapters" /></UFormField>
         <UFormField :label="t('capture.livePreview')" :hint="createPreviewAvailable ? t('capture.livePreviewHint') : t('capture.livePreviewUnavailable')"><USwitch v-model="createLivePreview" :disabled="!createPreviewAvailable" /></UFormField>
       </div>
     </ManagementFormModal>
@@ -818,7 +949,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <UInput v-model="settingsName" :maxlength="128" class="w-full" />
         </UFormField>
 
-        <UFormField :label="t('capture.adapters')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : t('capture.adaptersHint')" required><ProbeAdapterPicker v-model="settingsAdapterIds" :adapters="observableAdapters" :disabled="settingsConfigurationLocked" /></UFormField>
+        <UFormField :label="t('capture.adapters')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : settingsCompatibilityLoading ? t('capture.loadingCompatibleAdapters') : compatibleSettingsAdapters.length ? t('capture.adaptersHint') : t('capture.noCompatibleAdapters')" required><ProbeAdapterPicker v-model="settingsAdapterIds" :adapters="compatibleSettingsAdapters" :disabled="settingsConfigurationLocked || settingsCompatibilityLoading" /></UFormField>
 
         <UFormField :label="t('capture.livePreview')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : settingsPreviewAvailable ? t('capture.livePreviewHint') : t('capture.livePreviewUnavailable')">
           <USwitch v-model="settingsLivePreview" :disabled="settingsConfigurationLocked || !settingsPreviewAvailable" />
@@ -837,6 +968,15 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </ManagementFormModal>
 
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
+    <ConfirmDialog
+      :open="Boolean(pendingQuickCleanup)"
+      :title="t('capture.quickProbe.cleanupTitle')"
+      :description="t('capture.quickProbe.cleanupDescription')"
+      :confirm-label="t('capture.quickProbe.cleanupConfirm')"
+      :busy="probe.busy.value"
+      @update:open="$event || (pendingQuickCleanup = null)"
+      @confirm="confirmQuickProbeCleanup"
+    />
     <ConfirmDialog
       :open="clearAllOpen"
       :title="t('capture.clearAllTitle')"

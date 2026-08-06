@@ -5,6 +5,225 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
 })
+
+test('quick probe turns an executable into a retained probe without prerequisite assets', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const softwareTemplate = structuredClone(snapshot.software[0])
+    const dictionaryTemplate = structuredClone(snapshot.dictionaries[0])
+    let currentSnapshot: any = {
+      ...structuredClone(snapshot),
+      selectedSoftwareId: null,
+      software: [],
+      dictionaries: [],
+      workflows: [],
+      activations: [],
+      workflowRuntimeStatus: {},
+    }
+    let runs: any[] = []
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
+        if (command === 'desktop_snapshot') return currentSnapshot
+        if (command === 'desktop_probe_runs') return runs
+        if (command === 'desktop_preflight_software') {
+          return {
+            executablePath: args?.executablePath,
+            executableName: 'QuickTarget.exe',
+            suggestedName: 'QuickTarget',
+            architecture: 'x86_64',
+            running: true,
+            canAdd: true,
+            state: 'ready',
+            existingName: null,
+          }
+        }
+        if (command === 'desktop_start_quick_probe') {
+          const summary = {
+            id: 'quick-probe-ui', name: 'QuickTarget 快速测试', softwareId: 'software.quick-target',
+            dictionaryId: 'quick-dictionary-ui', adapterIds: ['synthetic.ext-text-out'], status: 'running',
+            livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
+            droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
+            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+          }
+          runs = [summary]
+          currentSnapshot = {
+            ...currentSnapshot,
+            selectedSoftwareId: 'software.quick-target',
+            software: [{ ...softwareTemplate, id: 'software.quick-target', name: 'QuickTarget', executableName: 'QuickTarget.exe', executablePath: args?.request.executablePath }],
+            dictionaries: [{ ...dictionaryTemplate, metadata: { ...dictionaryTemplate.metadata, id: 'quick-dictionary-ui', name: 'QuickTarget 临时词典' }, revision: 1, entryCount: 0 }],
+          }
+          return summary
+        }
+        if (command === 'desktop_retain_quick_probe') {
+          runs = [{ ...runs[0], quickProbe: false, updatedAtMs: 2 }]
+          return runs[0]
+        }
+        if (command === 'desktop_probe_run_entries') {
+          return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+        }
+        if (command === 'desktop_probe_run_summary') return runs[0]
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { snapshot: model })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await expect(page.getByRole('button', { name: '新建探针任务' })).toBeDisabled()
+  await page.getByRole('button', { name: '快速测试' }).click()
+  const dialog = page.getByRole('dialog', { name: '快速测试一个程序' })
+  await expect(dialog.getByText('任务名称', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('绑定词典', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('探针技术', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('目标语言', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('textbox', { name: '目标程序' }).fill('X:\\SyntheticFixtures\\QuickTarget.exe')
+  await dialog.getByRole('button', { name: '检查' }).click()
+  await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('已识别 QuickTarget')
+  await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('x86_64')
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/quick-probe-ready-zh.png' })
+  await dialog.getByRole('button', { name: '高级选项' }).click()
+  await expect(dialog.getByText('目标语言', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '开始测试' }).click()
+
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'QuickTarget 快速测试', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '保留', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '结束并清理', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '保留', exact: true }).click()
+  await expect(page.getByRole('button', { name: '探针设置', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '保留', exact: true })).toHaveCount(0)
+})
+
+test('quick probe foreground capture can end and clean up at compact English layout', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    let runs: any[] = []
+    const preflight = {
+      executablePath: 'X:\\SyntheticFixtures\\CapturedTarget.exe', executableName: 'CapturedTarget.exe',
+      suggestedName: 'CapturedTarget', architecture: 'x86_64', running: true, canAdd: false,
+      state: 'already_added', existingName: 'Captured Target',
+    }
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'light' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return runs
+        if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
+        if (command === 'desktop_cancel_software_capture') return null
+        if (command === 'desktop_start_quick_probe') {
+          const summary = {
+            id: 'quick-probe-captured', name: 'Captured Target quick test', softwareId: 'software-proof',
+            dictionaryId: 'quick-dictionary-captured', adapterIds: ['synthetic.ext-text-out'], status: 'running',
+            livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
+            droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
+            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+          }
+          runs = [summary]
+          return summary
+        }
+        if (command === 'desktop_cleanup_quick_probe') {
+          runs = []
+          ;(window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned = true
+          return { software: 'reused', dictionary: 'removed' }
+        }
+        if (command === 'desktop_probe_run_entries') {
+          return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+        }
+        if (command === 'desktop_probe_run_summary') return runs[0]
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    ;(window as unknown as { __quickProbePreflight?: typeof preflight }).__quickProbePreflight = preflight
+  }, { snapshot: model })
+  await page.setViewportSize({ width: 960, height: 640 })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: 'Capture', exact: true }).click()
+  await page.getByRole('button', { name: 'Quick test' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Quick-test an application' })
+  await dialog.getByRole('button', { name: 'Capture foreground app' }).click()
+  await expect(dialog.getByText('Waiting to capture the target')).toBeVisible()
+  await page.evaluate(() => {
+    const preflight = (window as unknown as { __quickProbePreflight: unknown }).__quickProbePreflight
+    window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
+      detail: { state: 'captured', shortcut: 'Ctrl+Shift+F8', preflight },
+    }))
+  })
+  await expect(dialog.getByRole('textbox', { name: 'Target application' })).toHaveValue('X:\\SyntheticFixtures\\CapturedTarget.exe')
+  await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('reuse “Captured Target”')
+  await dialog.getByRole('button', { name: 'Start test' }).click()
+  await expect(page.getByRole('heading', { name: 'Captured Target quick test', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'End and clean up', exact: true }).click()
+  const confirmation = page.getByRole('dialog', { name: 'End quick test' })
+  await expect(confirmation).toContainText('Assets referenced elsewhere are kept')
+  await confirmation.getByRole('button', { name: 'End and clean up' }).click()
+
+  await expect(confirmation).toHaveCount(0)
+  await expect(page.getByText('No probe runs yet')).toBeVisible()
+  await expect(page.getByRole('status')).toContainText('The software record that existed before the test is unchanged')
+  await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned))).toBe(true)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/quick-probe-compact-en.png' })
+})
+
+test('quick probe keeps the launcher recoverable after a target stops during startup', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    let attempts = 0
+    let runs: any[] = []
+    const summary = {
+      id: 'quick-probe-retry', name: 'Vector Studio 快速测试', softwareId: 'software-proof',
+      dictionaryId: 'quick-dictionary-retry', adapterIds: ['synthetic.ext-text-out'], status: 'running',
+      livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
+      droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
+      dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+    }
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return runs
+        if (command === 'desktop_preflight_software') {
+          return {
+            executablePath: args?.executablePath, executableName: 'VectorStudio.exe', suggestedName: 'Vector Studio',
+            architecture: 'x86_64', running: true, canAdd: false, state: 'already_added', existingName: 'Vector Studio',
+          }
+        }
+        if (command === 'desktop_start_quick_probe') {
+          attempts += 1
+          if (attempts === 1) throw { schemaVersion: 1, code: 'quick_probe.target_stopped', args: {} }
+          runs = [summary]
+          return summary
+        }
+        if (command === 'desktop_probe_run_entries') {
+          return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+        }
+        if (command === 'desktop_probe_run_summary') return runs[0]
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { snapshot: model })
+  await replaceModel(page, model)
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '快速测试' }).click()
+  const dialog = page.getByRole('dialog', { name: '快速测试一个程序' })
+  await dialog.getByRole('textbox', { name: '目标程序' }).fill('X:\\SyntheticFixtures\\VectorStudio.exe')
+  await dialog.getByRole('button', { name: '检查' }).click()
+  await dialog.getByRole('button', { name: '开始测试' }).click()
+
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('alert')).toContainText('请确认它仍在运行，再重新开始测试')
+  await expect(dialog.getByRole('button', { name: '开始测试' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '开始测试' }).click()
+  await expect(page.getByRole('heading', { name: 'Vector Studio 快速测试', exact: true })).toBeVisible()
+})
 test('probe run uses the shared searchable selectable paginated table flow', async ({ page }) => {
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
@@ -58,7 +277,7 @@ test('probe list hides technical detail behind one accessible hover target and u
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         return null
@@ -108,7 +327,7 @@ test('persisted probe closes creation modal even when its initial connection fai
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
         if (command === 'desktop_probe_run_summary') return createdRun
@@ -222,7 +441,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -313,7 +532,7 @@ test('probe detail states when the active runtime can only collect text', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -346,7 +565,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -473,7 +692,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 19 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary

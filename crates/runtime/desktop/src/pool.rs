@@ -28,6 +28,8 @@ pub struct DesktopRuntimeStatus {
     supported_features: BTreeSet<Feature>,
     requested_features: BTreeSet<Feature>,
     active_features: BTreeSet<Feature>,
+    active_target_count: usize,
+    failed_target_count: usize,
     applied_generation: Option<Generation>,
 }
 
@@ -67,6 +69,21 @@ impl DesktopRuntimeStatus {
     }
 
     #[must_use]
+    pub const fn active_target_count(&self) -> usize {
+        self.active_target_count
+    }
+
+    #[must_use]
+    pub const fn failed_target_count(&self) -> usize {
+        self.failed_target_count
+    }
+
+    #[must_use]
+    pub const fn is_partially_active(&self) -> bool {
+        self.active_target_count > 0 && self.failed_target_count > 0
+    }
+
+    #[must_use]
     pub const fn applied_generation(&self) -> Option<Generation> {
         self.applied_generation
     }
@@ -79,6 +96,8 @@ impl DesktopRuntimeStatus {
             supported_features: BTreeSet::new(),
             requested_features: BTreeSet::new(),
             active_features: BTreeSet::new(),
+            active_target_count: 0,
+            failed_target_count: 0,
             applied_generation: None,
         }
     }
@@ -173,6 +192,54 @@ impl DesktopRuntimePool {
         }
         self.status(&application_id)
             .ok_or(DesktopRuntimeError::InvalidState)
+    }
+
+    /// Runs one bounded acquisition through an isolated, short-lived Runtime.
+    ///
+    /// The Runtime is deliberately not inserted into `sessions`: acquisition must not borrow,
+    /// replace, stop, or otherwise mutate a Workflow/Capture Controller session owned by the Pool.
+    pub fn acquire_point(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        let mut runtime = self
+            .factory
+            .discover(application_id.into(), spec)
+            .map_err(map_runtime_acquisition_error)?;
+        runtime.acquire_point(target_id, adapter_id, point, cancellation)
+    }
+
+    /// Acquires from the Pool's stable primary target selection without exposing target identity
+    /// to product interaction state.
+    pub fn acquire_primary_point(
+        &mut self,
+        application_id: impl Into<Box<str>>,
+        spec: &DesktopRuntimeSpec,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        let mut runtime = self
+            .factory
+            .discover(application_id.into(), spec)
+            .map_err(map_runtime_acquisition_error)?;
+        let target_id = runtime
+            .targets()
+            .first()
+            .map(RuntimeTarget::id)
+            .ok_or(DesktopAcquisitionError::UnknownTarget)?;
+        runtime.acquire_point(target_id, adapter_id, point, cancellation)
     }
 
     pub fn set_features(
@@ -596,6 +663,32 @@ fn runtime_status(
         supported_features: runtime.supported_features(),
         requested_features,
         active_features: runtime.active_features(),
+        active_target_count: runtime.active_target_count(),
+        failed_target_count: runtime.failed_target_count(),
         applied_generation: runtime.applied_generation(),
+    }
+}
+
+const fn map_runtime_acquisition_error(error: DesktopRuntimeError) -> DesktopAcquisitionError {
+    match error {
+        DesktopRuntimeError::UnknownTarget => DesktopAcquisitionError::UnknownTarget,
+        DesktopRuntimeError::AcquisitionWorkerUnavailable => {
+            DesktopAcquisitionError::WorkerUnavailable
+        }
+        DesktopRuntimeError::InvalidState => DesktopAcquisitionError::InvalidState,
+        DesktopRuntimeError::ControllerUnavailable
+        | DesktopRuntimeError::ControllerRejected
+        | DesktopRuntimeError::ProtocolRejected
+        | DesktopRuntimeError::SessionRejected
+        | DesktopRuntimeError::ActivationRejected(_)
+        | DesktopRuntimeError::BundleUnavailable
+        | DesktopRuntimeError::InvalidManifest
+        | DesktopRuntimeError::InvalidArtifactPath
+        | DesktopRuntimeError::InvalidArtifactHash
+        | DesktopRuntimeError::ArtifactHashMismatch
+        | DesktopRuntimeError::AdapterInspectionFailed
+        | DesktopRuntimeError::AdapterRegistryRejected => {
+            DesktopAcquisitionError::ControllerUnavailable
+        }
     }
 }

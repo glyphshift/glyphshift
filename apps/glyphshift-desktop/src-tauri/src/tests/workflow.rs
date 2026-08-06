@@ -53,6 +53,17 @@ fn runtime_module_rejection_reaches_an_actionable_command_error() {
 }
 
 #[test]
+fn changed_resident_adapter_set_requires_a_target_restart() {
+    let error = serde_json::to_value(runtime_command_error(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::TargetRuntimeRestartRequired),
+        true,
+    ))
+    .expect("serialize target Runtime restart requirement");
+
+    assert_eq!(error["code"], "runtime.target_restart_required");
+}
+
+#[test]
 fn isolated_worker_permission_and_timeout_reach_actionable_command_errors() {
     let denied = serde_json::to_value(runtime_command_error(
         DesktopRuntimeError::ActivationRejected(
@@ -274,18 +285,7 @@ fn desktop_snapshot_returns_product_configuration_activation_and_runtime_state()
 #[test]
 fn desktop_snapshot_exposes_adapter_documentation_as_presentation_metadata() {
     let (mut application, _calls, _software_id, _data_root) = workflow_application();
-    application.adapters.push(AdapterView {
-        id: TEST_ADAPTER_ID.into(),
-        name: "Synthetic adapter".into(),
-        version: "1.0.0".into(),
-        summary: "Synthetic adapter presentation".into(),
-        platforms: vec!["windows".into()],
-        technologies: vec!["Synthetic".into()],
-        features: vec!["textObserve".into()],
-        technical_target: "SyntheticTarget".into(),
-        documentation_url: Some("https://example.invalid/adapter".into()),
-        configuration: "none".into(),
-    });
+    application.adapters[0].documentation_url = Some("https://example.invalid/adapter".into());
 
     let json = serde_json::to_value(application.snapshot()).expect("serialize product snapshot");
 
@@ -423,10 +423,13 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         runtimes: Some(runtimes),
         workflow_runtime_status: BTreeMap::new(),
         adapters: Vec::new(),
+        adapter_target_support: BTreeMap::new(),
         font_families: Vec::new(),
         font_cache_root: data_root.path().to_path_buf(),
         probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
             .expect("probe run store"),
+        quick_probe_sessions: QuickProbeSessionStore::open(data_root.path())
+            .expect("quick probe session store"),
         active_probe_run_id: None,
         active_probe_capability: None,
     };

@@ -126,6 +126,8 @@ pub struct RuntimeAdapterOption {
     version: Box<str>,
     summary: Box<str>,
     platforms: Vec<Box<str>>,
+    architectures: Vec<Box<str>>,
+    placement: Placement,
     technologies: Vec<Box<str>>,
     features: Vec<Feature>,
     technical_target: Box<str>,
@@ -157,6 +159,16 @@ impl RuntimeAdapterOption {
     #[must_use]
     pub fn platforms(&self) -> &[Box<str>] {
         &self.platforms
+    }
+
+    #[must_use]
+    pub fn architectures(&self) -> &[Box<str>] {
+        &self.architectures
+    }
+
+    #[must_use]
+    pub const fn placement(&self) -> Placement {
+        self.placement
     }
 
     #[must_use]
@@ -284,6 +296,8 @@ impl RuntimeBundle {
                         .clone()
                         .unwrap_or_else(|| "运行时文字与字体拦截适配器".into()),
                     platforms: descriptor.platforms().map(Into::into).collect(),
+                    architectures: descriptor.architectures().map(Into::into).collect(),
+                    placement: descriptor.placement(),
                     technologies: adapter.technology.iter().cloned().collect(),
                     features: features.clone(),
                     technical_target: adapter
@@ -367,6 +381,8 @@ impl RuntimeBundle {
                     .clone()
                     .unwrap_or_else(|| "独立进程文字观察适配器".into()),
                 platforms: worker.platforms.clone(),
+                architectures: worker.architectures.clone(),
+                placement: Placement::IsolatedWorker,
                 technologies: worker.technology.iter().cloned().collect(),
                 features: features.clone(),
                 technical_target: worker

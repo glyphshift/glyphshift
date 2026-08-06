@@ -21,29 +21,60 @@ fn quick_capture_arms_then_captures_and_can_be_cancelled() {
 #[test]
 fn software_preflight_keeps_each_deterministic_failure_distinct() {
     assert_eq!(
-        software_preflight_state(true, false, "x86_64", true, true),
+        software_preflight_state(true, false, true, true, true),
         SoftwarePreflightState::SelfTarget
     );
     assert_eq!(
-        software_preflight_state(false, true, "x86_64", true, true),
+        software_preflight_state(false, true, true, true, true),
         SoftwarePreflightState::AlreadyAdded
     );
     assert_eq!(
-        software_preflight_state(false, false, "x86", true, true),
+        software_preflight_state(false, false, false, true, true),
         SoftwarePreflightState::UnsupportedArchitecture
     );
     assert_eq!(
-        software_preflight_state(false, false, "x86_64", false, true),
+        software_preflight_state(false, false, true, false, true),
         SoftwarePreflightState::RuntimeUnavailable
     );
     assert_eq!(
-        software_preflight_state(false, false, "x86_64", true, false),
+        software_preflight_state(false, false, true, true, false),
         SoftwarePreflightState::NotRunning
     );
     assert_eq!(
-        software_preflight_state(false, false, "x86_64", true, true),
+        software_preflight_state(false, false, true, true, true),
         SoftwarePreflightState::Ready
     );
+}
+
+#[test]
+fn software_preflight_accepts_an_architecture_with_an_isolated_observer() {
+    let (mut application, _calls, _software_id, _data_root) = workflow_application();
+
+    application.adapter_target_support.insert(
+        "test.native".into(),
+        AdapterTargetSupport {
+            placement: Placement::TargetProcess,
+            platforms: vec!["windows".into()],
+            architectures: vec!["x86".into(), "x86_64".into()],
+            features: vec![Feature::TextObserve],
+        },
+    );
+
+    assert!(application.supports_probe_architecture("x86_64"));
+    assert!(!application.supports_probe_architecture("x86"));
+
+    application.adapter_target_support.insert(
+        "test.isolated".into(),
+        AdapterTargetSupport {
+            placement: Placement::IsolatedWorker,
+            platforms: vec!["windows".into()],
+            architectures: vec!["x86".into(), "x86_64".into()],
+            features: vec![Feature::TextObserve],
+        },
+    );
+
+    assert!(application.supports_probe_architecture("x86"));
+    assert!(!application.supports_probe_architecture("aarch64"));
 }
 
 #[test]

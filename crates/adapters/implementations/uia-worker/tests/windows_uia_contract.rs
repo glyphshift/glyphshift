@@ -113,6 +113,9 @@ impl StandardControlTarget {
     }
 
     fn interactive_geometry(&mut self) -> InteractiveGeometry {
+        writeln!(self.stdin, "foreground").expect("request target foreground");
+        self.stdin.flush().expect("flush target foreground request");
+        assert_eq!(self.read_line(Duration::from_secs(3)), "uia-foreground");
         writeln!(self.stdin, "geometry").expect("request target geometry");
         self.stdin.flush().expect("flush target geometry request");
         let response = self.read_line(Duration::from_secs(3));

@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { translateCommandError } from './commandError'
+import { i18n } from './i18n'
 import type { ProbeEntryPage, ProbeExportFormat, ProbeRunSummary } from './model'
 
 export type ProbeDictionaryBinding
@@ -38,6 +39,21 @@ export interface ProbeRunUpdateInput {
   livePreviewEnabled: boolean
 }
 
+export interface QuickProbeStartInput {
+  executablePath: string
+  targetLocale: string
+}
+
+export interface QuickProbeBrowserFallback {
+  softwareId?: string
+  softwareName: string
+}
+
+export interface QuickProbeCleanupResult {
+  software: 'removed' | 'reused' | 'retained'
+  dictionary: 'removed' | 'reused' | 'retained'
+}
+
 const runs = ref<ProbeRunSummary[]>([])
 const selectedRunId = ref(localStorage.getItem('glyphshift.probe.selectedRun') ?? '')
 const busy = ref(false)
@@ -60,6 +76,10 @@ function selectRun(id: string) {
   selectedRunId.value = id
   if (id) localStorage.setItem('glyphshift.probe.selectedRun', id)
   else localStorage.removeItem('glyphshift.probe.selectedRun')
+}
+
+function clearMessage() {
+  message.value = ''
 }
 
 export function useProbeRuns() {
@@ -108,6 +128,7 @@ export function useProbeRuns() {
             dictionaryRevision: 1,
             dictionaryEntryCount: 0,
             runtimeCapability: null,
+            quickProbe: false,
           }
       upsert(summary)
       return summary
@@ -125,6 +146,101 @@ export function useProbeRuns() {
           // Keep the original connection failure; a later refresh can recover the run list.
         }
       }
+      return null
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
+  async function compatibleAdapters(softwareId: string) {
+    if (!hasDesktopRuntime()) return null
+    try {
+      return await invoke<string[]>('desktop_compatible_probe_adapters', { softwareId })
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return []
+    }
+  }
+
+  async function startQuickProbe(input: QuickProbeStartInput, fallback: QuickProbeBrowserFallback) {
+    if (busy.value) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const now = Date.now()
+      const summary = hasDesktopRuntime()
+        ? await invoke<ProbeRunSummary>('desktop_start_quick_probe', { request: input })
+        : {
+            id: `quick-probe-${crypto.randomUUID()}`,
+            name: `${fallback.softwareName} ${i18n.global.t('capture.quickProbe.browserRunSuffix')}`,
+            softwareId: fallback.softwareId ?? `quick-software-${crypto.randomUUID()}`,
+            dictionaryId: `quick-dictionary-${crypto.randomUUID()}`,
+            adapterIds: [],
+            status: 'running' as const,
+            livePreviewEnabled: false,
+            observationRevision: 0,
+            observedCount: 0,
+            ignoredCount: 0,
+            droppedObservations: 0,
+            previewGeneration: 0,
+            createdAtMs: now,
+            updatedAtMs: now,
+            dictionaryRevision: 1,
+            dictionaryEntryCount: 0,
+            runtimeCapability: null,
+            quickProbe: true,
+          }
+      upsert(summary)
+      selectRun(summary.id)
+      return summary
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return null
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
+  async function retainQuickProbe(runId: string) {
+    if (busy.value) return null
+    const current = runs.value.find(run => run.id === runId)
+    if (!current) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const summary = hasDesktopRuntime()
+        ? await invoke<ProbeRunSummary>('desktop_retain_quick_probe', { runId })
+        : { ...current, quickProbe: false, updatedAtMs: Date.now() }
+      upsert(summary)
+      return summary
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return null
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
+  async function cleanupQuickProbe(runId: string) {
+    if (busy.value) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const result = hasDesktopRuntime()
+        ? await invoke<QuickProbeCleanupResult>('desktop_cleanup_quick_probe', { runId })
+        : { software: 'reused' as const, dictionary: 'removed' as const }
+      runs.value = runs.value.filter(run => run.id !== runId)
+      if (selectedRunId.value === runId) selectRun('')
+      return result
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
       return null
     }
     finally {
@@ -325,7 +441,12 @@ export function useProbeRuns() {
     polling,
     message,
     connect,
+    clearMessage,
     selectRun,
+    compatibleAdapters,
+    startQuickProbe,
+    retainQuickProbe,
+    cleanupQuickProbe,
     create,
     remove,
     update,

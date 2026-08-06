@@ -13,6 +13,13 @@ pub struct WindowsExecutable {
     pub(super) running: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowsForegroundPoint {
+    executable: WindowsExecutable,
+    x: i32,
+    y: i32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WindowsElevationError {
     QueryFailed,
@@ -40,6 +47,23 @@ impl WindowsExecutable {
     #[must_use]
     pub const fn running(&self) -> bool {
         self.running
+    }
+}
+
+impl WindowsForegroundPoint {
+    #[must_use]
+    pub const fn executable(&self) -> &WindowsExecutable {
+        &self.executable
+    }
+
+    #[must_use]
+    pub const fn x(&self) -> i32 {
+        self.x
+    }
+
+    #[must_use]
+    pub const fn y(&self) -> i32 {
+        self.y
     }
 }
 
@@ -71,8 +95,30 @@ pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError>
     windows_executable(Path::new(&path), Some(true))
 }
 
+#[cfg(windows)]
+pub fn foreground_windows_point() -> Result<WindowsForegroundPoint, PluginError> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let executable = foreground_windows_executable()?;
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) } == 0 {
+        return Err(PluginError::new("cursor_position_unavailable"));
+    }
+    Ok(WindowsForegroundPoint {
+        executable,
+        x: point.x,
+        y: point.y,
+    })
+}
+
 #[cfg(not(windows))]
 pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
+    Err(PluginError::new("unsupported_operating_system"))
+}
+
+#[cfg(not(windows))]
+pub fn foreground_windows_point() -> Result<WindowsForegroundPoint, PluginError> {
     Err(PluginError::new("unsupported_operating_system"))
 }
 

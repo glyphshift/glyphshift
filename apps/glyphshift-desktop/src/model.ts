@@ -50,6 +50,34 @@ export type SoftwareQuickCaptureEvent
     | { state: 'captured'; shortcut: string; preflight: SoftwarePreflight }
     | { state: 'failed'; shortcut: string; errorCode: string }
 
+export interface InteractiveTranslationRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+export interface InteractiveTranslationBlock {
+  source: string
+  anchors: InteractiveTranslationRect[]
+  granularity: 'word' | 'control' | 'line' | 'region'
+  provenance: 'structured' | 'visual'
+  confidenceBasisPoints?: number
+  translation?: string
+  translationState: 'translated' | 'missing'
+  origin?: 'dictionary' | 'provider'
+}
+
+export interface InteractiveTranslationResult {
+  blocks: InteractiveTranslationBlock[]
+  partial: boolean
+}
+
+export type InteractiveTranslationEvent
+  = { state: 'capturing'; shortcut: string }
+    | { state: 'presented'; shortcut: string; result: InteractiveTranslationResult }
+    | { state: 'failed'; shortcut: string; error: CommandError }
+
 export interface DictionaryMetadata {
   id: string
   releaseVersion: string
@@ -159,6 +187,7 @@ export interface ProbeRunSummary {
   dictionaryRevision: number
   dictionaryEntryCount: number
   runtimeCapability: ProbeRuntimeCapability | null
+  quickProbe: boolean
 }
 
 export interface ProbeEntryRow {

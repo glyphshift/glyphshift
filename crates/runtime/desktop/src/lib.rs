@@ -18,7 +18,9 @@ pub use bundle::{RuntimeAdapterOption, RuntimeBundle};
 use glyphshift_acquisition::{
     AcquisitionRequest, AuthorizedTarget, InteractiveSelection, SourcePolicy,
 };
-pub use glyphshift_acquisition::{AcquisitionResult, DesktopPoint};
+pub use glyphshift_acquisition::{
+    AcquisitionResult, DesktopPoint, DesktopRect, Granularity, Provenance, SourceBlock,
+};
 use glyphshift_acquisition_worker_host::{
     AcquisitionWorkerArtifact, AcquisitionWorkerBinding, AcquisitionWorkerHost,
     AcquisitionWorkerHostError, CancellationToken,

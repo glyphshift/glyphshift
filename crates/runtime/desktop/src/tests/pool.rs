@@ -1,6 +1,223 @@
 use super::*;
 
 #[test]
+fn point_acquisition_uses_a_short_lived_runtime_without_creating_a_pool_session() {
+    let root = tempdir().expect("point acquisition Runtime data");
+    let executable = root.path().join("PointHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .runtime_spec(&software_id)
+        .expect("point acquisition Runtime spec");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::clone(&calls),
+    }));
+
+    let result = pool
+        .acquire_point(
+            software_id.as_str(),
+            &spec,
+            1,
+            "test.acquire",
+            DesktopPoint::new(20, 30),
+            &DesktopAcquisitionCancellation::new(),
+        )
+        .expect("point acquisition");
+
+    assert_eq!(result.blocks()[0].source(), "Open");
+    assert!(pool.status(&software_id).is_none());
+    assert_eq!(discoveries.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        calls.lock().expect("acquisition calls").as_slice(),
+        &[(1, 1, Box::<str>::from("test.acquire"))]
+    );
+}
+
+#[test]
+fn primary_point_acquisition_selects_the_first_opaque_target_inside_the_runtime_boundary() {
+    let root = tempdir().expect("primary point Runtime data");
+    let executable = root.path().join("PrimaryPointHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .runtime_spec(&software_id)
+        .expect("point acquisition Runtime spec");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::new(AtomicUsize::new(0)),
+        calls: Arc::clone(&calls),
+    }));
+
+    pool.acquire_primary_point(
+        software_id,
+        &spec,
+        "test.acquire",
+        DesktopPoint::new(20, 30),
+        &DesktopAcquisitionCancellation::new(),
+    )
+    .expect("primary point acquisition");
+
+    assert_eq!(calls.lock().expect("acquisition calls")[0].1, 1);
+}
+
+#[test]
+fn point_acquisition_does_not_reuse_or_mutate_an_active_workflow_runtime() {
+    let root = tempdir().expect("workflow acquisition Runtime data");
+    let executable = root.path().join("WorkflowPointHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.acquire", "取词词典", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
+        )
+        .expect("acquisition dictionary");
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.acquire", "取词工作流").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.as_str(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.acquire"],
+                ),
+            ]),
+        )
+        .expect("acquisition workflow");
+    let intent = backend
+        .effective_workflow_intent("workflow.acquire")
+        .expect("workflow intent");
+    let spec = backend
+        .runtime_spec(&software_id)
+        .expect("point acquisition Runtime spec");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::clone(&calls),
+    }));
+    pool.reconcile_workflow(&intent).expect("active workflow");
+
+    pool.acquire_point(
+        software_id.as_str(),
+        &spec,
+        1,
+        "test.acquire",
+        DesktopPoint::new(20, 30),
+        &DesktopAcquisitionCancellation::new(),
+    )
+    .expect("point acquisition beside workflow");
+
+    let status = pool.status(&software_id).expect("workflow Runtime remains");
+    assert!(status.is_feature_active(Feature::TextReplace));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.lock().expect("acquisition calls")[0].0, 2);
+}
+
+#[test]
+fn point_acquisition_does_not_reuse_or_mutate_an_active_capture_runtime() {
+    let root = tempdir().expect("capture acquisition Runtime data");
+    let executable = root.path().join("CapturePointHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+        .expect("capture Runtime spec");
+    let capture = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-acquisition").expect("session id"),
+        root.path().join("capture.json"),
+        100,
+    )
+    .expect("capture configuration");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::clone(&calls),
+    }));
+    pool.start_capture(software_id.as_str(), &spec, None, capture)
+        .expect("active capture");
+
+    pool.acquire_point(
+        software_id.as_str(),
+        &spec,
+        1,
+        "test.acquire",
+        DesktopPoint::new(20, 30),
+        &DesktopAcquisitionCancellation::new(),
+    )
+    .expect("point acquisition beside capture");
+
+    let status = pool.status(&software_id).expect("capture Runtime remains");
+    assert!(status.is_feature_active(Feature::TextObserve));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.lock().expect("acquisition calls")[0].0, 2);
+}
+
+#[test]
+fn cancelled_point_acquisition_does_not_discover_a_runtime() {
+    let root = tempdir().expect("cancelled acquisition Runtime data");
+    let executable = root.path().join("CancelledPointHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .runtime_spec(&software_id)
+        .expect("point acquisition Runtime spec");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::new(Mutex::new(Vec::new())),
+    }));
+    let cancellation = DesktopAcquisitionCancellation::new();
+    cancellation.cancel();
+
+    assert_eq!(
+        pool.acquire_point(
+            software_id,
+            &spec,
+            1,
+            "test.acquire",
+            DesktopPoint::new(20, 30),
+            &cancellation,
+        ),
+        Err(DesktopAcquisitionError::Cancelled)
+    );
+    assert_eq!(discoveries.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn workflow_reconcile_runs_two_targets_and_stops_only_its_owned_software() {
     let root = tempdir().expect("workflow Runtime data");
     let mut backend = open_test_backend(root.path().join("data"));

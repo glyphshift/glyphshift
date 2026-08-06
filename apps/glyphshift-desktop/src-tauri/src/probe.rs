@@ -117,6 +117,7 @@ pub(super) struct ProbeRunView {
     pub(super) dictionary_revision: u64,
     pub(super) dictionary_entry_count: usize,
     pub(super) runtime_capability: Option<ProbeRuntimeCapability>,
+    pub(super) quick_probe: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -140,6 +141,53 @@ impl ProbeRuntimeCapability {
 }
 
 impl DesktopApplication {
+    pub(super) fn compatible_probe_adapter_ids(
+        &self,
+        software_id: &str,
+    ) -> Result<Vec<Box<str>>, CommandError> {
+        let snapshot = self.backend.snapshot();
+        let software = snapshot
+            .software()
+            .iter()
+            .find(|software| software.id() == software_id)
+            .ok_or_else(|| {
+                CommandError::new("capture.unknown_software").with_arg("softwareId", software_id)
+            })?;
+        let executable_path = software
+            .executable_path()
+            .ok_or_else(|| CommandError::new("software.invalid_executable"))?;
+        let executable = inspect_windows_executable(executable_path)
+            .map_err(|_| CommandError::new("software.invalid_executable"))?;
+
+        Ok(self
+            .adapter_target_support
+            .iter()
+            .filter(|(_, support)| {
+                support.supports("windows", executable.architecture(), Feature::TextObserve)
+            })
+            .map(|(adapter_id, _)| adapter_id.clone())
+            .collect())
+    }
+
+    fn ensure_compatible_probe_adapters(
+        &self,
+        software_id: &str,
+        adapter_ids: &[Box<str>],
+    ) -> Result<(), CommandError> {
+        if adapter_ids.is_empty() {
+            return Err(CommandError::new("capture.adapters_required"));
+        }
+        let compatible = self
+            .compatible_probe_adapter_ids(software_id)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if adapter_ids.iter().all(|id| compatible.contains(id)) {
+            Ok(())
+        } else {
+            Err(CommandError::new("capture.unknown_adapter"))
+        }
+    }
+
     pub(super) fn probe_run_view(
         &self,
         summary: ProbeRunSummary,
@@ -155,6 +203,7 @@ impl DesktopApplication {
             runtime_capability: (self.active_probe_run_id.as_deref() == Some(summary.id()))
                 .then_some(self.active_probe_capability)
                 .flatten(),
+            quick_probe: self.quick_probe_sessions.contains(summary.id()),
             summary,
             dictionary_revision: dictionary.revision(),
             dictionary_entry_count: dictionary.entries().len(),
@@ -193,6 +242,7 @@ impl DesktopApplication {
         if self.active_probe_run_id.is_some() {
             return Err(CommandError::new("capture.already_active"));
         }
+        self.ensure_compatible_probe_adapters(&request.software_id, &request.adapter_ids)?;
         if request.live_preview_enabled && !self.adapters_support_preview(&request.adapter_ids) {
             return Err(CommandError::new("capture.preview_unavailable"));
         }
@@ -256,6 +306,7 @@ impl DesktopApplication {
         let configuration_changed = current.adapter_ids() != request.adapter_ids.as_slice()
             || current.live_preview_enabled() != request.live_preview_enabled;
         if configuration_changed {
+            self.ensure_compatible_probe_adapters(current.software_id(), &request.adapter_ids)?;
             self.backend
                 .capture_runtime_spec(current.software_id(), &request.adapter_ids)
                 .map_err(capture_backend_error)?;
@@ -332,6 +383,7 @@ impl DesktopApplication {
         ) {
             return Err(CommandError::new("capture.already_active"));
         }
+        self.ensure_compatible_probe_adapters(summary.software_id(), summary.adapter_ids())?;
         let spec = self
             .backend
             .capture_runtime_spec(summary.software_id(), summary.adapter_ids())
@@ -666,6 +718,17 @@ pub(super) fn desktop_probe_runs(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .probe_run_list()
+}
+
+#[tauri::command]
+pub(super) fn desktop_compatible_probe_adapters(
+    software_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<Vec<Box<str>>, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .compatible_probe_adapter_ids(&software_id)
 }
 
 #[tauri::command]

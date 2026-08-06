@@ -210,6 +210,7 @@ pub enum HostOperationFailure {
     RemoteThreadTimeout,
     IsolatedWorkerPermissionDenied,
     IsolatedWorkerTimeout,
+    TargetRuntimeRestartRequired,
     TargetRuntimeRejected(u32),
     ControllerRejected,
 }

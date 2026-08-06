@@ -401,6 +401,9 @@ pub(super) fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) 
             HostOperationFailure::RuntimeModuleUnavailable => {
                 CommandError::new("runtime.component_load_failed")
             }
+            HostOperationFailure::TargetRuntimeRestartRequired => {
+                CommandError::new("runtime.target_restart_required")
+            }
             HostOperationFailure::RuntimeExportUnavailable
             | HostOperationFailure::TargetRuntimeRejected(_) => {
                 CommandError::new("runtime.component_incompatible")

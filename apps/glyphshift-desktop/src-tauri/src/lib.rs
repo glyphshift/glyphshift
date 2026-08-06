@@ -1,7 +1,10 @@
+mod acquisition;
 mod command_error;
 mod dictionary;
 mod font_catalog;
+mod interactive_translation;
 mod probe;
+mod quick_probe;
 mod settings;
 mod software;
 mod workflow;
@@ -19,8 +22,8 @@ use glyphshift_capture::{
     ProbeRunSummary, ProbeRunUpdate, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
-    current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,
-    launch_process_elevated, WindowsElevationError, WindowsExecutable,
+    current_process_is_elevated, foreground_windows_executable, foreground_windows_point,
+    inspect_windows_executable, launch_process_elevated, WindowsElevationError, WindowsExecutable,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
@@ -28,6 +31,7 @@ use glyphshift_desktop_backend::{
     ExecutableSelection, SoftwareEdit, WorkflowCreate, WorkflowEdit, WorkflowView,
 };
 use glyphshift_desktop_runtime::{
+    AcquisitionResult, DesktopAcquisitionCancellation, DesktopAcquisitionError, DesktopPoint,
     DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, HostOperationFailure,
     RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord, WorkflowReconcileReport,
 };
@@ -38,7 +42,7 @@ use glyphshift_dictionary_distribution::{
     FileDictionaryInstallStore, InstallRequest, PublisherIdentity, SignatureEnvelope,
     SystemInstallationClock, TrustVerifierError,
 };
-use glyphshift_domain::{Feature, Generation, RouteOperator};
+use glyphshift_domain::{Feature, Generation, Placement, RouteOperator};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_workflow::ResolveError;
@@ -48,6 +52,7 @@ use probe::{
     capture_preview_publish_error, ProbeDictionaryBindingRequest, ProbeRunCreateRequest,
     ProbeRunUpdateRequest, ProbeTranslationEditRequest,
 };
+use quick_probe::QuickProbeSessionStore;
 use serde::{Deserialize, Serialize};
 use settings::{
     configure_launch_at_startup, AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError,
@@ -68,7 +73,7 @@ use workflow::{
 #[cfg(test)]
 use workflow::{workflow_activation_command_error, WorkflowTargetRuntimeView};
 
-const DESKTOP_API_VERSION: u16 = 19;
+const DESKTOP_API_VERSION: u16 = 22;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -147,6 +152,42 @@ struct AdapterView {
     configuration: Box<str>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AdapterTargetSupport {
+    placement: Placement,
+    platforms: Vec<Box<str>>,
+    architectures: Vec<Box<str>>,
+    features: Vec<Feature>,
+}
+
+impl AdapterTargetSupport {
+    fn supports(&self, platform: &str, architecture: &str, feature: Feature) -> bool {
+        self.features.contains(&feature)
+            && (self.platforms.is_empty()
+                || self
+                    .platforms
+                    .iter()
+                    .any(|candidate| candidate.as_ref() == platform))
+            && match self.placement {
+                Placement::TargetProcess => {
+                    architecture == "x86_64"
+                        && (self.architectures.is_empty()
+                            || self
+                                .architectures
+                                .iter()
+                                .any(|candidate| candidate.as_ref() == architecture))
+                }
+                Placement::IsolatedWorker => {
+                    self.architectures.is_empty()
+                        || self
+                            .architectures
+                            .iter()
+                            .any(|candidate| candidate.as_ref() == architecture)
+                }
+            }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct DesktopProductSnapshot {
@@ -176,6 +217,25 @@ trait WorkflowRuntimeService: Send {
         spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
         configuration: CaptureConfiguration,
     ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError>;
+
+    fn acquire_point(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
+
+    fn acquire_primary_point(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 
@@ -241,6 +301,44 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
             .map(|status| ProbeRuntimeCapability::from_status(&status))
     }
 
+    fn acquire_point(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        DesktopRuntimePool::acquire_point(
+            self,
+            software_id,
+            spec,
+            target_id,
+            adapter_id,
+            point,
+            cancellation,
+        )
+    }
+
+    fn acquire_primary_point(
+        &mut self,
+        software_id: &str,
+        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        DesktopRuntimePool::acquire_primary_point(
+            self,
+            software_id,
+            spec,
+            adapter_id,
+            point,
+            cancellation,
+        )
+    }
+
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         DesktopRuntimePool::stop_capture(self, software_id).map(|_| ())
     }
@@ -283,9 +381,11 @@ struct DesktopApplication {
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
+    adapter_target_support: BTreeMap<Box<str>, AdapterTargetSupport>,
     font_families: Vec<Box<str>>,
     font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
+    quick_probe_sessions: QuickProbeSessionStore,
     active_probe_run_id: Option<Box<str>>,
     active_probe_capability: Option<ProbeRuntimeCapability>,
 }
@@ -294,8 +394,26 @@ impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
         let probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
+        let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
+            .map_err(|error| format!("quick probe startup: {error:?}"))?;
         let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
         let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
+        let adapter_target_support = runtime_bundle
+            .as_ref()
+            .into_iter()
+            .flat_map(|bundle| bundle.adapter_options())
+            .map(|adapter| {
+                (
+                    Box::<str>::from(adapter.id()),
+                    AdapterTargetSupport {
+                        placement: adapter.placement(),
+                        platforms: adapter.platforms().to_vec(),
+                        architectures: adapter.architectures().to_vec(),
+                        features: adapter.features().to_vec(),
+                    },
+                )
+            })
+            .collect();
         let adapters = runtime_bundle
             .as_ref()
             .map(|bundle| {
@@ -339,12 +457,17 @@ impl DesktopApplication {
             }),
             workflow_runtime_status: BTreeMap::new(),
             adapters,
+            adapter_target_support,
             font_families,
             font_cache_root: data_root.clone(),
             probe_runs,
+            quick_probe_sessions,
             active_probe_run_id: None,
             active_probe_capability: None,
         };
+        application
+            .recover_quick_probe_sessions()
+            .map_err(|error| format!("quick probe recovery: {error:?}"))?;
         application
             .restore_enabled_workflows()
             .map_err(|error| format!("{error:?}"))?;
@@ -518,9 +641,15 @@ pub fn run() {
     #[cfg(windows)]
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(|app, _shortcut, event| {
+            .with_handler(|app, shortcut, event| {
                 if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    software::handle_software_quick_capture_shortcut(app);
+                    if shortcut == &software::software_quick_capture_shortcut() {
+                        software::handle_software_quick_capture_shortcut(app);
+                    } else if shortcut
+                        == &interactive_translation::interactive_translation_shortcut()
+                    {
+                        interactive_translation::handle_interactive_translation_shortcut(app);
+                    }
                 }
             })
             .build(),
@@ -553,7 +682,9 @@ pub fn run() {
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(application));
+            app.manage(acquisition::AcquisitionCommandState::default());
             software::manage_quick_capture(app);
+            interactive_translation::manage_interactive_translation(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -564,7 +695,12 @@ pub fn run() {
             desktop_restart_elevated,
             desktop_snapshot,
             desktop_refresh_font_families,
+            acquisition::desktop_acquire_point,
+            acquisition::desktop_cancel_point_acquisition,
+            interactive_translation::desktop_arm_interactive_translation,
+            interactive_translation::desktop_cancel_interactive_translation,
             probe::desktop_probe_runs,
+            probe::desktop_compatible_probe_adapters,
             probe::desktop_create_probe_run,
             probe::desktop_delete_probe_runs,
             probe::desktop_update_probe_run,
@@ -577,6 +713,9 @@ pub fn run() {
             probe::desktop_edit_probe_translation,
             probe::desktop_bulk_probe_entries,
             probe::desktop_export_probe_run,
+            quick_probe::desktop_start_quick_probe,
+            quick_probe::desktop_retain_quick_probe,
+            quick_probe::desktop_cleanup_quick_probe,
             dictionary::desktop_dictionary,
             dictionary::desktop_query_dictionary_catalog,
             dictionary::desktop_install_dictionary_release,

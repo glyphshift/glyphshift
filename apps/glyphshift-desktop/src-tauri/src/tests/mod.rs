@@ -1,4 +1,9 @@
 use super::*;
+use glyphshift_acquisition::{
+    AcquisitionAdapter, AcquisitionCandidate, AcquisitionError, AcquisitionRequest,
+    AuthorizedTarget, Granularity, InteractiveSelection, InteractiveTextAcquisition, Provenance,
+    SourcePolicy,
+};
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
     DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, WorkflowCreate, WorkflowEdit,
@@ -88,6 +93,7 @@ struct WorkflowRuntimeCalls {
     captures_stopped: Vec<Box<str>>,
     capture_publications: Vec<(Box<str>, RuntimePublication)>,
     software_removed: Vec<Box<str>>,
+    point_acquisitions: Vec<(Box<str>, u64, Box<str>, DesktopPoint)>,
 }
 
 struct RecordingWorkflowRuntime {
@@ -204,6 +210,45 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .map_err(|_| DesktopRuntimeError::SessionRejected)
     }
 
+    fn acquire_point(
+        &mut self,
+        software_id: &str,
+        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        self.calls
+            .lock()
+            .expect("runtime call log")
+            .point_acquisitions
+            .push((software_id.into(), target_id, adapter_id.into(), point));
+        Ok(fixture_acquisition_result("Open", point))
+    }
+
+    fn acquire_primary_point(
+        &mut self,
+        software_id: &str,
+        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        self.calls
+            .lock()
+            .map_err(|_| DesktopAcquisitionError::InvalidState)?
+            .point_acquisitions
+            .push((software_id.into(), 1, adapter_id.into(), point));
+        Ok(fixture_acquisition_result("Open", point))
+    }
+
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         self.calls
             .lock()
@@ -267,6 +312,41 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
     }
 }
 
+struct FixtureAcquisitionAdapter {
+    source: Box<str>,
+}
+
+impl AcquisitionAdapter for FixtureAcquisitionAdapter {
+    fn provenance(&self) -> Provenance {
+        Provenance::Structured
+    }
+
+    fn acquire(
+        &mut self,
+        _request: &AcquisitionRequest,
+    ) -> Result<Vec<AcquisitionCandidate>, AcquisitionError> {
+        Ok(vec![AcquisitionCandidate::new(
+            self.source.clone(),
+            [glyphshift_acquisition::DesktopRect::new(10, 20, 80, 44)
+                .expect("fixture acquisition anchor")],
+            Granularity::Control,
+        )])
+    }
+}
+
+fn fixture_acquisition_result(source: &str, point: DesktopPoint) -> AcquisitionResult {
+    let target = AuthorizedTarget::new("fixture-target").expect("fixture target");
+    InteractiveTextAcquisition::new([Box::new(FixtureAcquisitionAdapter {
+        source: source.into(),
+    }) as Box<dyn AcquisitionAdapter>])
+    .acquire(&AcquisitionRequest::new(
+        target,
+        InteractiveSelection::Point(point),
+        SourcePolicy::StructuredOnly,
+    ))
+    .expect("fixture acquisition result")
+}
+
 fn workflow_application() -> (
     DesktopApplication,
     Arc<StdMutex<WorkflowRuntimeCalls>>,
@@ -274,24 +354,10 @@ fn workflow_application() -> (
     tempfile::TempDir,
 ) {
     let data_root = tempdir().expect("temporary product data");
-    let executable = data_root.path().join("SyntheticWorkflowHost.exe");
-    fs::write(&executable, b"synthetic executable identity").expect("synthetic executable");
-    let mut backend = DesktopBackend::open_with_environment(
-        data_root.path(),
-        DesktopEnvironment::new(
-            [AdapterRequirement::new(
-                glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
-                AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
-                [
-                    Feature::TextObserve,
-                    Feature::TextReplace,
-                    Feature::FontSubstitute,
-                ],
-            )],
-            Vec::<Box<str>>::new(),
-        ),
-    )
-    .expect("open product backend");
+    let executable = write_synthetic_executable(data_root.path(), "SyntheticWorkflowHost.exe");
+    let mut backend =
+        DesktopBackend::open_with_environment(data_root.path(), test_desktop_environment())
+            .expect("open product backend");
     let software_id: Box<str> = backend
         .add_software(ExecutableSelection::new(&executable))
         .expect("add synthetic software")
@@ -322,28 +388,86 @@ fn workflow_application() -> (
         capture_capability: ProbeRuntimeCapability::DirectReplace,
     });
     (
-        DesktopApplication {
-            backend,
-            dictionary_distribution: offline_dictionary_distribution(data_root.path())
-                .expect("offline dictionary distribution"),
-            runtimes: Some(runtimes),
-            workflow_runtime_status: BTreeMap::new(),
-            adapters: Vec::new(),
-            font_families: Vec::new(),
-            font_cache_root: data_root.path().to_path_buf(),
-            probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
-                .expect("probe run store"),
-            active_probe_run_id: None,
-            active_probe_capability: None,
-        },
+        test_desktop_application(data_root.path(), backend, runtimes),
         calls,
         software_id,
         data_root,
     )
 }
 
+fn write_synthetic_executable(root: &Path, name: &str) -> PathBuf {
+    let executable = root.join(name);
+    let mut image = vec![0_u8; 256];
+    image[0..2].copy_from_slice(b"MZ");
+    image[0x3c..0x40].copy_from_slice(&0x80_u32.to_le_bytes());
+    image[0x80..0x84].copy_from_slice(b"PE\0\0");
+    image[0x84..0x86].copy_from_slice(&0x8664_u16.to_le_bytes());
+    fs::write(&executable, image).expect("synthetic executable");
+    executable
+}
+
+fn test_desktop_environment() -> DesktopEnvironment {
+    DesktopEnvironment::new(
+        [AdapterRequirement::new(
+            glyphshift_domain::AdapterId::new(TEST_ADAPTER_ID),
+            AdapterVersionRequirement::Exact(AdapterVersion::new(1, 0, 0)),
+            [
+                Feature::TextObserve,
+                Feature::TextReplace,
+                Feature::FontSubstitute,
+            ],
+        )],
+        Vec::<Box<str>>::new(),
+    )
+}
+
+fn test_desktop_application(
+    data_root: &Path,
+    backend: DesktopBackend,
+    runtimes: Box<dyn WorkflowRuntimeService>,
+) -> DesktopApplication {
+    DesktopApplication {
+        backend,
+        dictionary_distribution: offline_dictionary_distribution(data_root)
+            .expect("offline dictionary distribution"),
+        runtimes: Some(runtimes),
+        workflow_runtime_status: BTreeMap::new(),
+        adapters: vec![AdapterView {
+            id: TEST_ADAPTER_ID.into(),
+            name: "Synthetic adapter".into(),
+            version: "1.0.0".into(),
+            summary: "Deterministic test adapter".into(),
+            platforms: vec!["windows".into()],
+            technologies: vec!["Synthetic".into()],
+            features: vec!["textObserve".into(), "textReplace".into()],
+            technical_target: "SyntheticTarget".into(),
+            documentation_url: None,
+            configuration: "none".into(),
+        }],
+        adapter_target_support: BTreeMap::from([(
+            TEST_ADAPTER_ID.into(),
+            AdapterTargetSupport {
+                placement: Placement::TargetProcess,
+                platforms: vec!["windows".into()],
+                architectures: vec!["x86_64".into()],
+                features: vec![Feature::TextObserve, Feature::TextReplace],
+            },
+        )]),
+        font_families: Vec::new(),
+        font_cache_root: data_root.to_path_buf(),
+        probe_runs: ProbeRunStore::open(data_root.join("probe-runs")).expect("probe run store"),
+        quick_probe_sessions: QuickProbeSessionStore::open(data_root)
+            .expect("quick probe session store"),
+        active_probe_run_id: None,
+        active_probe_capability: None,
+    }
+}
+
+mod acquisition;
 mod dictionary;
+mod interactive_translation;
 mod probe;
+mod quick_probe;
 mod shell;
 mod software;
 mod workflow;

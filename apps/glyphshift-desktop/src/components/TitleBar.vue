@@ -10,6 +10,7 @@ defineProps<{
 }>()
 const emit = defineEmits<{
   navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'help' | 'settings']
+  translate: []
   close: []
 }>()
 
@@ -77,6 +78,16 @@ async function native(action: 'minimize' | 'maximize') {
       />
     </nav>
     <div class="ml-auto flex items-stretch" data-tauri-drag-region>
+      <UButton
+        color="primary"
+        variant="ghost"
+        size="sm"
+        icon="i-tabler-language"
+        :label="t('titleBar.translate')"
+        class="h-full rounded-none border-l border-[var(--border)] px-3 text-[11px] font-semibold"
+        :aria-label="t('titleBar.translate')"
+        @click="emit('translate')"
+      />
       <UButton
         color="neutral"
         variant="ghost"

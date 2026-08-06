@@ -1,4 +1,9 @@
 use super::*;
+use glyphshift_acquisition::{
+    AcquisitionAdapter, AcquisitionCandidate, AcquisitionError, AcquisitionRequest,
+    AuthorizedTarget, Granularity, InteractiveSelection, InteractiveTextAcquisition, Provenance,
+    SourcePolicy,
+};
 use glyphshift_desktop_backend::{
     DesktopBackend, DesktopEnvironment, DictionaryCreate, DictionaryEdit, DictionaryEntryCreate,
     ExecutableSelection, WorkflowCreate, WorkflowTargetCreate,
@@ -13,6 +18,8 @@ use std::sync::{
 use tempfile::tempdir;
 
 const TEST_ADAPTER_ID: &str = "test.inline";
+type AcquisitionCall = (usize, u64, Box<str>);
+type AcquisitionCalls = Arc<Mutex<Vec<AcquisitionCall>>>;
 
 fn open_test_backend(root: impl AsRef<Path>) -> DesktopBackend {
     DesktopBackend::open_with_environment(
@@ -52,6 +59,33 @@ impl RuntimeFactory for InMemoryRuntimeFactory {
             generation: spec.publication().generation(),
             target_ids: vec![1],
             captured_target_ids: None,
+            acquisition_instance_id: 0,
+            acquisition_calls: None,
+        }))
+    }
+}
+
+struct AcquisitionRuntimeFactory {
+    discoveries: Arc<AtomicUsize>,
+    calls: AcquisitionCalls,
+}
+
+impl RuntimeFactory for AcquisitionRuntimeFactory {
+    fn discover(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+        let instance_id = self.discoveries.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(Box::new(InMemoryRuntime {
+            application_id,
+            active_features: BTreeSet::new(),
+            generation: spec.publication().generation(),
+            stop_fails: false,
+            target_ids: vec![1],
+            captured_target_ids: None,
+            acquisition_instance_id: instance_id,
+            acquisition_calls: Some(Arc::clone(&self.calls)),
         }))
     }
 }
@@ -63,6 +97,8 @@ struct InMemoryRuntime {
     stop_fails: bool,
     target_ids: Vec<u64>,
     captured_target_ids: Option<Arc<Mutex<Vec<u64>>>>,
+    acquisition_instance_id: usize,
+    acquisition_calls: Option<AcquisitionCalls>,
 }
 
 struct FamilyCaptureFactory {
@@ -82,6 +118,8 @@ impl RuntimeFactory for FamilyCaptureFactory {
             stop_fails: false,
             target_ids: vec![1, 2, 3],
             captured_target_ids: Some(self.captured_target_ids.clone()),
+            acquisition_instance_id: 0,
+            acquisition_calls: None,
         }))
     }
 }
@@ -105,6 +143,8 @@ impl RuntimeFactory for RetryRuntimeFactory {
                 stop_fails: false,
                 target_ids: vec![1],
                 captured_target_ids: None,
+                acquisition_instance_id: 0,
+                acquisition_calls: None,
             },
             reject_capture,
         }))
@@ -160,6 +200,17 @@ impl ManagedRuntime for RetryRuntime {
         }
         self.inner
             .start_capture(target_ids, requested_features, capture)
+    }
+
+    fn acquire_point(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        self.inner
+            .acquire_point(target_id, adapter_id, point, cancellation)
     }
 
     fn publish(
@@ -249,6 +300,41 @@ impl ManagedRuntime for InMemoryRuntime {
         Ok(())
     }
 
+    fn acquire_point(
+        &mut self,
+        target_id: u64,
+        adapter_id: &str,
+        point: DesktopPoint,
+        cancellation: &DesktopAcquisitionCancellation,
+    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
+        if cancellation.is_cancelled() {
+            return Err(DesktopAcquisitionError::Cancelled);
+        }
+        if !self.target_ids.contains(&target_id) {
+            return Err(DesktopAcquisitionError::UnknownTarget);
+        }
+        if adapter_id != "test.acquire" {
+            return Err(DesktopAcquisitionError::WorkerUnavailable);
+        }
+        if let Some(calls) = &self.acquisition_calls {
+            calls
+                .lock()
+                .map_err(|_| DesktopAcquisitionError::InvalidState)?
+                .push((self.acquisition_instance_id, target_id, adapter_id.into()));
+        }
+        let target = AuthorizedTarget::new(format!("target-{target_id}"))
+            .map_err(|_| DesktopAcquisitionError::TargetUnavailable)?;
+        InteractiveTextAcquisition::new([
+            Box::new(FixtureAcquisitionAdapter) as Box<dyn AcquisitionAdapter>
+        ])
+        .acquire(&AcquisitionRequest::new(
+            target,
+            InteractiveSelection::Point(point),
+            SourcePolicy::StructuredOnly,
+        ))
+        .map_err(|_| DesktopAcquisitionError::NoText)
+    }
+
     fn publish(
         &mut self,
         publication: glyphshift_runtime_contract::RuntimePublication,
@@ -288,6 +374,26 @@ impl ManagedRuntime for InMemoryRuntime {
         }
         self.active_features.clear();
         Ok(())
+    }
+}
+
+struct FixtureAcquisitionAdapter;
+
+impl AcquisitionAdapter for FixtureAcquisitionAdapter {
+    fn provenance(&self) -> Provenance {
+        Provenance::Structured
+    }
+
+    fn acquire(
+        &mut self,
+        _request: &AcquisitionRequest,
+    ) -> Result<Vec<AcquisitionCandidate>, AcquisitionError> {
+        Ok(vec![AcquisitionCandidate::new(
+            "Open",
+            [glyphshift_acquisition::DesktopRect::new(10, 20, 80, 44)
+                .expect("fixture acquisition anchor")],
+            Granularity::Control,
+        )])
     }
 }
 

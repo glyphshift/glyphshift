@@ -17,6 +17,7 @@ fn desktop_acquisition_session_uses_a_verified_worker_and_ephemeral_target_grant
     let mut target =
         TargetProcess::spawn_with_args(&target_executable, ["--uia-standard-controls"]);
     assert_eq!(target.read_response(), "uia-ready");
+    assert_eq!(target.render_command("foreground"), "uia-foreground");
     let geometry = target.render_command("geometry");
     let coordinates = geometry
         .strip_prefix("uia-geometry ")

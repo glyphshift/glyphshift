@@ -9,6 +9,7 @@ import DictionaryLibrary from './components/DictionaryLibrary.vue'
 import DictionaryProof from './components/DictionaryProof.vue'
 import CaptureView from './components/CaptureView.vue'
 import HelpView from './components/HelpView.vue'
+import InteractiveTranslationPanel from './components/InteractiveTranslationPanel.vue'
 import SettingsView from './components/SettingsView.vue'
 import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -19,7 +20,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 19
+const desktopApiVersion = 22
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -29,6 +30,8 @@ const editorDirty = ref(false)
 const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
 const shellCompatibilityErrorKey = ref('')
+const quickProbeCaptureActive = ref(false)
+const interactiveTranslationOpen = ref(false)
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
 let unlistenSoftwareCapture: UnlistenFn | null = null
@@ -144,8 +147,32 @@ async function connectDesktopShell() {
 }
 
 function receiveSoftwareQuickCapture(event: SoftwareQuickCaptureEvent) {
+  const requestedForQuickProbe = quickProbeCaptureActive.value
   workspace.handleSoftwareQuickCaptureEvent(event)
-  requestNavigation('software')
+  if (requestedForQuickProbe) {
+    if (event.state === 'captured') quickProbeCaptureActive.value = false
+    requestNavigation('capture')
+  }
+  else requestNavigation('software')
+}
+
+async function armQuickProbeCapture() {
+  quickProbeCaptureActive.value = await workspace.armSoftwareCapture()
+}
+
+async function cancelQuickProbeCapture() {
+  quickProbeCaptureActive.value = false
+  await workspace.cancelSoftwareCapture()
+}
+
+async function refreshWorkspaceAfterQuickProbe() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  try {
+    await workspace.connectDesktopBackend()
+  }
+  catch {
+    shellCompatibilityErrorKey.value = 'app.desktopUnavailable'
+  }
 }
 
 function receiveBrowserSoftwareQuickCapture(event: Event) {
@@ -183,7 +210,7 @@ onBeforeUnmount(() => {
 <template>
   <UApp :locale="nuxtLocale">
     <div class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
-      <TitleBar :current="view" @navigate="requestNavigation" @close="requestWindowClose" />
+      <TitleBar :current="view" @navigate="requestNavigation" @translate="interactiveTranslationOpen = true" @close="requestWindowClose" />
       <main class="flex min-h-0 flex-1 overflow-hidden">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <UAlert
@@ -271,10 +298,22 @@ onBeforeUnmount(() => {
         :software="workspace.model.value.software"
         :dictionaries="workspace.model.value.dictionaries"
         :adapters="workspace.model.value.adapters"
+        :capture-armed="quickProbeCaptureActive && workspace.softwareCaptureArmed.value"
+        :capture-shortcut="workspace.softwareCaptureShortcut.value"
+        :capture-result="workspace.softwareCaptureResult.value"
+        :capture-error="workspace.messages.value.software ?? ''"
+        @arm-capture="armQuickProbeCapture"
+        @cancel-capture="cancelQuickProbeCapture"
+        @workspace-changed="refreshWorkspaceAfterQuickProbe"
       />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />
       </main>
+      <InteractiveTranslationPanel
+        v-model:open="interactiveTranslationOpen"
+        :software="workspace.model.value.software"
+        :dictionaries="workspace.model.value.dictionaries"
+      />
       <ConfirmDialog
         :open="discardOpen"
         :title="t('common.discardTitle')"

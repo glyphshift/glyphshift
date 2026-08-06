@@ -2,7 +2,6 @@ use super::*;
 
 const SOFTWARE_QUICK_CAPTURE_EVENT: &str = "software-quick-capture";
 const SOFTWARE_QUICK_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
-const SUPPORTED_TARGET_ARCHITECTURE: &str = "x86_64";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,7 +87,7 @@ fn display_windows_path(path: &Path) -> String {
     value.strip_prefix(r"\\?\").unwrap_or(&value).to_string()
 }
 
-fn same_windows_path(left: &Path, right: &Path) -> bool {
+pub(super) fn same_windows_path(left: &Path, right: &Path) -> bool {
     let left = display_windows_path(left).replace('/', "\\");
     let right = display_windows_path(right).replace('/', "\\");
     left.eq_ignore_ascii_case(&right)
@@ -97,7 +96,7 @@ fn same_windows_path(left: &Path, right: &Path) -> bool {
 pub(super) fn software_preflight_state(
     is_self: bool,
     already_added: bool,
-    architecture: &str,
+    architecture_supported: bool,
     runtime_ready: bool,
     running: bool,
 ) -> SoftwarePreflightState {
@@ -105,7 +104,7 @@ pub(super) fn software_preflight_state(
         SoftwarePreflightState::SelfTarget
     } else if already_added {
         SoftwarePreflightState::AlreadyAdded
-    } else if architecture != SUPPORTED_TARGET_ARCHITECTURE {
+    } else if !architecture_supported {
         SoftwarePreflightState::UnsupportedArchitecture
     } else if !runtime_ready {
         SoftwarePreflightState::RuntimeUnavailable
@@ -116,7 +115,7 @@ pub(super) fn software_preflight_state(
     }
 }
 
-fn software_preflight_error(preflight: &SoftwarePreflightView) -> CommandError {
+pub(super) fn software_preflight_error(preflight: &SoftwarePreflightView) -> CommandError {
     match preflight.state {
         SoftwarePreflightState::Ready => CommandError::new("software.preflight_required"),
         SoftwarePreflightState::AlreadyAdded => {
@@ -147,6 +146,14 @@ fn software_referenced_error(workflow_count: usize, probe_count: usize) -> Comma
         .with_arg("probeCount", u64::try_from(probe_count).unwrap_or(u64::MAX))
 }
 impl DesktopApplication {
+    pub(super) fn supports_probe_architecture(&self, architecture: &str) -> bool {
+        architecture == "x86_64"
+            || self
+                .adapter_target_support
+                .values()
+                .any(|support| support.supports("windows", architecture, Feature::TextObserve))
+    }
+
     pub(super) fn software_preflight(
         &self,
         executable_path: impl AsRef<Path>,
@@ -182,10 +189,11 @@ impl DesktopApplication {
                     .iter()
                     .any(|feature| feature.as_ref() == "textObserve")
             });
+        let architecture_supported = self.supports_probe_architecture(executable.architecture());
         let state = software_preflight_state(
             is_self,
             existing_name.is_some(),
-            executable.architecture(),
+            architecture_supported,
             runtime_ready,
             executable.running(),
         );
@@ -371,14 +379,14 @@ pub(super) fn desktop_remove_software(
 }
 
 #[cfg(windows)]
-fn software_quick_capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
+pub(super) fn software_quick_capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
     use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F8)
 }
 
 #[cfg(windows)]
-fn focus_main_window(app: &tauri::AppHandle) {
+pub(super) fn focus_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
