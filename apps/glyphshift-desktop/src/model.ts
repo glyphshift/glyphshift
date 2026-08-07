@@ -73,6 +73,11 @@ export interface InteractiveTranslationResult {
   partial: boolean
 }
 
+export interface InteractiveTranslationBubblePresentation {
+  result: InteractiveTranslationResult
+  focusBlockIndex: number
+}
+
 export type InteractiveTranslationEvent
   = { state: 'capturing'; shortcut: string }
     | { state: 'presented'; shortcut: string; result: InteractiveTranslationResult }

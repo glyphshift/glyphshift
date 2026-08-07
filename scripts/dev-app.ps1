@@ -2,17 +2,11 @@
 param(
     [switch]$Detached,
 
-    [switch]$IncludeOcrCandidate,
-
     [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
-if ($env:GLYPHSHIFT_DEV_INCLUDE_OCR_CANDIDATE -eq '1') {
-    $IncludeOcrCandidate = $true
-}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
@@ -30,8 +24,7 @@ if ($Detached) {
     $taskPath = Join-Path $localTaskRoot 'task.pid'
     $powershellPath = (Get-Process -Id $PID).Path
 
-    if ($IncludeOcrCandidate) {
-        $env:GLYPHSHIFT_DEV_INCLUDE_OCR_CANDIDATE = '1'
+    if (-not [string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
         $env:GLYPHSHIFT_OCR_SUPPORT_ROOT = $OcrSupportRoot
     }
 
@@ -133,8 +126,7 @@ $runtimeBundleArguments = @{
     IncludeTestTarget = $true
     KeepExistingOutput = $true
 }
-if ($IncludeOcrCandidate) {
-    $runtimeBundleArguments.IncludeOcrCandidate = $true
+if (-not [string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
     $runtimeBundleArguments.OcrSupportRoot = $OcrSupportRoot
 }
 & (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments

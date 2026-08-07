@@ -7,12 +7,15 @@ use glyphshift_interactive_translation::{
 };
 
 const INTERACTIVE_TRANSLATION_EVENT: &str = "interactive-translation";
-const INTERACTIVE_TRANSLATION_SHORTCUT: &str = "Ctrl+Shift+F9";
+const INTERACTIVE_TRANSLATION_BUBBLE_EVENT: &str = "interactive-translation-bubble";
+const INTERACTIVE_TRANSLATION_BUBBLE_LABEL: &str = "interactive-translation-bubble";
 const UIA_ACQUISITION_ADAPTER_ID: &str = "windows.uia.acquire";
 const OCR_ACQUISITION_ADAPTER_ID: &str = "windows.ocr.acquire";
 const OCR_REGION_HALF_WIDTH: i32 = 320;
 const OCR_REGION_HALF_HEIGHT: i32 = 120;
 const MAX_SELECTION_ID_BYTES: usize = 256;
+const BUBBLE_POINTER_OFFSET: i32 = 18;
+const BUBBLE_SCREEN_MARGIN: i32 = 12;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +84,13 @@ pub(super) struct InteractiveTranslationResultView {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct InteractiveTranslationBubbleView {
+    result: InteractiveTranslationResultView,
+    focus_block_index: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 struct InteractiveTranslationBlockView {
     #[serde(flatten)]
     acquisition: acquisition::DesktopAcquisitionBlockView,
@@ -99,14 +109,14 @@ struct InteractiveTranslationBlockView {
 )]
 enum InteractiveTranslationEvent {
     Capturing {
-        shortcut: &'static str,
+        shortcut: Box<str>,
     },
     Presented {
-        shortcut: &'static str,
+        shortcut: Box<str>,
         result: InteractiveTranslationResultView,
     },
     Failed {
-        shortcut: &'static str,
+        shortcut: Box<str>,
         error: CommandError,
     },
 }
@@ -119,15 +129,72 @@ struct ActiveInteractiveTranslation {
 }
 
 #[derive(Default)]
+pub(super) struct InteractiveTranslationBubbleState {
+    presentation: Option<InteractiveTranslationBubbleView>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BubbleScreenRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
 pub(super) struct InteractiveTranslationCaptureState {
     shortcut_available: bool,
+    shortcut_id: Option<u32>,
+    shortcut_label: Box<str>,
     armed: Option<InteractiveTranslationArmRequest>,
     active: Option<ActiveInteractiveTranslation>,
     ocr_retry: Option<InteractiveTranslationArmRequest>,
     next_generation: u64,
 }
 
+impl Default for InteractiveTranslationCaptureState {
+    fn default() -> Self {
+        Self {
+            shortcut_available: false,
+            shortcut_id: None,
+            shortcut_label: DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT.into(),
+            armed: None,
+            active: None,
+            ocr_retry: None,
+            next_generation: 0,
+        }
+    }
+}
+
 impl InteractiveTranslationCaptureState {
+    fn shortcut_label(&self) -> Box<str> {
+        self.shortcut_label.clone()
+    }
+
+    fn shortcut_matches(&self, shortcut_id: u32) -> bool {
+        self.shortcut_available && self.shortcut_id == Some(shortcut_id)
+    }
+
+    fn registered_shortcut_id(&self) -> Option<u32> {
+        self.shortcut_available
+            .then_some(self.shortcut_id)
+            .flatten()
+    }
+
+    fn can_rebind_shortcut(&self) -> bool {
+        self.armed.is_none() && self.active.is_none()
+    }
+
+    fn set_shortcut_registration(
+        &mut self,
+        shortcut_label: Box<str>,
+        shortcut_id: u32,
+        available: bool,
+    ) {
+        self.shortcut_label = shortcut_label;
+        self.shortcut_id = Some(shortcut_id);
+        self.shortcut_available = available;
+    }
+
     fn arm(&mut self, request: InteractiveTranslationArmRequest) -> Result<(), CommandError> {
         if !self.shortcut_available {
             return Err(CommandError::new(
@@ -494,12 +561,82 @@ fn valid_selection_id(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
+#[cfg(windows)]
+pub(super) fn rebind_interactive_translation_shortcut(
+    app: &tauri::AppHandle,
+    value: &str,
+) -> Result<Box<str>, CommandError> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    let (candidate, label) = shortcut::parse_global_shortcut(value)?;
+    let capture_state = app.state::<Mutex<InteractiveTranslationCaptureState>>();
+    let mut capture = capture_state
+        .lock()
+        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?;
+    if capture.shortcut_id == Some(candidate.id()) && capture.shortcut_available {
+        capture.shortcut_label = label.clone();
+        return Ok(label);
+    }
+    if !capture.can_rebind_shortcut() {
+        return Err(CommandError::new("settings.shortcut_busy"));
+    }
+    let previous_shortcut = capture
+        .shortcut_available
+        .then(|| shortcut::parse_global_shortcut(&capture.shortcut_label))
+        .transpose()
+        .map_err(|_| CommandError::new("settings.shortcut_update_failed"))?
+        .map(|(shortcut, _)| shortcut);
+
+    app.global_shortcut()
+        .register(candidate)
+        .map_err(|_| CommandError::new("settings.shortcut_unavailable"))?;
+    if let Some(previous_shortcut) = previous_shortcut {
+        if app.global_shortcut().unregister(previous_shortcut).is_err() {
+            let _ = app.global_shortcut().unregister(candidate);
+            return Err(CommandError::new("settings.shortcut_update_failed"));
+        }
+    }
+    capture.set_shortcut_registration(label.clone(), candidate.id(), true);
+    Ok(label)
+}
+
+#[cfg(not(windows))]
+pub(super) fn rebind_interactive_translation_shortcut(
+    _app: &tauri::AppHandle,
+    _value: &str,
+) -> Result<Box<str>, CommandError> {
+    Err(CommandError::new("settings.shortcut_unavailable"))
+}
+
+#[cfg(windows)]
+pub(super) fn matches_interactive_translation_shortcut(
+    app: &tauri::AppHandle,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
+) -> bool {
+    app.state::<Mutex<InteractiveTranslationCaptureState>>()
+        .lock()
+        .is_ok_and(|capture| capture.shortcut_matches(shortcut.id()))
+}
+
+#[tauri::command]
+pub(super) fn desktop_probe_interactive_translation_shortcut(
+    app: tauri::AppHandle,
+    shortcut: String,
+    capture: State<'_, Mutex<InteractiveTranslationCaptureState>>,
+) -> Result<shortcut::GlobalShortcutProbeView, CommandError> {
+    let registered_shortcut_id = capture
+        .lock()
+        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?
+        .registered_shortcut_id();
+    shortcut::probe_global_shortcut(&app, &shortcut, registered_shortcut_id)
+}
+
 #[tauri::command]
 pub(super) fn desktop_arm_interactive_translation(
     request: InteractiveTranslationArmRequest,
     application: State<'_, Mutex<DesktopApplication>>,
     capture: State<'_, Mutex<InteractiveTranslationCaptureState>>,
-) -> Result<&'static str, CommandError> {
+) -> Result<Box<str>, CommandError> {
     let application = application.lock().map_err(|_| workspace_unavailable())?;
     application.prepare_interactive_translation(&request)?;
     if request.acquisition_mode == InteractiveTranslationAcquisitionMode::VisualOcr
@@ -510,11 +647,11 @@ pub(super) fn desktop_arm_interactive_translation(
         return Err(CommandError::new("interactive_translation.ocr_unavailable"));
     }
     drop(application);
-    capture
+    let mut capture = capture
         .lock()
-        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?
-        .arm(request)?;
-    Ok(INTERACTIVE_TRANSLATION_SHORTCUT)
+        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?;
+    capture.arm(request)?;
+    Ok(capture.shortcut_label())
 }
 
 #[tauri::command]
@@ -538,11 +675,31 @@ pub(super) fn desktop_cancel_interactive_translation(
     Ok(())
 }
 
-#[cfg(windows)]
-pub(super) fn interactive_translation_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
-    use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
+#[tauri::command]
+pub(super) fn desktop_interactive_translation_bubble(
+    bubble: State<'_, Mutex<InteractiveTranslationBubbleState>>,
+) -> Result<Option<InteractiveTranslationBubbleView>, CommandError> {
+    bubble
+        .lock()
+        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))
+        .map(|bubble| bubble.presentation.clone())
+}
 
-    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F9)
+#[tauri::command]
+pub(super) fn desktop_dismiss_interactive_translation_bubble(
+    app: tauri::AppHandle,
+    bubble: State<'_, Mutex<InteractiveTranslationBubbleState>>,
+) -> Result<(), CommandError> {
+    bubble
+        .lock()
+        .map_err(|_| CommandError::new("interactive_translation.state_unavailable"))?
+        .presentation = None;
+    if let Some(window) = app.get_webview_window(INTERACTIVE_TRANSLATION_BUBBLE_LABEL) {
+        window
+            .hide()
+            .map_err(|_| CommandError::new("interactive_translation.presentation_failed"))?;
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -551,14 +708,20 @@ pub(super) fn handle_interactive_translation_shortcut(app: &tauri::AppHandle) {
         .state::<Mutex<InteractiveTranslationCaptureState>>()
         .lock()
         .ok()
-        .and_then(|mut capture| capture.begin());
-    let Some((generation, request, cancellation)) = capture else {
+        .and_then(|mut capture| {
+            let shortcut = capture.shortcut_label();
+            capture.begin().map(|(generation, request, cancellation)| {
+                (generation, request, cancellation, shortcut)
+            })
+        });
+    let Some((generation, request, cancellation, shortcut)) = capture else {
         return;
     };
+    hide_interactive_translation_bubble(app);
     let _ = app.emit(
         INTERACTIVE_TRANSLATION_EVENT,
         InteractiveTranslationEvent::Capturing {
-            shortcut: INTERACTIVE_TRANSLATION_SHORTCUT,
+            shortcut: shortcut.clone(),
         },
     );
     let app_handle = app.clone();
@@ -567,11 +730,13 @@ pub(super) fn handle_interactive_translation_shortcut(app: &tauri::AppHandle) {
         let result = tauri::async_runtime::spawn_blocking(move || {
             let foreground = foreground_windows_point()
                 .map_err(|_| CommandError::new("interactive_translation.foreground_unavailable"))?;
+            let point = DesktopPoint::new(foreground.x(), foreground.y());
             task_app
                 .state::<Mutex<DesktopApplication>>()
                 .lock()
                 .map_err(|_| workspace_unavailable())?
                 .translate_foreground_point(&request, &foreground, &cancellation)
+                .map(|result| (point, result))
         })
         .await
         .map_err(|_| CommandError::new("interactive_translation.execution_failed"))
@@ -586,43 +751,212 @@ pub(super) fn handle_interactive_translation_shortcut(app: &tauri::AppHandle) {
         {
             capture.finish(generation, ocr_eligible);
         }
-        let event = match result {
-            Ok(result) => InteractiveTranslationEvent::Presented {
-                shortcut: INTERACTIVE_TRANSLATION_SHORTCUT,
-                result,
-            },
-            Err(error) => InteractiveTranslationEvent::Failed {
-                shortcut: INTERACTIVE_TRANSLATION_SHORTCUT,
-                error,
-            },
+        let (event, presented_near_target) = match result {
+            Ok((point, result)) => {
+                let presented_near_target =
+                    present_interactive_translation_bubble(&app_handle, point, &result).is_ok();
+                (
+                    InteractiveTranslationEvent::Presented {
+                        shortcut: shortcut.clone(),
+                        result,
+                    },
+                    presented_near_target,
+                )
+            }
+            Err(error) => (
+                InteractiveTranslationEvent::Failed { shortcut, error },
+                false,
+            ),
         };
         let _ = app_handle.emit(INTERACTIVE_TRANSLATION_EVENT, event);
-        software::focus_main_window(&app_handle);
+        if !presented_near_target {
+            software::focus_main_window(&app_handle);
+        }
     });
 }
 
+fn present_interactive_translation_bubble(
+    app: &tauri::AppHandle,
+    point: DesktopPoint,
+    result: &InteractiveTranslationResultView,
+) -> tauri::Result<()> {
+    let presentation = InteractiveTranslationBubbleView {
+        focus_block_index: closest_result_block(result, point),
+        result: result.clone(),
+    };
+    if let Ok(mut state) = app
+        .state::<Mutex<InteractiveTranslationBubbleState>>()
+        .lock()
+    {
+        state.presentation = Some(presentation.clone());
+    }
+    let presented = show_interactive_translation_bubble(app, point, &presentation);
+    if presented.is_err() {
+        hide_interactive_translation_bubble(app);
+    }
+    presented
+}
+
+fn show_interactive_translation_bubble(
+    app: &tauri::AppHandle,
+    point: DesktopPoint,
+    presentation: &InteractiveTranslationBubbleView,
+) -> tauri::Result<()> {
+    let window = app
+        .get_webview_window(INTERACTIVE_TRANSLATION_BUBBLE_LABEL)
+        .ok_or(tauri::Error::WindowNotFound)?;
+    let window_size = window.outer_size()?;
+    let screens = window
+        .available_monitors()?
+        .into_iter()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            BubbleScreenRect {
+                left: position.x,
+                top: position.y,
+                right: position
+                    .x
+                    .saturating_add(i32::try_from(size.width).unwrap_or(i32::MAX)),
+                bottom: position
+                    .y
+                    .saturating_add(i32::try_from(size.height).unwrap_or(i32::MAX)),
+            }
+        })
+        .collect::<Vec<_>>();
+    let position = bubble_position(
+        point,
+        i32::try_from(window_size.width).unwrap_or(i32::MAX),
+        i32::try_from(window_size.height).unwrap_or(i32::MAX),
+        &screens,
+    );
+    window.set_position(tauri::PhysicalPosition::new(position.0, position.1))?;
+    app.emit_to(
+        INTERACTIVE_TRANSLATION_BUBBLE_LABEL,
+        INTERACTIVE_TRANSLATION_BUBBLE_EVENT,
+        presentation,
+    )?;
+    window.show()
+}
+
+fn hide_interactive_translation_bubble(app: &tauri::AppHandle) {
+    if let Ok(mut state) = app
+        .state::<Mutex<InteractiveTranslationBubbleState>>()
+        .lock()
+    {
+        state.presentation = None;
+    }
+    if let Some(window) = app.get_webview_window(INTERACTIVE_TRANSLATION_BUBBLE_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+fn closest_result_block(result: &InteractiveTranslationResultView, point: DesktopPoint) -> usize {
+    result
+        .blocks
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, block)| block.acquisition.distance_squared_to(point))
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn bubble_position(
+    point: DesktopPoint,
+    width: i32,
+    height: i32,
+    screens: &[BubbleScreenRect],
+) -> (i32, i32) {
+    let screen = screens
+        .iter()
+        .min_by_key(|screen| {
+            let x = point.x().clamp(screen.left, screen.right);
+            let y = point.y().clamp(screen.top, screen.bottom);
+            let dx = i64::from(point.x()) - i64::from(x);
+            let dy = i64::from(point.y()) - i64::from(y);
+            dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy))
+        })
+        .copied()
+        .unwrap_or(BubbleScreenRect {
+            left: i32::MIN,
+            top: i32::MIN,
+            right: i32::MAX,
+            bottom: i32::MAX,
+        });
+    let min_x = screen.left.saturating_add(BUBBLE_SCREEN_MARGIN);
+    let max_x = screen
+        .right
+        .saturating_sub(BUBBLE_SCREEN_MARGIN)
+        .saturating_sub(width)
+        .max(min_x);
+    let min_y = screen.top.saturating_add(BUBBLE_SCREEN_MARGIN);
+    let max_y = screen
+        .bottom
+        .saturating_sub(BUBBLE_SCREEN_MARGIN)
+        .saturating_sub(height)
+        .max(min_y);
+    let right = point.x().saturating_add(BUBBLE_POINTER_OFFSET);
+    let left = point
+        .x()
+        .saturating_sub(BUBBLE_POINTER_OFFSET)
+        .saturating_sub(width);
+    let below = point.y().saturating_add(BUBBLE_POINTER_OFFSET);
+    let above = point
+        .y()
+        .saturating_sub(BUBBLE_POINTER_OFFSET)
+        .saturating_sub(height);
+    let x = if right <= max_x { right } else { left }.clamp(min_x, max_x);
+    let y = if below <= max_y { below } else { above }.clamp(min_y, max_y);
+    (x, y)
+}
+
 pub(super) fn manage_interactive_translation(app: &mut tauri::App) {
-    app.manage(Mutex::new(InteractiveTranslationCaptureState::default()));
+    app.manage(Mutex::new(InteractiveTranslationBubbleState::default()));
     #[cfg(windows)]
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-        let shortcut_available = app
-            .global_shortcut()
-            .register(interactive_translation_shortcut())
-            .is_ok();
-        if let Ok(mut capture) = app
-            .state::<Mutex<InteractiveTranslationCaptureState>>()
+        let configured: Box<str> = app
+            .state::<Mutex<AppSettingsStore>>()
             .lock()
-        {
-            capture.shortcut_available = shortcut_available;
-        }
+            .ok()
+            .map(|settings| settings.interactive_translation_shortcut().into())
+            .unwrap_or_else(|| DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT.into());
+        let (shortcut, label) = shortcut::parse_global_shortcut(&configured)
+            .or_else(|_| shortcut::parse_global_shortcut(DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT))
+            .expect("default interactive translation shortcut must be valid");
+        let shortcut_available = app.global_shortcut().register(shortcut).is_ok();
+        let mut capture = InteractiveTranslationCaptureState::default();
+        capture.set_shortcut_registration(label, shortcut.id(), shortcut_available);
+        app.manage(Mutex::new(capture));
+    }
+    #[cfg(not(windows))]
+    {
+        app.manage(Mutex::new(InteractiveTranslationCaptureState::default()));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn result_block(
+        source: &str,
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    ) -> InteractiveTranslationBlockView {
+        InteractiveTranslationBlockView {
+            acquisition: acquisition::DesktopAcquisitionBlockView::synthetic_at(
+                source,
+                DesktopRect::new(left, top, right, bottom).expect("valid result anchor"),
+            ),
+            translation: None,
+            translation_state: "missing",
+            origin: None,
+        }
+    }
 
     fn available_state() -> InteractiveTranslationCaptureState {
         let mut state = InteractiveTranslationCaptureState::default();
@@ -777,5 +1111,48 @@ mod tests {
             visual.acquisition_mode,
             InteractiveTranslationAcquisitionMode::VisualOcr
         );
+    }
+
+    #[test]
+    fn bubble_focuses_the_result_block_nearest_the_pointer() {
+        let result = InteractiveTranslationResultView {
+            blocks: vec![
+                result_block("far", 20, 20, 80, 50),
+                result_block("near", 500, 300, 620, 350),
+            ],
+            partial: false,
+        };
+
+        assert_eq!(
+            closest_result_block(&result, DesktopPoint::new(540, 320)),
+            1
+        );
+        assert_eq!(closest_result_block(&result, DesktopPoint::new(30, 30)), 0);
+    }
+
+    #[test]
+    fn bubble_position_stays_inside_the_pointer_monitor() {
+        let screens = [
+            BubbleScreenRect {
+                left: -1920,
+                top: 0,
+                right: 0,
+                bottom: 1080,
+            },
+            BubbleScreenRect {
+                left: 0,
+                top: 0,
+                right: 2560,
+                bottom: 1440,
+            },
+        ];
+
+        let (left, top) = bubble_position(DesktopPoint::new(-20, 1060), 420, 210, &screens);
+        assert!((-1908..=-432).contains(&left));
+        assert!((12..=858).contains(&top));
+
+        let (left, top) = bubble_position(DesktopPoint::new(2540, 1420), 420, 210, &screens);
+        assert!((12..=2128).contains(&left));
+        assert!((12..=1218).contains(&top));
     }
 }

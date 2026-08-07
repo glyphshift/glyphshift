@@ -44,22 +44,23 @@ npm --prefix apps/glyphshift-desktop test
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
 ```
 
-显式测试尚未进入发布 Bundle 的 OCR 候选时，先从固定版本的本地 vcpkg 与 `tessdata_fast`
-checkout 生成经过裁剪、摘要校验并携带许可证的支持集：
+首次构建默认 Runtime Bundle 前，先从固定版本的本地 vcpkg 与 `tessdata_fast` checkout 生成经过裁剪、
+摘要校验并携带许可证的 OCR 支持集：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ocr-runtime-support.ps1 -VcpkgRoot <local-vcpkg-root> -TessdataRoot <local-tessdata-fast-root> -Force
 ```
 
 两个 checkout 与输出都必须位于仓库的本地测试目录；脚本会拒绝非固定提交、修改过的源码、模型摘要
-漂移和超出白名单的 DLL。然后把生成目录交给开发启动脚本：
+漂移和超出白名单的 DLL。默认输出位于本地测试构建目录，之后直接启动开发桌面：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1 -IncludeOcrCandidate -OcrSupportRoot <verified-ocr-support-root>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
 ```
 
-脚本只会将候选制品复制到 `target/local-test/`，逐文件写入 `/3` 清单；4 个原生 DLL、2 个中英模型、
-构建来源清单、第三方 notice 和全部许可证缺一不可。该开关不会改变标准 Release Bundle。
+开发、独立 Runtime 和 Desktop Release 构建都会默认加入 OCR Worker，并逐文件写入 `/3` 清单；4 个
+原生 DLL、2 个中英模型、构建来源清单、第三方 notice 和全部许可证缺一不可。自定义支持目录时可传入
+`-OcrSupportRoot <verified-ocr-support-root>`，但该目录仍必须位于本地测试根目录下。
 
 只生成严格分离的 Debug 或 Release Runtime Bundle：
 

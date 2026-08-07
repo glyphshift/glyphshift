@@ -115,7 +115,7 @@ test('software batch delete keeps a rejected record and explains why', async ({ 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 23 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_remove_software') {
           throw {

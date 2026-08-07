@@ -110,6 +110,25 @@ impl DesktopAcquisitionBlockView {
             confidence_basis_points: block.confidence().map(|value| value.basis_points()),
         }
     }
+
+    pub(super) fn distance_squared_to(&self, point: DesktopPoint) -> u64 {
+        self.anchors
+            .iter()
+            .map(|anchor| anchor.distance_squared_to(point))
+            .min()
+            .unwrap_or(u64::MAX)
+    }
+
+    #[cfg(test)]
+    pub(super) fn synthetic_at(source: impl Into<Box<str>>, anchor: DesktopRect) -> Self {
+        Self {
+            source: source.into(),
+            anchors: vec![DesktopRectView::from_runtime(anchor)],
+            granularity: "word",
+            provenance: "structured",
+            confidence_basis_points: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -129,6 +148,27 @@ impl DesktopRectView {
             right: rect.right(),
             bottom: rect.bottom(),
         }
+    }
+
+    fn distance_squared_to(self, point: DesktopPoint) -> u64 {
+        let x = i64::from(point.x());
+        let y = i64::from(point.y());
+        let dx = if x < i64::from(self.left) {
+            i64::from(self.left) - x
+        } else if x > i64::from(self.right) {
+            x - i64::from(self.right)
+        } else {
+            0
+        };
+        let dy = if y < i64::from(self.top) {
+            i64::from(self.top) - y
+        } else if y > i64::from(self.bottom) {
+            y - i64::from(self.bottom)
+        } else {
+            0
+        };
+        u64::try_from(dx.saturating_mul(dx).saturating_add(dy.saturating_mul(dy)))
+            .unwrap_or(u64::MAX)
     }
 }
 

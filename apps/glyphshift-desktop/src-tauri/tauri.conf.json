@@ -21,6 +21,20 @@
         "decorations": false,
         "resizable": true,
         "center": true
+      },
+      {
+        "label": "interactive-translation-bubble",
+        "title": "Glyphshift translation",
+        "url": "index.html?surface=translation-bubble",
+        "width": 420,
+        "height": 210,
+        "resizable": false,
+        "decorations": false,
+        "visible": false,
+        "focus": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": true
       }
     ],
     "security": {

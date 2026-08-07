@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { useAppSettings } from '../appSettings'
 import { presentationError, translateCommandCode } from '../commandError'
 import { i18n } from '../i18n'
 import type {
@@ -23,6 +24,7 @@ import {
 } from './state'
 
 export function useSoftwareWorkspace() {
+  const appSettings = useAppSettings()
   async function selectSoftware(id: string) {
     model.value.selectedSoftwareId = id
     if (!hasDesktopRuntime()) return
@@ -83,6 +85,9 @@ export function useSoftwareWorkspace() {
     try {
       if (hasDesktopRuntime()) {
         softwareCaptureShortcut.value = await invoke<string>('desktop_arm_software_capture')
+      }
+      else {
+        softwareCaptureShortcut.value = appSettings.softwareCaptureShortcut.value
       }
       softwareCaptureArmed.value = true
       return true

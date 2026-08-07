@@ -1,10 +1,29 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings, type CloseBehavior, type LocalePreference, type ThemePreference } from '../appSettings'
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
+
+type ShortcutTarget = 'softwareCapture' | 'interactiveTranslation'
+type ShortcutStatus = 'idle' | 'checking' | 'conflict' | 'invalid' | 'failed' | 'saved'
+
+const modifierCodes = new Set([
+  'ControlLeft',
+  'ControlRight',
+  'AltLeft',
+  'AltRight',
+  'ShiftLeft',
+  'ShiftRight',
+  'MetaLeft',
+  'MetaRight',
+])
+const shortcutRecording = ref<ShortcutTarget | null>(null)
+const shortcutStatusTarget = ref<ShortcutTarget | null>(null)
+const shortcutPreview = ref('')
+const shortcutStatus = ref<ShortcutStatus>('idle')
+let shortcutAttempt = 0
 
 const localeItems = computed(() => [
   { value: 'system' as const, label: t('settings.locale.system') },
@@ -20,6 +39,160 @@ const closeBehaviorItems = computed(() => [
   { value: 'minimize' as const, label: t('settings.closeBehaviorOption.minimize') },
   { value: 'quit' as const, label: t('settings.closeBehaviorOption.quit') },
 ])
+const shortcutRows = computed(() => [
+  {
+    target: 'softwareCapture' as const,
+    label: t('settings.softwareCaptureShortcut'),
+    description: t('settings.softwareCaptureShortcutDescription'),
+    icon: 'i-tabler-crosshair',
+  },
+  {
+    target: 'interactiveTranslation' as const,
+    label: t('settings.interactiveTranslationShortcut'),
+    description: t('settings.interactiveTranslationShortcutDescription'),
+    icon: 'i-tabler-language-hiragana',
+  },
+])
+
+function displayShortcutToken(token: string) {
+  if (token === 'Super') return 'Win'
+  if (token.startsWith('Key') && token.length === 4) return token.slice(3)
+  if (token.startsWith('Digit') && token.length === 6) return token.slice(5)
+  if (token.startsWith('Numpad')) return `Num ${token.slice(6)}`
+  if (token === 'ArrowUp') return '↑'
+  if (token === 'ArrowDown') return '↓'
+  if (token === 'ArrowLeft') return '←'
+  if (token === 'ArrowRight') return '→'
+  return token
+}
+
+function displayShortcut(shortcut: string) {
+  return shortcut.split('+').map(displayShortcutToken).join(' + ')
+}
+
+function configuredShortcut(target: ShortcutTarget) {
+  return target === 'softwareCapture'
+    ? appSettings.softwareCaptureShortcut.value
+    : appSettings.interactiveTranslationShortcut.value
+}
+
+function currentShortcutDisplay(target: ShortcutTarget) {
+  return displayShortcut(configuredShortcut(target))
+}
+
+function visibleShortcutParts(target: ShortcutTarget) {
+  const shortcut = shortcutRecording.value === target ? shortcutPreview.value : configuredShortcut(target)
+  return shortcut ? shortcut.split('+').map(displayShortcutToken) : [t('settings.shortcutWaiting')]
+}
+
+function shortcutStatusMessage(target: ShortcutTarget) {
+  if (shortcutStatusTarget.value !== target) {
+    return t('settings.shortcutCurrent', { shortcut: currentShortcutDisplay(target) })
+  }
+  const candidate = displayShortcut(shortcutPreview.value)
+  switch (shortcutStatus.value) {
+    case 'checking': return t('settings.shortcutChecking', { shortcut: candidate })
+    case 'conflict': return t('settings.shortcutConflict', { shortcut: candidate })
+    case 'invalid': return t('settings.shortcutInvalid')
+    case 'failed': return t('settings.shortcutSaveFailed')
+    case 'saved': return t('settings.shortcutSaved', { shortcut: currentShortcutDisplay(target) })
+    default: return shortcutRecording.value === target
+      ? t('settings.shortcutCancelHint')
+      : t('settings.shortcutCurrent', { shortcut: currentShortcutDisplay(target) })
+  }
+}
+
+function shortcutStatusClass(target: ShortcutTarget) {
+  if (shortcutStatusTarget.value !== target) return 'text-[var(--text-muted)]'
+  if (shortcutStatus.value === 'conflict' || shortcutStatus.value === 'invalid') return 'text-amber-400'
+  if (shortcutStatus.value === 'failed') return 'text-red-400'
+  if (shortcutStatus.value === 'saved') return 'text-emerald-400'
+  return 'text-[var(--text-muted)]'
+}
+
+function shortcutFromEvent(event: KeyboardEvent) {
+  if (modifierCodes.has(event.code)) return null
+  const tokens: string[] = []
+  if (event.ctrlKey) tokens.push('Ctrl')
+  if (event.altKey) tokens.push('Alt')
+  if (event.shiftKey) tokens.push('Shift')
+  if (event.metaKey) tokens.push('Super')
+  if (!event.ctrlKey && !event.altKey && !event.metaKey) return ''
+  tokens.push(event.code)
+  return tokens.join('+')
+}
+
+function stopShortcutRecording(resetStatus = true) {
+  shortcutRecording.value = null
+  shortcutPreview.value = ''
+  if (resetStatus) {
+    shortcutStatus.value = 'idle'
+    shortcutStatusTarget.value = null
+  }
+  window.removeEventListener('keydown', recordShortcut, true)
+}
+
+function startShortcutRecording(target: ShortcutTarget) {
+  if (appSettings.settingsBusy.value || shortcutRecording.value) return
+  shortcutAttempt += 1
+  shortcutRecording.value = target
+  shortcutStatusTarget.value = target
+  shortcutPreview.value = ''
+  shortcutStatus.value = 'idle'
+  window.addEventListener('keydown', recordShortcut, true)
+}
+
+async function recordShortcut(event: KeyboardEvent) {
+  if (!shortcutRecording.value || event.repeat) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  if (event.code === 'Escape') {
+    shortcutAttempt += 1
+    stopShortcutRecording()
+    return
+  }
+  if (shortcutStatus.value === 'checking' || appSettings.settingsBusy.value) return
+  const shortcut = shortcutFromEvent(event)
+  if (shortcut === null) {
+    shortcutStatus.value = 'idle'
+    shortcutPreview.value = [
+      event.ctrlKey && 'Ctrl',
+      event.altKey && 'Alt',
+      event.shiftKey && 'Shift',
+      event.metaKey && 'Super',
+    ].filter(Boolean).join('+')
+    return
+  }
+  if (!shortcut) {
+    shortcutPreview.value = event.code
+    shortcutStatus.value = 'invalid'
+    return
+  }
+
+  const attempt = ++shortcutAttempt
+  const target = shortcutRecording.value
+  shortcutPreview.value = shortcut
+  shortcutStatus.value = 'checking'
+  try {
+    const probe = target === 'softwareCapture'
+      ? await appSettings.probeSoftwareCaptureShortcut(shortcut)
+      : await appSettings.probeInteractiveTranslationShortcut(shortcut)
+    if (attempt !== shortcutAttempt || shortcutRecording.value !== target) return
+    shortcutPreview.value = probe.shortcut
+    if (!probe.available) {
+      shortcutStatus.value = 'conflict'
+      return
+    }
+    if (target === 'softwareCapture') await appSettings.setSoftwareCaptureShortcut(probe.shortcut)
+    else await appSettings.setInteractiveTranslationShortcut(probe.shortcut)
+    if (attempt !== shortcutAttempt || shortcutRecording.value !== target) return
+    stopShortcutRecording(false)
+    shortcutStatus.value = 'saved'
+  }
+  catch {
+    if (attempt === shortcutAttempt && shortcutRecording.value === target) shortcutStatus.value = 'failed'
+  }
+}
 function updateLocale(value: unknown) {
   void appSettings.setLocalePreference(value as LocalePreference).catch(() => undefined)
 }
@@ -41,14 +214,18 @@ function updateLaunchElevated(value: boolean) {
 }
 
 onMounted(() => void appSettings.refreshPrivilegeStatus())
+onBeforeUnmount(() => {
+  shortcutAttempt += 1
+  stopShortcutRecording()
+})
 </script>
 
 <template>
   <!--
     THESIS: 设置只呈现立即生效的应用级偏好，不用说明文字冒充功能。
     OWN-WORLD: 继承高密度 Windows 管理器、薄分隔线与克制 cobalt 焦点。
-    STORY: 用户扫描外观分组，修改语言或主题，并立即看到结果。
-    FIRST VIEWPORT: 紧凑页头下是一组两行设置，标签说明在左，真实控件在右。
+    STORY: 用户扫描外观与快捷键分组，点击当前组合键后直接按键录制，并在可用性确认后立即生效。
+    FIRST VIEWPORT: 紧凑页头下优先呈现外观和快捷键；标签说明在左，真实控件与内联状态在右。
     FORM: established Operate surface；现有管理器结构的局部扩展。
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
@@ -107,6 +284,51 @@ onMounted(() => void appSettings.refreshPrivilegeStatus())
                 class="w-full"
                 @update:model-value="updateTheme"
               />
+          </ManagementFormRow>
+        </ManagementFormSection>
+
+        <ManagementFormSection :title="t('settings.shortcuts')" :description="t('settings.shortcutsDescription')">
+          <ManagementFormRow
+            v-for="row in shortcutRows"
+            :key="row.target"
+            :label="row.label"
+            :description="row.description"
+            :icon="row.icon"
+            control-width="compact"
+          >
+            <div class="space-y-2">
+              <button
+                type="button"
+                class="flex min-h-9 w-full items-center justify-between gap-3 rounded-md border px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                :class="shortcutRecording === row.target
+                  ? 'border-[var(--accent-strong)] bg-[var(--accent-soft)]'
+                  : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)]'"
+                :aria-label="shortcutRecording === row.target
+                  ? t('settings.shortcutRecordingLabel', { name: row.label })
+                  : t('settings.shortcutChangeLabel', { name: row.label, shortcut: currentShortcutDisplay(row.target) })"
+                :aria-pressed="shortcutRecording === row.target"
+                :disabled="appSettings.settingsBusy.value
+                  || Boolean(shortcutRecording && shortcutRecording !== row.target)"
+                @click="startShortcutRecording(row.target)"
+              >
+                <span class="flex min-w-0 flex-wrap items-center gap-1" aria-hidden="true">
+                  <template v-for="(part, index) in visibleShortcutParts(row.target)" :key="`${part}-${index}`">
+                    <span v-if="index" class="text-[10px] text-[var(--text-muted)]">+</span>
+                    <kbd class="min-w-6 rounded border border-[var(--border-strong)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold text-[var(--text)] shadow-sm">
+                      {{ part }}
+                    </kbd>
+                  </template>
+                </span>
+                <UIcon
+                  :name="shortcutRecording === row.target ? 'i-tabler-keyboard' : 'i-tabler-edit'"
+                  class="size-4 shrink-0 text-[var(--text-muted)]"
+                  aria-hidden="true"
+                />
+              </button>
+              <p class="m-0 text-[10px] leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
+                {{ shortcutStatusMessage(row.target) }}
+              </p>
+            </div>
           </ManagementFormRow>
         </ManagementFormSection>
 

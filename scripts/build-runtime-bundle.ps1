@@ -9,8 +9,6 @@ param(
 
     [switch]$IncludeTestTarget,
 
-    [switch]$IncludeOcrCandidate,
-
     [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT,
 
     [switch]$KeepExistingOutput
@@ -29,8 +27,12 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 if ([string]::IsNullOrWhiteSpace($CargoTargetDir)) {
     $CargoTargetDir = Join-Path $localTestRoot 'runtime-build'
 }
+if ([string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
+    $OcrSupportRoot = Join-Path $localTestRoot 'build\ocr-runtime-support'
+}
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $CargoTargetDir = [System.IO.Path]::GetFullPath($CargoTargetDir)
+$OcrSupportRoot = [System.IO.Path]::GetFullPath($OcrSupportRoot)
 
 function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
     $prefix = $localTestRoot.TrimEnd('\') + '\'
@@ -41,6 +43,31 @@ function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
 
 Assert-LocalTestPath $OutputRoot 'Runtime Bundle output'
 Assert-LocalTestPath $CargoTargetDir 'Cargo target directory'
+Assert-LocalTestPath $OcrSupportRoot 'OCR support root'
+
+if (-not (Test-Path -LiteralPath $OcrSupportRoot -PathType Container)) {
+    throw 'Verified OCR support is missing. Run build-ocr-runtime-support.ps1 first or pass -OcrSupportRoot.'
+}
+$requiredOcrSupportNames = @(
+    'tesseract55.dll',
+    'leptonica-1.87.0.dll',
+    'libpng16.dll',
+    'z.dll',
+    'chi_sim.traineddata',
+    'eng.traineddata',
+    'tesseract-LICENSE.txt',
+    'leptonica-LICENSE.txt',
+    'libpng-LICENSE.txt',
+    'zlib-LICENSE.txt',
+    'tessdata-fast-LICENSE.txt',
+    'THIRD-PARTY-NOTICES.txt',
+    'ocr-support.json'
+)
+foreach ($requiredName in $requiredOcrSupportNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path $OcrSupportRoot $requiredName) -PathType Leaf)) {
+        throw "Missing required OCR support artifact: $requiredName"
+    }
+}
 
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
@@ -49,6 +76,7 @@ $cargoArguments = @(
     '-p', 'glyphshift-controller-windows',
     '-p', 'glyphshift-target-runtime',
     '-p', 'glyphshift-adapter-uia-worker',
+    '-p', 'glyphshift-adapter-ocr-worker',
     '-p', 'glyphshift-adapter-console-native',
     '-p', 'glyphshift-adapter-draw-text-native',
     '-p', 'glyphshift-adapter-gdi-native',
@@ -61,16 +89,6 @@ $cargoArguments = @(
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
-}
-if ($IncludeOcrCandidate) {
-    if ([string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
-        throw 'OCR candidate packaging requires -OcrSupportRoot or GLYPHSHIFT_OCR_SUPPORT_ROOT.'
-    }
-    $OcrSupportRoot = (Resolve-Path -LiteralPath $OcrSupportRoot).Path
-    if (-not (Test-Path -LiteralPath $OcrSupportRoot -PathType Container)) {
-        throw 'OCR support root must be an existing directory.'
-    }
-    $cargoArguments += @('-p', 'glyphshift-adapter-ocr-worker')
 }
 if ($Profile -eq 'Release') {
     $cargoArguments += '--release'
@@ -115,50 +133,27 @@ $uiaWorkerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-adapter-uia-worker.exe' 'adapter-uia-worker' 'exe'
 $uiaAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-adapter-uia-acquisition-worker.exe' 'adapter-uia-acquisition-worker' 'exe'
-$ocrAcquisitionWorkerBundle = $null
+$ocrAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
+    'glyphshift-adapter-ocr-acquisition-worker.exe' 'adapter-ocr-acquisition-worker' 'exe'
 $ocrSupportBundles = @()
-if ($IncludeOcrCandidate) {
-    $ocrAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
-        'glyphshift-adapter-ocr-acquisition-worker.exe' 'adapter-ocr-acquisition-worker' 'exe'
-    $requiredOcrSupportNames = @(
-        'tesseract55.dll',
-        'leptonica-1.87.0.dll',
-        'libpng16.dll',
-        'z.dll',
-        'chi_sim.traineddata',
-        'eng.traineddata',
-        'tesseract-LICENSE.txt',
-        'leptonica-LICENSE.txt',
-        'libpng-LICENSE.txt',
-        'zlib-LICENSE.txt',
-        'tessdata-fast-LICENSE.txt',
-        'THIRD-PARTY-NOTICES.txt',
-        'ocr-support.json'
-    )
-    foreach ($requiredName in $requiredOcrSupportNames) {
-        if (-not (Test-Path -LiteralPath (Join-Path $OcrSupportRoot $requiredName) -PathType Leaf)) {
-            throw "Missing required OCR support artifact: $requiredName"
-        }
+$ocrSupportFiles = @($requiredOcrSupportNames | ForEach-Object {
+    Get-Item -LiteralPath (Join-Path $OcrSupportRoot $_)
+} | Sort-Object Name)
+if ($ocrSupportFiles.Count -gt 64) {
+    throw 'OCR support artifact count exceeds the Runtime Bundle limit.'
+}
+$seenOcrSupportNames = @{}
+foreach ($supportFile in $ocrSupportFiles) {
+    if ($supportFile.Name -notmatch '^[A-Za-z0-9._-]{1,255}$') {
+        throw "Invalid OCR support artifact name: $($supportFile.Name)"
     }
-    $ocrSupportFiles = @($requiredOcrSupportNames | ForEach-Object {
-        Get-Item -LiteralPath (Join-Path $OcrSupportRoot $_)
-    } | Sort-Object Name)
-    if ($ocrSupportFiles.Count -gt 64) {
-        throw 'OCR support artifact count exceeds the Runtime Bundle limit.'
+    if ($seenOcrSupportNames.ContainsKey($supportFile.Name)) {
+        throw "Duplicate OCR support artifact name: $($supportFile.Name)"
     }
-    $seenOcrSupportNames = @{}
-    foreach ($supportFile in $ocrSupportFiles) {
-        if ($supportFile.Name -notmatch '^[A-Za-z0-9._-]{1,255}$') {
-            throw "Invalid OCR support artifact name: $($supportFile.Name)"
-        }
-        if ($seenOcrSupportNames.ContainsKey($supportFile.Name)) {
-            throw "Duplicate OCR support artifact name: $($supportFile.Name)"
-        }
-        $seenOcrSupportNames[$supportFile.Name] = $true
-        $hash = (Get-FileHash -LiteralPath $supportFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        Copy-Item -LiteralPath $supportFile.FullName -Destination (Join-Path $stagingRoot $supportFile.Name)
-        $ocrSupportBundles += [ordered]@{ file = $supportFile.Name; sha256 = $hash }
-    }
+    $seenOcrSupportNames[$supportFile.Name] = $true
+    $hash = (Get-FileHash -LiteralPath $supportFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Copy-Item -LiteralPath $supportFile.FullName -Destination (Join-Path $stagingRoot $supportFile.Name)
+    $ocrSupportBundles += [ordered]@{ file = $supportFile.Name; sha256 = $hash }
 }
 $consoleBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
@@ -226,16 +221,14 @@ $acquisitionWorkers = @(
         sha256 = $uiaAcquisitionWorkerBundle.sha256
         adapter_id = 'windows.uia.acquire'
         support_files = @()
-    }
-)
-if ($IncludeOcrCandidate) {
-    $acquisitionWorkers += [ordered]@{
+    },
+    [ordered]@{
         file = $ocrAcquisitionWorkerBundle.file
         sha256 = $ocrAcquisitionWorkerBundle.sha256
         adapter_id = 'windows.ocr.acquire'
         support_files = $ocrSupportBundles
     }
-}
+)
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/3'

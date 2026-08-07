@@ -123,7 +123,7 @@ test('administrator launch preference persists before elevation and disables wit
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 22 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 23 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {

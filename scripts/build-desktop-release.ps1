@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -27,10 +29,15 @@ New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $candidateRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 
-& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') `
-    -Profile Release `
-    -OutputRoot $runtimeRoot `
-    -CargoTargetDir $cargoTargetDir
+$runtimeBundleArguments = @{
+    Profile = 'Release'
+    OutputRoot = $runtimeRoot
+    CargoTargetDir = $cargoTargetDir
+}
+if (-not [string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
+    $runtimeBundleArguments.OcrSupportRoot = $OcrSupportRoot
+}
+& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments
 
 $runtimeManifestPath = Join-Path $runtimeRoot 'runtime-bundle.json'
 $runtimeManifest = Get-Content -Raw -LiteralPath $runtimeManifestPath | ConvertFrom-Json

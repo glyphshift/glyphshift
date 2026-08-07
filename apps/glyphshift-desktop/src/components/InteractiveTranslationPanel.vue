@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useI18n } from 'vue-i18n'
+import { useAppSettings } from '../appSettings'
 import { translateCommandError } from '../commandError'
 import type {
   DictionarySummary,
@@ -25,10 +26,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 const { t } = useI18n()
+const appSettings = useAppSettings()
 const phase = ref<Phase>('setup')
 const softwareId = ref('')
 const dictionaryId = ref('')
-const shortcut = ref('Ctrl+Shift+F9')
+const shortcut = ref(appSettings.interactiveTranslationShortcut.value)
 const result = ref<InteractiveTranslationResult | null>(null)
 const error = ref('')
 const errorCode = ref('')
@@ -142,7 +144,14 @@ function browserResult(): InteractiveTranslationResult {
 }
 
 function handleBrowserShortcut(event: KeyboardEvent) {
-  if (!props.open || phase.value !== 'armed' || !event.ctrlKey || !event.shiftKey || event.key !== 'F9') return
+  const tokens = shortcut.value.split('+')
+  if (!props.open
+    || phase.value !== 'armed'
+    || event.code !== tokens.at(-1)
+    || event.ctrlKey !== tokens.includes('Ctrl')
+    || event.altKey !== tokens.includes('Alt')
+    || event.shiftKey !== tokens.includes('Shift')
+    || event.metaKey !== tokens.includes('Super')) return
   event.preventDefault()
   receive({ state: 'capturing', shortcut: shortcut.value })
   window.setTimeout(() => receive({
@@ -179,7 +188,7 @@ async function arm(mode: AcquisitionMode = 'structured') {
             acquisitionMode: mode,
           },
         })
-      : 'Ctrl+Shift+F9'
+      : appSettings.interactiveTranslationShortcut.value
     phase.value = 'armed'
   }
   catch (cause) {

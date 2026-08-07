@@ -2,10 +2,8 @@ use super::*;
 
 #[test]
 fn quick_capture_arms_then_captures_and_can_be_cancelled() {
-    let mut capture = SoftwareQuickCaptureState {
-        shortcut_available: true,
-        ..Default::default()
-    };
+    let mut capture = SoftwareQuickCaptureState::default();
+    capture.shortcut_available = true;
 
     assert_eq!(capture.press(), SoftwareQuickCaptureTransition::Armed);
     assert!(capture.armed);

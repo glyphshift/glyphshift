@@ -1,7 +1,6 @@
 use super::*;
 
 const SOFTWARE_QUICK_CAPTURE_EVENT: &str = "software-quick-capture";
-const SOFTWARE_QUICK_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,14 +34,14 @@ pub(super) struct SoftwarePreflightView {
 )]
 enum SoftwareQuickCaptureEvent {
     Armed {
-        shortcut: &'static str,
+        shortcut: Box<str>,
     },
     Captured {
-        shortcut: &'static str,
+        shortcut: Box<str>,
         preflight: SoftwarePreflightView,
     },
     Failed {
-        shortcut: &'static str,
+        shortcut: Box<str>,
         error_code: &'static str,
     },
 }
@@ -53,13 +52,55 @@ pub(super) enum SoftwareQuickCaptureTransition {
     Capture,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct SoftwareQuickCaptureState {
     pub(super) armed: bool,
     pub(super) shortcut_available: bool,
+    shortcut_id: Option<u32>,
+    shortcut_label: Box<str>,
+}
+
+impl Default for SoftwareQuickCaptureState {
+    fn default() -> Self {
+        Self {
+            armed: false,
+            shortcut_available: false,
+            shortcut_id: None,
+            shortcut_label: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
+        }
+    }
 }
 
 impl SoftwareQuickCaptureState {
+    fn shortcut_label(&self) -> Box<str> {
+        self.shortcut_label.clone()
+    }
+
+    fn shortcut_matches(&self, shortcut_id: u32) -> bool {
+        self.shortcut_available && self.shortcut_id == Some(shortcut_id)
+    }
+
+    fn registered_shortcut_id(&self) -> Option<u32> {
+        self.shortcut_available
+            .then_some(self.shortcut_id)
+            .flatten()
+    }
+
+    fn can_rebind_shortcut(&self) -> bool {
+        !self.armed
+    }
+
+    fn set_shortcut_registration(
+        &mut self,
+        shortcut_label: Box<str>,
+        shortcut_id: u32,
+        available: bool,
+    ) {
+        self.shortcut_label = shortcut_label;
+        self.shortcut_id = Some(shortcut_id);
+        self.shortcut_available = available;
+    }
+
     pub(super) fn press(&mut self) -> SoftwareQuickCaptureTransition {
         if self.armed {
             self.armed = false;
@@ -315,9 +356,10 @@ pub(super) fn desktop_preflight_software(
 #[tauri::command]
 pub(super) fn desktop_arm_software_capture(
     capture: State<'_, Mutex<SoftwareQuickCaptureState>>,
-) -> Result<&'static str, CommandError> {
-    capture.lock().map_err(|_| workspace_unavailable())?.arm()?;
-    Ok(SOFTWARE_QUICK_CAPTURE_SHORTCUT)
+) -> Result<Box<str>, CommandError> {
+    let mut capture = capture.lock().map_err(|_| workspace_unavailable())?;
+    capture.arm()?;
+    Ok(capture.shortcut_label())
 }
 
 #[tauri::command]
@@ -378,11 +420,72 @@ pub(super) fn desktop_remove_software(
         .remove_software(&extension_id)
 }
 
-#[cfg(windows)]
-pub(super) fn software_quick_capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
-    use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
+#[tauri::command]
+pub(super) fn desktop_probe_software_capture_shortcut(
+    app: tauri::AppHandle,
+    shortcut: String,
+    capture: State<'_, Mutex<SoftwareQuickCaptureState>>,
+) -> Result<shortcut::GlobalShortcutProbeView, CommandError> {
+    let registered_shortcut_id = capture
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .registered_shortcut_id();
+    shortcut::probe_global_shortcut(&app, &shortcut, registered_shortcut_id)
+}
 
-    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F8)
+#[cfg(windows)]
+pub(super) fn rebind_software_capture_shortcut(
+    app: &tauri::AppHandle,
+    value: &str,
+) -> Result<Box<str>, CommandError> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
+    let (candidate, label) = shortcut::parse_global_shortcut(value)?;
+    let capture_state = app.state::<Mutex<SoftwareQuickCaptureState>>();
+    let mut capture = capture_state.lock().map_err(|_| workspace_unavailable())?;
+    if capture.shortcut_id == Some(candidate.id()) && capture.shortcut_available {
+        capture.shortcut_label = label.clone();
+        return Ok(label);
+    }
+    if !capture.can_rebind_shortcut() {
+        return Err(CommandError::new("settings.shortcut_busy"));
+    }
+    let previous_shortcut = capture
+        .shortcut_available
+        .then(|| shortcut::parse_global_shortcut(&capture.shortcut_label))
+        .transpose()
+        .map_err(|_| CommandError::new("settings.shortcut_update_failed"))?
+        .map(|(shortcut, _)| shortcut);
+
+    app.global_shortcut()
+        .register(candidate)
+        .map_err(|_| CommandError::new("settings.shortcut_unavailable"))?;
+    if let Some(previous_shortcut) = previous_shortcut {
+        if app.global_shortcut().unregister(previous_shortcut).is_err() {
+            let _ = app.global_shortcut().unregister(candidate);
+            return Err(CommandError::new("settings.shortcut_update_failed"));
+        }
+    }
+    capture.set_shortcut_registration(label.clone(), candidate.id(), true);
+    Ok(label)
+}
+
+#[cfg(not(windows))]
+pub(super) fn rebind_software_capture_shortcut(
+    _app: &tauri::AppHandle,
+    _value: &str,
+) -> Result<Box<str>, CommandError> {
+    Err(CommandError::new("settings.shortcut_unavailable"))
+}
+
+#[cfg(windows)]
+pub(super) fn matches_software_quick_capture_shortcut(
+    app: &tauri::AppHandle,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
+) -> bool {
+    app.state::<Mutex<SoftwareQuickCaptureState>>()
+        .lock()
+        .is_ok_and(|capture| capture.shortcut_matches(shortcut.id()))
 }
 
 #[cfg(windows)]
@@ -406,17 +509,18 @@ pub(super) fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
         .state::<Mutex<SoftwareQuickCaptureState>>()
         .lock()
         .ok()
-        .map(|mut capture| capture.press());
+        .map(|mut capture| {
+            let shortcut = capture.shortcut_label();
+            (capture.press(), shortcut)
+        });
     match transition {
-        Some(SoftwareQuickCaptureTransition::Armed) => {
+        Some((SoftwareQuickCaptureTransition::Armed, shortcut)) => {
             let _ = app.emit(
                 SOFTWARE_QUICK_CAPTURE_EVENT,
-                SoftwareQuickCaptureEvent::Armed {
-                    shortcut: SOFTWARE_QUICK_CAPTURE_SHORTCUT,
-                },
+                SoftwareQuickCaptureEvent::Armed { shortcut },
             );
         }
-        Some(SoftwareQuickCaptureTransition::Capture) => {
+        Some((SoftwareQuickCaptureTransition::Capture, shortcut)) => {
             let preflight = foreground_windows_executable()
                 .map_err(|_| "software.quick_capture_foreground_unavailable")
                 .and_then(|executable| {
@@ -431,7 +535,7 @@ pub(super) fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
                     let _ = app.emit(
                         SOFTWARE_QUICK_CAPTURE_EVENT,
                         SoftwareQuickCaptureEvent::Failed {
-                            shortcut: SOFTWARE_QUICK_CAPTURE_SHORTCUT,
+                            shortcut: shortcut.clone(),
                             error_code: "software.quick_capture_self",
                         },
                     );
@@ -440,7 +544,7 @@ pub(super) fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
                     let _ = app.emit(
                         SOFTWARE_QUICK_CAPTURE_EVENT,
                         SoftwareQuickCaptureEvent::Captured {
-                            shortcut: SOFTWARE_QUICK_CAPTURE_SHORTCUT,
+                            shortcut: shortcut.clone(),
                             preflight,
                         },
                     );
@@ -450,7 +554,7 @@ pub(super) fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
                     let _ = app.emit(
                         SOFTWARE_QUICK_CAPTURE_EVENT,
                         SoftwareQuickCaptureEvent::Failed {
-                            shortcut: SOFTWARE_QUICK_CAPTURE_SHORTCUT,
+                            shortcut,
                             error_code,
                         },
                     );
@@ -462,17 +566,26 @@ pub(super) fn handle_software_quick_capture_shortcut(app: &tauri::AppHandle) {
     }
 }
 pub(super) fn manage_quick_capture(app: &mut tauri::App) {
-    app.manage(Mutex::new(SoftwareQuickCaptureState::default()));
     #[cfg(windows)]
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-        let shortcut_available = app
-            .global_shortcut()
-            .register(software_quick_capture_shortcut())
-            .is_ok();
-        if let Ok(mut capture) = app.state::<Mutex<SoftwareQuickCaptureState>>().lock() {
-            capture.shortcut_available = shortcut_available;
-        }
+        let configured: Box<str> = app
+            .state::<Mutex<AppSettingsStore>>()
+            .lock()
+            .ok()
+            .map(|settings| settings.software_capture_shortcut().into())
+            .unwrap_or_else(|| DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into());
+        let (shortcut, label) = shortcut::parse_global_shortcut(&configured)
+            .or_else(|_| shortcut::parse_global_shortcut(DEFAULT_SOFTWARE_CAPTURE_SHORTCUT))
+            .expect("default software capture shortcut must be valid");
+        let shortcut_available = app.global_shortcut().register(shortcut).is_ok();
+        let mut capture = SoftwareQuickCaptureState::default();
+        capture.set_shortcut_registration(label, shortcut.id(), shortcut_available);
+        app.manage(Mutex::new(capture));
+    }
+    #[cfg(not(windows))]
+    {
+        app.manage(Mutex::new(SoftwareQuickCaptureState::default()));
     }
 }

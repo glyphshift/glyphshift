@@ -6,6 +6,7 @@ mod interactive_translation;
 mod probe;
 mod quick_probe;
 mod settings;
+mod shortcut;
 mod software;
 mod workflow;
 
@@ -57,6 +58,7 @@ use quick_probe::QuickProbeSessionStore;
 use serde::{Deserialize, Serialize};
 use settings::{
     configure_launch_at_startup, AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError,
+    DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT, DEFAULT_SOFTWARE_CAPTURE_SHORTCUT,
 };
 #[cfg(test)]
 use software::{
@@ -74,7 +76,7 @@ use workflow::{
 #[cfg(test)]
 use workflow::{workflow_activation_command_error, WorkflowTargetRuntimeView};
 
-const DESKTOP_API_VERSION: u16 = 22;
+const DESKTOP_API_VERSION: u16 = 23;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -598,12 +600,23 @@ fn desktop_settings(
 
 #[tauri::command]
 fn desktop_update_settings(
-    update: AppSettingsUpdate,
+    mut update: AppSettingsUpdate,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<AppSettings, CommandError> {
+    let interactive_translation_shortcut =
+        shortcut::normalize_global_shortcut(update.interactive_translation_shortcut())?;
+    let software_capture_shortcut =
+        shortcut::normalize_global_shortcut(update.software_capture_shortcut())?;
+    update.set_interactive_translation_shortcut(interactive_translation_shortcut.clone());
+    update.set_software_capture_shortcut(software_capture_shortcut.clone());
     let mut settings = settings
         .lock()
         .map_err(|_| CommandError::new("settings.unavailable"))?;
+    if settings.interactive_translation_shortcut() != interactive_translation_shortcut.as_ref()
+        || settings.software_capture_shortcut() != software_capture_shortcut.as_ref()
+    {
+        return Err(CommandError::new("settings.shortcut_update_failed"));
+    }
     let previous_launch_at_startup = settings.launch_at_startup();
     let launch_at_startup_changed = previous_launch_at_startup != update.launch_at_startup();
     if launch_at_startup_changed {
@@ -615,6 +628,50 @@ fn desktop_update_settings(
             if launch_at_startup_changed {
                 let _ = configure_launch_at_startup(previous_launch_at_startup);
             }
+            Err(settings_command_error(error))
+        }
+    }
+}
+
+#[tauri::command]
+fn desktop_update_interactive_translation_shortcut(
+    app: tauri::AppHandle,
+    shortcut: String,
+    settings: State<'_, Mutex<AppSettingsStore>>,
+) -> Result<AppSettings, CommandError> {
+    let shortcut = shortcut::normalize_global_shortcut(&shortcut)?;
+    let mut settings = settings
+        .lock()
+        .map_err(|_| CommandError::new("settings.unavailable"))?;
+    let previous: Box<str> = settings.interactive_translation_shortcut().into();
+    let shortcut =
+        interactive_translation::rebind_interactive_translation_shortcut(&app, &shortcut)?;
+    match settings.update_interactive_translation_shortcut(shortcut) {
+        Ok(saved) => Ok(saved),
+        Err(error) => {
+            let _ =
+                interactive_translation::rebind_interactive_translation_shortcut(&app, &previous);
+            Err(settings_command_error(error))
+        }
+    }
+}
+
+#[tauri::command]
+fn desktop_update_software_capture_shortcut(
+    app: tauri::AppHandle,
+    shortcut: String,
+    settings: State<'_, Mutex<AppSettingsStore>>,
+) -> Result<AppSettings, CommandError> {
+    let shortcut = shortcut::normalize_global_shortcut(&shortcut)?;
+    let mut settings = settings
+        .lock()
+        .map_err(|_| CommandError::new("settings.unavailable"))?;
+    let previous: Box<str> = settings.software_capture_shortcut().into();
+    let shortcut = software::rebind_software_capture_shortcut(&app, &shortcut)?;
+    match settings.update_software_capture_shortcut(shortcut) {
+        Ok(saved) => Ok(saved),
+        Err(error) => {
+            let _ = software::rebind_software_capture_shortcut(&app, &previous);
             Err(settings_command_error(error))
         }
     }
@@ -677,11 +734,11 @@ pub fn run() {
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
                 if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    if shortcut == &software::software_quick_capture_shortcut() {
+                    if software::matches_software_quick_capture_shortcut(app, shortcut) {
                         software::handle_software_quick_capture_shortcut(app);
-                    } else if shortcut
-                        == &interactive_translation::interactive_translation_shortcut()
-                    {
+                    } else if interactive_translation::matches_interactive_translation_shortcut(
+                        app, shortcut,
+                    ) {
                         interactive_translation::handle_interactive_translation_shortcut(app);
                     }
                 }
@@ -725,6 +782,8 @@ pub fn run() {
             desktop_status,
             desktop_settings,
             desktop_update_settings,
+            desktop_update_interactive_translation_shortcut,
+            desktop_update_software_capture_shortcut,
             desktop_privilege_status,
             desktop_restart_elevated,
             desktop_snapshot,
@@ -733,7 +792,10 @@ pub fn run() {
             acquisition::desktop_cancel_point_acquisition,
             interactive_translation::desktop_arm_interactive_translation,
             interactive_translation::desktop_cancel_interactive_translation,
+            interactive_translation::desktop_probe_interactive_translation_shortcut,
             interactive_translation::desktop_interactive_translation_capabilities,
+            interactive_translation::desktop_interactive_translation_bubble,
+            interactive_translation::desktop_dismiss_interactive_translation_bubble,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,
             probe::desktop_create_probe_run,
@@ -767,6 +829,7 @@ pub fn run() {
             software::desktop_preflight_software,
             software::desktop_arm_software_capture,
             software::desktop_cancel_software_capture,
+            software::desktop_probe_software_capture_shortcut,
             software::desktop_add_software,
             software::desktop_update_software,
             software::desktop_select_software,

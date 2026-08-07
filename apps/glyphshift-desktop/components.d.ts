@@ -16,6 +16,7 @@ declare module 'vue' {
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
     HelpView: typeof import('./src/components/HelpView.vue')['default']
+    InteractiveTranslationBubble: typeof import('./src/components/InteractiveTranslationBubble.vue')['default']
     InteractiveTranslationPanel: typeof import('./src/components/InteractiveTranslationPanel.vue')['default']
     ManagementDetailHeader: typeof import('./src/components/ManagementDetailHeader.vue')['default']
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']

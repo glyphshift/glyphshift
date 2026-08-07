@@ -20,7 +20,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 22
+const desktopApiVersion = 23
 
 const { t } = useI18n()
 const appSettings = useAppSettings()

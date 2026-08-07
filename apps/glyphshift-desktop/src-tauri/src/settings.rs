@@ -5,7 +5,17 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 pub(crate) const APP_SETTINGS_SCHEMA_VERSION: u16 = 1;
+pub(crate) const DEFAULT_SOFTWARE_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
+pub(crate) const DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT: &str = "Ctrl+Shift+F9";
 const SETTINGS_FILE_NAME: &str = "app-settings.json";
+
+fn default_interactive_translation_shortcut() -> Box<str> {
+    DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT.into()
+}
+
+fn default_software_capture_shortcut() -> Box<str> {
+    DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) enum LocalePreference {
@@ -47,6 +57,10 @@ pub(crate) struct AppSettings {
     launch_elevated: bool,
     #[serde(default)]
     close_behavior: CloseBehavior,
+    #[serde(default = "default_interactive_translation_shortcut")]
+    interactive_translation_shortcut: Box<str>,
+    #[serde(default = "default_software_capture_shortcut")]
+    software_capture_shortcut: Box<str>,
 }
 
 impl Default for AppSettings {
@@ -58,6 +72,8 @@ impl Default for AppSettings {
             launch_at_startup: false,
             launch_elevated: false,
             close_behavior: CloseBehavior::default(),
+            interactive_translation_shortcut: default_interactive_translation_shortcut(),
+            software_capture_shortcut: default_software_capture_shortcut(),
         }
     }
 }
@@ -70,9 +86,17 @@ impl AppSettings {
     pub(crate) const fn should_request_elevation(&self, elevated: Option<bool>) -> bool {
         self.launch_elevated && matches!(elevated, Some(false))
     }
+
+    pub(crate) fn interactive_translation_shortcut(&self) -> &str {
+        &self.interactive_translation_shortcut
+    }
+
+    pub(crate) fn software_capture_shortcut(&self) -> &str {
+        &self.software_capture_shortcut
+    }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSettingsUpdate {
     locale_preference: LocalePreference,
@@ -80,11 +104,29 @@ pub(crate) struct AppSettingsUpdate {
     launch_at_startup: bool,
     launch_elevated: bool,
     close_behavior: CloseBehavior,
+    interactive_translation_shortcut: Box<str>,
+    software_capture_shortcut: Box<str>,
 }
 
 impl AppSettingsUpdate {
-    pub(crate) const fn launch_at_startup(self) -> bool {
+    pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
+    }
+
+    pub(crate) fn interactive_translation_shortcut(&self) -> &str {
+        &self.interactive_translation_shortcut
+    }
+
+    pub(crate) fn set_interactive_translation_shortcut(&mut self, shortcut: Box<str>) {
+        self.interactive_translation_shortcut = shortcut;
+    }
+
+    pub(crate) fn software_capture_shortcut(&self) -> &str {
+        &self.software_capture_shortcut
+    }
+
+    pub(crate) fn set_software_capture_shortcut(&mut self, shortcut: Box<str>) {
+        self.software_capture_shortcut = shortcut;
     }
 }
 
@@ -97,6 +139,8 @@ impl From<AppSettingsUpdate> for AppSettings {
             launch_at_startup: update.launch_at_startup,
             launch_elevated: update.launch_elevated,
             close_behavior: update.close_behavior,
+            interactive_translation_shortcut: update.interactive_translation_shortcut,
+            software_capture_shortcut: update.software_capture_shortcut,
         }
     }
 }
@@ -174,11 +218,43 @@ impl AppSettingsStore {
         self.current.launch_at_startup()
     }
 
+    pub(crate) fn interactive_translation_shortcut(&self) -> &str {
+        self.current.interactive_translation_shortcut()
+    }
+
+    pub(crate) fn software_capture_shortcut(&self) -> &str {
+        self.current.software_capture_shortcut()
+    }
+
     pub(crate) fn update(
         &mut self,
         update: AppSettingsUpdate,
     ) -> Result<AppSettings, SettingsError> {
         let next = AppSettings::from(update);
+        self.persist(&next)?;
+        self.current = next;
+        self.load_error = None;
+        Ok(self.current.clone())
+    }
+
+    pub(crate) fn update_interactive_translation_shortcut(
+        &mut self,
+        shortcut: Box<str>,
+    ) -> Result<AppSettings, SettingsError> {
+        let mut next = self.current.clone();
+        next.interactive_translation_shortcut = shortcut;
+        self.persist(&next)?;
+        self.current = next;
+        self.load_error = None;
+        Ok(self.current.clone())
+    }
+
+    pub(crate) fn update_software_capture_shortcut(
+        &mut self,
+        shortcut: Box<str>,
+    ) -> Result<AppSettings, SettingsError> {
+        let mut next = self.current.clone();
+        next.software_capture_shortcut = shortcut;
         self.persist(&next)?;
         self.current = next;
         self.load_error = None;
@@ -239,6 +315,8 @@ mod tests {
                 launch_at_startup: true,
                 launch_elevated: true,
                 close_behavior: CloseBehavior::Minimize,
+                interactive_translation_shortcut: "Ctrl+Alt+KeyT".into(),
+                software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
             })
             .expect("save settings");
         let reopened = AppSettingsStore::open(root.path()).expect("reopen settings store");
@@ -246,6 +324,8 @@ mod tests {
         assert!(saved.should_request_elevation(Some(false)));
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
+        assert_eq!(saved.interactive_translation_shortcut(), "Ctrl+Alt+KeyT");
+        assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
         assert_eq!(reopened.current(), Ok(saved));
     }
 
@@ -268,6 +348,8 @@ mod tests {
                 launch_at_startup: false,
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
+                interactive_translation_shortcut: DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT.into(),
+                software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
             })
             .expect("replace invalid settings");
         assert_eq!(store.current(), Ok(recovered));
@@ -291,5 +373,13 @@ mod tests {
         assert!(!settings.launch_elevated);
         assert!(!settings.should_request_elevation(Some(false)));
         assert_eq!(settings.close_behavior, CloseBehavior::Quit);
+        assert_eq!(
+            settings.interactive_translation_shortcut(),
+            DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT
+        );
+        assert_eq!(
+            settings.software_capture_shortcut(),
+            DEFAULT_SOFTWARE_CAPTURE_SHORTCUT
+        );
     }
 }
