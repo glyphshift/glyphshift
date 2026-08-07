@@ -76,7 +76,7 @@ use workflow::{
 #[cfg(test)]
 use workflow::{workflow_activation_command_error, WorkflowTargetRuntimeView};
 
-const DESKTOP_API_VERSION: u16 = 23;
+const DESKTOP_API_VERSION: u16 = 24;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -810,7 +810,7 @@ pub fn run() {
             probe::desktop_edit_probe_translation,
             probe::desktop_bulk_probe_entries,
             probe::desktop_export_probe_run,
-            quick_probe::desktop_start_quick_probe,
+            quick_probe::desktop_create_probe_from_sources,
             quick_probe::desktop_retain_quick_probe,
             quick_probe::desktop_cleanup_quick_probe,
             dictionary::desktop_dictionary,

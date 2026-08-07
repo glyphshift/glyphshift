@@ -11,6 +11,9 @@ Glyphshift 是通用运行时界面替换工具。当前交付面向 Windows，�
 **软件（Software）**：用户登记的目标应用身份，包括名称、说明和程序绑定。软件不拥有本次
 运行要使用的词典或字体策略。
 
+**软件资料库（Software Library）**：可供工作流和探针复用的 Software 集合，是创建目标的一种来源，
+不是当前运行进程或 Runtime 状态的唯一来源。_Avoid_: 软件列表即运行目标全集。
+
 **词典（Dictionary）**：可独立编辑、安装、发布和复用的纯翻译资产，承载便携元数据以及唯一的
 `source → translation` 映射。词典不拥有位置、语境、字体、Platform、Technology、Adapter、Hook
 或保护原文策略。
@@ -79,6 +82,15 @@ Technology 多选只筛选 Catalog，Adapter 多选才改变执行计划。
 
 **探针任务（Probe Run）**：可恢复的持续观察任务，绑定一个软件、一个词典和一组 Adapter。
 它只保存运行状态与观测事实，不拥有翻译内容。_Avoid_: Probe Workspace、探针字典。
+
+**探针目标来源（Probe Target Source）**：创建探针时解析目标身份的选择，可以引用 Software Library，
+也可以捕获当前运行程序并生成由本次探针拥有的临时 Software。_Avoid_: 软件只能预先登记。
+
+**探针词典来源（Probe Dictionary Source）**：创建探针时解析词典的选择，可以引用已有 Dictionary，
+也可以生成系统命名、由本次探针拥有的临时 Dictionary。_Avoid_: 新建空词典表单。
+
+**临时探针资产（Temporary Probe Asset）**：为一次 Probe Run 自动生成并由其创建会话显式拥有的
+Software 或 Dictionary；可以被用户保留为资料库资产，否则随探针安全清理。_Avoid_: 根据名称或 ID 前缀猜测临时性。
 
 **观测索引（Observation Index）**：探针任务的本地证据集合，按原文关联 Adapter、出现次数、
 时间与忽略状态；它不进入 Dictionary，也不是用户需要单独管理的目录。_Avoid_: Capture Catalog、

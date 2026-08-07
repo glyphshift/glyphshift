@@ -179,11 +179,39 @@ fn read_quick_probe_ledger(path: &Path) -> Result<QuickProbeLedger, CommandError
     Ok(ledger)
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub(super) enum ProbeTargetSourceRequest {
+    Library { software_id: Box<str> },
+    ActiveProcess { executable_path: String },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub(super) enum ProbeDictionarySourceRequest {
+    Library { dictionary_id: Box<str> },
+    Temporary { target_locale: Box<str> },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct QuickProbeStartRequest {
-    pub(super) executable_path: String,
-    pub(super) target_locale: Box<str>,
+pub(super) struct ProbeCreationRequest {
+    pub(super) target: ProbeTargetSourceRequest,
+    pub(super) dictionary: ProbeDictionarySourceRequest,
+    #[serde(default)]
+    pub(super) name: Option<Box<str>>,
+    #[serde(default)]
+    pub(super) adapter_ids: Vec<Box<str>>,
+    #[serde(default)]
+    pub(super) live_preview_enabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -202,46 +230,93 @@ pub(super) struct QuickProbeCleanupView {
 }
 
 impl DesktopApplication {
-    pub(super) fn start_quick_probe(
+    pub(super) fn create_probe_from_sources(
         &mut self,
-        request: QuickProbeStartRequest,
+        request: ProbeCreationRequest,
     ) -> Result<ProbeRunView, CommandError> {
-        self.validate_quick_probe_request(&request)?;
-        let preflight = self.software_preflight(&request.executable_path)?;
-        self.validate_quick_probe_preflight(&preflight)?;
-        self.start_quick_probe_preflighted(request)
+        self.validate_probe_creation_request(&request)?;
+        let executable_path = self.probe_creation_executable_path(&request.target)?;
+        let preflight = self.software_preflight(&executable_path)?;
+        self.validate_probe_creation_preflight(
+            &preflight,
+            matches!(
+                &request.target,
+                ProbeTargetSourceRequest::ActiveProcess { .. }
+            ),
+        )?;
+        self.create_probe_from_sources_preflighted(request, executable_path)
     }
 
     #[cfg(test)]
-    pub(super) fn start_quick_probe_for_test(
+    pub(super) fn create_probe_from_sources_for_test(
         &mut self,
-        request: QuickProbeStartRequest,
+        request: ProbeCreationRequest,
     ) -> Result<ProbeRunView, CommandError> {
-        self.validate_quick_probe_request(&request)?;
-        let mut preflight = self.software_preflight(&request.executable_path)?;
+        self.validate_probe_creation_request(&request)?;
+        let executable_path = self.probe_creation_executable_path(&request.target)?;
+        let mut preflight = self.software_preflight(&executable_path)?;
         preflight.running = true;
         if preflight.state == SoftwarePreflightState::NotRunning {
             preflight.state = SoftwarePreflightState::Ready;
             preflight.can_add = true;
         }
-        self.validate_quick_probe_preflight(&preflight)?;
-        self.start_quick_probe_preflighted(request)
+        self.validate_probe_creation_preflight(
+            &preflight,
+            matches!(
+                &request.target,
+                ProbeTargetSourceRequest::ActiveProcess { .. }
+            ),
+        )?;
+        self.create_probe_from_sources_preflighted(request, executable_path)
     }
 
-    fn validate_quick_probe_request(
+    fn validate_probe_creation_request(
         &self,
-        request: &QuickProbeStartRequest,
+        request: &ProbeCreationRequest,
     ) -> Result<(), CommandError> {
-        let target_locale = request.target_locale.trim();
-        if target_locale.is_empty() || target_locale.chars().count() > 64 {
-            return Err(CommandError::new("quick_probe.invalid_locale"));
+        if let ProbeDictionarySourceRequest::Temporary { target_locale } = &request.dictionary {
+            let target_locale = target_locale.trim();
+            if target_locale.is_empty() || target_locale.chars().count() > 64 {
+                return Err(CommandError::new("quick_probe.invalid_locale"));
+            }
+        }
+        if request
+            .name
+            .as_deref()
+            .is_some_and(|name| name.trim().is_empty() || name.chars().count() > 128)
+        {
+            return Err(CommandError::new("capture.invalid_configuration"));
         }
         Ok(())
     }
 
-    fn validate_quick_probe_preflight(
+    fn probe_creation_executable_path(
+        &self,
+        target: &ProbeTargetSourceRequest,
+    ) -> Result<String, CommandError> {
+        match target {
+            ProbeTargetSourceRequest::ActiveProcess { executable_path } => {
+                Ok(executable_path.clone())
+            }
+            ProbeTargetSourceRequest::Library { software_id } => self
+                .backend
+                .snapshot()
+                .software()
+                .iter()
+                .find(|software| software.id() == software_id.as_ref())
+                .and_then(|software| software.executable_path())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| {
+                    CommandError::new("capture.unknown_software")
+                        .with_arg("softwareId", software_id.to_string())
+                }),
+        }
+    }
+
+    fn validate_probe_creation_preflight(
         &self,
         preflight: &software::SoftwarePreflightView,
+        require_running: bool,
     ) -> Result<(), CommandError> {
         if preflight.state == SoftwarePreflightState::SelfTarget {
             return Err(software::software_preflight_error(preflight));
@@ -253,7 +328,7 @@ impl DesktopApplication {
         if self.runtimes.is_none() {
             return Err(CommandError::new("software.runtime_unavailable"));
         }
-        if !preflight.running {
+        if require_running && !preflight.running {
             return Err(CommandError::new("software.not_running"));
         }
         if !matches!(
@@ -265,43 +340,64 @@ impl DesktopApplication {
         Ok(())
     }
 
-    fn start_quick_probe_preflighted(
+    fn create_probe_from_sources_preflighted(
         &mut self,
-        request: QuickProbeStartRequest,
+        request: ProbeCreationRequest,
+        executable_path: String,
     ) -> Result<ProbeRunView, CommandError> {
-        let target_locale = request.target_locale.trim();
         let snapshot = self.backend.snapshot();
-        let existing_software_id = snapshot.software().iter().find_map(|software| {
-            software
-                .executable_path()
-                .filter(|path| {
-                    software::same_windows_path(
-                        Path::new(path),
-                        Path::new(&request.executable_path),
-                    )
+        let existing_software_id = match &request.target {
+            ProbeTargetSourceRequest::Library { software_id } => Some(software_id.clone()),
+            ProbeTargetSourceRequest::ActiveProcess { .. } => {
+                snapshot.software().iter().find_map(|software| {
+                    software
+                        .executable_path()
+                        .filter(|path| {
+                            software::same_windows_path(path.as_ref(), Path::new(&executable_path))
+                        })
+                        .map(|_| Box::<str>::from(software.id()))
                 })
-                .map(|_| Box::<str>::from(software.id()))
-        });
+            }
+        };
         let suffix = self.next_quick_probe_suffix();
         let run_id: Box<str> = format!("quick-probe-{suffix}").into();
-        let dictionary_id: Box<str> = format!("quick-dictionary-{suffix}").into();
+        let (dictionary_id, owns_dictionary) = match &request.dictionary {
+            ProbeDictionarySourceRequest::Library { dictionary_id } => {
+                self.backend.dictionary(dictionary_id).map_err(|_| {
+                    CommandError::new("dictionary.not_found")
+                        .with_arg("dictionaryId", dictionary_id.to_string())
+                })?;
+                (dictionary_id.clone(), false)
+            }
+            ProbeDictionarySourceRequest::Temporary { .. } => {
+                (format!("quick-dictionary-{suffix}").into(), true)
+            }
+        };
+        let owns_software = existing_software_id.is_none();
+        let owns_temporary_assets = owns_software || owns_dictionary;
+        let require_running = matches!(
+            &request.target,
+            ProbeTargetSourceRequest::ActiveProcess { .. }
+        );
         let mut record = QuickProbeRecord {
             run_id: run_id.clone(),
             software_id: existing_software_id.clone(),
             dictionary_id: dictionary_id.clone(),
-            executable_path: request.executable_path.clone().into(),
-            owns_software: existing_software_id.is_none(),
-            owns_dictionary: true,
+            executable_path: executable_path.clone().into(),
+            owns_software,
+            owns_dictionary,
             phase: QuickProbePhase::Preparing,
         };
-        self.quick_probe_sessions.save(record.clone())?;
+        if owns_temporary_assets {
+            self.quick_probe_sessions.save(record.clone())?;
+        }
 
         let result = (|| {
             let software_id = if let Some(software_id) = existing_software_id {
                 software_id
             } else {
                 self.backend
-                    .add_software(ExecutableSelection::new(&request.executable_path))
+                    .add_software(ExecutableSelection::new(&executable_path))
                     .map_err(|_| CommandError::new("software.invalid_executable"))?;
                 let software_id = self
                     .backend
@@ -314,17 +410,23 @@ impl DesktopApplication {
                             .filter(|path| {
                                 software::same_windows_path(
                                     Path::new(path),
-                                    Path::new(&request.executable_path),
+                                    Path::new(&executable_path),
                                 )
                             })
                             .map(|_| Box::<str>::from(software.id()))
                     })
                     .ok_or_else(|| CommandError::new("quick_probe.start_failed"))?;
                 record.software_id = Some(software_id.clone());
-                self.quick_probe_sessions.save(record.clone())?;
+                if owns_temporary_assets {
+                    self.quick_probe_sessions.save(record.clone())?;
+                }
                 software_id
             };
-            let adapter_ids = self.compatible_probe_adapter_ids(&software_id)?;
+            let adapter_ids = if request.adapter_ids.is_empty() {
+                self.compatible_probe_adapter_ids(&software_id)?
+            } else {
+                request.adapter_ids.clone()
+            };
             if adapter_ids.is_empty() {
                 return Err(CommandError::new("capture.adapters_required"));
             }
@@ -336,34 +438,50 @@ impl DesktopApplication {
                 .find(|software| software.id() == software_id.as_ref())
                 .map(|software| Box::<str>::from(software.name()))
                 .ok_or_else(|| CommandError::new("capture.unknown_software"))?;
-            self.backend
-                .create_dictionary(DictionaryCreate::new(
-                    dictionary_id.clone(),
-                    format!("{software_name} 临时词典"),
-                    "auto",
-                    target_locale,
-                ))
-                .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
+            if let ProbeDictionarySourceRequest::Temporary { target_locale } = &request.dictionary {
+                self.backend
+                    .create_dictionary(DictionaryCreate::new(
+                        dictionary_id.clone(),
+                        format!("{software_name} 临时词典"),
+                        "auto",
+                        target_locale.trim(),
+                    ))
+                    .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
+            }
             let view = self.create_probe_run(ProbeRunCreateRequest {
                 id: run_id.clone(),
-                name: format!("{software_name} 快速测试").into(),
+                name: request
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("{software_name} 探针").into()),
                 software_id,
                 adapter_ids,
-                live_preview_enabled: false,
+                live_preview_enabled: request.live_preview_enabled,
                 dictionary: ProbeDictionaryBindingRequest::Existing {
                     dictionary_id: dictionary_id.clone(),
                 },
             })?;
-            if view.summary.status() != ProbeRunStatus::Running {
+            if require_running && view.summary.status() != ProbeRunStatus::Running {
                 return Err(CommandError::new("quick_probe.target_stopped"));
             }
-            record.phase = QuickProbePhase::Active;
-            self.quick_probe_sessions.save(record.clone())?;
+            if owns_temporary_assets {
+                record.phase = QuickProbePhase::Active;
+                self.quick_probe_sessions.save(record.clone())?;
+            }
             Ok(view)
         })();
 
         if result.is_err() {
-            let _ = self.cleanup_quick_probe(run_id.as_ref());
+            if owns_temporary_assets {
+                let _ = self.cleanup_quick_probe(run_id.as_ref());
+            } else {
+                if self.active_probe_run_id.as_deref() == Some(run_id.as_ref()) {
+                    let _ = self.disconnect_probe_run(run_id.as_ref());
+                }
+                if self.probe_runs.summary(run_id.as_ref()).is_ok() {
+                    let _ = self.delete_probe_runs(std::slice::from_ref(&run_id));
+                }
+            }
         }
         result
     }
@@ -511,14 +629,14 @@ impl DesktopApplication {
 }
 
 #[tauri::command]
-pub(super) fn desktop_start_quick_probe(
-    request: QuickProbeStartRequest,
+pub(super) fn desktop_create_probe_from_sources(
+    request: ProbeCreationRequest,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<ProbeRunView, CommandError> {
     application
         .lock()
         .map_err(|_| workspace_unavailable())?
-        .start_quick_probe(request)
+        .create_probe_from_sources(request)
 }
 
 #[tauri::command]

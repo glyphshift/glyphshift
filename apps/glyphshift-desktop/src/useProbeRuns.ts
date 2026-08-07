@@ -4,26 +4,6 @@ import { translateCommandError } from './commandError'
 import { i18n } from './i18n'
 import type { ProbeEntryPage, ProbeExportFormat, ProbeRunSummary } from './model'
 
-export type ProbeDictionaryBinding
-  = { kind: 'existing'; dictionaryId: string }
-    | {
-      kind: 'new'
-      id: string
-      name: string
-      description: string
-      sourceLocale: string
-      targetLocale: string
-    }
-
-export interface ProbeRunCreateInput {
-  id: string
-  name: string
-  softwareId: string
-  adapterIds: string[]
-  livePreviewEnabled: boolean
-  dictionary: ProbeDictionaryBinding
-}
-
 export interface ProbeRunQueryInput {
   runId: string
   search: string
@@ -39,14 +19,26 @@ export interface ProbeRunUpdateInput {
   livePreviewEnabled: boolean
 }
 
-export interface QuickProbeStartInput {
-  executablePath: string
-  targetLocale: string
+export type ProbeTargetSource
+  = { kind: 'library'; softwareId: string }
+    | { kind: 'active_process'; executablePath: string }
+
+export type ProbeDictionarySource
+  = { kind: 'library'; dictionaryId: string }
+    | { kind: 'temporary'; targetLocale: string }
+
+export interface ProbeCreationInput {
+  target: ProbeTargetSource
+  dictionary: ProbeDictionarySource
+  name?: string
+  adapterIds: string[]
+  livePreviewEnabled: boolean
 }
 
-export interface QuickProbeBrowserFallback {
+export interface ProbeCreationBrowserFallback {
   softwareId?: string
   softwareName: string
+  dictionaryId?: string
 }
 
 export interface QuickProbeCleanupResult {
@@ -100,59 +92,6 @@ export function useProbeRuns() {
     if (!runs.value.some(item => item.id === selectedRunId.value)) selectRun('')
   }
 
-  async function create(input: ProbeRunCreateInput) {
-    if (busy.value) return null
-    busy.value = true
-    message.value = ''
-    try {
-      const dictionaryId = input.dictionary.kind === 'existing'
-        ? input.dictionary.dictionaryId
-        : input.dictionary.id
-      const summary = hasDesktopRuntime()
-        ? await invoke<ProbeRunSummary>('desktop_create_probe_run', { request: input })
-        : {
-            id: input.id,
-            name: input.name,
-            softwareId: input.softwareId,
-            dictionaryId,
-            adapterIds: [...input.adapterIds],
-            status: 'ready' as const,
-            livePreviewEnabled: input.livePreviewEnabled,
-            observationRevision: 0,
-            observedCount: 0,
-            ignoredCount: 0,
-            droppedObservations: 0,
-            previewGeneration: 0,
-            createdAtMs: Date.now(),
-            updatedAtMs: Date.now(),
-            dictionaryRevision: 1,
-            dictionaryEntryCount: 0,
-            runtimeCapability: null,
-            quickProbe: false,
-          }
-      upsert(summary)
-      return summary
-    }
-    catch (error) {
-      message.value = translateCommandError(error)
-      if (hasDesktopRuntime()) {
-        try {
-          const refreshed = await invoke<ProbeRunSummary[]>('desktop_probe_runs')
-          runs.value = refreshed.sort((left, right) => right.updatedAtMs - left.updatedAtMs || left.name.localeCompare(right.name))
-          const persisted = runs.value.find(run => run.id === input.id)
-          if (persisted) return persisted
-        }
-        catch {
-          // Keep the original connection failure; a later refresh can recover the run list.
-        }
-      }
-      return null
-    }
-    finally {
-      busy.value = false
-    }
-  }
-
   async function compatibleAdapters(softwareId: string) {
     if (!hasDesktopRuntime()) return null
     try {
@@ -164,19 +103,21 @@ export function useProbeRuns() {
     }
   }
 
-  async function startQuickProbe(input: QuickProbeStartInput, fallback: QuickProbeBrowserFallback) {
+  async function createFromSources(input: ProbeCreationInput, fallback: ProbeCreationBrowserFallback) {
     if (busy.value) return null
     busy.value = true
     message.value = ''
     try {
       const now = Date.now()
+      const ownsSoftware = input.target.kind === 'active_process' && !fallback.softwareId
+      const ownsDictionary = input.dictionary.kind === 'temporary'
       const summary = hasDesktopRuntime()
-        ? await invoke<ProbeRunSummary>('desktop_start_quick_probe', { request: input })
+        ? await invoke<ProbeRunSummary>('desktop_create_probe_from_sources', { request: input })
         : {
             id: `quick-probe-${crypto.randomUUID()}`,
-            name: `${fallback.softwareName} ${i18n.global.t('capture.quickProbe.browserRunSuffix')}`,
+            name: input.name?.trim() || `${fallback.softwareName} ${i18n.global.t('capture.quickProbe.browserRunSuffix')}`,
             softwareId: fallback.softwareId ?? `quick-software-${crypto.randomUUID()}`,
-            dictionaryId: `quick-dictionary-${crypto.randomUUID()}`,
+            dictionaryId: fallback.dictionaryId ?? `quick-dictionary-${crypto.randomUUID()}`,
             adapterIds: [],
             status: 'running' as const,
             livePreviewEnabled: false,
@@ -190,7 +131,7 @@ export function useProbeRuns() {
             dictionaryRevision: 1,
             dictionaryEntryCount: 0,
             runtimeCapability: null,
-            quickProbe: true,
+            quickProbe: ownsSoftware || ownsDictionary,
           }
       upsert(summary)
       selectRun(summary.id)
@@ -444,10 +385,9 @@ export function useProbeRuns() {
     clearMessage,
     selectRun,
     compatibleAdapters,
-    startQuickProbe,
+    createFromSources,
     retainQuickProbe,
     cleanupQuickProbe,
-    create,
     remove,
     update,
     clearEntries,

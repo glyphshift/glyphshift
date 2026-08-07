@@ -1,13 +1,45 @@
 use super::*;
 use crate::quick_probe::{
-    QuickProbeAssetDisposition, QuickProbeSessionStore, QuickProbeStartRequest,
+    ProbeCreationRequest, ProbeDictionarySourceRequest, ProbeTargetSourceRequest,
+    QuickProbeAssetDisposition, QuickProbeSessionStore,
 };
 
-fn quick_probe_request(executable: &Path) -> QuickProbeStartRequest {
-    QuickProbeStartRequest {
-        executable_path: executable.to_string_lossy().into_owned(),
-        target_locale: "zh-CN".into(),
+fn quick_probe_request(executable: &Path) -> ProbeCreationRequest {
+    ProbeCreationRequest {
+        target: ProbeTargetSourceRequest::ActiveProcess {
+            executable_path: executable.to_string_lossy().into_owned(),
+        },
+        dictionary: ProbeDictionarySourceRequest::Temporary {
+            target_locale: "zh-CN".into(),
+        },
+        name: None,
+        adapter_ids: Vec::new(),
+        live_preview_enabled: false,
     }
+}
+
+fn library_probe_request(
+    software_id: impl Into<Box<str>>,
+    dictionary_id: impl Into<Box<str>>,
+) -> ProbeCreationRequest {
+    ProbeCreationRequest {
+        target: ProbeTargetSourceRequest::Library {
+            software_id: software_id.into(),
+        },
+        dictionary: ProbeDictionarySourceRequest::Library {
+            dictionary_id: dictionary_id.into(),
+        },
+        name: Some("Library probe".into()),
+        adapter_ids: Vec::new(),
+        live_preview_enabled: false,
+    }
+}
+
+fn first_dictionary_id(application: &DesktopApplication) -> Box<str> {
+    application.backend.snapshot().dictionaries()[0]
+        .metadata()
+        .id()
+        .into()
 }
 
 fn software_executable(application: &DesktopApplication, software_id: &str) -> PathBuf {
@@ -28,7 +60,7 @@ fn quick_probe_reuses_software_and_cleans_only_its_owned_assets() {
     let executable = software_executable(&application, &software_id);
 
     let started = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect("start quick probe");
 
     assert_eq!(started.summary.status(), ProbeRunStatus::Running);
@@ -65,12 +97,77 @@ fn quick_probe_reuses_software_and_cleans_only_its_owned_assets() {
 }
 
 #[test]
+fn probe_creation_reuses_both_library_sources_without_temporary_ownership() {
+    let (mut application, _calls, software_id, data_root) = workflow_application();
+    let dictionary_id = first_dictionary_id(&application);
+
+    let started = application
+        .create_probe_from_sources_for_test(library_probe_request(
+            software_id.clone(),
+            dictionary_id.clone(),
+        ))
+        .expect("start a probe from library assets");
+
+    assert_eq!(started.summary.software_id(), software_id.as_ref());
+    assert_eq!(started.summary.dictionary_id(), dictionary_id.as_ref());
+    assert!(!started.quick_probe);
+    assert!(QuickProbeSessionStore::open(data_root.path())
+        .expect("reopen library probe ledger")
+        .is_empty());
+}
+
+#[test]
+fn probe_creation_can_pair_an_active_process_with_a_library_dictionary() {
+    let (mut application, _calls, _software_id, data_root) = workflow_application();
+    let dictionary_id = first_dictionary_id(&application);
+    let executable = write_synthetic_executable(data_root.path(), "SyntheticActiveTarget.exe");
+    let mut request = quick_probe_request(&executable);
+    request.dictionary = ProbeDictionarySourceRequest::Library {
+        dictionary_id: dictionary_id.clone(),
+    };
+
+    let started = application
+        .create_probe_from_sources_for_test(request)
+        .expect("start an active-process probe with a library dictionary");
+
+    assert_eq!(started.summary.dictionary_id(), dictionary_id.as_ref());
+    assert!(started.quick_probe);
+    let cleaned = application
+        .cleanup_quick_probe(started.summary.id())
+        .expect("clean active-process probe");
+    assert_eq!(cleaned.software, QuickProbeAssetDisposition::Removed);
+    assert_eq!(cleaned.dictionary, QuickProbeAssetDisposition::Reused);
+    assert!(application.backend.dictionary(&dictionary_id).is_ok());
+}
+
+#[test]
+fn probe_creation_can_pair_library_software_with_a_temporary_dictionary() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let mut request = quick_probe_request(&software_executable(&application, &software_id));
+    request.target = ProbeTargetSourceRequest::Library {
+        software_id: software_id.clone(),
+    };
+
+    let started = application
+        .create_probe_from_sources_for_test(request)
+        .expect("start a library-software probe with a temporary dictionary");
+
+    assert_eq!(started.summary.software_id(), software_id.as_ref());
+    assert!(started.quick_probe);
+    let cleaned = application
+        .cleanup_quick_probe(started.summary.id())
+        .expect("clean temporary dictionary probe");
+    assert_eq!(cleaned.software, QuickProbeAssetDisposition::Reused);
+    assert_eq!(cleaned.dictionary, QuickProbeAssetDisposition::Removed);
+}
+
+#[test]
 fn quick_probe_can_retain_a_new_software_dictionary_and_probe() {
     let (mut application, _calls, _software_id, data_root) = workflow_application();
     let executable = write_synthetic_executable(data_root.path(), "SyntheticQuickTarget.exe");
 
     let started = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect("start quick probe for a new software");
     let retained = application
         .retain_quick_probe(started.summary.id())
@@ -99,7 +196,7 @@ fn quick_probe_removes_new_assets_when_the_user_ends_the_session() {
     let initial_software_count = application.backend.snapshot().software().len();
 
     let started = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect("start disposable quick probe");
     let created_software_id = Box::<str>::from(started.summary.software_id());
     let cleaned = application
@@ -131,7 +228,7 @@ fn quick_probe_start_failure_compensates_every_new_asset() {
     }));
 
     let error = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect_err("an offline quick target must fail as one operation");
 
     assert_eq!(
@@ -158,7 +255,7 @@ fn quick_probe_cleanup_retains_owned_assets_that_a_workflow_now_references() {
     let (mut application, _calls, _software_id, data_root) = workflow_application();
     let executable = write_synthetic_executable(data_root.path(), "SyntheticPromotedTarget.exe");
     let started = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect("start promotable quick probe");
     application
         .backend
@@ -196,7 +293,7 @@ fn quick_probe_recovery_cleans_an_orphaned_owned_dictionary() {
     let (mut application, _calls, software_id, data_root) = workflow_application();
     let executable = software_executable(&application, &software_id);
     let started = application
-        .start_quick_probe_for_test(quick_probe_request(&executable))
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
         .expect("start quick probe before simulated interruption");
     let run_id = Box::<str>::from(started.summary.id());
     let dictionary_id = Box::<str>::from(started.summary.dictionary_id());

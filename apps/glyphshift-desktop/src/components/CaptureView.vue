@@ -69,18 +69,6 @@ const pendingRemoval = ref<ProbeRunSummary[]>([])
 const quickProbeOpen = ref(false)
 const pendingQuickCleanup = ref<ProbeRunSummary | null>(null)
 const quickProbeNotice = ref('')
-const creating = ref(false)
-const createName = ref('')
-const createSoftwareId = ref('')
-const createAdapterIds = ref<string[]>([])
-const createLivePreview = ref(false)
-const createDictionaryMode = ref<'existing' | 'new'>('existing')
-const createDictionaryId = ref('')
-const createCompatibleAdapterIds = ref<string[] | null>(null)
-const createCompatibilityLoading = ref(false)
-const newDictionaryName = ref('')
-const newSourceLocale = ref('en-US')
-const newTargetLocale = ref('zh-CN')
 const settingsOpen = ref(false)
 const settingsName = ref('')
 const settingsAdapterIds = ref<string[]>([])
@@ -105,13 +93,9 @@ const dirtyTranslations = new Set<string>()
 const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
-let createCompatibilityRequest = 0
 let settingsCompatibilityRequest = 0
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
-const compatibleCreateAdapters = computed(() => createCompatibleAdapterIds.value === null
-  ? observableAdapters.value
-  : observableAdapters.value.filter(adapter => createCompatibleAdapterIds.value?.includes(adapter.id)))
 const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.value === null
   ? observableAdapters.value
   : observableAdapters.value.filter(adapter => settingsCompatibleAdapterIds.value?.includes(adapter.id)))
@@ -142,8 +126,6 @@ const adapterFilterLabel = computed(() => {
 const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
-const createPreviewAvailable = computed(() => Boolean(createAdapterIds.value.length)
-  && createAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
@@ -163,17 +145,6 @@ const settingsChanged = computed(() => {
     || settingsLivePreview.value !== run.livePreviewEnabled
   )
 })
-const createValid = computed(() => Boolean(
-  !createCompatibilityLoading.value
-  && createName.value.trim()
-  && createSoftwareId.value
-  && createAdapterIds.value.length
-  && (createDictionaryMode.value === 'existing'
-    ? createDictionaryId.value
-    : newDictionaryName.value.trim()
-      && newSourceLocale.value.trim()
-      && newTargetLocale.value.trim()),
-))
 const activeRunExists = computed(() => probe.runs.value.some(run => ['running', 'paused'].includes(run.status)))
 const bulkRunDeletionBlocked = computed(() => [...listSelected.value].some((id) => {
   const run = probe.runs.value.find(item => item.id === id)
@@ -236,14 +207,6 @@ const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
     onSelect: () => { adapterFilterIds.value = [] },
   }],
 ])
-
-watch(createAdapterIds, () => {
-  createLivePreview.value = createPreviewAvailable.value
-}, { deep: true })
-
-watch(createSoftwareId, () => {
-  if (creating.value) void loadCompatibleCreateAdapters()
-})
 
 watch(settingsAdapterIds, () => {
   if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
@@ -355,59 +318,6 @@ async function poll() {
   )) await loadPage()
 }
 
-function resetCreateForm() {
-  createName.value = ''
-  createSoftwareId.value = ''
-  createAdapterIds.value = []
-  createLivePreview.value = false
-  createDictionaryMode.value = 'existing'
-  createDictionaryId.value = ''
-  createCompatibleAdapterIds.value = null
-  createCompatibilityLoading.value = false
-  newDictionaryName.value = ''
-  newSourceLocale.value = 'en-US'
-  newTargetLocale.value = 'zh-CN'
-}
-
-function closeCreate() {
-  creating.value = false
-  resetCreateForm()
-}
-
-async function openCreate() {
-  resetCreateForm()
-  const software = props.software[0]
-  createSoftwareId.value = software?.id ?? ''
-  createAdapterIds.value = observableAdapters.value.map(adapter => adapter.id)
-  createLivePreview.value = createPreviewAvailable.value
-  createDictionaryMode.value = props.dictionaries.length ? 'existing' : 'new'
-  createDictionaryId.value = props.dictionaries[0]?.metadata.id ?? ''
-  creating.value = true
-  await loadCompatibleCreateAdapters()
-}
-
-async function loadCompatibleCreateAdapters() {
-  const request = ++createCompatibilityRequest
-  const softwareId = createSoftwareId.value
-  if (!softwareId) {
-    createCompatibleAdapterIds.value = []
-    createAdapterIds.value = []
-    return
-  }
-  createCompatibilityLoading.value = true
-  createCompatibleAdapterIds.value = []
-  createAdapterIds.value = []
-  try {
-    const compatible = await probe.compatibleAdapters(softwareId)
-    if (request !== createCompatibilityRequest || softwareId !== createSoftwareId.value) return
-    createCompatibleAdapterIds.value = compatible
-    createAdapterIds.value = compatible ?? observableAdapters.value.map(adapter => adapter.id)
-  }
-  finally {
-    if (request === createCompatibilityRequest) createCompatibilityLoading.value = false
-  }
-}
-
 async function openSettings() {
   const run = selectedRun.value
   if (!run) return
@@ -426,34 +336,6 @@ async function openSettings() {
   settingsCompatibleAdapterIds.value = compatible
   if (compatible) settingsAdapterIds.value = settingsAdapterIds.value.filter(id => compatible.includes(id))
   settingsCompatibilityLoading.value = false
-}
-
-async function createRun() {
-  if (!createValid.value) return
-  const dictionary = createDictionaryMode.value === 'existing'
-    ? { kind: 'existing' as const, dictionaryId: createDictionaryId.value }
-    : {
-        kind: 'new' as const,
-        id: `dictionary.probe-${crypto.randomUUID()}`,
-        name: newDictionaryName.value.trim(),
-        description: '',
-        sourceLocale: newSourceLocale.value.trim(),
-        targetLocale: newTargetLocale.value.trim(),
-      }
-  const created = await probe.create({
-    id: `probe-${crypto.randomUUID()}`,
-    name: createName.value.trim(),
-    softwareId: createSoftwareId.value,
-    adapterIds: [...createAdapterIds.value],
-    livePreviewEnabled: createLivePreview.value,
-    dictionary,
-  })
-  if (created) {
-    closeCreate()
-    await nextTick()
-    probe.selectRun(created.id)
-    await loadPage()
-  }
 }
 
 async function handleQuickProbeStarted(runId: string) {
@@ -485,7 +367,9 @@ function quickProbeCleanupNotice(result: QuickProbeCleanupResult) {
   if (result.software === 'retained' || result.dictionary === 'retained') {
     return t('capture.quickProbe.cleanupReferencedNotice')
   }
-  if (result.software === 'reused') return t('capture.quickProbe.cleanupReusedNotice')
+  if (result.software === 'reused' || result.dictionary === 'reused') {
+    return t('capture.quickProbe.cleanupReusedNotice')
+  }
   return t('capture.quickProbe.cleanupCompleteNotice')
 }
 
@@ -781,8 +665,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </ManagementDetailHeader>
     <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
       <template #actions>
-        <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-settings-plus" :label="t('capture.createRun')" :disabled="!software.length || !observableAdapters.length || activeRunExists" @click="openCreate" />
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-bolt" :label="t('capture.quickProbe.action')" :disabled="activeRunExists" @click="quickProbeOpen = true" />
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!observableAdapters.length || activeRunExists" @click="quickProbeOpen = true" />
       </template>
     </ManagementPageHeader>
 
@@ -881,6 +764,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <QuickProbeLauncher
       v-model:open="quickProbeOpen"
       :software="software"
+      :dictionaries="dictionaries"
       :capture-armed="captureArmed"
       :capture-shortcut="captureShortcut"
       :capture-result="captureResult"
@@ -889,49 +773,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @cancel-capture="emit('cancel-capture')"
       @started="handleQuickProbeStarted"
     />
-
-    <ManagementFormModal :open="creating" :title="t('capture.createRun')" :description="t('capture.createDescription')" :confirm-label="t('capture.createConfirm')" :confirm-disabled="probe.busy.value || !createValid" :busy="probe.busy.value" width="lg" @update:open="$event || closeCreate()" @confirm="createRun">
-      <div class="space-y-3">
-        <UFormField :label="t('capture.runName')" required><UInput v-model="createName" :maxlength="128" class="w-full" /></UFormField>
-        <UFormField :label="t('capture.chooseSoftware')" required><USelect v-model="createSoftwareId" :items="software.map(item => ({ value: item.id, label: item.name }))" value-key="value" label-key="label" class="w-full" /></UFormField>
-        <UFormField :label="t('capture.dictionaryBinding')" required>
-          <div class="mb-2 flex rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-0.5" role="group" :aria-label="t('capture.dictionaryBinding')">
-            <UButton
-              class="flex-1"
-              :color="createDictionaryMode === 'existing' ? 'primary' : 'neutral'"
-              size="xs"
-              :variant="createDictionaryMode === 'existing' ? 'soft' : 'ghost'"
-              :label="t('capture.useExistingDictionary')"
-              :disabled="!dictionaries.length"
-              :aria-pressed="createDictionaryMode === 'existing'"
-              @click="createDictionaryMode = 'existing'"
-            />
-            <UButton
-              class="flex-1"
-              :color="createDictionaryMode === 'new' ? 'primary' : 'neutral'"
-              size="xs"
-              :variant="createDictionaryMode === 'new' ? 'soft' : 'ghost'"
-              :label="t('capture.createDictionary')"
-              :aria-pressed="createDictionaryMode === 'new'"
-              @click="createDictionaryMode = 'new'"
-            />
-          </div>
-          <USelect v-if="createDictionaryMode === 'existing'" v-model="createDictionaryId" :items="dictionaries.map(item => ({ value: item.metadata.id, label: item.metadata.name }))" value-key="value" label-key="label" class="w-full" />
-          <div v-else class="space-y-3 rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
-            <p class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('capture.createDictionaryHint') }}</p>
-            <UFormField :label="t('capture.dictionaryName')" required>
-              <UInput v-model="newDictionaryName" :maxlength="128" class="w-full" />
-            </UFormField>
-            <div class="grid grid-cols-2 gap-3">
-              <UFormField :label="t('capture.sourceLocale')" required><UInput v-model="newSourceLocale" class="w-full" /></UFormField>
-              <UFormField :label="t('capture.targetLocale')" required><UInput v-model="newTargetLocale" class="w-full" /></UFormField>
-            </div>
-          </div>
-        </UFormField>
-        <UFormField :label="t('capture.adapters')" :hint="createCompatibilityLoading ? t('capture.loadingCompatibleAdapters') : compatibleCreateAdapters.length ? t('capture.adaptersHint') : t('capture.noCompatibleAdapters')" required><ProbeAdapterPicker v-model="createAdapterIds" :adapters="compatibleCreateAdapters" /></UFormField>
-        <UFormField :label="t('capture.livePreview')" :hint="createPreviewAvailable ? t('capture.livePreviewHint') : t('capture.livePreviewUnavailable')"><USwitch v-model="createLivePreview" :disabled="!createPreviewAvailable" /></UFormField>
-      </div>
-    </ManagementFormModal>
 
     <ManagementFormModal
       :open="settingsOpen"
