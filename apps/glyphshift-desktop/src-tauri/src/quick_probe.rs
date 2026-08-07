@@ -509,10 +509,21 @@ impl DesktopApplication {
             .quick_probe_sessions
             .record(run_id)
             .ok_or_else(|| CommandError::new("quick_probe.not_found"))?;
+        let probe_run_exists = self.probe_runs.summary(run_id).is_ok();
         if self.active_probe_run_id.as_deref() == Some(run_id) {
-            self.disconnect_probe_run(run_id)?;
+            if probe_run_exists {
+                self.disconnect_probe_run(run_id)?;
+            } else {
+                if let (Some(runtimes), Some(software_id)) =
+                    (self.runtimes.as_mut(), record.software_id.as_deref())
+                {
+                    let _ = runtimes.stop_capture(software_id);
+                }
+                self.active_probe_run_id = None;
+                self.active_probe_capability = None;
+            }
         }
-        if self.probe_runs.summary(run_id).is_ok() {
+        if probe_run_exists {
             self.delete_probe_runs(&[run_id.into()])?;
         }
 

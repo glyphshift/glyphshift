@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('new probe captures an active process and creates a temporary dictionary without prerequisite assets', async ({ page }) => {
+test('empty libraries stay actionable and a running application can create a temporary probe', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     const softwareTemplate = structuredClone(snapshot.software[0])
     const dictionaryTemplate = structuredClone(snapshot.dictionaries[0])
@@ -23,10 +23,22 @@ test('new probe captures an active process and creates a temporary dictionary wi
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return currentSnapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
+        if (command === 'desktop_running_software_targets') {
+          return [{
+            executablePath: 'X:\\SyntheticFixtures\\QuickTarget.exe',
+            executableName: 'QuickTarget.exe',
+            suggestedName: 'QuickTarget',
+            architecture: 'x86_64',
+            running: true,
+            canAdd: true,
+            state: 'ready',
+            existingName: null,
+          }]
+        }
         if (command === 'desktop_preflight_software') {
           return {
             executablePath: args?.executablePath,
@@ -75,26 +87,25 @@ test('new probe captures an active process and creates a temporary dictionary wi
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await expect(dialog.getByRole('button', { name: '软件资料库' })).toBeDisabled()
-  await expect(dialog.getByRole('button', { name: '当前程序' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(dialog.getByRole('button', { name: '使用临时词典' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(dialog.getByText('目标语言', { exact: true })).toHaveCount(0)
-  await dialog.getByRole('button', { name: '捕获前台程序' }).click()
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
-    detail: {
-      state: 'captured', shortcut: 'Ctrl+Shift+F8', preflight: {
-        executablePath: 'X:\\SyntheticFixtures\\QuickTarget.exe', executableName: 'QuickTarget.exe',
-        suggestedName: 'QuickTarget', architecture: 'x86_64', running: true, canAdd: true,
-        state: 'ready', existingName: null,
-      },
-    },
-  })))
+  await expect(dialog.getByRole('button', { name: '软件资料库' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '软件资料库' }).click()
+  await expect(dialog.getByText('软件资料库中还没有可用软件。')).toBeVisible()
+  await dialog.getByRole('button', { name: '运行中软件' }).click()
+  await dialog.getByRole('combobox', { name: '运行中软件' }).click()
+  await page.getByRole('option', { name: 'QuickTarget · QuickTarget.exe · x86_64' }).click()
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('已识别 QuickTarget')
+
+  await expect(dialog.getByRole('button', { name: '使用已有词典' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '使用已有词典' }).click()
+  await expect(dialog.getByText('词典资料库中还没有可用词典。')).toBeVisible()
+  await dialog.getByRole('button', { name: '使用临时词典' }).click()
+  await expect(dialog.getByRole('button', { name: '使用临时词典' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('textbox', { name: '任务名称' })).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '目标语言' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '高级选项' })).toHaveCount(0)
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('x86_64')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/quick-probe-ready-zh.png' })
-  await dialog.getByRole('button', { name: '高级选项' }).click()
-  await expect(dialog.getByText('目标语言', { exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: '创建并连接' }).click()
 
   await expect(dialog).toHaveCount(0)
@@ -117,7 +128,7 @@ test('current-app source can end and clean up at compact English layout', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'light' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -154,9 +165,9 @@ test('current-app source can end and clean up at compact English layout', async 
   await page.getByRole('button', { name: 'Capture', exact: true }).click()
   await page.getByRole('button', { name: 'New probe run' }).click()
   const dialog = page.getByRole('dialog', { name: 'New probe run' })
-  await dialog.getByRole('button', { name: 'Current app' }).click()
+  await dialog.getByRole('button', { name: 'Running apps' }).click()
   await dialog.getByRole('button', { name: 'Use temporary dictionary' }).click()
-  await dialog.getByRole('button', { name: 'Capture foreground app' }).click()
+  await dialog.getByRole('button', { name: 'Capture with shortcut' }).click()
   await expect(dialog.getByText('Waiting to capture the target')).toBeVisible()
   await page.evaluate(() => {
     const preflight = (window as unknown as { __quickProbePreflight: unknown }).__quickProbePreflight
@@ -194,7 +205,7 @@ test('current-app source keeps creation recoverable after a target stops during 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -224,9 +235,9 @@ test('current-app source keeps creation recoverable after a target stops during 
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await dialog.getByRole('button', { name: '当前程序' }).click()
+  await dialog.getByRole('button', { name: '运行中软件' }).click()
   await dialog.getByRole('button', { name: '使用临时词典' }).click()
-  await dialog.getByRole('button', { name: '捕获前台程序' }).click()
+  await dialog.getByRole('button', { name: '使用快捷键捕获' }).click()
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
     detail: {
       state: 'captured', shortcut: 'Ctrl+Shift+F8', preflight: {
@@ -252,7 +263,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
   await expect(dialog.getByRole('button', { name: '软件资料库' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(dialog.getByRole('button', { name: '当前程序' })).toHaveAttribute('aria-pressed', 'false')
+  await expect(dialog.getByRole('button', { name: '运行中软件' })).toHaveAttribute('aria-pressed', 'false')
   await expect(dialog.getByText('使用已有词典', { exact: true })).toBeVisible()
   await expect(dialog.getByText('使用临时词典', { exact: true })).toBeVisible()
   await expect(dialog.getByText('界面基础词典', { exact: true })).toBeVisible()
@@ -261,7 +272,6 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('gdi32.dll!TextOutW', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/位置|语境/)).toHaveCount(0)
 
-  await dialog.getByRole('button', { name: '高级选项' }).click()
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
   await dialog.getByRole('button', { name: '创建并连接' }).click()
   await expect(dialog).toHaveCount(0)
@@ -297,7 +307,7 @@ test('probe list hides technical detail behind one accessible hover target and u
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         return null
@@ -348,7 +358,7 @@ test('library sources create a normal probe without temporary ownership', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
         if (command === 'desktop_probe_run_summary') return createdRun
@@ -376,7 +386,6 @@ test('library sources create a normal probe without temporary ownership', async 
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await dialog.getByRole('button', { name: '高级选项' }).click()
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('离线软件探针')
   await dialog.getByRole('button', { name: '创建并连接' }).click()
 
@@ -401,7 +410,6 @@ test('new probe resets temporary source choices after cancellation', async ({ pa
   await expect(temporaryDictionaryMode).toHaveAttribute('aria-pressed', 'true')
   await expect(temporaryDictionaryMode).toHaveClass(/text-primary/)
   await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'false')
-  await dialog.getByRole('button', { name: '高级选项' }).click()
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('不应保留的任务')
   await dialog.getByRole('textbox', { name: '目标语言' }).fill('ko-KR')
   await dialog.getByRole('button', { name: '取消' }).click()
@@ -410,7 +418,6 @@ test('new probe resets temporary source choices after cancellation', async ({ pa
   dialog = page.getByRole('dialog', { name: '新建探针任务' })
   await expect(dialog.getByRole('button', { name: '使用已有词典' })).toHaveAttribute('aria-pressed', 'true')
   await dialog.getByRole('button', { name: '使用临时词典' }).click()
-  await dialog.getByRole('button', { name: '高级选项' }).click()
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toHaveValue('')
   await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
   await expect(dialog.getByText('词典名称', { exact: true })).toHaveCount(0)
@@ -453,7 +460,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -463,6 +470,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
           summary = {
             ...summary,
             name: request.name,
+            dictionaryId: request.dictionaryId,
             adapterIds: request.adapterIds,
             livePreviewEnabled: request.livePreviewEnabled,
             updatedAtMs: summary.updatedAtMs + 1,
@@ -516,6 +524,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __probeSettingsRequest?: { adapterIds: string[]; livePreviewEnabled: boolean } }).__probeSettingsRequest
   ))).toMatchObject({
+    dictionaryId: 'dictionary-proof',
     adapterIds: ['synthetic.text-out', 'synthetic.console-observer'],
     livePreviewEnabled: true,
   })
@@ -544,7 +553,7 @@ test('probe detail states when the active runtime can only collect text', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -577,7 +586,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -640,7 +649,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   const initialThumbTransform = await page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)
   await expect(page.locator('tbody tr')).toHaveCount(50)
   await expect(page.locator('tbody input')).toHaveCount(50)
-  await expect(page.locator('tbody tr').first()).toContainText('词典未命中')
+  await expect(page.locator('tbody tr').first()).toContainText('未进词典')
   const firstTranslation = page.getByLabel('“Source 0001”的译文')
   await firstTranslation.fill('即时译文')
   await firstTranslation.blur()
@@ -704,7 +713,7 @@ test('probe reconnect reports an actionable target Runtime failure', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 24 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary

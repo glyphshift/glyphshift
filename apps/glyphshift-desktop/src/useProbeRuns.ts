@@ -15,8 +15,14 @@ export interface ProbeRunQueryInput {
 export interface ProbeRunUpdateInput {
   runId: string
   name: string
+  dictionaryId: string
   adapterIds: string[]
   livePreviewEnabled: boolean
+}
+
+export interface ProbeDictionarySyncEntry {
+  source: string
+  translation: string
 }
 
 export type ProbeTargetSource
@@ -221,6 +227,7 @@ export function useProbeRuns() {
               ? {
                   ...current,
                   name: input.name,
+                  dictionaryId: input.dictionaryId,
                   adapterIds: [...input.adapterIds],
                   livePreviewEnabled: input.livePreviewEnabled,
                   updatedAtMs: Date.now(),
@@ -345,6 +352,39 @@ export function useProbeRuns() {
     return summary
   }
 
+  async function syncDictionaryEntries(runId: string, entries: ProbeDictionarySyncEntry[]) {
+    if (busy.value || !entries.length) return null
+    busy.value = true
+    message.value = ''
+    try {
+      const summary = hasDesktopRuntime()
+        ? await invoke<ProbeRunSummary>('desktop_sync_probe_dictionary_entries', {
+            request: { runId, entries },
+          })
+        : (() => {
+            const current = runs.value.find(run => run.id === runId)
+            return current
+              ? {
+                  ...current,
+                  dictionaryRevision: current.dictionaryRevision + 1,
+                  dictionaryEntryCount: current.dictionaryEntryCount + entries.length,
+                  updatedAtMs: Date.now(),
+                }
+              : null
+          })()
+      if (!summary) return null
+      upsert(summary)
+      return summary
+    }
+    catch (error) {
+      message.value = translateCommandError(error)
+      return null
+    }
+    finally {
+      busy.value = false
+    }
+  }
+
   async function bulk(
     runId: string,
     sources: string[],
@@ -397,6 +437,7 @@ export function useProbeRuns() {
     refreshSummary,
     queryEntries,
     editTranslation,
+    syncDictionaryEntries,
     bulk,
     exportRun,
     report,

@@ -11,8 +11,13 @@ fn run_settings_allow_rename_while_connected_but_protect_runtime_configuration()
     let renamed = store
         .update(
             summary.id(),
-            ProbeRunUpdate::new("Renamed probe", ["windows.gdi.text-out"], true)
-                .expect("rename update"),
+            ProbeRunUpdate::new(
+                "Renamed probe",
+                summary.dictionary_id(),
+                ["windows.gdi.text-out"],
+                true,
+            )
+            .expect("rename update"),
         )
         .expect("rename connected run");
     assert_eq!(renamed.name(), "Renamed probe");
@@ -21,10 +26,22 @@ fn run_settings_allow_rename_while_connected_but_protect_runtime_configuration()
     assert_eq!(
         store.update(
             summary.id(),
-            ProbeRunUpdate::new("Renamed probe", ["windows.gdi.draw-text"], false)
-                .expect("configuration update"),
+            ProbeRunUpdate::new(
+                "Renamed probe",
+                "dictionary.secondary",
+                ["windows.gdi.draw-text"],
+                false,
+            )
+            .expect("configuration update"),
         ),
         Err(ProbeRunError::InvalidState)
+    );
+    assert_eq!(
+        store
+            .summary(summary.id())
+            .expect("read protected run")
+            .dictionary_id(),
+        summary.dictionary_id()
     );
 
     store
@@ -33,14 +50,20 @@ fn run_settings_allow_rename_while_connected_but_protect_runtime_configuration()
     let updated = store
         .update(
             summary.id(),
-            ProbeRunUpdate::new("Renamed probe", ["windows.gdi.draw-text"], false)
-                .expect("configuration update"),
+            ProbeRunUpdate::new(
+                "Renamed probe",
+                "dictionary.secondary",
+                ["windows.gdi.draw-text"],
+                false,
+            )
+            .expect("configuration update"),
         )
         .expect("update released run");
     assert_eq!(
         updated.adapter_ids(),
         &[Box::<str>::from("windows.gdi.draw-text")]
     );
+    assert_eq!(updated.dictionary_id(), "dictionary.secondary");
     assert!(!updated.live_preview_enabled());
 }
 

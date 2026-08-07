@@ -204,6 +204,20 @@ impl DesktopApplication {
         Ok(self.software_preflight_for(executable))
     }
 
+    pub(super) fn running_software_targets(
+        &self,
+    ) -> Result<Vec<SoftwarePreflightView>, CommandError> {
+        running_windows_executables()
+            .map_err(|_| CommandError::new("software.running_targets_unavailable"))
+            .map(|executables| {
+                executables
+                    .into_iter()
+                    .map(|executable| self.software_preflight_for(executable))
+                    .filter(|preflight| preflight.state != SoftwarePreflightState::SelfTarget)
+                    .collect()
+            })
+    }
+
     pub(super) fn software_preflight_for(
         &self,
         executable: WindowsExecutable,
@@ -351,6 +365,16 @@ pub(super) fn desktop_preflight_software(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .software_preflight(executable_path)
+}
+
+#[tauri::command]
+pub(super) fn desktop_running_software_targets(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<Vec<SoftwarePreflightView>, CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .running_software_targets()
 }
 
 #[tauri::command]

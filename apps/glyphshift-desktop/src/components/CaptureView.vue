@@ -36,6 +36,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'arm-capture': []
   'cancel-capture': []
+  'open-dictionary': [id: string]
   'workspace-changed': []
 }>()
 
@@ -71,11 +72,13 @@ const pendingQuickCleanup = ref<ProbeRunSummary | null>(null)
 const quickProbeNotice = ref('')
 const settingsOpen = ref(false)
 const settingsName = ref('')
+const settingsDictionaryId = ref('')
 const settingsAdapterIds = ref<string[]>([])
 const settingsLivePreview = ref(false)
 const settingsCompatibleAdapterIds = ref<string[] | null>(null)
 const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
+const dictionaryNotice = ref('')
 const translationValues = ref<Record<string, string>>({})
 const {
   tableShell,
@@ -94,6 +97,7 @@ const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let settingsCompatibilityRequest = 0
+let translationSaveQueue = Promise.resolve()
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
 const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.value === null
@@ -102,6 +106,11 @@ const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.v
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
+const settingsDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === settingsDictionaryId.value))
+const settingsDictionaryItems = computed(() => props.dictionaries.map(item => ({
+  value: item.metadata.id,
+  label: `${item.metadata.name} · ${item.metadata.sourceLocale} → ${item.metadata.targetLocale}`,
+})))
 const selectedRunMetadata = computed(() => {
   const run = selectedRun.value
   if (!run) return ''
@@ -126,6 +135,12 @@ const adapterFilterLabel = computed(() => {
 const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
+const selectedDictionaryEntries = computed(() => selectedRows.value
+  .map(row => ({
+    source: row.source,
+    translation: (translationValues.value[row.source] ?? row.translation).trim(),
+  }))
+  .filter(entry => entry.translation))
 const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
@@ -133,6 +148,7 @@ const settingsValid = computed(() => Boolean(
   !settingsCompatibilityLoading.value
   &&
   settingsName.value.trim()
+  && settingsDictionary.value
   && settingsAdapterIds.value.length
   && (!settingsLivePreview.value || settingsPreviewAvailable.value),
 ))
@@ -141,6 +157,7 @@ const settingsChanged = computed(() => {
   if (!run) return false
   return (
     settingsName.value.trim() !== run.name
+    || settingsDictionaryId.value !== run.dictionaryId
     || JSON.stringify(settingsAdapterIds.value) !== JSON.stringify(run.adapterIds)
     || settingsLivePreview.value !== run.livePreviewEnabled
   )
@@ -215,11 +232,13 @@ watch(settingsAdapterIds, () => {
 watch(() => probe.selectedRunId.value, async (id, previous) => {
   if (id === previous) return
   selected.value = new Set()
+  dictionaryNotice.value = ''
   restoreViewState(id)
   await loadPage()
 })
 
 watch([page, pageSize], async () => {
+  selected.value = new Set()
   persistViewState()
   await loadPage()
 })
@@ -319,9 +338,12 @@ async function poll() {
 }
 
 async function openSettings() {
+  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  if (dirtyTranslations.size) return
   const run = selectedRun.value
   if (!run) return
   settingsName.value = run.name
+  settingsDictionaryId.value = run.dictionaryId
   settingsAdapterIds.value = [...run.adapterIds]
   settingsLivePreview.value = run.livePreviewEnabled
   settingsCompatibleAdapterIds.value = null
@@ -386,11 +408,17 @@ async function applySettings() {
   const updated = await probe.update({
     runId: run.id,
     name: settingsName.value.trim(),
+    dictionaryId: settingsDictionaryId.value,
     adapterIds: [...settingsAdapterIds.value],
     livePreviewEnabled: settingsLivePreview.value,
   })
   if (!updated) return
   adapterFilterIds.value = adapterFilterIds.value.filter(id => updated.adapterIds.includes(id))
+  if (updated.dictionaryId !== run.dictionaryId) {
+    dictionaryNotice.value = t('capture.dictionaryBindingChanged', {
+      dictionary: dictionaryName(updated.dictionaryId),
+    })
+  }
   settingsOpen.value = false
   await loadPage()
 }
@@ -459,7 +487,29 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
   if (action === 'restore') sources = selectedRows.value.filter(row => row.state === 'ignored').map(row => row.source)
   if (!sources.length) return
   try {
+    if (action === 'clear_translations') {
+      for (const source of sources) {
+        const timer = editTimers.get(source)
+        if (timer) clearTimeout(timer)
+        editTimers.delete(source)
+      }
+      await translationSaveQueue
+    }
     await probe.bulk(run.id, sources, action)
+    if (action === 'clear_translations') {
+      for (const source of sources) {
+        const timer = editTimers.get(source)
+        if (timer) clearTimeout(timer)
+        editTimers.delete(source)
+        dirtyTranslations.delete(source)
+        translationValues.value[source] = ''
+      }
+      emit('workspace-changed')
+      dictionaryNotice.value = t('capture.removedFromDictionary', {
+        count: sources.length,
+        dictionary: selectedDictionary.value?.metadata.name ?? run.dictionaryId,
+      })
+    }
     selected.value = new Set()
     await loadPage()
   }
@@ -469,6 +519,7 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
 }
 
 function updateTranslation(source: string, value: unknown) {
+  dictionaryNotice.value = ''
   const translation = String(value ?? '')
   translationValues.value = { ...translationValues.value, [source]: translation }
   dirtyTranslations.add(source)
@@ -477,20 +528,76 @@ function updateTranslation(source: string, value: unknown) {
   editTimers.set(source, setTimeout(() => void saveTranslation(source), 500))
 }
 
-async function saveTranslation(source: string) {
+function saveTranslation(source: string) {
   const run = selectedRun.value
-  if (!run || !dirtyTranslations.has(source)) return
+  if (!run || !dirtyTranslations.has(source)) return Promise.resolve()
   const pending = editTimers.get(source)
   if (pending) clearTimeout(pending)
   editTimers.delete(source)
-  try {
-    await probe.editTranslation(run.id, source, translationValues.value[source] ?? '')
-    dirtyTranslations.delete(source)
-    await loadPage()
+  const task = translationSaveQueue.then(async () => {
+    if (!dirtyTranslations.has(source)) return
+    try {
+      await probe.editTranslation(run.id, source, translationValues.value[source] ?? '')
+      dirtyTranslations.delete(source)
+      emit('workspace-changed')
+      await loadPage()
+    }
+    catch (error) {
+      probe.report(error)
+    }
+  })
+  translationSaveQueue = task
+  return task
+}
+
+async function syncSelectedToDictionary() {
+  const run = selectedRun.value
+  const dictionary = selectedDictionary.value
+  if (!run || !dictionary || !selectedDictionaryEntries.value.length) return
+  for (const { source } of selectedDictionaryEntries.value) {
+    const timer = editTimers.get(source)
+    if (timer) clearTimeout(timer)
+    editTimers.delete(source)
   }
-  catch (error) {
-    probe.report(error)
-  }
+  await translationSaveQueue
+  const entries = selectedDictionaryEntries.value
+  const updated = await probe.syncDictionaryEntries(run.id, entries)
+  if (!updated) return
+  for (const { source } of entries) dirtyTranslations.delete(source)
+  selected.value = new Set()
+  dictionaryNotice.value = t('capture.savedToDictionary', {
+    count: entries.length,
+    dictionary: dictionary.metadata.name,
+  })
+  emit('workspace-changed')
+  await loadPage()
+}
+
+async function syncRowToDictionary(row: ProbeEntryRow) {
+  const run = selectedRun.value
+  const dictionary = selectedDictionary.value
+  const translation = (translationValues.value[row.source] ?? row.translation).trim()
+  if (!run || !dictionary || !translation) return
+  const timer = editTimers.get(row.source)
+  if (timer) clearTimeout(timer)
+  editTimers.delete(row.source)
+  await translationSaveQueue
+  const updated = await probe.syncDictionaryEntries(run.id, [{ source: row.source, translation }])
+  if (!updated) return
+  dirtyTranslations.delete(row.source)
+  dictionaryNotice.value = t('capture.savedToDictionary', {
+    count: 1,
+    dictionary: dictionary.metadata.name,
+  })
+  emit('workspace-changed')
+  await loadPage()
+}
+
+async function openBoundDictionary() {
+  const dictionaryId = selectedRun.value?.dictionaryId
+  if (!dictionaryId) return
+  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  if (!dirtyTranslations.size) emit('open-dictionary', dictionaryId)
 }
 
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
@@ -671,6 +778,24 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
 
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
+    <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
+
+    <section
+      v-if="selectedRun && selectedDictionary"
+      class="mb-3 flex items-center gap-3 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5"
+      :aria-label="t('capture.boundDictionary')"
+    >
+      <UIcon name="i-tabler-book-2" class="size-5 shrink-0 text-[var(--primary)]" aria-hidden="true" />
+      <div class="min-w-0 flex-1">
+        <div class="flex min-w-0 items-center gap-2">
+          <strong class="truncate text-xs text-[var(--text)]">{{ selectedDictionary.metadata.name }}</strong>
+          <UBadge color="neutral" variant="soft" size="sm" :label="`${selectedDictionary.metadata.sourceLocale} → ${selectedDictionary.metadata.targetLocale}`" />
+          <span class="shrink-0 text-[9px] text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: selectedRun.dictionaryEntryCount }) }}</span>
+        </div>
+        <p class="m-0 mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('capture.dictionaryLinkHint') }}</p>
+      </div>
+      <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-external-link" :label="t('capture.openDictionary')" @click="openBoundDictionary" />
+    </section>
 
     <template v-if="selectedRun">
       <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')">
@@ -680,9 +805,10 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           </UDropdownMenu>
         </template>
         <template #bulk-actions>
+          <UButton color="primary" variant="soft" size="sm" icon="i-tabler-book-upload" :label="t('capture.saveSelectedToDictionary')" :disabled="!selectedDictionaryEntries.length || probe.busy.value" @click="syncSelectedToDictionary" />
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye-off" :label="t('capture.bulkIgnore')" :disabled="!selectedRows.some(row => row.count > 0 && row.state !== 'ignored')" @click="bulk('ignore')" />
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye" :label="t('capture.bulkRestore')" :disabled="!selectedRows.some(row => row.state === 'ignored')" @click="bulk('restore')" />
-          <UButton color="error" variant="soft" size="sm" icon="i-tabler-eraser" :label="t('capture.bulkClear')" :disabled="!selectedRows.some(row => row.translation)" @click="bulk('clear_translations')" />
+          <UButton color="error" variant="soft" size="sm" icon="i-tabler-book-off" :label="t('capture.removeSelectedFromDictionary')" :disabled="!selectedRows.some(row => row.translation)" @click="bulk('clear_translations')" />
         </template>
 
         <div ref="tableShell" class="relative h-full min-h-0 overflow-hidden">
@@ -691,7 +817,10 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.source)" :aria-label="t('common.selectNamed', { name: row.original.source })" @update:model-value="toggleSelection(row.original.source)" /></template>
             <template #source-cell="{ row }"><div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div></template>
             <template #translation-cell="{ row }">
-              <UInput :model-value="translationValues[row.original.source] ?? row.original.translation" size="sm" class="w-full" :placeholder="t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" @update:model-value="updateTranslation(row.original.source, $event)" @blur="saveTranslation(row.original.source)" />
+              <div class="flex min-w-0 items-center gap-1">
+                <UInput :model-value="translationValues[row.original.source] ?? row.original.translation" size="sm" class="min-w-0 flex-1" :placeholder="t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" @update:model-value="updateTranslation(row.original.source, $event)" @blur="saveTranslation(row.original.source)" />
+                <UButton color="primary" variant="ghost" size="xs" icon="i-tabler-book-upload" :disabled="!(translationValues[row.original.source] ?? row.original.translation).trim() || probe.busy.value" :aria-label="t('capture.saveRowToDictionary', { source: row.original.source })" :title="t('capture.saveRowToDictionary', { source: row.original.source })" @click="syncRowToDictionary(row.original)" />
+              </div>
             </template>
             <template #state-cell="{ row }"><UBadge :color="stateColor(row.original.state)" variant="soft" size="sm" :label="stateLabel(row.original.state)" /></template>
             <template #adapters-cell="{ row }">
@@ -788,6 +917,10 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <div class="space-y-4">
         <UFormField :label="t('capture.runName')" required>
           <UInput v-model="settingsName" :maxlength="128" class="w-full" />
+        </UFormField>
+
+        <UFormField :label="t('capture.boundDictionary')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : t('capture.dictionaryBindingHint')" required>
+          <USelect v-model="settingsDictionaryId" :items="settingsDictionaryItems" value-key="value" label-key="label" class="w-full" :disabled="settingsConfigurationLocked" />
         </UFormField>
 
         <UFormField :label="t('capture.adapters')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : settingsCompatibilityLoading ? t('capture.loadingCompatibleAdapters') : compatibleSettingsAdapters.length ? t('capture.adaptersHint') : t('capture.noCompatibleAdapters')" required><ProbeAdapterPicker v-model="settingsAdapterIds" :adapters="compatibleSettingsAdapters" :disabled="settingsConfigurationLocked || settingsCompatibilityLoading" /></UFormField>

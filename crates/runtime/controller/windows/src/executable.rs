@@ -95,6 +95,76 @@ pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError>
     windows_executable(Path::new(&path), Some(true))
 }
 
+fn normalize_running_executables(
+    mut executables: Vec<WindowsExecutable>,
+) -> Vec<WindowsExecutable> {
+    executables.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| {
+                left.path
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .cmp(&right.path.to_string_lossy().to_lowercase())
+            })
+    });
+    executables.dedup_by(|left, right| {
+        left.path
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.path.to_string_lossy())
+    });
+    executables
+}
+
+#[cfg(windows)]
+pub fn running_windows_executables() -> Result<Vec<WindowsExecutable>, PluginError> {
+    use std::collections::BTreeSet;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextLengthW, GetWindowThreadProcessId, IsWindowVisible,
+    };
+
+    unsafe extern "system" fn collect_visible_window_process(
+        window: HWND,
+        parameter: LPARAM,
+    ) -> i32 {
+        let process_ids = &mut *(parameter as *mut BTreeSet<u32>);
+        if IsWindowVisible(window) == 0 || GetWindowTextLengthW(window) == 0 {
+            return 1;
+        }
+        let mut process_id = 0_u32;
+        GetWindowThreadProcessId(window, &mut process_id);
+        if process_id != 0 && process_id != std::process::id() {
+            process_ids.insert(process_id);
+        }
+        1
+    }
+
+    let mut process_ids = BTreeSet::new();
+    let enumerated = unsafe {
+        EnumWindows(
+            Some(collect_visible_window_process),
+            (&mut process_ids as *mut BTreeSet<u32>) as LPARAM,
+        )
+    };
+    if enumerated == 0 {
+        return Err(PluginError::new("visible_window_inventory_unavailable"));
+    }
+
+    let executables = process_ids
+        .into_iter()
+        .filter_map(process_executable_path)
+        .filter_map(|path| windows_executable(Path::new(&path), Some(true)).ok())
+        .collect();
+    Ok(normalize_running_executables(executables))
+}
+
+#[cfg(not(windows))]
+pub fn running_windows_executables() -> Result<Vec<WindowsExecutable>, PluginError> {
+    Err(PluginError::new("unsupported_operating_system"))
+}
+
 #[cfg(windows)]
 pub fn foreground_windows_point() -> Result<WindowsForegroundPoint, PluginError> {
     use windows_sys::Win32::Foundation::POINT;
@@ -110,6 +180,39 @@ pub fn foreground_windows_point() -> Result<WindowsForegroundPoint, PluginError>
         x: point.x,
         y: point.y,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_executables_are_sorted_and_deduplicated_by_path() {
+        let executables = normalize_running_executables(vec![
+            WindowsExecutable {
+                path: PathBuf::from(r"C:\Synthetic\zeta.exe"),
+                name: "zeta.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+            WindowsExecutable {
+                path: PathBuf::from(r"C:\Synthetic\Alpha.exe"),
+                name: "Alpha.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+            WindowsExecutable {
+                path: PathBuf::from(r"c:\synthetic\alpha.exe"),
+                name: "Alpha.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+        ]);
+
+        assert_eq!(executables.len(), 2);
+        assert_eq!(executables[0].name(), "Alpha.exe");
+        assert_eq!(executables[1].name(), "zeta.exe");
+    }
 }
 
 #[cfg(not(windows))]

@@ -20,7 +20,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 24
+const desktopApiVersion = 26
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -304,6 +304,7 @@ onBeforeUnmount(() => {
         :capture-error="workspace.messages.value.software ?? ''"
         @arm-capture="armQuickProbeCapture"
         @cancel-capture="cancelQuickProbeCapture"
+        @open-dictionary="openDictionary"
         @workspace-changed="refreshWorkspaceAfterQuickProbe"
       />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { computed, ref, watch } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
+import { translateCommandError } from '../commandError'
 import type { SoftwarePreflight, SoftwareRecord } from '../model'
 import { editableRowIndex } from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
@@ -47,6 +49,13 @@ const addDescription = ref('')
 const addPath = ref('')
 const addSubmitting = ref(false)
 const addStartCount = ref(0)
+const runningTargets = ref<SoftwarePreflight[]>([])
+const runningTargetPath = ref('')
+const runningTargetsLoading = ref(false)
+const runningTargetsLoaded = ref(false)
+const runningTargetsError = ref('')
+let runningTargetsRequest = 0
+
 function normalizedPath(path: string) {
   return path.trim().replace(/^\\\\\?\\/, '').replace(/\//g, '\\').toLocaleLowerCase()
 }
@@ -103,6 +112,10 @@ const preflightPresentation = computed(() => {
       }
   }
 })
+const runningTargetItems = computed(() => runningTargets.value.map(target => ({
+  value: target.executablePath,
+  label: `${target.existingName ?? target.suggestedName} · ${target.executableName} · ${target.architecture}`,
+})))
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
@@ -152,6 +165,10 @@ watch(() => props.messages.software, (message) => {
 })
 watch(() => props.captureResult, (result) => {
   if (!result) return
+  const existingIndex = runningTargets.value.findIndex(item => normalizedPath(item.executablePath) === normalizedPath(result.executablePath))
+  if (existingIndex >= 0) runningTargets.value.splice(existingIndex, 1, result)
+  else runningTargets.value.unshift(result)
+  runningTargetPath.value = result.executablePath
   addName.value = result.suggestedName
   addDescription.value = ''
   addPath.value = result.executablePath
@@ -223,15 +240,65 @@ function startAdd() {
   addPath.value = ''
   addSubmitting.value = false
   addStartCount.value = props.items.length
+  runningTargets.value = []
+  runningTargetPath.value = ''
+  runningTargetsLoaded.value = false
+  runningTargetsError.value = ''
   adding.value = true
+  void loadRunningTargets()
 }
 
 function updateAddOpen(open: boolean) {
   adding.value = open
   if (!open) {
     addSubmitting.value = false
+    if (props.captureArmed) emit('cancelCapture')
     emit('clearPreflight')
   }
+}
+
+function hasDesktopRuntime() {
+  return '__TAURI_INTERNALS__' in window
+}
+
+async function loadRunningTargets(force = false) {
+  if (runningTargetsLoading.value || (runningTargetsLoaded.value && !force)) return
+  const request = ++runningTargetsRequest
+  runningTargetsLoading.value = true
+  runningTargetsError.value = ''
+  try {
+    const result = hasDesktopRuntime()
+      ? await invoke<SoftwarePreflight[]>('desktop_running_software_targets')
+      : []
+    if (request !== runningTargetsRequest) return
+    runningTargets.value = Array.isArray(result) ? result : []
+    runningTargetsLoaded.value = true
+  }
+  catch (error) {
+    if (request !== runningTargetsRequest) return
+    runningTargets.value = []
+    runningTargetPath.value = ''
+    runningTargetsLoaded.value = true
+    runningTargetsError.value = translateCommandError(error)
+  }
+  finally {
+    if (request === runningTargetsRequest) runningTargetsLoading.value = false
+  }
+}
+
+function chooseRunningTarget(value: unknown) {
+  const path = String(value ?? '')
+  const target = runningTargets.value.find(item => item.executablePath === path)
+  runningTargetPath.value = path
+  if (!target) return
+  addName.value = target.existingName ?? target.suggestedName
+  addPath.value = target.executablePath
+  emit('validate', target.executablePath)
+}
+
+function toggleForegroundCapture() {
+  if (props.captureArmed) emit('cancelCapture')
+  else emit('armCapture')
 }
 
 async function browseExecutable() {
@@ -276,32 +343,9 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
       icon="i-tabler-apps"
     >
       <template #actions>
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-tabler-focus-2"
-          :label="t('software.quickCapture')"
-          :disabled="busy || captureArmed"
-          @click="emit('armCapture')"
-        />
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('software.add')" :disabled="busy" @click="startAdd" />
       </template>
     </ManagementPageHeader>
-
-    <div
-      v-if="captureArmed"
-      :aria-label="t('software.captureWaitingTitle')"
-      class="mb-3 flex items-center gap-3 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--primary)_35%,var(--border))] bg-[color-mix(in_srgb,var(--primary)_10%,var(--surface))] px-3 py-2"
-      role="alert"
-    >
-      <UIcon name="i-tabler-focus-centered" class="size-4 shrink-0 text-[var(--primary)]" aria-hidden="true" />
-      <div class="min-w-0 flex-1">
-        <p class="m-0 text-xs font-semibold text-[var(--text)]">{{ t('software.captureWaitingTitle') }}</p>
-        <p class="m-0 mt-0.5 text-[11px] leading-4 text-[var(--text-muted)]">{{ t('software.captureWaitingDescription', { shortcut: captureShortcut }) }}</p>
-      </div>
-      <UButton color="neutral" variant="outline" size="xs" :label="t('software.cancelCapture')" @click="emit('cancelCapture')" />
-    </div>
 
     <div v-if="messages.software" :aria-label="t('software.error')" class="mb-3" role="alert">
       <UAlert color="error" variant="soft" :title="t('software.error')" :description="messages.software" />
@@ -376,13 +420,44 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
       @update:open="updateAddOpen"
       @confirm="submitAdd"
     >
-      <div class="space-y-3">
+      <div class="space-y-4">
         <UFormField :label="t('software.name')" required>
           <UInput v-model="addName" autofocus size="sm" class="w-full" :aria-label="t('software.name')" />
         </UFormField>
         <UFormField :label="t('software.softwareDescription')">
           <UTextarea v-model="addDescription" :maxlength="512" :rows="2" autoresize class="w-full" :placeholder="t('software.descriptionPlaceholder')" :aria-label="t('software.softwareDescription')" />
         </UFormField>
+
+        <div class="space-y-2 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="m-0 text-xs font-semibold text-[var(--text)]">{{ t('software.runningSoftware') }}</p>
+              <p class="m-0 mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareHint') }}</p>
+            </div>
+            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-refresh" :aria-label="t('software.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
+          </div>
+          <USelect
+            :model-value="runningTargetPath"
+            :items="runningTargetItems"
+            value-key="value"
+            label-key="label"
+            :placeholder="t('software.runningSoftwarePlaceholder')"
+            :aria-label="t('software.runningSoftware')"
+            :loading="runningTargetsLoading"
+            :disabled="runningTargetsLoading || !runningTargetItems.length"
+            class="w-full"
+            @update:model-value="chooseRunningTarget"
+          />
+          <UAlert v-if="runningTargetsError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('software.error')" :description="runningTargetsError" />
+          <p v-else-if="runningTargetsLoaded && !runningTargets.length" class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareEmpty') }}</p>
+          <div class="flex items-center justify-between gap-3 pt-1">
+            <p class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.captureWaitingDescription', { shortcut: captureShortcut }) }}</p>
+            <UButton color="neutral" :variant="captureArmed ? 'soft' : 'outline'" size="sm" :icon="captureArmed ? 'i-tabler-x' : 'i-tabler-focus-centered'" :label="captureArmed ? t('software.cancelCapture') : t('software.quickCapture')" @click="toggleForegroundCapture" />
+          </div>
+        </div>
+
+        <UAlert v-if="captureArmed" color="primary" variant="soft" icon="i-tabler-keyboard" :title="t('software.captureWaitingTitle')" :description="t('software.captureWaitingDescription', { shortcut: captureShortcut })" />
+
         <UFormField :label="t('software.executablePath')" required>
           <div class="flex gap-2">
             <UInput v-model="addPath" size="sm" class="min-w-0 flex-1" :placeholder="t('software.pathPlaceholder')" :aria-label="t('software.executablePath')" />

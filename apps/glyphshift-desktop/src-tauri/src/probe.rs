@@ -51,6 +51,7 @@ pub(super) struct ProbeRunCreateRequest {
 pub(super) struct ProbeRunUpdateRequest {
     pub(super) run_id: Box<str>,
     pub(super) name: Box<str>,
+    pub(super) dictionary_id: Box<str>,
     pub(super) adapter_ids: Vec<Box<str>>,
     pub(super) live_preview_enabled: bool,
 }
@@ -91,6 +92,20 @@ pub(super) struct ProbeTranslationEditRequest {
     pub(super) run_id: Box<str>,
     pub(super) source: Box<str>,
     pub(super) translation: Box<str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProbeDictionarySyncEntryRequest {
+    pub(super) source: Box<str>,
+    pub(super) translation: Box<str>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ProbeDictionarySyncRequest {
+    pub(super) run_id: Box<str>,
+    pub(super) entries: Vec<ProbeDictionarySyncEntryRequest>,
 }
 
 #[derive(Deserialize)]
@@ -303,7 +318,14 @@ impl DesktopApplication {
             .probe_runs
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
+        self.backend
+            .dictionary(&request.dictionary_id)
+            .map_err(|_| {
+                CommandError::new("dictionary.not_found")
+                    .with_arg("dictionaryId", request.dictionary_id.to_string())
+            })?;
         let configuration_changed = current.adapter_ids() != request.adapter_ids.as_slice()
+            || current.dictionary_id() != request.dictionary_id.as_ref()
             || current.live_preview_enabled() != request.live_preview_enabled;
         if configuration_changed {
             self.ensure_compatible_probe_adapters(current.software_id(), &request.adapter_ids)?;
@@ -317,6 +339,7 @@ impl DesktopApplication {
         }
         let update = ProbeRunUpdate::new(
             request.name,
+            request.dictionary_id,
             request.adapter_ids,
             request.live_preview_enabled,
         )
@@ -542,6 +565,46 @@ impl DesktopApplication {
             self.reconcile_enabled_workflows()?;
         }
         self.publish_probe_preview_if_active(&request.run_id)?;
+        self.probe_run_summary(&request.run_id)
+    }
+
+    pub(super) fn sync_probe_dictionary_entries(
+        &mut self,
+        request: ProbeDictionarySyncRequest,
+    ) -> Result<ProbeRunView, CommandError> {
+        if request.entries.is_empty() {
+            return Err(CommandError::new("capture.invalid_configuration"));
+        }
+        let summary = self
+            .probe_runs
+            .summary(&request.run_id)
+            .map_err(probe_run_error)?;
+        let dictionary = self
+            .backend
+            .dictionary(summary.dictionary_id())
+            .cloned()
+            .map_err(|_| CommandError::new("dictionary.not_found"))?;
+        let mut sources = BTreeSet::new();
+        let mut entries = Vec::with_capacity(request.entries.len());
+        for entry in request.entries {
+            let source = entry.source.trim();
+            let translation = entry.translation.trim();
+            if source.is_empty()
+                || translation.is_empty()
+                || !sources.insert(Box::<str>::from(source))
+            {
+                return Err(CommandError::new("capture.invalid_configuration"));
+            }
+            entries.push(DictionaryEntryCreate::new(source, translation));
+        }
+        let updated_dictionary = self
+            .backend
+            .upsert_dictionary_entries(dictionary.id(), entries, dictionary.revision())
+            .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+        if updated_dictionary.revision() != dictionary.revision() {
+            self.reconcile_enabled_workflows()?;
+            self.publish_probe_preview_if_active(&request.run_id)?;
+        }
         self.probe_run_summary(&request.run_id)
     }
 
@@ -844,6 +907,17 @@ pub(super) fn desktop_edit_probe_translation(
         .lock()
         .map_err(|_| runtime_unavailable())?
         .edit_probe_translation(request)
+}
+
+#[tauri::command]
+pub(super) fn desktop_sync_probe_dictionary_entries(
+    request: ProbeDictionarySyncRequest,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .sync_probe_dictionary_entries(request)
 }
 
 #[tauri::command]

@@ -83,8 +83,13 @@ Technology 多选只筛选 Catalog，Adapter 多选才改变执行计划。
 **探针任务（Probe Run）**：可恢复的持续观察任务，绑定一个软件、一个词典和一组 Adapter。
 它只保存运行状态与观测事实，不拥有翻译内容。_Avoid_: Probe Workspace、探针字典。
 
+**探针词典绑定（Probe Dictionary Binding）**：Probe Run 指向唯一 Dictionary 的可修改引用。联合表
+读取这份 Dictionary 的译文；用户填写单条译文或显式同步已翻译的多选条目时写入该 Dictionary，删除
+绑定译文不删除 Observation。切换绑定不复制或删除新旧词典内容。_Avoid_: 自动把所有观测变成词条。
+
 **探针目标来源（Probe Target Source）**：创建探针时解析目标身份的选择，可以引用 Software Library，
-也可以捕获当前运行程序并生成由本次探针拥有的临时 Software。_Avoid_: 软件只能预先登记。
+也可以从运行中可见软件列表选择或用快捷键捕获当前前台程序，并在需要时生成由本次探针拥有的临时
+Software。列表和快捷键是同一种 Active Process 来源的两种选择方式。_Avoid_: 软件只能预先登记。
 
 **探针词典来源（Probe Dictionary Source）**：创建探针时解析词典的选择，可以引用已有 Dictionary，
 也可以生成系统命名、由本次探针拥有的临时 Dictionary。_Avoid_: 新建空词典表单。

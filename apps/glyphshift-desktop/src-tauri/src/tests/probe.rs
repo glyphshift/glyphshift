@@ -309,6 +309,7 @@ fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary(
         .update_probe_run(ProbeRunUpdateRequest {
             run_id: run.summary.id().into(),
             name: "Renamed probe".into(),
+            dictionary_id: "dictionary.product".into(),
             adapter_ids: vec![TEST_ADAPTER_ID.into()],
             live_preview_enabled: false,
         })

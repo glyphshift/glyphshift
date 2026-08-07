@@ -24,7 +24,8 @@ use glyphshift_capture::{
 };
 use glyphshift_controller_windows::{
     current_process_is_elevated, foreground_windows_executable, foreground_windows_point,
-    inspect_windows_executable, launch_process_elevated, WindowsElevationError, WindowsExecutable,
+    inspect_windows_executable, launch_process_elevated, running_windows_executables,
+    WindowsElevationError, WindowsExecutable,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
@@ -76,7 +77,7 @@ use workflow::{
 #[cfg(test)]
 use workflow::{workflow_activation_command_error, WorkflowTargetRuntimeView};
 
-const DESKTOP_API_VERSION: u16 = 24;
+const DESKTOP_API_VERSION: u16 = 26;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -808,6 +809,7 @@ pub fn run() {
             probe::desktop_probe_run_summary,
             probe::desktop_probe_run_entries,
             probe::desktop_edit_probe_translation,
+            probe::desktop_sync_probe_dictionary_entries,
             probe::desktop_bulk_probe_entries,
             probe::desktop_export_probe_run,
             quick_probe::desktop_create_probe_from_sources,
@@ -827,6 +829,7 @@ pub fn run() {
             workflow::desktop_copy_workflow,
             workflow::desktop_delete_workflows,
             software::desktop_preflight_software,
+            software::desktop_running_software_targets,
             software::desktop_arm_software_capture,
             software::desktop_cancel_software_capture,
             software::desktop_probe_software_capture_shortcut,

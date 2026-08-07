@@ -79,6 +79,7 @@ impl ProbeRunCreate {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProbeRunUpdate {
     name: Box<str>,
+    dictionary_id: Box<str>,
     adapter_ids: Vec<Box<str>>,
     live_preview_enabled: bool,
 }
@@ -86,12 +87,15 @@ pub struct ProbeRunUpdate {
 impl ProbeRunUpdate {
     pub fn new(
         name: impl Into<Box<str>>,
+        dictionary_id: impl Into<Box<str>>,
         adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
         live_preview_enabled: bool,
     ) -> Result<Self, ProbeRunError> {
         let name = name.into();
+        let dictionary_id = dictionary_id.into();
         let adapter_ids = adapter_ids.into_iter().map(Into::into).collect::<Vec<_>>();
         if name.trim().is_empty()
+            || !safe_identifier(&dictionary_id)
             || adapter_ids.is_empty()
             || adapter_ids.iter().any(|id| !safe_identifier(id))
             || adapter_ids.iter().collect::<BTreeSet<_>>().len() != adapter_ids.len()
@@ -100,6 +104,7 @@ impl ProbeRunUpdate {
         }
         Ok(Self {
             name: name.trim().into(),
+            dictionary_id,
             adapter_ids,
             live_preview_enabled,
         })
@@ -400,6 +405,7 @@ impl ProbeRunStore {
     ) -> Result<ProbeRunSummary, ProbeRunError> {
         let mut document = self.synchronized_document(run_id)?;
         let configuration_changed = document.summary.adapter_ids != update.adapter_ids
+            || document.summary.dictionary_id != update.dictionary_id
             || document.summary.live_preview_enabled != update.live_preview_enabled;
         if configuration_changed
             && matches!(
@@ -410,12 +416,14 @@ impl ProbeRunStore {
             return Err(ProbeRunError::InvalidState);
         }
         if document.summary.name == update.name
+            && document.summary.dictionary_id == update.dictionary_id
             && document.summary.adapter_ids == update.adapter_ids
             && document.summary.live_preview_enabled == update.live_preview_enabled
         {
             return Ok(document.summary);
         }
         document.summary.name = update.name;
+        document.summary.dictionary_id = update.dictionary_id;
         document.summary.adapter_ids = update.adapter_ids;
         document.summary.live_preview_enabled = update.live_preview_enabled;
         self.touch(&mut document);

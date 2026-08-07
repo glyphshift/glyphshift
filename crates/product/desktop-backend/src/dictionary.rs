@@ -494,11 +494,12 @@ impl DesktopBackend {
                 current: current.revision,
             });
         }
-        let mut entries = current
+        let existing_entries = current
             .entries
             .iter()
             .map(dictionary_entry_create)
             .collect::<Vec<_>>();
+        let mut entries = existing_entries.clone();
         let next_source = entry.source.clone();
         let index = replacing_source.and_then(|source| {
             entries
@@ -521,6 +522,61 @@ impl DesktopBackend {
             entries[index] = entry;
         } else {
             entries.push(entry);
+        }
+        self.update_dictionary(DictionaryEdit {
+            metadata: current.metadata,
+            base_revision: current.revision,
+            entries,
+        })
+    }
+
+    pub fn upsert_dictionary_entries(
+        &mut self,
+        dictionary_id: &str,
+        updates: impl IntoIterator<Item = DictionaryEntryCreate>,
+        base_revision: u64,
+    ) -> Result<DictionaryView, BackendError> {
+        let current = self
+            .dictionaries
+            .get(dictionary_id)
+            .ok_or_else(|| BackendError::UnknownDictionary(dictionary_id.into()))?
+            .clone();
+        if current.revision != base_revision {
+            return Err(BackendError::RevisionConflict {
+                current: current.revision,
+            });
+        }
+        let updates = updates.into_iter().collect::<Vec<_>>();
+        let sources = updates
+            .iter()
+            .map(|entry| entry.source.as_ref())
+            .collect::<BTreeSet<_>>();
+        if updates.is_empty()
+            || sources.len() != updates.len()
+            || updates
+                .iter()
+                .any(|entry| entry.source.trim().is_empty() || entry.translation.trim().is_empty())
+        {
+            return Err(BackendError::InvalidInput("dictionary-entry"));
+        }
+        let existing_entries = current
+            .entries
+            .iter()
+            .map(dictionary_entry_create)
+            .collect::<Vec<_>>();
+        let mut entries = existing_entries.clone();
+        for update in updates {
+            if let Some(index) = entries
+                .iter()
+                .position(|entry| entry.source == update.source)
+            {
+                entries[index] = update;
+            } else {
+                entries.push(update);
+            }
+        }
+        if entries == existing_entries {
+            return Ok(current);
         }
         self.update_dictionary(DictionaryEdit {
             metadata: current.metadata,

@@ -300,17 +300,7 @@ usePageEscape(() => true, () => emit('back'))
       @update:open="$event || (metadataOpen = false)"
       @confirm="applyMetadata"
     >
-      <div class="space-y-3">
-        <UFormField :label="t('dictionaryEditor.name')" required><UInput v-model="metadataDraft.name" :maxlength="128" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.description')"><UTextarea v-model="metadataDraft.description" :maxlength="512" :rows="2" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.sourceLocale')" required><UInput v-model="metadataDraft.sourceLocale" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.targetLocale')" required><UInput v-model="metadataDraft.targetLocale" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.releaseVersion')" required><UInput v-model="metadataDraft.releaseVersion" class="w-full" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.authors')" :hint="t('dictionaryEditor.commaSeparated')"><UInput :model-value="metadataDraft.authors.join(', ')" class="w-full" @update:model-value="metadataDraft.authors = String($event).split(',').map(value => value.trim()).filter(Boolean)" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.license')"><UInput :model-value="metadataDraft.license ?? ''" class="w-full" @update:model-value="metadataDraft.license = String($event)" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.homepage')"><UInput :model-value="metadataDraft.homepage ?? ''" class="w-full" @update:model-value="metadataDraft.homepage = String($event)" /></UFormField>
-        <UFormField :label="t('dictionaryEditor.tags')" :hint="t('dictionaryEditor.commaSeparated')"><UInput :model-value="metadataDraft.tags.join(', ')" class="w-full" @update:model-value="metadataDraft.tags = String($event).split(',').map(value => value.trim()).filter(Boolean)" /></UFormField>
-      </div>
+      <DictionaryMetadataForm v-model="metadataDraft" />
     </ManagementFormModal>
 
     <ConfirmDialog

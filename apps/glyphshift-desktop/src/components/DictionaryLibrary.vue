@@ -47,9 +47,23 @@ const catalogTag = ref('')
 const catalogPageNumber = ref(1)
 const catalogPageSize = ref(20)
 const catalogCursors = ref<(string | null)[]>([null])
-const name = ref('')
-const sourceLocale = ref('en-US')
-const targetLocale = ref('zh-CN')
+
+function emptyMetadata(): DictionaryMetadata {
+  return {
+    id: '',
+    name: '',
+    description: '',
+    sourceLocale: 'en-US',
+    targetLocale: 'zh-CN',
+    releaseVersion: '0.1.0',
+    authors: [],
+    license: null,
+    homepage: null,
+    tags: [],
+  }
+}
+
+const createDraft = ref<DictionaryMetadata>(emptyMetadata())
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
@@ -124,9 +138,7 @@ function togglePageSelection() {
 }
 
 function resetForm() {
-  name.value = ''
-  sourceLocale.value = 'en-US'
-  targetLocale.value = 'zh-CN'
+  createDraft.value = emptyMetadata()
 }
 
 function openCreate() {
@@ -140,17 +152,18 @@ function closeCreate() {
 }
 
 function submit() {
-  if (!name.value.trim() || !sourceLocale.value.trim() || !targetLocale.value.trim()) return
+  const metadata = createDraft.value
+  if (!metadata.name.trim() || !metadata.sourceLocale.trim() || !metadata.targetLocale.trim()) return
   emit('create', {
-    name: name.value.trim(),
-    description: '',
-    sourceLocale: sourceLocale.value.trim(),
-    targetLocale: targetLocale.value.trim(),
-    releaseVersion: '0.1.0',
-    authors: [],
-    license: null,
-    homepage: null,
-    tags: [],
+    name: metadata.name.trim(),
+    description: metadata.description.trim(),
+    sourceLocale: metadata.sourceLocale.trim(),
+    targetLocale: metadata.targetLocale.trim(),
+    releaseVersion: metadata.releaseVersion,
+    authors: metadata.authors.map(value => value.trim()).filter(Boolean),
+    license: metadata.license?.trim() || null,
+    homepage: metadata.homepage?.trim() || null,
+    tags: [...new Set(metadata.tags.map(value => value.trim()).filter(Boolean))],
   })
   closeCreate()
 }
@@ -490,19 +503,13 @@ async function chooseExport(item: DictionarySummary) {
       :title="t('dictionaries.create')"
       :description="t('dictionaries.createDescription')"
       :confirm-label="t('dictionaries.createConfirm')"
-      :confirm-disabled="busy || !name.trim() || !sourceLocale.trim() || !targetLocale.trim()"
+      :confirm-disabled="busy || !createDraft.name.trim() || !createDraft.sourceLocale.trim() || !createDraft.targetLocale.trim() || !createDraft.releaseVersion.trim()"
       :busy="busy"
       width="md"
       @update:open="$event || closeCreate()"
       @confirm="submit"
     >
-      <div class="space-y-3">
-        <UFormField :label="t('dictionaries.name')" required><UInput v-model="name" :maxlength="128" class="w-full" /></UFormField>
-        <div class="grid grid-cols-2 gap-3">
-          <UFormField :label="t('dictionaries.sourceLocale')" required><UInput v-model="sourceLocale" class="w-full" /></UFormField>
-          <UFormField :label="t('dictionaries.targetLocale')" required><UInput v-model="targetLocale" class="w-full" /></UFormField>
-        </div>
-      </div>
+      <DictionaryMetadataForm v-model="createDraft" />
     </ManagementFormModal>
 
     <ConfirmDialog

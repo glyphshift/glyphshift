@@ -76,6 +76,7 @@ const messageKeys: Record<string, string> = {
   'software.runtime_unavailable': 'errors.software.runtimeUnavailable',
   'software.self_target': 'errors.software.selfTarget',
   'software.unsupported_architecture': 'errors.software.unsupportedArchitecture',
+  'software.running_targets_unavailable': 'errors.software.runningTargetsUnavailable',
   'software.quick_capture_unavailable': 'errors.software.quickCaptureUnavailable',
   'software.quick_capture_foreground_unavailable': 'errors.software.quickCaptureForegroundUnavailable',
   'software.quick_capture_self': 'errors.software.quickCaptureSelf',
