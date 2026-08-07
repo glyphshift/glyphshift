@@ -176,6 +176,16 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-ocr' `
     -Expected @('glyphshift-acquisition')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-ocr-worker' `
+    -Expected @(
+        'glyphshift-acquisition',
+        'glyphshift-acquisition-worker-sdk',
+        'glyphshift-adapter-ocr',
+        'glyphshift-worker-process-grant',
+        'windows-capture',
+        'windows-sys'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-qt-painter' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -198,10 +208,14 @@ Assert-Dependencies `
         'glyphshift-adapter-uia',
         'glyphshift-capture',
         'glyphshift-isolated-worker-sdk',
+        'glyphshift-worker-process-grant',
         'windows',
         'windows-core',
         'windows-sys'
     )
+Assert-Dependencies `
+    -PackageName 'glyphshift-worker-process-grant' `
+    -Expected @('windows-sys')
 Assert-Dependencies `
     -PackageName 'glyphshift-controller-sdk' `
     -Expected @('serde', 'serde_json')
@@ -418,6 +432,7 @@ Assert-Dependencies `
         'glyphshift-desktop-runtime',
         'glyphshift-dictionary-distribution',
         'glyphshift-domain',
+        'glyphshift-interactive-translation',
         'glyphshift-runtime-contract',
         'glyphshift-translation',
         'glyphshift-workflow',
@@ -496,6 +511,7 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-gtk3-pango',
     'glyphshift-adapter-gtk3-pango-native',
     'glyphshift-adapter-ocr',
+    'glyphshift-adapter-ocr-worker',
     'glyphshift-adapter-qt-painter',
     'glyphshift-adapter-qt-painter-native',
     'glyphshift-adapter-raylib',
@@ -548,7 +564,8 @@ $packageFamilies = @{
         'glyphshift-session',
         'glyphshift-target-process-host',
         'glyphshift-target-runtime',
-        'glyphshift-target-runtime-contract'
+        'glyphshift-target-runtime-contract',
+        'glyphshift-worker-process-grant'
     )
     Product = @(
         'glyphshift-desktop-backend',
@@ -568,6 +585,7 @@ $dependencyLayers = @{
         'glyphshift-dictionary-package',
         'glyphshift-domain',
         'glyphshift-isolated-worker-sdk',
+        'glyphshift-worker-process-grant',
         'glyphshift-translation'
     )
     L1 = @(
@@ -712,6 +730,7 @@ $productionScanPackageNames = @(
     'glyphshift-adapter-native-abi',
     'glyphshift-adapter-native-host',
     'glyphshift-adapter-ocr',
+    'glyphshift-adapter-ocr-worker',
     'glyphshift-adapter-uia',
     'glyphshift-adapter-uia-worker',
     'glyphshift-controller-sdk',
@@ -725,6 +744,7 @@ $productionScanPackageNames = @(
     'glyphshift-isolated-worker-host',
     'glyphshift-isolated-worker-sdk',
     'glyphshift-interactive-translation',
+    'glyphshift-worker-process-grant',
     'glyphshift-translation',
     'glyphshift-decision',
     'glyphshift-session',
@@ -791,7 +811,10 @@ foreach ($relativeRoot in $productionSourceRoots) {
             }
         }
 
-        if ($content -match '(?<![A-Za-z0-9])[A-Za-z]:[\\/]') {
+        $absolutePathScanContent = $content `
+            -replace '(?i)X:[\\/]SyntheticFixtures', '<synthetic-fixture-root>' `
+            -replace '(?i)C:[\\/]Synthetic', '<synthetic-fixture-root>'
+        if ($absolutePathScanContent -match '(?<![A-Za-z0-9])[A-Za-z]:[\\/]') {
             $relativeFile = [System.IO.Path]::GetRelativePath(
                 $workspaceRoot,
                 $sourceFile.FullName

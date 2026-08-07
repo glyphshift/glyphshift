@@ -15,14 +15,14 @@ glyphshift-domain = { path = "../../../core/domain" }
 libloading = "0.8"
 
 [dev-dependencies]
-glyphshift-adapter-console = { path = "../../implementations/console" }
-glyphshift-adapter-direct2d = { path = "../../implementations/direct2d" }
-glyphshift-adapter-directwrite = { path = "../../implementations/directwrite" }
-glyphshift-adapter-gdi = { path = "../../implementations/gdi" }
-glyphshift-adapter-gdiplus = { path = "../../implementations/gdiplus" }
-glyphshift-adapter-gtk3-pango = { path = "../../implementations/gtk3-pango" }
-glyphshift-adapter-qt-painter = { path = "../../implementations/qt-painter" }
-glyphshift-adapter-raylib = { path = "../../implementations/raylib" }
+glyphshift-adapter-console = { path = "../../implementations/native/console" }
+glyphshift-adapter-direct2d = { path = "../../implementations/native/direct2d" }
+glyphshift-adapter-directwrite = { path = "../../implementations/native/directwrite" }
+glyphshift-adapter-gdi = { path = "../../implementations/native/gdi" }
+glyphshift-adapter-gdiplus = { path = "../../implementations/native/gdiplus" }
+glyphshift-adapter-gtk3-pango = { path = "../../implementations/framework/gtk3-pango" }
+glyphshift-adapter-qt-painter = { path = "../../implementations/framework/qt-painter" }
+glyphshift-adapter-raylib = { path = "../../implementations/framework/raylib" }
 glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
 
 [target.'cfg(windows)'.dev-dependencies]

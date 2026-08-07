@@ -10,7 +10,7 @@ name = "glyphshift-test-isolated-worker"
 path = "src/main.rs"
 
 [dependencies]
-glyphshift-adapter-uia = { path = "../../crates/adapters/implementations/uia" }
+glyphshift-adapter-uia = { path = "../../crates/adapters/implementations/accessibility/uia" }
 glyphshift-capture = { path = "../../crates/core/capture" }
 glyphshift-isolated-worker-sdk = { path = "../../crates/runtime/worker/sdk" }
 

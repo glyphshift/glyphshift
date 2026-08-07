@@ -14,11 +14,17 @@ crate types, and runtime discovery remain stable across the folder split.
 
 ## Implementations
 
-`implementations/` owns technology-specific descriptors and their deployable companions: Console, Direct2D,
-DirectWrite, Win32 DrawText/GDI, GDI+, GTK3/Pango, Qt Painter, raylib, and UI Automation. Descriptor, Native DLL,
-shared native support, and isolated Worker crates stay separate when they own distinct test, ABI, or process seams.
-Leaf folders use technology names such as `gdi/`, `gdi-native/` and `uia-worker/`; the parent family supplies the
-otherwise repeated `glyphshift-adapter-` path context.
+`implementations/` owns technology-specific descriptors and their deployable companions. Its second level is a
+navigation aid based on how text is acquired; it does not introduce another runtime interface:
+
+- `native/` — Console, Direct2D, DirectWrite, Win32 DrawText/GDI, and GDI+ hooks.
+- `framework/` — GTK3/Pango, Qt Painter, and raylib hooks.
+- `accessibility/` — UI Automation descriptor and isolated Worker.
+- `fallback/` — OCR descriptor and isolated Worker.
+
+Descriptor, Native DLL, shared native support, and isolated Worker crates stay separate when they own distinct test,
+ABI, or process seams. Companions for one technology remain adjacent inside the same group. Empty future categories
+are not created before a concrete Adapter exists.
 
 Adapters are organized by text technology, not by software brand. Product orchestration discovers concrete
 implementations at runtime and must not add static dependencies on them.

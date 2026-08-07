@@ -44,8 +44,8 @@ features = [
 ]
 
 [dev-dependencies]
-glyphshift-adapter-console = { path = "../../../adapters/implementations/console" }
-glyphshift-adapter-gdi = { path = "../../../adapters/implementations/gdi" }
+glyphshift-adapter-console = { path = "../../../adapters/implementations/native/console" }
+glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
 glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
 glyphshift-domain = { path = "../../../core/domain" }
 glyphshift-translation = { path = "../../../core/translation" }

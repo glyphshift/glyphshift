@@ -29,9 +29,9 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-glyphshift-adapter-gdi = { path = "../../../adapters/implementations/gdi" }
-glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/gdiplus" }
-glyphshift-adapter-qt-painter = { path = "../../../adapters/implementations/qt-painter" }
+glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
+glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/native/gdiplus" }
+glyphshift-adapter-qt-painter = { path = "../../../adapters/implementations/framework/qt-painter" }
 glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
 glyphshift-translation = { path = "../../../core/translation" }
 glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
