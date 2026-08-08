@@ -165,8 +165,8 @@ impl ControllerTransport for ContractTransport {
 }
 
 fn local_artifact(name: &str) -> PathBuf {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../target/local-test/target-process-host");
+    let directory =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../local-test/target-process-host");
     std::fs::create_dir_all(&directory).expect("local artifact directory");
     let path = directory.join(name);
     std::fs::File::create(&path).expect("local artifact");

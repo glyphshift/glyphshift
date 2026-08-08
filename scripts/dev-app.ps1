@@ -10,10 +10,10 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
-$localTaskRoot = Join-Path $repoRoot 'target\local-test\evidence\desktop-dev'
-$cargoTargetDir = Join-Path $repoRoot 'target\local-test\tauri-build'
-$runtimeBundleRoot = Join-Path $repoRoot 'target\local-test\runtime-bundle'
-$desktopDataRoot = Join-Path $repoRoot 'target\local-test\desktop-data'
+$localTaskRoot = Join-Path $repoRoot 'local-test\evidence\desktop-dev'
+$cargoTargetDir = Join-Path $repoRoot 'local-test\tauri-build'
+$runtimeBundleRoot = Join-Path $repoRoot 'local-test\runtime-bundle'
+$desktopDataRoot = Join-Path $repoRoot 'local-test\desktop-data'
 $env:GLYPHSHIFT_DATA_ROOT = $desktopDataRoot
 
 if ($Detached) {

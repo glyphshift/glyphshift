@@ -196,7 +196,7 @@ Settings 外观、Workflow 基础配置与 Software 编辑属于同一类轻量�
   软件名、词典内容与 Adapter presentation 属于动态数据，不作为核心 UI 文案翻译。
 - `main.css` 只保留 Tailwind/Nuxt UI 引入、语义 token 和根级浏览器规则。
 - 图标统一来自 Tabler；普通界面不得显示 Driver、Profile、Domain ID、进程标识或 DLL。
-- 本地截图、真实软件样本、进程信息和测试词典只能写入 `target/local-test/`，不得提交。
+- 本地截图、真实软件样本、进程信息和测试词典只能写入 `local-test/`，不得提交。
 
 ## 禁止项
 

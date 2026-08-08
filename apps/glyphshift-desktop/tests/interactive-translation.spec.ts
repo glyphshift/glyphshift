@@ -96,5 +96,5 @@ test('foreground mismatch remains actionable in compact English layout', async (
   await expect(dialog.getByRole('alert')).toContainText('foreground application is not the selected software')
   await expect(dialog.getByRole('button', { name: 'Retry' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Try OCR' })).toHaveCount(0)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/interactive-translation-compact-en.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/interactive-translation-compact-en.png' })
 })

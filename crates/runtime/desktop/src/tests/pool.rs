@@ -410,7 +410,7 @@ fn capture_owns_one_software_and_cannot_overlap_a_translation_workflow() {
 #[test]
 fn process_family_capture_selects_every_discovered_target_when_not_narrowed() {
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../target/local-test/evidence/desktop-runtime-family-capture");
+        .join("../../../local-test/evidence/desktop-runtime-family-capture");
     fs::create_dir_all(&local_test).expect("family capture local-test root");
     let root = tempfile::Builder::new()
         .prefix("contract-")

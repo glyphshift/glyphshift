@@ -5,7 +5,7 @@ const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './tests',
-  outputDir: '../../target/local-test/desktop-playwright',
+  outputDir: '../../local-test/desktop-playwright',
   fullyParallel: false,
   workers: 1,
   retries: 0,

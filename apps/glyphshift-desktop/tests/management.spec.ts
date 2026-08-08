@@ -21,21 +21,22 @@ test('management table body stays continuous for empty and populated states', as
     return Math.abs(emptyBox.y - (bodyBox.y + 32)) <= 1
       && Math.abs((emptyBox.y + emptyBox.height) - (bodyBox.y + bodyBox.height)) <= 1
   }).toBe(true)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-empty-continuous.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/management-table-empty-continuous.png' })
 
   await replaceModel(page, model)
   const lastRow = page.getByTestId('management-table-body').locator('tbody > tr').last()
   await expect(lastRow).toBeVisible()
   await expect.poll(() => lastRow.evaluate(element => getComputedStyle(element).borderBottomWidth)).toBe('1px')
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
 })
 
-test('software creation requires preflight and supports two-step foreground capture', async ({ page }) => {
+test('software creation uses one entry and supports preflight plus foreground capture', async ({ page }) => {
   await page.getByRole('button', { name: '软件', exact: true }).click()
-  await expect(page.getByRole('button', { name: '快速捕获' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '快速捕获' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '新建软件' }).first()).toBeVisible()
 
-  await page.getByRole('button', { name: '新增软件' }).click()
-  const dialog = page.getByRole('dialog', { name: '新增软件' })
+  await page.getByRole('button', { name: '新建软件' }).first().click()
+  const dialog = page.getByRole('dialog', { name: '新建软件' })
   await dialog.getByRole('textbox', { name: '软件名称' }).fill('Synthetic Editor')
   await dialog.getByRole('textbox', { name: '程序路径' }).fill('X:\\SyntheticFixtures\\SyntheticEditor.exe')
   await expect(dialog.getByRole('button', { name: '添加软件' })).toBeDisabled()
@@ -45,10 +46,10 @@ test('software creation requires preflight and supports two-step foreground capt
   await expect(dialog.getByRole('button', { name: '添加软件' })).toBeEnabled()
   await dialog.getByRole('button', { name: '取消' }).click()
 
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
-    detail: { state: 'armed', shortcut: 'Ctrl+Shift+F8' },
-  })))
-  await expect(page.getByRole('alert', { name: '等待选择软件' })).toContainText('Ctrl+Shift+F8')
+  await page.getByRole('button', { name: '新建软件' }).first().click()
+  await dialog.getByRole('button', { name: '按键捕获' }).click()
+  await expect(dialog.getByText('等待选择软件', { exact: true })).toBeVisible()
+  await expect(dialog.getByText(/切换到目标软件，再按 Ctrl\+Shift\+F8/).first()).toBeVisible()
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
     detail: {
       state: 'captured',
@@ -171,7 +172,7 @@ test('workflow names a stopped software and exposes its actionable Runtime error
   await expect(details.getByText('Vector Studio', { exact: true })).toBeVisible()
   await expect(details.getByText('没有找到与该程序路径匹配的运行实例；请先启动这个版本的软件。')).toBeVisible()
   await expect(details.getByRole('button', { name: '刷新状态', exact: true })).toBeVisible()
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-runtime-stopped.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-runtime-stopped.png' })
 })
 
 test('workflow keeps permission failures distinct from a stopped software', async ({ page }) => {

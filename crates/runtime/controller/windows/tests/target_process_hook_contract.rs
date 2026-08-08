@@ -454,7 +454,7 @@ fn ctl_windows_005_rejects_a_changed_runtime_before_target_injection() {
     let profile = profile_directory();
     let original_runtime = profile.join("glyphshift_target_runtime.dll");
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../target/local-test/controller-runtime-contract");
+        .join("../../../../local-test/controller-runtime-contract");
     std::fs::create_dir_all(&local_test).expect("local test directory");
     let changed_runtime = local_test.join("changed-runtime.dll");
     std::fs::copy(&original_runtime, &changed_runtime).expect("runtime test copy");

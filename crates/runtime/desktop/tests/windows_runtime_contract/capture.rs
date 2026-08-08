@@ -8,7 +8,7 @@ fn desktop_bundle_captures_uia_public_text_without_password_content() {
         .expect("local Runtime bundle root");
     let target_executable = runtime_root.join("test-target.exe");
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../target/local-test/evidence/desktop-uia-capture");
+        .join("../../../local-test/evidence/desktop-uia-capture");
     std::fs::create_dir_all(&local_test).expect("UIA capture evidence root");
     let data = tempfile::Builder::new()
         .prefix("contract-")
@@ -61,7 +61,7 @@ fn desktop_capture_owns_one_checkpoint_for_a_process_family() {
         .expect("local Runtime bundle root");
     let target_executable = runtime_root.join("test-target.exe");
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../target/local-test/evidence/desktop-central-capture");
+        .join("../../../local-test/evidence/desktop-central-capture");
     std::fs::create_dir_all(&local_test).expect("central capture evidence root");
     let data = tempfile::Builder::new()
         .prefix("contract-")

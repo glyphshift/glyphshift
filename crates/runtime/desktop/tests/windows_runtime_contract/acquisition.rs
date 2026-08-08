@@ -8,7 +8,7 @@ fn desktop_acquisition_session_uses_a_verified_worker_and_ephemeral_target_grant
         .expect("local Runtime bundle root");
     let target_executable = runtime_root.join("test-target.exe");
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../target/local-test/evidence/desktop-acquisition-session");
+        .join("../../../local-test/evidence/desktop-acquisition-session");
     std::fs::create_dir_all(&local_test).expect("acquisition evidence root");
     let data = tempfile::Builder::new()
         .prefix("contract-")

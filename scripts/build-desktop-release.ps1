@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
-$localTestRoot = Join-Path $repoRoot 'target\local-test'
+$localTestRoot = Join-Path $repoRoot 'local-test'
 $buildId = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmssfff')
 $buildRoot = Join-Path $localTestRoot "evidence\desktop-release\$buildId"
 $runtimeRoot = Join-Path $buildRoot 'runtime'

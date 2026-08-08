@@ -70,7 +70,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-bundle
 
 Release Bundle 只包含 manifest 声明的 Controller、Target Runtime、正式 Adapter、Acquisition Worker
 及其 support files，并使用 `/3` 清单；测试宿主只在显式 `-IncludeTestTarget` 时加入。所有输出仍只
-进入 `target/local-test/`。
+进入 `local-test/`。
 
 生成包含 Release Runtime Bundle 的本地 unsigned NSIS candidate：
 
@@ -79,9 +79,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-releas
 ```
 
 脚本使用本地临时 Tauri 配置，不修改基础配置，也不安装 candidate。产物、清单和构建中间文件均
-只进入 `target/local-test/`；公开发行仍需要独立的代码签名与发布流程。
+只进入 `local-test/`；公开发行仍需要独立的代码签名与发布流程。
 
-本机程序位置、Runtime Bundle、截图、日志和实机结果必须放在 `target/local-test/`，不得提交。
+本机程序位置、Runtime Bundle、截图、日志和实机结果必须放在 `local-test/`，不得提交。
 
 ## 架构入口
 

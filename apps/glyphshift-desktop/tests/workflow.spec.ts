@@ -62,7 +62,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
   await expect(dialog.getByText('G4 · 71717171')).toBeVisible()
   await expect(dialog.getByText('2 条诊断因缓冲限制被丢弃')).toBeVisible()
   await expect(dialog.getByText('synthetic.ext-text-out')).toHaveCount(0)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/runtime-diagnostics-modal.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/runtime-diagnostics-modal.png' })
   await dialog.getByRole('button', { name: '关闭诊断' }).click()
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __diagnosticControls?: boolean[] }).__diagnosticControls
@@ -171,7 +171,7 @@ test('workflow editor uses a left section rail for four focused large-catalog vi
   await expect(dialog.getByTestId('workflow-font-tab')).toBeVisible()
   await expect(dialog.getByTestId('workflow-dictionary-catalog')).toHaveCount(0)
   await page.waitForTimeout(200)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/workflow-editor-tabbed-large-catalogs.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-editor-tabbed-large-catalogs.png' })
 })
 
 test('workflow saves reordered dictionaries in explicit priority order', async ({ page }) => {

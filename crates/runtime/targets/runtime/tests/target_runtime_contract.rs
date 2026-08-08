@@ -204,7 +204,7 @@ fn trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog() {
     let native_package = native_package();
     let native_hash = artifact_hash(&native_package);
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../target/local-test/target-runtime-contract");
+        .join("../../../../local-test/target-runtime-contract");
     std::fs::create_dir_all(&local_test).expect("local test directory");
     let output_path = local_test.join("capture-native-contract.json");
     let _ = std::fs::remove_file(&output_path);
@@ -353,7 +353,7 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
     let gdiplus_package = gdiplus_native_package();
     let gdiplus_hash = artifact_hash(&gdiplus_package);
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../target/local-test/target-runtime-contract");
+        .join("../../../../local-test/target-runtime-contract");
     std::fs::create_dir_all(&local_test).expect("local test directory");
     let changed_package = local_test.join("changed-adapter.dll");
     std::fs::copy(&native_package, &changed_package).expect("adapter test copy");

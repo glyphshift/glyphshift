@@ -68,7 +68,7 @@ fn runtime_bundle_rejects_a_missing_isolated_worker_artifact() {
         .map(std::path::PathBuf::from)
         .expect("local Runtime bundle root");
     let local_test = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../target/local-test/evidence/runtime-bundle-missing-worker");
+        .join("../../../local-test/evidence/runtime-bundle-missing-worker");
     std::fs::create_dir_all(&local_test).expect("missing-worker evidence root");
     let copy = tempfile::Builder::new()
         .prefix("contract-")

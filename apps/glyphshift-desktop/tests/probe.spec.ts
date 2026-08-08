@@ -105,7 +105,7 @@ test('empty libraries stay actionable and a running application can create a tem
   await expect(dialog.getByRole('button', { name: '高级选项' })).toHaveCount(0)
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('x86_64')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/quick-probe-ready-zh.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/quick-probe-ready-zh.png' })
   await dialog.getByRole('button', { name: '创建并连接' }).click()
 
   await expect(dialog).toHaveCount(0)
@@ -188,7 +188,7 @@ test('current-app source can end and clean up at compact English layout', async 
   await expect(page.getByRole('status')).toContainText('Reused software or dictionaries are unchanged')
   await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned))).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/quick-probe-compact-en.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/quick-probe-compact-en.png' })
 })
 
 test('current-app source keeps creation recoverable after a target stops during startup', async ({ page }) => {
@@ -657,10 +657,10 @@ test('probe run keeps backend paging while adapter filters and view state recove
     (window as unknown as { __captureEditRequests?: Array<{ translation: string }> }).__captureEditRequests?.[0]?.translation
   ))).toBe('即时译文')
   await expect(page.getByText('预览 G9')).toBeVisible()
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/capture-workspace-live-edit-scroll.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/capture-workspace-live-edit-scroll.png' })
   await tableScroller.evaluate(element => { element.scrollTop = 600 })
   await expect.poll(() => page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)).not.toBe(initialThumbTransform)
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/capture-workspace-scrollbar-pagination.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/capture-workspace-scrollbar-pagination.png' })
   await page.getByLabel('选择当前页').click()
   await expect(page.getByText('50 条目已选择')).toBeVisible()
   await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)

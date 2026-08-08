@@ -50,7 +50,7 @@ test('opens on the nearest OCR block and lets the user browse the bounded result
   await expect(bubble.getByText('Settings', { exact: true })).toBeVisible()
   await expect(bubble.getByText('设置', { exact: true })).toBeVisible()
   await expect(bubble.getByText('UIA', { exact: true })).toBeVisible()
-  await page.screenshot({ path: '../../target/local-test/evidence/desktop-screens/interactive-translation-bubble.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/interactive-translation-bubble.png' })
 })
 
 test('shows an honest dictionary miss and dismisses with Escape', async ({ page }) => {

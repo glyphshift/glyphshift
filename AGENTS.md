@@ -6,15 +6,15 @@
 
 ## Local testing and privacy
 
-- Put every machine-specific test input and output under `target/local-test/`. This directory is
+- Put every machine-specific test input and output under `local-test/`. This directory is
   local-only and must never be added, force-added, committed, or referenced as a required repository
   resource.
-- Use `target/local-test/machine.ps1` (or another file below the same directory) for local executable
+- Use `local-test/machine.ps1` (or another file below the same directory) for local executable
   paths and environment variables such as `GLYPHSHIFT_AE_EXE`, `GLYPHSHIFT_PREMIERE_EXE`,
   `GLYPHSHIFT_QQ_EXE`, attached PIDs, and temporary data roots.
 - Put screenshots, videos, raw logs, runtime descriptors, process/module dumps, captured text,
   temporary catalogs/packages, copied dictionaries/plugins, WebView profiles, and real AE/PR/QQ
-  smoke-test results under `target/local-test/evidence/`; do not put them in Flightdeck or any other
+  smoke-test results under `local-test/evidence/`; do not put them in Flightdeck or any other
   tracked directory.
 - Tracked test code may contain deterministic harnesses and synthetic fixtures only. Real software
   locations and live-process values must be supplied through environment variables; do not add a
@@ -27,5 +27,5 @@
 - Flightdeck may record portable conclusions, commands, pass/fail counts, and residual risks, but not
   raw local evidence or enough machine-specific detail to reconstruct the local environment.
 - Before every commit, inspect staged paths and staged text for local artifacts. At minimum, reject
-  anything under `target/local-test/` and scan for absolute drive paths, usernames, PIDs, and links to
+  anything under `local-test/` and scan for absolute drive paths, usernames, PIDs, and links to
   local screenshots.

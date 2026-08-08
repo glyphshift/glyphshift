@@ -1,6 +1,7 @@
 # Rust and local verification
 /target
 **/target
+/local-test
 
 # Node / Vite
 node_modules

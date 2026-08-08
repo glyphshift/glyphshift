@@ -30,7 +30,7 @@ fn rtp_001_round_trips_route_translations_context_and_font_without_machine_data(
     assert_eq!(decoded, publication);
     assert!(encoded.contains("glyphshift.runtime/2"));
     assert!(encoded.contains("adapter_ids"));
-    assert!(!encoded.contains("target/local-test"));
+    assert!(!encoded.contains("local-test"));
     assert!(!encoded.contains("process_id"));
     assert!(!encoded.contains("driver"));
     let _domain_types_remain_host_independent = (
