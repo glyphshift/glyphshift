@@ -43,6 +43,9 @@ export const model = {
   }, {
     id: 'synthetic.console-observer', name: 'WriteConsoleW 观察器', summary: '观察 Console 客户端 Unicode 输出；不执行翻译写回',
     version: '1.0.0', platforms: ['windows'], technologies: ['Windows Console'], features: ['textObserve'], technicalTarget: 'KernelBase!WriteConsoleW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/console/writeconsole', configuration: 'none',
+  }, {
+    id: 'windows.unity.mono.standard-ui', name: 'Unity Mono 标准界面', summary: '翻译 Windows x64 Unity Mono 应用中的 TMP/uGUI 标准 text 属性；不适用于 IL2CPP、UI Toolkit、NGUI、自绘文字或 TMP SetText 快捷入口',
+    version: '0.1.0', platforms: ['windows'], technologies: ['Unity Mono / TextMeshPro / uGUI'], features: ['textObserve', 'textReplace'], technicalTarget: 'Mono JIT!TMP_Text.set_text + UnityEngine.UI.Text.set_text', documentationUrl: 'https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html', configuration: 'none',
   }],
   workflows: [{
     id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5,

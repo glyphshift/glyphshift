@@ -14,6 +14,7 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(page.getByText('GdipDrawString', { exact: true })).toBeVisible()
+  await expect(page.getByText('Unity Mono 标准界面', { exact: true })).toBeVisible()
   await expect(page.getByText('Windows', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('GDI', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('GDI+', { exact: true })).toBeVisible()
@@ -22,7 +23,7 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('字体替换', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('无需配置', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('v1.0.0', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(5)
+  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(6)
   await page.evaluate(() => {
     window.open = ((url?: string | URL) => {
       ;(window as unknown as { __openedAdapterDocumentation?: string }).__openedAdapterDocumentation = String(url)
@@ -33,6 +34,10 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __openedAdapterDocumentation?: string }
   ).__openedAdapterDocumentation)).toBe('https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw')
+  await page.getByRole('button', { name: '查看 Unity Mono 标准界面 技术文档' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __openedAdapterDocumentation?: string }
+  ).__openedAdapterDocumentation)).toBe('https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html')
   await expect(page.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
 })

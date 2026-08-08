@@ -78,5 +78,13 @@
     "technology": "raylib 5.5",
     "technicalTarget": "raylib.dll!DrawTextEx",
     "documentationUrl": "https://www.raylib.com/cheatsheet/raylib_cheatsheet_v5.5.pdf"
+  },
+  {
+    "id": "windows.unity.mono.standard-ui",
+    "name": "Unity Mono 标准界面",
+    "summary": "翻译 Windows x64 Unity Mono 应用中的 TMP/uGUI 标准 text 属性；不适用于 IL2CPP、UI Toolkit、NGUI、自绘文字或 TMP SetText 快捷入口",
+    "technology": "Unity Mono / TextMeshPro / uGUI",
+    "technicalTarget": "Mono JIT!TMP_Text.set_text + UnityEngine.UI.Text.set_text",
+    "documentationUrl": "https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html"
   }
 ]

@@ -39,3 +39,23 @@ fn native_descriptor_can_declare_a_target_process_observer() {
         [Feature::TextObserve]
     );
 }
+
+#[test]
+fn native_descriptor_can_declare_retained_target_replacement() {
+    let descriptor = NativeAdapterDescriptorV1::retained_target(
+        "example.synthetic.retained",
+        (1, 0, 0),
+        FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE,
+        PLATFORM_WINDOWS,
+        ARCH_ARM64,
+    )
+    .to_descriptor()
+    .expect("retained target descriptor");
+
+    assert_eq!(descriptor.apply_model(), ApplyModel::RetainedObject);
+    assert_eq!(descriptor.placement(), Placement::TargetProcess);
+    assert_eq!(
+        descriptor.features().collect::<Vec<_>>(),
+        [Feature::TextObserve, Feature::TextReplace]
+    );
+}

@@ -85,7 +85,8 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native',
-    '-p', 'glyphshift-adapter-raylib-native'
+    '-p', 'glyphshift-adapter-raylib-native',
+    '-p', 'glyphshift-adapter-unity-mono-standard-ui-native'
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
@@ -173,6 +174,8 @@ $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
 $raylibBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
+$unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-standard-ui' 'dll'
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -214,6 +217,7 @@ $directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-lay
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
+$unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
 
 $acquisitionWorkers = @(
     [ordered]@{
@@ -324,6 +328,15 @@ $runtimeManifest = [ordered]@{
             technology = $raylibPresentation.technology
             technicalTarget = $raylibPresentation.technicalTarget
             documentationUrl = $raylibPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $unityMonoStandardUiBundle.file
+            sha256 = $unityMonoStandardUiBundle.sha256
+            name = $unityMonoStandardUiPresentation.name
+            summary = $unityMonoStandardUiPresentation.summary
+            technology = $unityMonoStandardUiPresentation.technology
+            technicalTarget = $unityMonoStandardUiPresentation.technicalTarget
+            documentationUrl = $unityMonoStandardUiPresentation.documentationUrl
         }
     )
     isolated_workers = @(

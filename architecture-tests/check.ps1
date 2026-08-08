@@ -198,6 +198,17 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-raylib-native' `
     -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-raylib', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-unity-mono-standard-ui' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-unity-mono-standard-ui-native' `
+    -Expected @(
+        'glyphshift-adapter-native-abi',
+        'glyphshift-adapter-unity-mono-standard-ui',
+        'retour',
+        'windows'
+    )
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-uia' `
     -Expected @('glyphshift-acquisition', 'glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -516,6 +527,8 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-qt-painter-native',
     'glyphshift-adapter-raylib',
     'glyphshift-adapter-raylib-native',
+    'glyphshift-adapter-unity-mono-standard-ui',
+    'glyphshift-adapter-unity-mono-standard-ui-native',
     'glyphshift-adapter-uia',
     'glyphshift-adapter-uia-worker'
 )

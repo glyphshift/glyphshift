@@ -109,6 +109,30 @@ impl NativeAdapterDescriptorV1 {
     }
 
     #[must_use]
+    pub const fn retained_target(
+        adapter_id: &'static str,
+        version: (u16, u16, u16),
+        feature_bits: u64,
+        platform_bits: u32,
+        architecture_bits: u32,
+    ) -> Self {
+        Self {
+            struct_size: std::mem::size_of::<Self>() as u32,
+            adapter_id: FixedUtf8::new(adapter_id),
+            version_major: version.0,
+            version_minor: version.1,
+            version_patch: version.2,
+            abi_major: 1,
+            abi_minor: 0,
+            apply_model: APPLY_MODEL_RETAINED_OBJECT,
+            placement: PLACEMENT_TARGET_PROCESS,
+            feature_bits,
+            platform_bits,
+            architecture_bits,
+        }
+    }
+
+    #[must_use]
     pub const fn observe_target(
         adapter_id: &'static str,
         version: (u16, u16, u16),

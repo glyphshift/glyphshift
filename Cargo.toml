@@ -24,6 +24,8 @@ members = [
     "crates/adapters/implementations/framework/qt-painter-native",
     "crates/adapters/implementations/framework/raylib",
     "crates/adapters/implementations/framework/raylib-native",
+    "crates/adapters/implementations/framework/unity-mono-standard-ui",
+    "crates/adapters/implementations/framework/unity-mono-standard-ui-native",
     "crates/adapters/platform/native-abi",
     "crates/adapters/platform/native-host",
     "crates/adapters/platform/sdk",

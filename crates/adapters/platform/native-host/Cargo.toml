@@ -23,6 +23,7 @@ glyphshift-adapter-gdiplus = { path = "../../implementations/native/gdiplus" }
 glyphshift-adapter-gtk3-pango = { path = "../../implementations/framework/gtk3-pango" }
 glyphshift-adapter-qt-painter = { path = "../../implementations/framework/qt-painter" }
 glyphshift-adapter-raylib = { path = "../../implementations/framework/raylib" }
+glyphshift-adapter-unity-mono-standard-ui = { path = "../../implementations/framework/unity-mono-standard-ui" }
 glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
 
 [target.'cfg(windows)'.dev-dependencies]
