@@ -9,8 +9,6 @@ param(
 
     [switch]$IncludeTestTarget,
 
-    [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT,
-
     [switch]$KeepExistingOutput
 )
 
@@ -27,12 +25,8 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 if ([string]::IsNullOrWhiteSpace($CargoTargetDir)) {
     $CargoTargetDir = Join-Path $localTestRoot 'runtime-build'
 }
-if ([string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
-    $OcrSupportRoot = Join-Path $localTestRoot 'build\ocr-runtime-support'
-}
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $CargoTargetDir = [System.IO.Path]::GetFullPath($CargoTargetDir)
-$OcrSupportRoot = [System.IO.Path]::GetFullPath($OcrSupportRoot)
 
 function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
     $prefix = $localTestRoot.TrimEnd('\') + '\'
@@ -43,31 +37,6 @@ function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
 
 Assert-LocalTestPath $OutputRoot 'Runtime Bundle output'
 Assert-LocalTestPath $CargoTargetDir 'Cargo target directory'
-Assert-LocalTestPath $OcrSupportRoot 'OCR support root'
-
-if (-not (Test-Path -LiteralPath $OcrSupportRoot -PathType Container)) {
-    throw 'Verified OCR support is missing. Run build-ocr-runtime-support.ps1 first or pass -OcrSupportRoot.'
-}
-$requiredOcrSupportNames = @(
-    'tesseract55.dll',
-    'leptonica-1.87.0.dll',
-    'libpng16.dll',
-    'z.dll',
-    'chi_sim.traineddata',
-    'eng.traineddata',
-    'tesseract-LICENSE.txt',
-    'leptonica-LICENSE.txt',
-    'libpng-LICENSE.txt',
-    'zlib-LICENSE.txt',
-    'tessdata-fast-LICENSE.txt',
-    'THIRD-PARTY-NOTICES.txt',
-    'ocr-support.json'
-)
-foreach ($requiredName in $requiredOcrSupportNames) {
-    if (-not (Test-Path -LiteralPath (Join-Path $OcrSupportRoot $requiredName) -PathType Leaf)) {
-        throw "Missing required OCR support artifact: $requiredName"
-    }
-}
 
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
@@ -75,9 +44,6 @@ $cargoArguments = @(
     '--manifest-path', $manifestPath,
     '-p', 'glyphshift-controller-windows',
     '-p', 'glyphshift-target-runtime',
-    '-p', 'glyphshift-adapter-uia-worker',
-    '-p', 'glyphshift-adapter-ocr-worker',
-    '-p', 'glyphshift-adapter-console-native',
     '-p', 'glyphshift-adapter-draw-text-native',
     '-p', 'glyphshift-adapter-gdi-native',
     '-p', 'glyphshift-adapter-gdi-text-out-native',
@@ -130,34 +96,6 @@ $controllerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-controller-windows.exe' 'controller' 'exe'
 $runtimeBundle = Copy-VersionedBundleArtifact `
     'glyphshift_target_runtime.dll' 'runtime' 'dll'
-$uiaWorkerBundle = Copy-VersionedBundleArtifact `
-    'glyphshift-adapter-uia-worker.exe' 'adapter-uia-worker' 'exe'
-$uiaAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
-    'glyphshift-adapter-uia-acquisition-worker.exe' 'adapter-uia-acquisition-worker' 'exe'
-$ocrAcquisitionWorkerBundle = Copy-VersionedBundleArtifact `
-    'glyphshift-adapter-ocr-acquisition-worker.exe' 'adapter-ocr-acquisition-worker' 'exe'
-$ocrSupportBundles = @()
-$ocrSupportFiles = @($requiredOcrSupportNames | ForEach-Object {
-    Get-Item -LiteralPath (Join-Path $OcrSupportRoot $_)
-} | Sort-Object Name)
-if ($ocrSupportFiles.Count -gt 64) {
-    throw 'OCR support artifact count exceeds the Runtime Bundle limit.'
-}
-$seenOcrSupportNames = @{}
-foreach ($supportFile in $ocrSupportFiles) {
-    if ($supportFile.Name -notmatch '^[A-Za-z0-9._-]{1,255}$') {
-        throw "Invalid OCR support artifact name: $($supportFile.Name)"
-    }
-    if ($seenOcrSupportNames.ContainsKey($supportFile.Name)) {
-        throw "Duplicate OCR support artifact name: $($supportFile.Name)"
-    }
-    $seenOcrSupportNames[$supportFile.Name] = $true
-    $hash = (Get-FileHash -LiteralPath $supportFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    Copy-Item -LiteralPath $supportFile.FullName -Destination (Join-Path $stagingRoot $supportFile.Name)
-    $ocrSupportBundles += [ordered]@{ file = $supportFile.Name; sha256 = $hash }
-}
-$consoleBundle = Copy-VersionedBundleArtifact `
-    'glyphshift_adapter_console_native.dll' 'adapter-console' 'dll'
 $gdiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gdi_native.dll' 'adapter-gdi' 'dll'
 $textOutBundle = Copy-VersionedBundleArtifact `
@@ -208,8 +146,6 @@ function Get-AdapterPresentation([string]$AdapterId) {
 }
 
 $extTextOutPresentation = Get-AdapterPresentation 'windows.gdi.ext-text-out'
-$consolePresentation = Get-AdapterPresentation 'windows.console.write-console'
-$uiaPresentation = Get-AdapterPresentation 'windows.uia.observe'
 $textOutPresentation = Get-AdapterPresentation 'windows.gdi.text-out'
 $drawTextPresentation = Get-AdapterPresentation 'windows.user32.draw-text'
 $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
@@ -218,21 +154,6 @@ $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layo
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
-
-$acquisitionWorkers = @(
-    [ordered]@{
-        file = $uiaAcquisitionWorkerBundle.file
-        sha256 = $uiaAcquisitionWorkerBundle.sha256
-        adapter_id = 'windows.uia.acquire'
-        support_files = @()
-    },
-    [ordered]@{
-        file = $ocrAcquisitionWorkerBundle.file
-        sha256 = $ocrAcquisitionWorkerBundle.sha256
-        adapter_id = 'windows.ocr.acquire'
-        support_files = $ocrSupportBundles
-    }
-)
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/3'
@@ -248,15 +169,6 @@ $runtimeManifest = [ordered]@{
         sha256 = $runtimeBundle.sha256
     }
     adapters = @(
-        [ordered]@{
-            file = $consoleBundle.file
-            sha256 = $consoleBundle.sha256
-            name = $consolePresentation.name
-            summary = $consolePresentation.summary
-            technology = $consolePresentation.technology
-            technicalTarget = $consolePresentation.technicalTarget
-            documentationUrl = $consolePresentation.documentationUrl
-        },
         [ordered]@{
             file = $gdiBundle.file
             sha256 = $gdiBundle.sha256
@@ -339,23 +251,8 @@ $runtimeManifest = [ordered]@{
             documentationUrl = $unityMonoStandardUiPresentation.documentationUrl
         }
     )
-    isolated_workers = @(
-        [ordered]@{
-            file = $uiaWorkerBundle.file
-            sha256 = $uiaWorkerBundle.sha256
-            adapter_id = 'windows.uia.observe'
-            version = @(1, 0, 0)
-            features = @('text-observe')
-            platforms = @('windows')
-            architectures = @('x86', 'x86_64')
-            name = $uiaPresentation.name
-            summary = $uiaPresentation.summary
-            technology = $uiaPresentation.technology
-            technicalTarget = $uiaPresentation.technicalTarget
-            documentationUrl = $uiaPresentation.documentationUrl
-        }
-    )
-    acquisition_workers = $acquisitionWorkers
+    isolated_workers = @()
+    acquisition_workers = @()
 }
 $runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 6
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
@@ -365,15 +262,10 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
     $utf8WithoutBom
 )
 
-$acquisitionArtifacts = @($runtimeManifest.acquisition_workers | ForEach-Object {
-    $_
-    @($_.support_files)
-})
 $declaredArtifacts = @(
     $runtimeManifest.controller,
     $runtimeManifest.runtime
-) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers) +
-    $acquisitionArtifacts
+) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers)
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
 if ($IncludeTestTarget) {
     $expectedFiles += 'test-target.exe'

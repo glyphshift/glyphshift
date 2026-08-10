@@ -1,5 +1,3 @@
-import type { CommandError } from './commandError'
-
 export type CapabilityState = 'active' | 'ready' | 'candidate' | 'limited' | 'unavailable'
 export interface CapabilityEvidence {
   state: CapabilityState
@@ -49,39 +47,6 @@ export type SoftwareQuickCaptureEvent
   = { state: 'armed'; shortcut: string }
     | { state: 'captured'; shortcut: string; preflight: SoftwarePreflight }
     | { state: 'failed'; shortcut: string; errorCode: string }
-
-export interface InteractiveTranslationRect {
-  left: number
-  top: number
-  right: number
-  bottom: number
-}
-
-export interface InteractiveTranslationBlock {
-  source: string
-  anchors: InteractiveTranslationRect[]
-  granularity: 'word' | 'control' | 'line' | 'region'
-  provenance: 'structured' | 'visual'
-  confidenceBasisPoints?: number
-  translation?: string
-  translationState: 'translated' | 'missing'
-  origin?: 'dictionary' | 'provider'
-}
-
-export interface InteractiveTranslationResult {
-  blocks: InteractiveTranslationBlock[]
-  partial: boolean
-}
-
-export interface InteractiveTranslationBubblePresentation {
-  result: InteractiveTranslationResult
-  focusBlockIndex: number
-}
-
-export type InteractiveTranslationEvent
-  = { state: 'capturing'; shortcut: string }
-    | { state: 'presented'; shortcut: string; result: InteractiveTranslationResult }
-    | { state: 'failed'; shortcut: string; error: CommandError }
 
 export interface DictionaryMetadata {
   id: string
@@ -346,3 +311,4 @@ export function emptyModel(): DesktopModel {
     workflowDetails: {},
   }
 }
+import type { CommandError } from './commandError'

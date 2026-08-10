@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { presentationError } from '../commandError'
 import { i18n } from '../i18n'
 import type {
   DesktopSnapshot,
@@ -183,8 +182,15 @@ export function useDictionaryWorkspace() {
         applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_delete_dictionaries', { dictionaryIds: ids }))
       }
       else {
-        if (ids.some(id => model.value.workflows.some(workflow => workflow.dictionaryIds.includes(id)))) {
-          throw presentationError(i18n.global.t('workspace.dictionaryReferenced'))
+        const workflowNames = [...new Set(model.value.workflows
+          .filter(workflow => ids.some(id => workflow.dictionaryIds.includes(id)))
+          .map(workflow => workflow.name))]
+        if (workflowNames.length) {
+          throw {
+            schemaVersion: 1,
+            code: 'dictionary.referenced',
+            args: { workflowNames, probeNames: [] },
+          }
         }
         const removed = new Set(ids)
         model.value.dictionaries = model.value.dictionaries.filter(item => !removed.has(item.metadata.id))

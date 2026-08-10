@@ -121,16 +121,6 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 
 ## Translation
 
-**交互选区（Interactive Selection）**：用户明确触发并绑定当前授权目标的一次性 Point、Text Range 或
-Region 选择。它只在短期交互会话中有效，不是可持久化的 Region Binding、Dictionary Location 或
-Probe 范围。
-
-**取词结果（Text Acquisition Result）**：由交互选区产生的有界原文块、短期屏幕锚点、粒度和来源
-证据。它不包含译文，不进入 Dictionary 或 Observation Index，目标窗口变化后必须重新取得。
-
-**外部译文呈现（External Translation Presentation）**：Glyphshift 在目标软件之外显示交互译文的
-应用方式，不修改目标控件，也不冒充 Runtime 已确认的 TextReplace。
-
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
 
 **Compiled Font Policy**：由工作流目标的字体策略编译并与 Translation Snapshot 一起发布的不可变

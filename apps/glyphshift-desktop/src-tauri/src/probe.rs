@@ -268,7 +268,7 @@ impl DesktopApplication {
         if self.active_probe_run_id.is_some() || held_probe_exists {
             return Err(CommandError::new("capture.already_active"));
         }
-        let adapter_ids = self.prioritize_probe_adapter_ids(&request.adapter_ids);
+        let adapter_ids = request.adapter_ids.clone();
         self.ensure_compatible_probe_adapters(&request.software_id, &adapter_ids)?;
         if request.live_preview_enabled && !self.adapters_support_preview(&adapter_ids) {
             return Err(CommandError::new("capture.preview_unavailable"));
@@ -336,7 +336,7 @@ impl DesktopApplication {
                 CommandError::new("dictionary.not_found")
                     .with_arg("dictionaryId", request.dictionary_id.to_string())
             })?;
-        let adapter_ids = self.prioritize_probe_adapter_ids(&request.adapter_ids);
+        let adapter_ids = request.adapter_ids.clone();
         let configuration_changed = current.adapter_ids() != adapter_ids.as_slice()
             || current.dictionary_id() != request.dictionary_id.as_ref()
             || current.live_preview_enabled() != request.live_preview_enabled;
@@ -455,9 +455,7 @@ impl DesktopApplication {
         let configuration = self
             .probe_runs
             .capture_configuration(run_id, DEFAULT_MAX_ENTRIES)
-            .map_err(probe_run_error)?
-            .with_fallback_adapters(self.fallback_probe_adapter_ids(summary.adapter_ids()))
-            .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
+            .map_err(probe_run_error)?;
         let start_result = self
             .runtimes
             .as_mut()
@@ -742,20 +740,6 @@ impl DesktopApplication {
 
     pub(super) fn adapters_support_preview(&self, adapter_ids: &[Box<str>]) -> bool {
         !self.preview_adapter_ids(adapter_ids).is_empty()
-    }
-
-    pub(super) fn prioritize_probe_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
-        let mut prioritized = adapter_ids.to_vec();
-        prioritized.sort_by_key(|adapter_id| !self.adapter_supports_replacement(adapter_id));
-        prioritized
-    }
-
-    pub(super) fn fallback_probe_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
-        adapter_ids
-            .iter()
-            .filter(|adapter_id| !self.adapter_supports_replacement(adapter_id))
-            .cloned()
-            .collect()
     }
 
     fn adapter_supports_replacement(&self, adapter_id: &str) -> bool {

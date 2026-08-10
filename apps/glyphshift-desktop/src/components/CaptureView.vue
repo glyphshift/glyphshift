@@ -95,10 +95,6 @@ const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const dictionaryNotice = ref('')
 const launchingSoftware = ref(false)
-const collectionRecoveryAdapterIds = ref<string[]>([])
-const collectionRecoveryLoading = ref(false)
-const collectionRecoveryChecked = ref(false)
-const collectionRecoveryNotice = ref('')
 const translationValues = ref<Record<string, string>>({})
 const {
   tableShell,
@@ -117,7 +113,6 @@ const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let settingsCompatibilityRequest = 0
-let collectionRecoveryRequest = 0
 let translationSaveQueue = Promise.resolve()
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
@@ -127,17 +122,6 @@ const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.v
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
-const collectionRecoveryEligible = computed(() => {
-  const error = probe.lastError.value
-  const operation = String(error?.args.operation ?? '')
-  return error?.code === 'runtime.target_access_failed'
-    && ['remoteMemory', 'remoteThread'].includes(operation)
-    && Boolean(selectedRun.value)
-})
-const collectionRecoveryAvailable = computed(() => collectionRecoveryEligible.value
-  && collectionRecoveryAdapterIds.value.length > 0)
-const collectionRecoveryActionVisible = computed(() => collectionRecoveryEligible.value
-  && (collectionRecoveryLoading.value || collectionRecoveryChecked.value))
 const settingsDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === settingsDictionaryId.value))
 const settingsDictionaryItems = computed(() => props.dictionaries.map(item => ({
   value: item.metadata.id,
@@ -274,26 +258,6 @@ const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
 watch(settingsAdapterIds, () => {
   if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
 }, { deep: true })
-
-watch([collectionRecoveryEligible, () => selectedRun.value?.id], async ([eligible, runId]) => {
-  const request = ++collectionRecoveryRequest
-  collectionRecoveryAdapterIds.value = []
-  collectionRecoveryChecked.value = false
-  collectionRecoveryLoading.value = Boolean(eligible && runId)
-  if (!eligible || !runId) return
-  const run = selectedRun.value
-  if (!run || run.id !== runId) return
-  const compatible = await probe.compatibleAdapters(run.softwareId, run.id)
-  if (request !== collectionRecoveryRequest || selectedRun.value?.id !== runId) return
-  const compatibleIds = new Set(compatible ?? [])
-  collectionRecoveryAdapterIds.value = props.adapters
-    .filter(adapter => adapter.features.includes('textObserve')
-      && !adapter.features.includes('textReplace')
-      && compatibleIds.has(adapter.id))
-    .map(adapter => adapter.id)
-  collectionRecoveryChecked.value = true
-  collectionRecoveryLoading.value = false
-})
 
 watch(() => probe.selectedRunId.value, async (id, previous) => {
   if (id === previous) return
@@ -682,26 +646,6 @@ async function launchSelectedSoftware() {
   }
 }
 
-async function recoverWithCollectionOnly() {
-  const run = selectedRun.value
-  const adapterIds = [...collectionRecoveryAdapterIds.value]
-  if (!run || !adapterIds.length || probe.busy.value) return
-  collectionRecoveryNotice.value = ''
-  const updated = await probe.update({
-    runId: run.id,
-    name: run.name,
-    dictionaryId: run.dictionaryId,
-    adapterIds,
-    livePreviewEnabled: false,
-  })
-  if (!updated) return
-  const resumed = await probe.resume(updated.id)
-  if (!resumed) return
-  collectionRecoveryNotice.value = t('capture.collectionRecoveryStarted')
-  emit('workspace-changed')
-  await loadPage()
-}
-
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
   const next = { ...translationValues.value }
   for (const row of rows) if (!dirtyTranslations.has(row.source)) next[row.source] = row.translation
@@ -888,16 +832,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
     </ManagementPageHeader>
 
-    <div v-if="probe.message.value" class="mb-3">
-      <UAlert role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" />
-      <div v-if="collectionRecoveryActionVisible" class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
-        <span class="text-[10px] leading-4 text-[var(--text-muted)]">
-          {{ collectionRecoveryLoading ? t('capture.collectionRecoveryChecking') : collectionRecoveryAvailable ? t('capture.collectionRecoveryHint') : t('capture.collectionRecoveryUnavailable') }}
-        </span>
-        <UButton v-if="collectionRecoveryAvailable" color="primary" variant="soft" size="sm" icon="i-tabler-eye" :label="t('capture.collectionRecoveryAction')" :loading="probe.busy.value" @click="recoverWithCollectionOnly" />
-      </div>
-    </div>
-    <UAlert v-else-if="collectionRecoveryNotice" role="status" color="success" variant="soft" :title="t('capture.collectionRecoveryTitle')" :description="collectionRecoveryNotice" class="mb-3" />
+    <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
 

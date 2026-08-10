@@ -24,7 +24,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -76,12 +76,15 @@ test('workflow target independently selects adapters dictionaries and one font p
   await expect(dialog.getByRole('tab', { name: '基础配置' })).toHaveAttribute('aria-selected', 'true')
 
   await dialog.getByRole('tab', { name: '软件与拦截' }).click()
-  await expect(dialog.getByText('windows · GDI', { exact: true })).toBeVisible()
+  const extTextOutRow = dialog.getByTestId('workflow-adapter-table').locator('tbody > tr').filter({ hasText: 'ExtTextOutW' })
+  await expect(extTextOutRow.getByText('Windows', { exact: true })).toBeVisible()
+  await expect(extTextOutRow.getByText('GDI', { exact: true })).toBeVisible()
   await expect(dialog.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(dialog.getByText('GdipDrawString', { exact: true })).toBeVisible()
   await expect(dialog.getByText('WriteConsoleW 观察器', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('UI Automation 观察器', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
 
   await dialog.getByRole('tab', { name: '翻译词典' }).click()
@@ -96,18 +99,106 @@ test('workflow target independently selects adapters dictionaries and one font p
   await expect(dialog.getByText(/位置|main-ui/)).toHaveCount(0)
 })
 
-test('observe-only adapter stays available and disables live preview only when selected alone', async ({ page }) => {
-  await page.getByRole('button', { name: '探针', exact: true }).click()
-  await page.getByRole('button', { name: '新建探针任务' }).click()
+test('workflow adapter catalog is one table with classification columns and select all', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '软件与拦截' }).click()
 
-  const form = page.getByRole('dialog', { name: '新建探针任务' })
-  await expect(form.getByText('WriteConsoleW 观察器', { exact: true })).toBeVisible()
-  await expect(form.getByRole('switch', { name: '实时预览' })).toBeEnabled()
-  for (const name of ['ExtTextOutW', 'TextOutW', 'DrawTextW / DrawTextExW', 'GdipDrawString']) {
-    await form.getByRole('checkbox', { name, exact: true }).uncheck()
-  }
-  await expect(form.getByRole('switch', { name: '实时预览' })).toBeDisabled()
-  await expect(form.getByText('所选技术中没有可写回目标软件的技术，无法开启实时预览。')).toBeVisible()
+  const adapterTable = dialog.getByTestId('workflow-adapter-table')
+  await expect(adapterTable.getByRole('table')).toHaveCount(1)
+  await expect(adapterTable.locator('tbody > tr')).toHaveCount(model.adapters.length)
+  await expect(adapterTable.getByRole('columnheader', { name: '拦截方式', exact: true })).toBeVisible()
+  await expect(adapterTable.getByRole('columnheader', { name: '平台', exact: true })).toBeVisible()
+  await expect(adapterTable.getByRole('columnheader', { name: '技术分类', exact: true })).toBeVisible()
+  await expect(adapterTable.getByText('windows · GDI', { exact: true })).toHaveCount(0)
+  await expect.poll(() => adapterTable.evaluate(element => element.scrollWidth >= element.clientWidth)).toBe(true)
+
+  const adapterCheckboxes = adapterTable.getByRole('checkbox', { name: /^选择拦截方式 / })
+  const checkedAdapterCheckboxes = adapterTable.getByRole('checkbox', { name: /^选择拦截方式 /, checked: true })
+  await expect(adapterCheckboxes).toHaveCount(model.adapters.length)
+  await expect(checkedAdapterCheckboxes).toHaveCount(1)
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-adapter-table-960.png' })
+  await adapterTable.getByText('全选', { exact: true }).click()
+  await expect(checkedAdapterCheckboxes).toHaveCount(model.adapters.length)
+  await adapterTable.getByText('取消全选', { exact: true }).click()
+  await expect(checkedAdapterCheckboxes).toHaveCount(0)
+})
+
+test('new workflow selects a searched font by clicking its visible row', async ({ page }) => {
+  await page.getByRole('button', { name: '新建工作流' }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '软件与拦截' }).click()
+  await dialog.getByRole('button', { name: '添加 Vector Studio' }).click()
+  await dialog.getByRole('tab', { name: '字体策略' }).click()
+  await dialog.getByRole('switch', { name: '启用字体策略' }).click()
+  await dialog.getByPlaceholder('搜索本机字体').fill('Mono')
+
+  const fontRow = dialog.getByTestId('workflow-font-catalog').locator('[data-font-family="Synthetic Mono"]')
+  await fontRow.getByText('Synthetic Mono', { exact: true }).click()
+
+  await expect(fontRow.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).toBeChecked()
+  const selectedFonts = dialog.getByTestId('workflow-selected-fonts')
+  await expect(selectedFonts.locator('[data-selected-font-family="Synthetic Mono"]')).toBeVisible()
+  await fontRow.getByText('Synthetic Mono', { exact: true }).click()
+  await expect(fontRow.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).not.toBeChecked()
+  await expect(selectedFonts.locator('[data-selected-font-family="Synthetic Mono"]')).toHaveCount(0)
+  await fontRow.getByText('Synthetic Mono', { exact: true }).click()
+
+  await dialog.getByRole('tab', { name: '软件与拦截' }).click()
+  await dialog.getByRole('checkbox', { name: '选择拦截方式 ExtTextOutW' }).click()
+  await dialog.getByRole('tab', { name: '翻译词典' }).click()
+  await dialog.getByRole('checkbox', { name: '选择词典 界面基础词典' }).click()
+  await dialog.getByRole('tab', { name: '基础配置' }).click()
+  await dialog.getByTestId('workflow-basic-tab').locator('input').fill('字体选择工作流')
+  await dialog.getByRole('button', { name: '创建工作流' }).click()
+
+  await page.getByRole('button', { name: '编辑 字体选择工作流' }).click()
+  const savedDialog = workflowEditor(page)
+  await savedDialog.getByRole('tab', { name: '字体策略' }).click()
+  await savedDialog.getByPlaceholder('搜索本机字体').fill('Mono')
+  await expect(savedDialog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).toBeChecked()
+})
+
+test('font catalog keeps its source order while selected fonts use separate priority tags', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
+  await page.getByRole('button', { name: '新建工作流' }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '软件与拦截' }).click()
+  await dialog.getByRole('button', { name: '添加 Vector Studio' }).click()
+  await dialog.getByRole('tab', { name: '字体策略' }).click()
+  await dialog.getByRole('switch', { name: '启用字体策略' }).click()
+
+  const catalog = dialog.getByTestId('workflow-font-catalog')
+  const catalogRows = catalog.locator('[data-font-family]')
+  await expect(catalogRows.nth(0)).toHaveAttribute('data-font-family', 'Synthetic Sans')
+  await expect(catalogRows.nth(1)).toHaveAttribute('data-font-family', 'Synthetic Serif')
+  await expect(catalogRows.nth(2)).toHaveAttribute('data-font-family', 'Synthetic Mono')
+
+  await catalog.locator('[data-font-family="Synthetic Mono"]').getByText('Synthetic Mono', { exact: true }).click()
+  await expect(catalogRows.nth(0)).toHaveAttribute('data-font-family', 'Synthetic Sans')
+  await expect(catalogRows.nth(1)).toHaveAttribute('data-font-family', 'Synthetic Serif')
+  await expect(catalogRows.nth(2)).toHaveAttribute('data-font-family', 'Synthetic Mono')
+
+  const selectedFonts = dialog.getByTestId('workflow-selected-fonts')
+  const selectedTags = selectedFonts.locator('[data-selected-font-family]')
+  await expect(selectedTags).toHaveCount(1)
+  await expect(selectedTags.nth(0)).toHaveAttribute('data-selected-font-family', 'Synthetic Mono')
+
+  await catalog.locator('[data-font-family="Synthetic Sans"]').getByText('Synthetic Sans', { exact: true }).click()
+  await expect(catalogRows.nth(0)).toHaveAttribute('data-font-family', 'Synthetic Sans')
+  await expect(catalogRows.nth(1)).toHaveAttribute('data-font-family', 'Synthetic Serif')
+  await expect(catalogRows.nth(2)).toHaveAttribute('data-font-family', 'Synthetic Mono')
+  await expect(selectedTags.nth(0)).toHaveAttribute('data-selected-font-family', 'Synthetic Mono')
+  await expect(selectedTags.nth(1)).toHaveAttribute('data-selected-font-family', 'Synthetic Sans')
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-selected-font-tags-960.png' })
+
+  await selectedFonts.getByRole('button', { name: '提高 Synthetic Sans 的优先级' }).click()
+  await expect(selectedTags.nth(0)).toHaveAttribute('data-selected-font-family', 'Synthetic Sans')
+  await expect(selectedTags.nth(1)).toHaveAttribute('data-selected-font-family', 'Synthetic Mono')
+  await selectedFonts.getByRole('button', { name: '移除已选字体 Synthetic Mono' }).click()
+  await expect(selectedTags).toHaveCount(1)
+  await expect(catalog.getByRole('checkbox', { name: '选择字体 Synthetic Mono' })).not.toBeChecked()
 })
 
 test('font policy uses a compact coverage selector and an explicit cached refresh', async ({ page }) => {
@@ -210,11 +301,10 @@ test('workflow saves font coverage and ordered inline candidates', async ({ page
   dialog = workflowEditor(page)
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await expect(dialog.getByRole('combobox', { name: '应用范围' })).toContainText('Hook 捕获的全部文字')
-  const priorityItems = dialog.getByTestId('workflow-font-catalog').locator('[data-font-family]')
-  await expect(priorityItems.nth(0)).toHaveAttribute('data-font-family', 'Synthetic Serif')
-  await expect(priorityItems.nth(0)).toContainText('优先级 1')
-  await expect(priorityItems.nth(1)).toHaveAttribute('data-font-family', 'Synthetic Sans')
-  await expect(priorityItems.nth(2)).toHaveAttribute('data-font-family', 'Synthetic Mono')
+  const priorityItems = dialog.getByTestId('workflow-selected-fonts').locator('[data-selected-font-family]')
+  await expect(priorityItems.nth(0)).toHaveAttribute('data-selected-font-family', 'Synthetic Serif')
+  await expect(priorityItems.nth(1)).toHaveAttribute('data-selected-font-family', 'Synthetic Sans')
+  await expect(priorityItems.nth(2)).toHaveAttribute('data-selected-font-family', 'Synthetic Mono')
 })
 
 test('inline font policy stays isolated between software targets', async ({ page }) => {

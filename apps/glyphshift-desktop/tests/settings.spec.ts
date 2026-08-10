@@ -15,6 +15,8 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
   await expect(page.getByText('GdipDrawString', { exact: true })).toBeVisible()
   await expect(page.getByText('Unity Mono 标准界面', { exact: true })).toBeVisible()
+  await expect(page.getByText('WriteConsoleW 观察器', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('UI Automation 观察器', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Windows', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('GDI', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('GDI+', { exact: true })).toBeVisible()
@@ -23,7 +25,7 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('字体替换', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('无需配置', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('v1.0.0', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(6)
+  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(5)
   await page.evaluate(() => {
     window.open = ((url?: string | URL) => {
       ;(window as unknown as { __openedAdapterDocumentation?: string }).__openedAdapterDocumentation = String(url)
@@ -53,6 +55,8 @@ test('settings applies and persists the real locale and theme preferences', asyn
 
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
   await expect(page.getByText(/在线翻译/)).toHaveCount(0)
+  await expect(page.getByText(/取词翻译/)).toHaveCount(0)
+  await expect(page.getByText(/F9/)).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
   await expect(page.getByRole('combobox')).toHaveCount(3)
 
@@ -128,7 +132,7 @@ test('administrator launch preference persists before elevation and disables wit
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {

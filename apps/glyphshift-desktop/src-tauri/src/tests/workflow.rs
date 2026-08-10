@@ -31,6 +31,61 @@ fn workflow_activation_error_explains_an_empty_dictionary() {
 }
 
 #[test]
+fn font_only_workflow_does_not_misclassify_a_product_adapter_as_unavailable() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    application
+        .backend
+        .replace_font_families(["Synthetic Sans"]);
+    application
+        .create_workflow(
+            WorkflowCreate::new("workflow.font-only", "Font only").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id,
+                    [TEST_ADAPTER_ID],
+                    Vec::<Box<str>>::new(),
+                )
+                .with_font_policy(glyphshift_desktop_backend::WorkflowFontPolicy::new(
+                    ["Synthetic Sans"],
+                    glyphshift_desktop_backend::FontCoverage::AllObservations,
+                )),
+            ]),
+        )
+        .expect("create a font-only workflow");
+
+    application
+        .enable_workflow("workflow.font-only", false)
+        .expect("a current product adapter must remain valid when only font substitution is requested");
+}
+
+#[test]
+fn workflow_with_an_adapter_missing_from_the_current_environment_stays_rejected() {
+    let (application, _calls, _software_id, data_root) = workflow_application();
+    drop(application);
+    let backend = DesktopBackend::open_with_environment(
+        data_root.path(),
+        DesktopEnvironment::new(
+            Vec::<AdapterRequirement>::new(),
+            Vec::<Box<str>>::new(),
+        ),
+    )
+    .expect("reopen product data without the former adapter");
+    let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));
+    let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
+        calls,
+        start_capture_error: None,
+        capture_capability: ProbeRuntimeCapability::DirectReplace,
+    });
+    let mut reopened = test_desktop_application(data_root.path(), backend, runtimes);
+
+    let error = reopened
+        .enable_workflow("workflow.product", false)
+        .expect_err("an adapter absent from the current environment must remain invalid");
+    let json = serde_json::to_value(error).expect("serialize unknown adapter error");
+    assert_eq!(json["code"], "workflow.unknown_adapter");
+    assert_eq!(json["args"]["adapterId"], TEST_ADAPTER_ID);
+}
+
+#[test]
 fn runtime_protocol_rejection_does_not_collapse_into_a_generic_activation_error() {
     let error = serde_json::to_value(runtime_command_error(
         DesktopRuntimeError::ProtocolRejected,

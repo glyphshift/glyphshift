@@ -195,6 +195,38 @@ fn dictionary_and_workflow_details_are_loaded_by_product_id() {
 }
 
 #[test]
+fn dictionary_delete_reports_the_workflows_and_probes_that_reference_it() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe.dictionary-reference".into(),
+            name: "词典定位探针".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create a probe that references the dictionary");
+
+    let error = application
+        .delete_dictionaries(&[Box::<str>::from("dictionary.product")])
+        .expect_err("referenced dictionary must be preserved");
+    let serialized = serde_json::to_value(error).expect("serialize dictionary reference error");
+
+    assert_eq!(serialized["code"], "dictionary.referenced");
+    assert_eq!(
+        serialized["args"]["workflowNames"],
+        serde_json::json!(["产品工作流"])
+    );
+    assert_eq!(
+        serialized["args"]["probeNames"],
+        serde_json::json!(["词典定位探针"])
+    );
+}
+
+#[test]
 fn dictionary_crud_reconciles_every_enabled_workflow_that_uses_the_dictionary() {
     let (mut application, _calls, _software_id, _data_root) = workflow_application();
     let created = application

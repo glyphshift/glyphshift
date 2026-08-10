@@ -9,7 +9,6 @@ import DictionaryLibrary from './components/DictionaryLibrary.vue'
 import DictionaryProof from './components/DictionaryProof.vue'
 import CaptureView from './components/CaptureView.vue'
 import HelpView from './components/HelpView.vue'
-import InteractiveTranslationPanel from './components/InteractiveTranslationPanel.vue'
 import SettingsView from './components/SettingsView.vue'
 import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
@@ -21,7 +20,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 27
+const desktopApiVersion = 28
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -33,7 +32,6 @@ const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
 const shellCompatibilityErrorKey = ref('')
 const quickProbeCaptureActive = ref(false)
-const interactiveTranslationOpen = ref(false)
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
 let unlistenSoftwareCapture: UnlistenFn | null = null
@@ -218,7 +216,6 @@ onBeforeUnmount(() => {
         :current="view"
         :probe-activity-status="probe.activityStatus.value"
         @navigate="requestNavigation"
-        @translate="interactiveTranslationOpen = true"
         @close="requestWindowClose"
       />
       <main class="flex min-h-0 flex-1 overflow-hidden">
@@ -320,11 +317,6 @@ onBeforeUnmount(() => {
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />
       </main>
-      <InteractiveTranslationPanel
-        v-model:open="interactiveTranslationOpen"
-        :software="workspace.model.value.software"
-        :dictionaries="workspace.model.value.dictionaries"
-      />
       <ConfirmDialog
         :open="discardOpen"
         :title="t('common.discardTitle')"

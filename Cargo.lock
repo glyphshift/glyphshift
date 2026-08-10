@@ -1818,7 +1818,6 @@ dependencies = [
 name = "glyphshift-desktop-shell"
 version = "0.2.0"
 dependencies = [
- "glyphshift-acquisition",
  "glyphshift-adapter-registry",
  "glyphshift-capture",
  "glyphshift-controller-windows",
@@ -1827,7 +1826,6 @@ dependencies = [
  "glyphshift-dictionary-distribution",
  "glyphshift-dictionary-package",
  "glyphshift-domain",
- "glyphshift-interactive-translation",
  "glyphshift-runtime-contract",
  "glyphshift-translation",
  "glyphshift-workflow",
@@ -1875,13 +1873,6 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-interactive-translation"
-version = "0.1.0"
-dependencies = [
- "glyphshift-acquisition",
 ]
 
 [[package]]

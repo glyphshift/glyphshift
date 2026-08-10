@@ -1,8 +1,6 @@
 [CmdletBinding()]
 param(
-    [switch]$Detached,
-
-    [string]$OcrSupportRoot = $env:GLYPHSHIFT_OCR_SUPPORT_ROOT
+    [switch]$Detached
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,10 +21,6 @@ if ($Detached) {
     $stderrPath = Join-Path $localTaskRoot 'stderr.log'
     $taskPath = Join-Path $localTaskRoot 'task.pid'
     $powershellPath = (Get-Process -Id $PID).Path
-
-    if (-not [string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
-        $env:GLYPHSHIFT_OCR_SUPPORT_ROOT = $OcrSupportRoot
-    }
 
     $task = Start-Process `
         -FilePath $powershellPath `
@@ -125,9 +119,6 @@ $runtimeBundleArguments = @{
     CargoTargetDir = $cargoTargetDir
     IncludeTestTarget = $true
     KeepExistingOutput = $true
-}
-if (-not [string]::IsNullOrWhiteSpace($OcrSupportRoot)) {
-    $runtimeBundleArguments.OcrSupportRoot = $OcrSupportRoot
 }
 & (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments
 $env:GLYPHSHIFT_RUNTIME_ROOT = $runtimeBundleRoot

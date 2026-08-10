@@ -139,13 +139,47 @@ test('software direct and batch delete remove unreferenced records', async ({ pa
   await expect(page.getByText('Disposable Two', { exact: true })).toBeHidden()
 })
 
+test('dictionary delete names every workflow and probe that blocks it', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  await page.addInitScript(({ current }) => {
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
+        if (command === 'desktop_snapshot') return current
+        if (command === 'desktop_delete_dictionaries') {
+          throw {
+            schemaVersion: 1,
+            code: 'dictionary.referenced',
+            args: {
+              workflowNames: ['默认创作工作流'],
+              probeNames: ['界面巡检探针'],
+            },
+          }
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+  }, { current: snapshot })
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '删除 界面基础词典' }).click()
+  await page.getByRole('dialog', { name: '删除词典' }).getByRole('button', { name: '确认删除' }).click()
+
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText('默认创作工作流')
+  await expect(alert).toContainText('界面巡检探针')
+})
+
 test('software batch delete keeps a rejected record and explains why', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   await page.addInitScript(({ current }) => {
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_remove_software') {
           throw {

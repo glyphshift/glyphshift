@@ -16,6 +16,8 @@ import type {
 import { editableRowIndex } from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
+import AdapterSelectionTable from './AdapterSelectionTable.vue'
+import SelectedFontTags from './SelectedFontTags.vue'
 
 const props = defineProps<{
   items: WorkflowSummary[]
@@ -126,14 +128,6 @@ const visibleFontFamilies = computed(() => {
   return props.installedFamilies
     .filter(family => (!needle || family.toLocaleLowerCase().includes(needle))
       && (fontFilter.value !== 'selected' || selectedFamilies.includes(family)))
-    .sort((left, right) => {
-      const leftIndex = selectedFamilies.indexOf(left)
-      const rightIndex = selectedFamilies.indexOf(right)
-      if (leftIndex >= 0 && rightIndex >= 0) return leftIndex - rightIndex
-      if (leftIndex >= 0) return -1
-      if (rightIndex >= 0) return 1
-      return 0
-    })
 })
 const targetOptions = computed(() => targets.value.map(target => ({
   value: target.softwareId,
@@ -203,16 +197,6 @@ const fontCoverageOptions = computed(() => [
 const workflowMessage = computed(() => props.messages.workflows || props.items.map(item => props.messages[item.id]).find(Boolean) || '')
 const workflowAdapters = computed(() => props.adapters.filter(adapter =>
   adapter.features.includes('textReplace') || adapter.features.includes('fontSubstitute')))
-const adapterGroups = computed(() => {
-  const groups = new Map<string, AdapterOption[]>()
-  for (const adapter of workflowAdapters.value) {
-    const platform = adapter.platforms.join(' / ') || t('workflows.crossPlatform')
-    const technology = adapter.technologies.join(' / ') || t('workflows.otherTechnology')
-    const key = `${platform} · ${technology}`
-    groups.set(key, [...(groups.get(key) ?? []), adapter])
-  }
-  return [...groups.entries()]
-})
 const columnOptions = computed(() => [
   { key: 'software', label: t('workflows.columns.software'), visible: visibleColumns.value.software },
   { key: 'adapters', label: t('workflows.columns.adapters'), visible: visibleColumns.value.adapters },
@@ -398,12 +382,6 @@ function toggleSoftware(id: string) {
   })
   activeSoftwareId.value = id
 }
-function toggleAdapter(id: string) {
-  if (!activeTarget.value) return
-  activeTarget.value.adapterPlan.adapterIds = activeTarget.value.adapterPlan.adapterIds.includes(id)
-    ? activeTarget.value.adapterPlan.adapterIds.filter(candidate => candidate !== id)
-    : [...activeTarget.value.adapterPlan.adapterIds, id]
-}
 function toggleDictionary(id: string) {
   if (!activeTarget.value) return
   activeTarget.value.dictionaryIds = activeTarget.value.dictionaryIds.includes(id)
@@ -431,6 +409,10 @@ function toggleFontFamily(family: string) {
   policy.families = policy.families.includes(family)
     ? policy.families.filter(candidate => candidate !== family)
     : [...policy.families, family]
+}
+function toggleFontFamilyFromRow(event: MouseEvent, family: string) {
+  if (event.target instanceof Element && event.target.closest('button')) return
+  toggleFontFamily(family)
 }
 function moveFontFamily(family: string, offset: number) {
   const policy = activeTarget.value?.fontPolicy
@@ -571,7 +553,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
 
             <section v-if="activeTarget" data-testid="workflow-adapter-config" class="space-y-3 border-t border-[var(--border)] pt-5">
               <div><h4 class="m-0 text-[11px] font-semibold">{{ t('workflows.interceptionFor', { name: softwareName(activeTarget.softwareId) }) }}</h4><p class="m-0 mt-1 text-[9px] text-[var(--text-muted)]">{{ t('workflows.adaptersHint') }}</p></div>
-              <div v-for="[group, options] in adapterGroups" :key="group" class="space-y-1"><div class="text-[9px] text-[var(--text-muted)]">{{ group }}</div><div class="overflow-hidden rounded-[5px] border border-[var(--border)]"><label v-for="adapter in options" :key="adapter.id" class="flex cursor-pointer items-start gap-2 border-b border-[var(--border)] p-2.5 last:border-b-0 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.adapterPlan.adapterIds.includes(adapter.id)" class="mt-0.5" @update:model-value="toggleAdapter(adapter.id)" /><span class="min-w-0"><strong class="block text-[10px]">{{ adapter.name }}</strong><span class="block text-[9px] leading-4 text-[var(--text-muted)]">{{ adapter.summary }}</span></span></label></div></div>
+              <AdapterSelectionTable v-if="workflowAdapters.length" v-model="activeTarget.adapterPlan.adapterIds" :adapters="workflowAdapters" />
               <UAlert v-if="!workflowAdapters.length" color="warning" variant="soft" :title="t('workflows.noAdapters')" :description="t('workflows.noAdaptersDescription')" />
             </section>
             <UEmpty v-else icon="i-tabler-app-window" :title="t('workflows.chooseTarget')" :description="t('workflows.addSoftwareFirstDescription')" size="sm" />
@@ -608,13 +590,14 @@ usePageEscape(() => formOpen.value, requestCloseForm)
                   <p v-if="activeTarget.fontPolicy.coverage === 'dictionary_matches'" class="m-0 max-w-[52ch] pt-5 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('workflows.fontDictionaryMatchesHint') }}</p>
                 </div>
                 <UAlert v-if="activeTarget.fontPolicy.coverage === 'all_observations'" role="alert" color="warning" variant="soft" icon="i-tabler-alert-triangle" :aria-label="t('workflows.fontAllObservationsWarningTitle')" :title="t('workflows.fontAllObservationsWarningTitle')" :description="t('workflows.fontAllObservationsWarningDescription')" :ui="{ root: 'p-2', title: 'text-[9px]', description: 'text-[9px] leading-4' }" />
+                <SelectedFontTags :families="activeTarget.fontPolicy.families" @move="moveFontFamily" @remove="toggleFontFamily" />
                 <div class="flex items-center justify-between gap-3">
                   <div><h4 class="m-0 text-[11px] font-semibold">{{ t('workflows.fontCatalog') }}</h4><p class="m-0 mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('workflows.fontCacheCount', { count: installedFamilies.length }) }}</p></div>
                   <UButton color="neutral" variant="outline" size="xs" icon="i-tabler-refresh" :label="t('workflows.refreshFonts')" :aria-label="t('workflows.refreshFontsLabel')" :title="t('workflows.refreshFontsLabel')" :loading="fontRefreshing" :disabled="fontRefreshing" @click="emit('refreshFonts')" />
                 </div>
                 <div class="grid grid-cols-[minmax(0,1fr)_128px] gap-2"><UInput v-model="fontQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchFonts')" :aria-label="t('workflows.searchFonts')" /><USelect v-model="fontFilter" :items="catalogFilterOptions" value-key="value" label-key="label" :aria-label="t('workflows.fontFilter')" class="w-full" /></div>
                 <div data-testid="workflow-font-catalog" class="max-h-64 overflow-y-auto rounded-[6px] border border-[var(--border)] [scrollbar-gutter:stable]">
-                  <div v-for="family in visibleFontFamilies" :key="family" :data-font-family="family" class="flex min-h-10 items-center gap-2 border-b border-[var(--border)] px-3 last:border-b-0 hover:bg-[var(--surface-hover)]"><UCheckbox :model-value="activeTarget.fontPolicy.families.includes(family)" :aria-label="t('workflows.selectFontNamed', { name: family })" @update:model-value="toggleFontFamily(family)" /><span class="min-w-0 flex-1 truncate text-[9px]">{{ family }}</span><template v-if="activeTarget.fontPolicy.families.includes(family)"><UBadge color="neutral" variant="soft" size="sm" :label="t('workflows.priorityNumber', { number: activeTarget.fontPolicy.families.indexOf(family) + 1 })" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-up" :disabled="activeTarget.fontPolicy.families.indexOf(family) === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="moveFontFamily(family, -1)" /><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-down" :disabled="activeTarget.fontPolicy.families.indexOf(family) === activeTarget.fontPolicy.families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="moveFontFamily(family, 1)" /></template></div>
+                  <div v-for="family in visibleFontFamilies" :key="family" :data-font-family="family" class="flex min-h-10 cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 last:border-b-0 hover:bg-[var(--surface-hover)]" :class="activeTarget.fontPolicy.families.includes(family) ? 'bg-[var(--selection)]' : ''" @click="toggleFontFamilyFromRow($event, family)"><UCheckbox :model-value="activeTarget.fontPolicy.families.includes(family)" :aria-label="t('workflows.selectFontNamed', { name: family })" @update:model-value="toggleFontFamily(family)" /><span class="min-w-0 flex-1 truncate text-[9px]">{{ family }}</span></div>
                   <div v-if="!visibleFontFamilies.length" class="flex min-h-16 items-center justify-center px-4 py-4 text-center text-[9px] text-[var(--text-muted)]">{{ installedFamilies.length ? t('workflows.noFontMatch') : t('workflows.noInstalledFonts') }}</div>
                 </div>
               </div>

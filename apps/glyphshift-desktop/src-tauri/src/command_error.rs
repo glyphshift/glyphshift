@@ -7,6 +7,7 @@ pub(crate) const COMMAND_ERROR_SCHEMA_VERSION: u16 = 1;
 #[serde(untagged)]
 pub(crate) enum CommandErrorArg {
     Text(Box<str>),
+    TextList(Vec<Box<str>>),
     Number(u64),
     Boolean(bool),
 }
@@ -20,6 +21,12 @@ impl From<&str> for CommandErrorArg {
 impl From<String> for CommandErrorArg {
     fn from(value: String) -> Self {
         Self::Text(value.into())
+    }
+}
+
+impl From<Vec<Box<str>>> for CommandErrorArg {
+    fn from(value: Vec<Box<str>>) -> Self {
+        Self::TextList(value)
     }
 }
 
@@ -63,10 +70,6 @@ impl CommandError {
         self.args.insert(name.into(), value.into());
         self
     }
-
-    pub(crate) fn code(&self) -> &str {
-        &self.code
-    }
 }
 
 #[cfg(test)]
@@ -77,7 +80,11 @@ mod tests {
     fn serializes_a_stable_semantic_error_contract() {
         let error = CommandError::new("settings.write_failed")
             .with_arg("retryable", true)
-            .with_arg("attempt", 2_u64);
+            .with_arg("attempt", 2_u64)
+            .with_arg(
+                "references",
+                vec![Box::<str>::from("Workflow A"), Box::<str>::from("Probe B")],
+            );
 
         let value = serde_json::to_value(error).expect("serialize command error");
 
@@ -85,6 +92,10 @@ mod tests {
         assert_eq!(value["code"], "settings.write_failed");
         assert_eq!(value["args"]["retryable"], true);
         assert_eq!(value["args"]["attempt"], 2);
+        assert_eq!(
+            value["args"]["references"],
+            serde_json::json!(["Workflow A", "Probe B"])
+        );
         assert!(value.get("diagnosticId").is_none());
     }
 }

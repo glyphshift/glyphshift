@@ -1,6 +1,6 @@
 import { i18n } from './i18n'
 
-export type CommandErrorArg = string | number | boolean
+export type CommandErrorArg = string | number | boolean | string[]
 
 export interface CommandError {
   schemaVersion: 1
@@ -130,42 +130,6 @@ const messageKeys: Record<string, string> = {
   'quick_probe.target_stopped': 'errors.quickProbe.targetStopped',
   'quick_probe.not_found': 'errors.quickProbe.notFound',
   'quick_probe.cleanup_failed': 'errors.quickProbe.cleanupFailed',
-  'acquisition.invalid_request': 'errors.acquisition.invalidRequest',
-  'acquisition.state_unavailable': 'errors.acquisition.stateUnavailable',
-  'acquisition.request_in_progress': 'errors.acquisition.requestInProgress',
-  'acquisition.request_not_found': 'errors.acquisition.requestNotFound',
-  'acquisition.execution_failed': 'errors.acquisition.executionFailed',
-  'acquisition.software_not_found': 'errors.acquisition.softwareNotFound',
-  'acquisition.runtime_spec_unavailable': 'errors.acquisition.runtimeSpecUnavailable',
-  'acquisition.target_not_found': 'errors.acquisition.targetNotFound',
-  'acquisition.invalid_state': 'errors.acquisition.invalidState',
-  'acquisition.controller_unavailable': 'errors.acquisition.controllerUnavailable',
-  'acquisition.target_unavailable': 'errors.acquisition.targetUnavailable',
-  'acquisition.adapter_unavailable': 'errors.acquisition.adapterUnavailable',
-  'acquisition.permission_denied': 'errors.acquisition.permissionDenied',
-  'acquisition.no_text': 'errors.acquisition.noText',
-  'acquisition.provider_unavailable': 'errors.acquisition.providerUnavailable',
-  'acquisition.timed_out': 'errors.acquisition.timedOut',
-  'acquisition.cancelled': 'errors.acquisition.cancelled',
-  'interactive_translation.invalid_request': 'errors.interactiveTranslation.invalidRequest',
-  'interactive_translation.shortcut_unavailable': 'errors.interactiveTranslation.shortcutUnavailable',
-  'interactive_translation.request_in_progress': 'errors.interactiveTranslation.requestInProgress',
-  'interactive_translation.ocr_not_eligible': 'errors.interactiveTranslation.ocrNotEligible',
-  'interactive_translation.ocr_unavailable': 'errors.interactiveTranslation.ocrUnavailable',
-  'interactive_translation.state_unavailable': 'errors.interactiveTranslation.stateUnavailable',
-  'interactive_translation.software_not_found': 'errors.interactiveTranslation.softwareNotFound',
-  'interactive_translation.software_not_configured': 'errors.interactiveTranslation.softwareNotConfigured',
-  'interactive_translation.dictionary_not_found': 'errors.interactiveTranslation.dictionaryNotFound',
-  'interactive_translation.dictionary_invalid': 'errors.interactiveTranslation.dictionaryInvalid',
-  'interactive_translation.runtime_spec_unavailable': 'errors.interactiveTranslation.runtimeSpecUnavailable',
-  'interactive_translation.foreground_mismatch': 'errors.interactiveTranslation.foregroundMismatch',
-  'interactive_translation.foreground_unavailable': 'errors.interactiveTranslation.foregroundUnavailable',
-  'interactive_translation.cancelled': 'errors.interactiveTranslation.cancelled',
-  'interactive_translation.acquisition_failed': 'errors.interactiveTranslation.acquisitionFailed',
-  'interactive_translation.provider_timed_out': 'errors.interactiveTranslation.providerTimedOut',
-  'interactive_translation.translation_unavailable': 'errors.interactiveTranslation.translationUnavailable',
-  'interactive_translation.presentation_failed': 'errors.interactiveTranslation.presentationFailed',
-  'interactive_translation.execution_failed': 'errors.interactiveTranslation.executionFailed',
 }
 
 export function isCommandError(value: unknown): value is CommandError {
@@ -201,6 +165,13 @@ export function translateCommandError(error: unknown): string {
     if (workflowCount > 0 && probeCount === 0) key = 'errors.software.referencedByWorkflow'
     else if (probeCount > 0 && workflowCount === 0) key = 'errors.software.referencedByProbe'
   }
+  if (error.code === 'dictionary.referenced') {
+    const workflowNames = Array.isArray(error.args.workflowNames) ? error.args.workflowNames : []
+    const probeNames = Array.isArray(error.args.probeNames) ? error.args.probeNames : []
+    if (workflowNames.length > 0 && probeNames.length > 0) key = 'errors.dictionary.referencedByWorkflowAndProbe'
+    else if (workflowNames.length > 0) key = 'errors.dictionary.referencedByWorkflow'
+    else if (probeNames.length > 0) key = 'errors.dictionary.referencedByProbe'
+  }
   if (error.code === 'runtime.target_access_failed') {
     const operation = String(error.args.operation ?? '')
     const controllerElevated = error.args.controllerElevated === true
@@ -218,5 +189,11 @@ export function translateCommandError(error: unknown): string {
     }
     else if (controllerElevated) key = 'errors.runtime.targetAccessFailedElevated'
   }
-  return i18n.global.t(key, error.args)
+  const localizedArgs = Object.fromEntries(Object.entries(error.args).map(([name, value]) => [
+    name,
+    Array.isArray(value)
+      ? new Intl.ListFormat(i18n.global.locale.value, { style: 'long', type: 'conjunction' }).format(value)
+      : value,
+  ]))
+  return i18n.global.t(key, localizedArgs)
 }

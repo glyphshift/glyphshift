@@ -46,6 +46,18 @@ pub(super) fn dictionary_export_error(error: BackendError) -> CommandError {
     }
 }
 
+fn dictionary_referenced_error(
+    workflow_names: BTreeSet<Box<str>>,
+    probe_names: BTreeSet<Box<str>>,
+) -> CommandError {
+    CommandError::new("dictionary.referenced")
+        .with_arg(
+            "workflowNames",
+            workflow_names.into_iter().collect::<Vec<_>>(),
+        )
+        .with_arg("probeNames", probe_names.into_iter().collect::<Vec<_>>())
+}
+
 struct OfflineDictionaryCatalog;
 
 impl DictionaryDistributionPort for OfflineDictionaryCatalog {
@@ -280,18 +292,34 @@ impl DesktopApplication {
         &mut self,
         dictionary_ids: &[Box<str>],
     ) -> Result<DesktopProductSnapshot, CommandError> {
-        let referenced_by_probe = self
+        let workflow_names = self
+            .backend
+            .snapshot()
+            .workflows()
+            .iter()
+            .filter(|workflow| {
+                workflow.dictionary_ids().iter().any(|candidate| {
+                    dictionary_ids
+                        .iter()
+                        .any(|id| id.as_ref() == candidate.as_ref())
+                })
+            })
+            .map(|workflow| Box::<str>::from(workflow.name()))
+            .collect::<BTreeSet<_>>();
+        let probe_names = self
             .probe_runs
             .list()
             .map_err(probe_run_error)?
             .into_iter()
-            .any(|run| {
+            .filter(|run| {
                 dictionary_ids
                     .iter()
                     .any(|id| id.as_ref() == run.dictionary_id())
-            });
-        if referenced_by_probe {
-            return Err(CommandError::new("dictionary.referenced"));
+            })
+            .map(|run| Box::<str>::from(run.name()))
+            .collect::<BTreeSet<_>>();
+        if !workflow_names.is_empty() || !probe_names.is_empty() {
+            return Err(dictionary_referenced_error(workflow_names, probe_names));
         }
         self.backend
             .delete_dictionaries(dictionary_ids.iter().map(AsRef::as_ref))

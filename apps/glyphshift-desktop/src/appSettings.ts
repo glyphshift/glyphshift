@@ -20,7 +20,6 @@ export interface AppSettings {
   launchAtStartup: boolean
   launchElevated: boolean
   closeBehavior: CloseBehavior
-  interactiveTranslationShortcut: string
   softwareCaptureShortcut: string
 }
 
@@ -30,7 +29,6 @@ interface AppSettingsUpdate {
   launchAtStartup: boolean
   launchElevated: boolean
   closeBehavior: CloseBehavior
-  interactiveTranslationShortcut: string
   softwareCaptureShortcut: string
 }
 
@@ -46,7 +44,6 @@ const fallbackSettings: AppSettings = {
   launchAtStartup: false,
   launchElevated: false,
   closeBehavior: 'quit',
-  interactiveTranslationShortcut: 'Ctrl+Shift+F9',
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
 }
 
@@ -72,9 +69,6 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     || (candidate.launchAtStartup !== undefined && typeof candidate.launchAtStartup !== 'boolean')
     || (candidate.launchElevated !== undefined && typeof candidate.launchElevated !== 'boolean')
     || (candidate.closeBehavior !== undefined && !['minimize', 'quit'].includes(candidate.closeBehavior))
-    || (candidate.interactiveTranslationShortcut !== undefined
-      && (typeof candidate.interactiveTranslationShortcut !== 'string'
-        || candidate.interactiveTranslationShortcut.length === 0))
     || (candidate.softwareCaptureShortcut !== undefined
       && (typeof candidate.softwareCaptureShortcut !== 'string'
         || candidate.softwareCaptureShortcut.length === 0))) return null
@@ -85,7 +79,6 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     launchAtStartup: candidate.launchAtStartup ?? false,
     launchElevated: candidate.launchElevated ?? false,
     closeBehavior: candidate.closeBehavior ?? 'quit',
-    interactiveTranslationShortcut: candidate.interactiveTranslationShortcut ?? 'Ctrl+Shift+F9',
     softwareCaptureShortcut: candidate.softwareCaptureShortcut ?? 'Ctrl+Shift+F8',
   }
 }
@@ -179,17 +172,13 @@ async function updateAppSettings(update: AppSettingsUpdate) {
   }
 }
 
-async function updateGlobalShortcut(
-  command: 'desktop_update_interactive_translation_shortcut' | 'desktop_update_software_capture_shortcut',
-  key: 'interactiveTranslationShortcut' | 'softwareCaptureShortcut',
-  shortcut: string,
-) {
+async function updateSoftwareCaptureShortcut(shortcut: string) {
   settingsBusy.value = true
   settingsError.value = ''
   try {
     const saved = hasDesktopRuntime()
-      ? await invoke<AppSettings>(command, { shortcut })
-      : { ...settings.value, [key]: shortcut }
+      ? await invoke<AppSettings>('desktop_update_software_capture_shortcut', { shortcut })
+      : { ...settings.value, softwareCaptureShortcut: shortcut }
     if (!hasDesktopRuntime()) localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(saved))
     const normalized = normalizeAppSettings(saved)
     if (!normalized) {
@@ -214,7 +203,6 @@ export function useAppSettings() {
       launchAtStartup: settings.value.launchAtStartup,
       launchElevated: settings.value.launchElevated,
       closeBehavior: settings.value.closeBehavior,
-      interactiveTranslationShortcut: settings.value.interactiveTranslationShortcut,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
       ...patch,
     })
@@ -233,7 +221,6 @@ export function useAppSettings() {
     launchAtStartup: computed(() => settings.value.launchAtStartup),
     launchElevated: computed(() => settings.value.launchElevated),
     closeBehavior: computed(() => settings.value.closeBehavior),
-    interactiveTranslationShortcut: computed(() => settings.value.interactiveTranslationShortcut),
     softwareCaptureShortcut: computed(() => settings.value.softwareCaptureShortcut),
     async setLocalePreference(localePreference: LocalePreference) {
       await update({ localePreference })
@@ -263,29 +250,13 @@ export function useAppSettings() {
     async setCloseBehavior(closeBehavior: CloseBehavior) {
       await update({ closeBehavior })
     },
-    async probeInteractiveTranslationShortcut(shortcut: string) {
-      return hasDesktopRuntime()
-        ? invoke<GlobalShortcutProbe>('desktop_probe_interactive_translation_shortcut', { shortcut })
-        : { shortcut, available: shortcut !== settings.value.softwareCaptureShortcut }
-    },
-    async setInteractiveTranslationShortcut(shortcut: string) {
-      await updateGlobalShortcut(
-        'desktop_update_interactive_translation_shortcut',
-        'interactiveTranslationShortcut',
-        shortcut,
-      )
-    },
     async probeSoftwareCaptureShortcut(shortcut: string) {
       return hasDesktopRuntime()
         ? invoke<GlobalShortcutProbe>('desktop_probe_software_capture_shortcut', { shortcut })
-        : { shortcut, available: shortcut !== settings.value.interactiveTranslationShortcut }
+        : { shortcut, available: true }
     },
     async setSoftwareCaptureShortcut(shortcut: string) {
-      await updateGlobalShortcut(
-        'desktop_update_software_capture_shortcut',
-        'softwareCaptureShortcut',
-        shortcut,
-      )
+      await updateSoftwareCaptureShortcut(shortcut)
     },
     async refreshPrivilegeStatus() {
       privilegeBusy.value = true

@@ -1,9 +1,4 @@
 use super::*;
-use glyphshift_acquisition::{
-    AcquisitionAdapter, AcquisitionCandidate, AcquisitionError, AcquisitionRequest,
-    AuthorizedTarget, Granularity, InteractiveSelection, InteractiveTextAcquisition, Provenance,
-    SourcePolicy,
-};
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
     DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, WorkflowCreate, WorkflowEdit,
@@ -93,8 +88,6 @@ struct WorkflowRuntimeCalls {
     captures_stopped: Vec<Box<str>>,
     capture_publications: Vec<(Box<str>, RuntimePublication)>,
     software_removed: Vec<Box<str>>,
-    point_acquisitions: Vec<(Box<str>, u64, Box<str>, DesktopPoint)>,
-    region_acquisitions: Vec<(Box<str>, Box<str>, DesktopRect)>,
 }
 
 struct RecordingWorkflowRuntime {
@@ -104,10 +97,6 @@ struct RecordingWorkflowRuntime {
 }
 
 impl WorkflowRuntimeService for RecordingWorkflowRuntime {
-    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
-        matches!(adapter_id, "windows.uia.acquire" | "windows.ocr.acquire")
-    }
-
     fn activate_workflow(
         &mut self,
         intent: &glyphshift_desktop_backend::EffectiveWorkflowIntent,
@@ -215,64 +204,6 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .map_err(|_| DesktopRuntimeError::SessionRejected)
     }
 
-    fn acquire_point(
-        &mut self,
-        software_id: &str,
-        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        target_id: u64,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        if cancellation.is_cancelled() {
-            return Err(DesktopAcquisitionError::Cancelled);
-        }
-        self.calls
-            .lock()
-            .expect("runtime call log")
-            .point_acquisitions
-            .push((software_id.into(), target_id, adapter_id.into(), point));
-        Ok(fixture_acquisition_result("Open", point))
-    }
-
-    fn acquire_primary_point(
-        &mut self,
-        software_id: &str,
-        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        if cancellation.is_cancelled() {
-            return Err(DesktopAcquisitionError::Cancelled);
-        }
-        self.calls
-            .lock()
-            .map_err(|_| DesktopAcquisitionError::InvalidState)?
-            .point_acquisitions
-            .push((software_id.into(), 1, adapter_id.into(), point));
-        Ok(fixture_acquisition_result("Open", point))
-    }
-
-    fn acquire_primary_region(
-        &mut self,
-        software_id: &str,
-        _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        region: DesktopRect,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        if cancellation.is_cancelled() {
-            return Err(DesktopAcquisitionError::Cancelled);
-        }
-        self.calls
-            .lock()
-            .map_err(|_| DesktopAcquisitionError::InvalidState)?
-            .region_acquisitions
-            .push((software_id.into(), adapter_id.into(), region));
-        Ok(fixture_region_acquisition_result("Open", region))
-    }
-
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
         self.calls
             .lock()
@@ -334,57 +265,6 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .push((software_id.into(), publication));
         Ok(())
     }
-}
-
-struct FixtureAcquisitionAdapter {
-    source: Box<str>,
-    provenance: Provenance,
-}
-
-impl AcquisitionAdapter for FixtureAcquisitionAdapter {
-    fn provenance(&self) -> Provenance {
-        self.provenance
-    }
-
-    fn acquire(
-        &mut self,
-        _request: &AcquisitionRequest,
-    ) -> Result<Vec<AcquisitionCandidate>, AcquisitionError> {
-        Ok(vec![AcquisitionCandidate::new(
-            self.source.clone(),
-            [glyphshift_acquisition::DesktopRect::new(10, 20, 80, 44)
-                .expect("fixture acquisition anchor")],
-            Granularity::Control,
-        )])
-    }
-}
-
-fn fixture_acquisition_result(source: &str, point: DesktopPoint) -> AcquisitionResult {
-    let target = AuthorizedTarget::new("fixture-target").expect("fixture target");
-    InteractiveTextAcquisition::new([Box::new(FixtureAcquisitionAdapter {
-        source: source.into(),
-        provenance: Provenance::Structured,
-    }) as Box<dyn AcquisitionAdapter>])
-    .acquire(&AcquisitionRequest::new(
-        target,
-        InteractiveSelection::Point(point),
-        SourcePolicy::StructuredOnly,
-    ))
-    .expect("fixture acquisition result")
-}
-
-fn fixture_region_acquisition_result(source: &str, region: DesktopRect) -> AcquisitionResult {
-    let target = AuthorizedTarget::new("fixture-target").expect("fixture target");
-    InteractiveTextAcquisition::new([Box::new(FixtureAcquisitionAdapter {
-        source: source.into(),
-        provenance: Provenance::Visual,
-    }) as Box<dyn AcquisitionAdapter>])
-    .acquire(&AcquisitionRequest::new(
-        target,
-        InteractiveSelection::Region(region),
-        SourcePolicy::VisualOnly,
-    ))
-    .expect("fixture visual acquisition result")
 }
 
 fn workflow_application() -> (
@@ -503,9 +383,7 @@ fn test_desktop_application(
     }
 }
 
-mod acquisition;
 mod dictionary;
-mod interactive_translation;
 mod probe;
 mod quick_probe;
 mod shell;

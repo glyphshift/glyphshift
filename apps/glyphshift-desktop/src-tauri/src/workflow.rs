@@ -178,10 +178,17 @@ impl DesktopApplication {
         {
             return Ok(());
         }
-        let intent = self
-            .backend
-            .effective_workflow_intent(workflow_id)
-            .map_err(|_| CommandError::new("workflow.reconcile_invalid"))?;
+        let intent = match self.backend.effective_workflow_intent(workflow_id) {
+            Ok(intent) => intent,
+            Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))) => {
+                self.backend
+                    .disable_workflow(workflow_id)
+                    .map_err(|_| CommandError::new("workflow.disable_failed"))?;
+                self.workflow_runtime_status.remove(workflow_id);
+                return Ok(());
+            }
+            Err(_) => return Err(CommandError::new("workflow.reconcile_invalid")),
+        };
         let runtime = self.runtimes.as_mut().map_or_else(
             || unavailable_workflow_runtime_view(&intent, true),
             |runtimes| runtimes.activate_workflow(&intent, false),

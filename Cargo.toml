@@ -39,7 +39,6 @@ members = [
     "crates/runtime/controller/windows",
     "crates/core/capture",
     "crates/core/decision",
-    "crates/product/interactive-translation",
     "crates/product/desktop-backend",
     "crates/runtime/desktop",
     "crates/dictionary/distribution",

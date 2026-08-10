@@ -11,14 +11,13 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AdapterSelectionTable: typeof import('./src/components/AdapterSelectionTable.vue')['default']
     CaptureView: typeof import('./src/components/CaptureView.vue')['default']
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryMetadataForm: typeof import('./src/components/DictionaryMetadataForm.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
     HelpView: typeof import('./src/components/HelpView.vue')['default']
-    InteractiveTranslationBubble: typeof import('./src/components/InteractiveTranslationBubble.vue')['default']
-    InteractiveTranslationPanel: typeof import('./src/components/InteractiveTranslationPanel.vue')['default']
     ManagementDetailHeader: typeof import('./src/components/ManagementDetailHeader.vue')['default']
     ManagementFormModal: typeof import('./src/components/ManagementFormModal.vue')['default']
     ManagementFormRow: typeof import('./src/components/ManagementFormRow.vue')['default']
@@ -31,6 +30,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     RuntimeDiagnosticsModal: typeof import('./src/components/RuntimeDiagnosticsModal.vue')['default']
+    SelectedFontTags: typeof import('./src/components/SelectedFontTags.vue')['default']
     SemanticVersionInput: typeof import('./src/components/SemanticVersionInput.vue')['default']
     SettingsView: typeof import('./src/components/SettingsView.vue')['default']
     SoftwareTable: typeof import('./src/components/SoftwareTable.vue')['default']
@@ -48,7 +48,6 @@ declare module 'vue' {
     UInput: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Input.vue')['default']
     UInputNumber: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/InputNumber.vue')['default']
     UInputTags: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/InputTags.vue')['default']
-    UKbd: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Kbd.vue')['default']
     UModal: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Modal.vue')['default']
     UPagination: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Pagination.vue')['default']
     UPopover: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Popover.vue')['default']

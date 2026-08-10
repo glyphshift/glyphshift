@@ -51,7 +51,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
         if (command === 'desktop_import_dictionary') {
@@ -99,7 +99,7 @@ test('dictionary export reports when the native save dialog cannot open', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
         return null
@@ -212,7 +212,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -268,7 +268,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -312,7 +312,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 28 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale
@@ -352,6 +352,7 @@ test('dictionary editor contains no adapter or font configuration', async ({ pag
   await page.getByRole('button', { name: '词典设置' }).click()
   const settings = page.getByRole('dialog', { name: '词典设置' })
   await expect(settings.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
+  await settings.getByRole('button', { name: '更多发布信息' }).click()
   await expect(settings.getByText('Glyphshift', { exact: true })).toBeVisible()
   await settings.getByRole('button', { name: '取消' }).click()
   await expect(page.getByRole('button', { name: '添加词条' })).toHaveCount(0)

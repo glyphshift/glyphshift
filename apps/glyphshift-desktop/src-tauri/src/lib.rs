@@ -1,8 +1,6 @@
-mod acquisition;
 mod command_error;
 mod dictionary;
 mod font_catalog;
-mod interactive_translation;
 mod probe;
 mod quick_probe;
 mod settings;
@@ -23,9 +21,8 @@ use glyphshift_capture::{
     ProbeRunSummary, ProbeRunUpdate, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
-    current_process_is_elevated, foreground_windows_executable, foreground_windows_point,
-    inspect_windows_executable, launch_process_elevated, running_windows_executables,
-    WindowsElevationError, WindowsExecutable,
+    current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,
+    launch_process_elevated, running_windows_executables, WindowsElevationError, WindowsExecutable,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
@@ -33,10 +30,9 @@ use glyphshift_desktop_backend::{
     ExecutableSelection, SoftwareEdit, WorkflowCreate, WorkflowEdit, WorkflowView,
 };
 use glyphshift_desktop_runtime::{
-    AcquisitionResult, DesktopAcquisitionCancellation, DesktopAcquisitionError, DesktopPoint,
-    DesktopRect, DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus,
-    HostOperationFailure, RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord,
-    TargetExecutionOwner, WorkflowReconcileReport,
+    DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus, HostOperationFailure,
+    RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord, TargetExecutionOwner,
+    WorkflowReconcileReport,
 };
 use glyphshift_dictionary_distribution::{
     ArtifactStatement, ArtifactTrustVerifier, CatalogPage, CatalogPortError, CatalogQuery,
@@ -59,7 +55,7 @@ use quick_probe::QuickProbeSessionStore;
 use serde::{Deserialize, Serialize};
 use settings::{
     configure_launch_at_startup, AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError,
-    DEFAULT_INTERACTIVE_TRANSLATION_SHORTCUT, DEFAULT_SOFTWARE_CAPTURE_SHORTCUT,
+    DEFAULT_SOFTWARE_CAPTURE_SHORTCUT,
 };
 #[cfg(test)]
 use software::{
@@ -80,7 +76,7 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 27;
+const DESKTOP_API_VERSION: u16 = 28;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -206,8 +202,6 @@ struct DesktopProductSnapshot {
 }
 
 trait WorkflowRuntimeService: Send {
-    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool;
-
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -226,34 +220,6 @@ trait WorkflowRuntimeService: Send {
         spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
         configuration: CaptureConfiguration,
     ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError>;
-
-    fn acquire_point(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        target_id: u64,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
-
-    fn acquire_primary_point(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
-
-    fn acquire_primary_region(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        region: DesktopRect,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError>;
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 
@@ -282,10 +248,6 @@ trait WorkflowRuntimeService: Send {
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
-    fn supports_acquisition_adapter(&self, adapter_id: &str) -> bool {
-        DesktopRuntimePool::supports_acquisition_adapter(self, adapter_id)
-    }
-
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -321,62 +283,6 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
     ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError> {
         DesktopRuntimePool::start_capture(self, software_id, spec, None, configuration)
             .map(|status| ProbeRuntimeCapability::from_status(&status))
-    }
-
-    fn acquire_point(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        target_id: u64,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        DesktopRuntimePool::acquire_point(
-            self,
-            software_id,
-            spec,
-            target_id,
-            adapter_id,
-            point,
-            cancellation,
-        )
-    }
-
-    fn acquire_primary_point(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        point: DesktopPoint,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        DesktopRuntimePool::acquire_primary_point(
-            self,
-            software_id,
-            spec,
-            adapter_id,
-            point,
-            cancellation,
-        )
-    }
-
-    fn acquire_primary_region(
-        &mut self,
-        software_id: &str,
-        spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
-        adapter_id: &str,
-        region: DesktopRect,
-        cancellation: &DesktopAcquisitionCancellation,
-    ) -> Result<AcquisitionResult, DesktopAcquisitionError> {
-        DesktopRuntimePool::acquire_primary_region(
-            self,
-            software_id,
-            spec,
-            adapter_id,
-            region,
-            cancellation,
-        )
     }
 
     fn stop_capture(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {
@@ -442,6 +348,7 @@ impl DesktopApplication {
             .as_ref()
             .into_iter()
             .flat_map(|bundle| bundle.adapter_options())
+            .filter(|adapter| product_adapter_enabled(adapter.features().iter().copied()))
             .map(|adapter| {
                 (
                     Box::<str>::from(adapter.id()),
@@ -460,6 +367,7 @@ impl DesktopApplication {
                 bundle
                     .adapter_options()
                     .iter()
+                    .filter(|adapter| product_adapter_enabled(adapter.features().iter().copied()))
                     .map(|adapter| AdapterView {
                         id: adapter.id().into(),
                         name: adapter.name().into(),
@@ -483,7 +391,14 @@ impl DesktopApplication {
         let environment = DesktopEnvironment::new(
             runtime_bundle
                 .as_ref()
-                .map(|bundle| bundle.adapter_requirements().to_vec())
+                .map(|bundle| {
+                    bundle
+                        .adapter_requirements()
+                        .iter()
+                        .filter(|requirement| product_adapter_enabled(requirement.features()))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default(),
             font_families.iter().cloned(),
         );
@@ -560,6 +475,12 @@ impl DesktopApplication {
     }
 }
 
+fn product_adapter_enabled(features: impl IntoIterator<Item = Feature>) -> bool {
+    features
+        .into_iter()
+        .any(|feature| feature == Feature::TextReplace)
+}
+
 fn adapter_feature_id(feature: Feature) -> &'static str {
     match feature {
         Feature::TextObserve => "textObserve",
@@ -607,18 +528,13 @@ fn desktop_update_settings(
     mut update: AppSettingsUpdate,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<AppSettings, CommandError> {
-    let interactive_translation_shortcut =
-        shortcut::normalize_global_shortcut(update.interactive_translation_shortcut())?;
     let software_capture_shortcut =
         shortcut::normalize_global_shortcut(update.software_capture_shortcut())?;
-    update.set_interactive_translation_shortcut(interactive_translation_shortcut.clone());
     update.set_software_capture_shortcut(software_capture_shortcut.clone());
     let mut settings = settings
         .lock()
         .map_err(|_| CommandError::new("settings.unavailable"))?;
-    if settings.interactive_translation_shortcut() != interactive_translation_shortcut.as_ref()
-        || settings.software_capture_shortcut() != software_capture_shortcut.as_ref()
-    {
+    if settings.software_capture_shortcut() != software_capture_shortcut.as_ref() {
         return Err(CommandError::new("settings.shortcut_update_failed"));
     }
     let previous_launch_at_startup = settings.launch_at_startup();
@@ -632,29 +548,6 @@ fn desktop_update_settings(
             if launch_at_startup_changed {
                 let _ = configure_launch_at_startup(previous_launch_at_startup);
             }
-            Err(settings_command_error(error))
-        }
-    }
-}
-
-#[tauri::command]
-fn desktop_update_interactive_translation_shortcut(
-    app: tauri::AppHandle,
-    shortcut: String,
-    settings: State<'_, Mutex<AppSettingsStore>>,
-) -> Result<AppSettings, CommandError> {
-    let shortcut = shortcut::normalize_global_shortcut(&shortcut)?;
-    let mut settings = settings
-        .lock()
-        .map_err(|_| CommandError::new("settings.unavailable"))?;
-    let previous: Box<str> = settings.interactive_translation_shortcut().into();
-    let shortcut =
-        interactive_translation::rebind_interactive_translation_shortcut(&app, &shortcut)?;
-    match settings.update_interactive_translation_shortcut(shortcut) {
-        Ok(saved) => Ok(saved),
-        Err(error) => {
-            let _ =
-                interactive_translation::rebind_interactive_translation_shortcut(&app, &previous);
             Err(settings_command_error(error))
         }
     }
@@ -740,10 +633,6 @@ pub fn run() {
                 if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                     if software::matches_software_quick_capture_shortcut(app, shortcut) {
                         software::handle_software_quick_capture_shortcut(app);
-                    } else if interactive_translation::matches_interactive_translation_shortcut(
-                        app, shortcut,
-                    ) {
-                        interactive_translation::handle_interactive_translation_shortcut(app);
                     }
                 }
             })
@@ -777,29 +666,18 @@ pub fn run() {
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(application));
-            app.manage(acquisition::AcquisitionCommandState::default());
             software::manage_quick_capture(app);
-            interactive_translation::manage_interactive_translation(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             desktop_status,
             desktop_settings,
             desktop_update_settings,
-            desktop_update_interactive_translation_shortcut,
             desktop_update_software_capture_shortcut,
             desktop_privilege_status,
             desktop_restart_elevated,
             desktop_snapshot,
             desktop_refresh_font_families,
-            acquisition::desktop_acquire_point,
-            acquisition::desktop_cancel_point_acquisition,
-            interactive_translation::desktop_arm_interactive_translation,
-            interactive_translation::desktop_cancel_interactive_translation,
-            interactive_translation::desktop_probe_interactive_translation_shortcut,
-            interactive_translation::desktop_interactive_translation_capabilities,
-            interactive_translation::desktop_interactive_translation_bubble,
-            interactive_translation::desktop_dismiss_interactive_translation_bubble,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,
             probe::desktop_create_probe_run,

@@ -6,7 +6,7 @@ import { useAppSettings, type CloseBehavior, type LocalePreference, type ThemePr
 const { t } = useI18n()
 const appSettings = useAppSettings()
 
-type ShortcutTarget = 'softwareCapture' | 'interactiveTranslation'
+type ShortcutTarget = 'softwareCapture'
 type ShortcutStatus = 'idle' | 'checking' | 'conflict' | 'invalid' | 'failed' | 'saved'
 
 const modifierCodes = new Set([
@@ -46,12 +46,6 @@ const shortcutRows = computed(() => [
     description: t('settings.softwareCaptureShortcutDescription'),
     icon: 'i-tabler-crosshair',
   },
-  {
-    target: 'interactiveTranslation' as const,
-    label: t('settings.interactiveTranslationShortcut'),
-    description: t('settings.interactiveTranslationShortcutDescription'),
-    icon: 'i-tabler-language-hiragana',
-  },
 ])
 
 function displayShortcutToken(token: string) {
@@ -70,10 +64,8 @@ function displayShortcut(shortcut: string) {
   return shortcut.split('+').map(displayShortcutToken).join(' + ')
 }
 
-function configuredShortcut(target: ShortcutTarget) {
-  return target === 'softwareCapture'
-    ? appSettings.softwareCaptureShortcut.value
-    : appSettings.interactiveTranslationShortcut.value
+function configuredShortcut(_target: ShortcutTarget) {
+  return appSettings.softwareCaptureShortcut.value
 }
 
 function currentShortcutDisplay(target: ShortcutTarget) {
@@ -174,17 +166,14 @@ async function recordShortcut(event: KeyboardEvent) {
   shortcutPreview.value = shortcut
   shortcutStatus.value = 'checking'
   try {
-    const probe = target === 'softwareCapture'
-      ? await appSettings.probeSoftwareCaptureShortcut(shortcut)
-      : await appSettings.probeInteractiveTranslationShortcut(shortcut)
+    const probe = await appSettings.probeSoftwareCaptureShortcut(shortcut)
     if (attempt !== shortcutAttempt || shortcutRecording.value !== target) return
     shortcutPreview.value = probe.shortcut
     if (!probe.available) {
       shortcutStatus.value = 'conflict'
       return
     }
-    if (target === 'softwareCapture') await appSettings.setSoftwareCaptureShortcut(probe.shortcut)
-    else await appSettings.setInteractiveTranslationShortcut(probe.shortcut)
+    await appSettings.setSoftwareCaptureShortcut(probe.shortcut)
     if (attempt !== shortcutAttempt || shortcutRecording.value !== target) return
     stopShortcutRecording(false)
     shortcutStatus.value = 'saved'
@@ -297,8 +286,9 @@ onBeforeUnmount(() => {
             control-width="compact"
           >
             <div class="space-y-2">
-              <button
-                type="button"
+              <UButton
+                color="neutral"
+                variant="outline"
                 class="flex min-h-9 w-full items-center justify-between gap-3 rounded-md border px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
                 :class="shortcutRecording === row.target
                   ? 'border-[var(--accent-strong)] bg-[var(--accent-soft)]'
@@ -324,7 +314,7 @@ onBeforeUnmount(() => {
                   class="size-4 shrink-0 text-[var(--text-muted)]"
                   aria-hidden="true"
                 />
-              </button>
+              </UButton>
               <p class="m-0 text-[10px] leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
                 {{ shortcutStatusMessage(row.target) }}
               </p>

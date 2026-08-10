@@ -16,7 +16,6 @@ const model = {
     { id: 'synthetic.text-out', name: 'TextOutW', summary: '拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面', version: '1.0.0', platforms: ['windows'], technologies: ['GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdi32.dll!TextOutW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-textoutw', configuration: 'none' },
     { id: 'synthetic.draw-text', name: 'DrawTextW / DrawTextExW', summary: '拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面', version: '1.0.0', platforms: ['windows'], technologies: ['USER32 / GDI'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'user32.dll!DrawTextW + DrawTextExW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-drawtextw', configuration: 'none' },
     { id: 'synthetic.gdip-draw-string', name: 'GdipDrawString', summary: '拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面', version: '1.0.0', platforms: ['windows'], technologies: ['GDI+'], features: ['textObserve', 'textReplace', 'fontSubstitute'], technicalTarget: 'gdiplus.dll!GdipDrawString', documentationUrl: 'https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-drawing-text-use', configuration: 'none' },
-    { id: 'synthetic.console-observer', name: 'WriteConsoleW 观察器', summary: '观察 Console 客户端 Unicode 输出；不执行翻译写回', version: '1.0.0', platforms: ['windows'], technologies: ['Windows Console'], features: ['textObserve'], technicalTarget: 'KernelBase!WriteConsoleW', documentationUrl: 'https://learn.microsoft.com/en-us/windows/console/writeconsole', configuration: 'none' },
   ],
   workflows: [{ id: 'workflow-proof', name: '默认创作工作流', description: '组合词典与字体策略', revision: 5, softwareIds: ['software-proof'], dictionaryIds: ['dictionary-proof'], targets: [{ softwareId: 'software-proof', adapterPlan: { strategy: 'parallel', adapterIds: ['synthetic.ext-text-out'] }, dictionaryIds: ['dictionary-proof'], fontPolicy: { families: ['Synthetic Sans', 'Synthetic Serif'], coverage: 'dictionary_matches' } }] }],
   activations: [{ workflowId: 'workflow-proof', revision: 5 }],
@@ -72,7 +71,7 @@ test('capture probe run creation and joined table state', async ({ page }) => {
   await expect(page.getByRole('dialog', { name: '新建探针任务' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-create.png' })
-  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '新建空词典' }).click()
+  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '使用临时词典' }).click()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-create-new-dictionary.png' })
   await page.setViewportSize({ width: 960, height: 640 })
@@ -81,7 +80,6 @@ test('capture probe run creation and joined table state', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const createDialog = page.getByRole('dialog', { name: '新建探针任务' })
   await createDialog.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
-  await createDialog.getByRole('textbox', { name: '词典名称' }).fill('Vector Studio 界面词典')
   await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
   await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toBeVisible()
   await waitForVisualStability(page)

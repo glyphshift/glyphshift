@@ -20,7 +20,6 @@ glyphshift-desktop-backend = { path = "../../../crates/product/desktop-backend" 
 glyphshift-desktop-runtime = { path = "../../../crates/runtime/desktop" }
 glyphshift-dictionary-distribution = { path = "../../../crates/dictionary/distribution" }
 glyphshift-domain = { path = "../../../crates/core/domain" }
-glyphshift-interactive-translation = { path = "../../../crates/product/interactive-translation" }
 glyphshift-runtime-contract = { path = "../../../crates/runtime/contract" }
 glyphshift-translation = { path = "../../../crates/core/translation" }
 glyphshift-workflow = { path = "../../../crates/core/workflow" }
@@ -36,7 +35,6 @@ tempfile = "3.23.0"
 winreg = "0.55.0"
 
 [dev-dependencies]
-glyphshift-acquisition = { path = "../../../crates/runtime/acquisition" }
 glyphshift-adapter-registry = { path = "../../../crates/adapters/platform/registry" }
 glyphshift-dictionary-package = { path = "../../../crates/dictionary/package" }
 sha2 = "0.10"
