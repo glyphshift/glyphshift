@@ -65,11 +65,12 @@ fn changed_resident_adapter_set_requires_a_target_restart() {
 
 #[test]
 fn isolated_worker_permission_and_timeout_reach_actionable_command_errors() {
-    let denied = serde_json::to_value(runtime_command_error(
+    let denied = serde_json::to_value(runtime_command_error_with_privilege(
         DesktopRuntimeError::ActivationRejected(
             HostOperationFailure::IsolatedWorkerPermissionDenied,
         ),
         true,
+        Some(true),
     ))
     .expect("serialize isolated Worker permission rejection");
     let timeout = serde_json::to_value(runtime_command_error(
@@ -79,7 +80,38 @@ fn isolated_worker_permission_and_timeout_reach_actionable_command_errors() {
     .expect("serialize isolated Worker timeout");
 
     assert_eq!(denied["code"], "runtime.target_access_failed");
+    assert_eq!(denied["args"]["operation"], "observer");
+    assert_eq!(denied["args"]["controllerElevated"], true);
     assert_eq!(timeout["code"], "runtime.activation_timed_out");
+}
+
+#[test]
+fn target_access_rejections_preserve_the_failed_operation_and_controller_privilege() {
+    let process = serde_json::to_value(runtime_command_error_with_privilege(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::TargetProcessUnavailable),
+        true,
+        Some(true),
+    ))
+    .expect("serialize target process rejection");
+    let memory = serde_json::to_value(runtime_command_error_with_privilege(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::RemoteMemoryUnavailable),
+        true,
+        Some(true),
+    ))
+    .expect("serialize remote memory rejection");
+    let thread = serde_json::to_value(runtime_command_error_with_privilege(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::RemoteThreadUnavailable),
+        true,
+        Some(false),
+    ))
+    .expect("serialize remote thread rejection");
+
+    assert_eq!(process["args"]["operation"], "targetProcess");
+    assert_eq!(process["args"]["controllerElevated"], true);
+    assert_eq!(memory["args"]["operation"], "remoteMemory");
+    assert_eq!(memory["args"]["controllerElevated"], true);
+    assert_eq!(thread["args"]["operation"], "remoteThread");
+    assert_eq!(thread["args"]["controllerElevated"], false);
 }
 
 #[test]

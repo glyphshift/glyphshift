@@ -4,9 +4,11 @@ import { useToast } from '@nuxt/ui/composables'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
+import type { ProbeActivityStatus } from '../useProbeRuns'
 
-defineProps<{
+const props = defineProps<{
   current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
+  probeActivityStatus: ProbeActivityStatus
 }>()
 const emit = defineEmits<{
   navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'help' | 'settings']
@@ -17,6 +19,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useToast()
 const appSettings = useAppSettings()
+const probeActivityLabel = computed(() => props.probeActivityStatus
+  ? t(`titleBar.probeActivity.${props.probeActivityStatus}`)
+  : '')
 const nav = computed(() => [
   { id: 'workflows' as const, label: t('titleBar.workflows'), icon: 'i-tabler-git-branch' },
   { id: 'software' as const, label: t('titleBar.software'), icon: 'i-tabler-library' },
@@ -65,17 +70,30 @@ async function native(action: 'minimize' | 'maximize') {
         color="neutral"
         variant="ghost"
         size="sm"
-        :icon="item.icon"
-        :label="item.label"
         :class="[
-          'relative h-full min-w-[92px] rounded-none px-3 text-[11px]',
+          'relative h-full min-w-[92px] gap-1.5 rounded-none px-3 text-[11px]',
           current === item.id || (item.id === 'dictionaries' && current === 'dictionary-editor')
             ? 'font-semibold text-[var(--text)] after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:bg-[var(--accent)]'
             : 'text-[var(--text-secondary)]',
         ]"
+        :aria-label="item.label"
+        :aria-describedby="item.id === 'capture' && probeActivityStatus ? 'probe-activity-status' : undefined"
         :aria-current="current === item.id || (item.id === 'dictionaries' && current === 'dictionary-editor') ? 'page' : undefined"
         @click="emit('navigate', item.id)"
-      />
+      >
+        <UIcon :name="item.icon" class="size-4 shrink-0" />
+        <span>{{ item.label }}</span>
+        <UBadge
+          v-if="item.id === 'capture' && probeActivityStatus"
+          id="probe-activity-status"
+          :color="probeActivityStatus === 'running' ? 'success' : 'warning'"
+          variant="soft"
+          size="sm"
+          :label="probeActivityLabel"
+          class="h-4 shrink-0 px-1.5 text-[9px] font-semibold leading-none"
+          aria-live="polite"
+        />
+      </UButton>
     </nav>
     <div class="ml-auto flex items-stretch" data-tauri-drag-region>
       <UButton

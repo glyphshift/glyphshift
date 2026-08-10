@@ -16,15 +16,17 @@ import TitleBar from './components/TitleBar.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
 import { useAppSettings } from './appSettings'
 import type { SoftwareQuickCaptureEvent, WorkflowDetail, WorkflowTarget } from './model'
+import { useProbeRuns } from './useProbeRuns'
 import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 26
+const desktopApiVersion = 27
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
 const workspace = useWorkspace()
+const probe = useProbeRuns()
 const view = ref<View>('workflows')
 const editorDirty = ref(false)
 const pendingExit = ref<NavigableView | 'close' | null>(null)
@@ -139,7 +141,9 @@ async function connectDesktopShell() {
     shellCompatibilityErrorKey.value = ''
     if (!status.shellReady || !await workspace.connectDesktopBackend()) {
       shellCompatibilityErrorKey.value = 'app.desktopUnavailable'
+      return
     }
+    await probe.connect()
   }
   catch {
     shellCompatibilityErrorKey.value = 'app.desktopUnavailable'
@@ -210,7 +214,13 @@ onBeforeUnmount(() => {
 <template>
   <UApp :locale="nuxtLocale">
     <div class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
-      <TitleBar :current="view" @navigate="requestNavigation" @translate="interactiveTranslationOpen = true" @close="requestWindowClose" />
+      <TitleBar
+        :current="view"
+        :probe-activity-status="probe.activityStatus.value"
+        @navigate="requestNavigation"
+        @translate="interactiveTranslationOpen = true"
+        @close="requestWindowClose"
+      />
       <main class="flex min-h-0 flex-1 overflow-hidden">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <UAlert

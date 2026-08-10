@@ -153,6 +153,7 @@ struct CaptureCatalogBuilder {
     max_entries: usize,
     revision: u64,
     entries: BTreeMap<(Box<str>, Box<str>), CaptureCatalogEntry>,
+    fallback_adapters: BTreeSet<Box<str>>,
 }
 
 impl CaptureCatalogBuilder {
@@ -166,6 +167,7 @@ impl CaptureCatalogBuilder {
                     max_entries: configuration.max_entries() as usize,
                     revision: 0,
                     entries: BTreeMap::new(),
+                    fallback_adapters: configuration.fallback_adapters().clone(),
                 },
                 0,
             ));
@@ -179,6 +181,7 @@ impl CaptureCatalogBuilder {
                     max_entries: configuration.max_entries() as usize,
                     revision,
                     entries: BTreeMap::new(),
+                    fallback_adapters: configuration.fallback_adapters().clone(),
                 },
                 0,
             ));
@@ -200,29 +203,59 @@ impl CaptureCatalogBuilder {
                 max_entries: configuration.max_entries() as usize,
                 revision,
                 entries,
+                fallback_adapters: configuration.fallback_adapters().clone(),
             },
             dropped_observations,
         ))
     }
 
-    fn record(&mut self, adapter_id: Box<str>, source: &str, observed_at_ms: u64) -> bool {
+    fn record(&mut self, adapter_id: Box<str>, source: &str, observed_at_ms: u64) -> u64 {
         let source = source.trim();
         if source.is_empty()
             || source.encode_utf16().count() > MAX_SOURCE_UNITS
             || !safe_identifier(&adapter_id)
         {
-            return false;
+            return 1;
         }
         let key = (source.into(), adapter_id.clone());
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.count = entry.count.saturating_add(1);
             entry.last_seen_ms = entry.last_seen_ms.max(observed_at_ms);
             entry.first_seen_ms = entry.first_seen_ms.min(observed_at_ms);
-            return true;
+            return 0;
         }
         if self.entries.len() >= self.max_entries {
-            return false;
+            if self.fallback_adapters.contains(&adapter_id) {
+                return 1;
+            }
+            let fallback_key = self
+                .entries
+                .iter()
+                .filter(|((_, existing_adapter_id), _)| {
+                    self.fallback_adapters.contains(existing_adapter_id)
+                })
+                .min_by(|(left_key, left), (right_key, right)| {
+                    left.last_seen_ms
+                        .cmp(&right.last_seen_ms)
+                        .then_with(|| left_key.cmp(right_key))
+                })
+                .map(|(key, _)| key.clone());
+            let Some(fallback_key) = fallback_key else {
+                return 1;
+            };
+            let displaced = self
+                .entries
+                .remove(&fallback_key)
+                .map_or(0, |entry| entry.count);
+            self.insert(adapter_id, source, observed_at_ms);
+            return displaced;
         }
+        self.insert(adapter_id, source, observed_at_ms);
+        0
+    }
+
+    fn insert(&mut self, adapter_id: Box<str>, source: &str, observed_at_ms: u64) {
+        let key = (source.into(), adapter_id.clone());
         self.entries.insert(
             key,
             CaptureCatalogEntry {
@@ -233,7 +266,6 @@ impl CaptureCatalogBuilder {
                 last_seen_ms: observed_at_ms,
             },
         );
-        true
     }
 
     fn snapshot(&mut self, updated_at_ms: u64, dropped_observations: u64) -> CaptureCatalog {
@@ -365,8 +397,9 @@ impl FileCaptureSink {
                             source,
                             observed_at_ms,
                         }) => {
-                            if !builder.record(adapter_id, &source, observed_at_ms) {
-                                worker_dropped.fetch_add(1, Ordering::Relaxed);
+                            let dropped = builder.record(adapter_id, &source, observed_at_ms);
+                            if dropped > 0 {
+                                worker_dropped.fetch_add(dropped, Ordering::Relaxed);
                             }
                             dirty = true;
                         }

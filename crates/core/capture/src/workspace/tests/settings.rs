@@ -82,10 +82,28 @@ fn clearing_observations_resets_evidence_and_allows_a_fresh_capture() {
     store
         .set_ignored(summary.id(), &[Box::<str>::from("Old text")], true)
         .expect("ignore old text");
+    store
+        .set_status(summary.id(), ProbeRunStatus::Running)
+        .expect("mark capture running");
+    assert_eq!(
+        store.clear_observations(summary.id()),
+        Err(ProbeRunError::InvalidState)
+    );
+    store
+        .set_status(summary.id(), ProbeRunStatus::Paused)
+        .expect("pause capture before clearing");
+    assert_eq!(
+        store.clear_observations(summary.id()),
+        Err(ProbeRunError::InvalidState)
+    );
+    store
+        .set_status(summary.id(), ProbeRunStatus::Ready)
+        .expect("release the capture writer before clearing");
 
     let cleared = store
         .clear_observations(summary.id())
-        .expect("clear observations");
+        .expect("clear released observations");
+    assert_eq!(cleared.status(), ProbeRunStatus::Ready);
     assert_eq!(cleared.observed_count, 0);
     assert_eq!(cleared.ignored_count, 0);
     assert_eq!(cleared.dropped_observations, 0);
@@ -101,6 +119,9 @@ fn clearing_observations_resets_evidence_and_allows_a_fresh_capture() {
         .expect("empty page");
     assert_eq!(empty_page.total, 0);
 
+    store
+        .set_status(summary.id(), ProbeRunStatus::Running)
+        .expect("resume fresh capture");
     let sink = FileCaptureSink::start(
         store
             .capture_configuration(summary.id(), 100)

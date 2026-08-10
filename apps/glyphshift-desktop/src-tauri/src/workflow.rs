@@ -382,8 +382,22 @@ impl DesktopApplication {
 }
 
 pub(super) fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) -> CommandError {
+    runtime_command_error_with_privilege(error, enabling, current_process_is_elevated().ok())
+}
+
+pub(super) fn runtime_command_error_with_privilege(
+    error: DesktopRuntimeError,
+    enabling: bool,
+    controller_elevated: Option<bool>,
+) -> CommandError {
     match error {
         DesktopRuntimeError::UnknownTarget => CommandError::new("runtime.target_not_found"),
+        DesktopRuntimeError::TargetInUse(TargetExecutionOwner::Capture) if enabling => {
+            CommandError::new("runtime.target_in_use_by_probe")
+        }
+        DesktopRuntimeError::TargetInUse(TargetExecutionOwner::Workflow) if enabling => {
+            CommandError::new("runtime.target_in_use_by_workflow")
+        }
         DesktopRuntimeError::SessionRejected if enabling => {
             CommandError::new("runtime.session_rejected")
         }
@@ -392,11 +406,17 @@ pub(super) fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) 
             CommandError::new("runtime.component_incompatible")
         }
         DesktopRuntimeError::ActivationRejected(reason) if enabling => match reason {
-            HostOperationFailure::TargetProcessUnavailable
-            | HostOperationFailure::RemoteMemoryUnavailable
-            | HostOperationFailure::RemoteThreadUnavailable
-            | HostOperationFailure::IsolatedWorkerPermissionDenied => {
-                CommandError::new("runtime.target_access_failed")
+            HostOperationFailure::TargetProcessUnavailable => {
+                target_access_command_error("targetProcess", controller_elevated)
+            }
+            HostOperationFailure::RemoteMemoryUnavailable => {
+                target_access_command_error("remoteMemory", controller_elevated)
+            }
+            HostOperationFailure::RemoteThreadUnavailable => {
+                target_access_command_error("remoteThread", controller_elevated)
+            }
+            HostOperationFailure::IsolatedWorkerPermissionDenied => {
+                target_access_command_error("observer", controller_elevated)
             }
             HostOperationFailure::RuntimeModuleUnavailable => {
                 CommandError::new("runtime.component_load_failed")
@@ -419,6 +439,16 @@ pub(super) fn runtime_command_error(error: DesktopRuntimeError, enabling: bool) 
         _ if enabling => CommandError::new("runtime.activation_failed"),
         _ => CommandError::new("runtime.stop_unconfirmed"),
     }
+}
+
+fn target_access_command_error(
+    operation: &'static str,
+    controller_elevated: Option<bool>,
+) -> CommandError {
+    let error = CommandError::new("runtime.target_access_failed").with_arg("operation", operation);
+    controller_elevated.map_or(error.clone(), |elevated| {
+        error.with_arg("controllerElevated", elevated)
+    })
 }
 fn runtime_diagnostics_error(error: DesktopRuntimeError, software_id: &str) -> CommandError {
     let code = match error {

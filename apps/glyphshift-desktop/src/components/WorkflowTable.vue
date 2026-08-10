@@ -15,6 +15,7 @@ import type {
 } from '../model'
 import { editableRowIndex } from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
+import { useTableColumns } from '../useTableColumns'
 
 const props = defineProps<{
   items: WorkflowSummary[]
@@ -55,6 +56,13 @@ const page = ref(1)
 const pageSize = ref(20)
 const selected = ref(new Set<string>())
 const statusFilter = ref('all')
+const { columns: visibleColumns, toggleColumn } = useTableColumns('glyphshift.table-columns.workflows', {
+  software: true,
+  adapters: true,
+  assets: true,
+  status: true,
+  enabled: true,
+})
 const creating = ref(false)
 const name = ref('')
 const description = ref('')
@@ -205,14 +213,21 @@ const adapterGroups = computed(() => {
   }
   return [...groups.entries()]
 })
-const columns = computed<TableColumn<WorkflowSummary>[]>(() => [
+const columnOptions = computed(() => [
+  { key: 'software', label: t('workflows.columns.software'), visible: visibleColumns.value.software },
+  { key: 'adapters', label: t('workflows.columns.adapters'), visible: visibleColumns.value.adapters },
+  { key: 'assets', label: t('workflows.columns.assets'), visible: visibleColumns.value.assets },
+  { key: 'status', label: t('workflows.columns.status'), visible: visibleColumns.value.status },
+  { key: 'enabled', label: t('workflows.columns.enabled'), visible: visibleColumns.value.enabled },
+])
+const tableColumns = computed<TableColumn<WorkflowSummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
   { id: 'workflow', header: t('workflows.columns.workflow'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } },
-  { id: 'software', header: t('workflows.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } },
-  { id: 'adapters', header: t('workflows.columns.adapters'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } },
-  { id: 'assets', header: t('workflows.columns.assets') },
-  { id: 'status', header: t('workflows.columns.status'), meta: { class: { th: 'w-24 text-center', td: 'w-24 text-center' } } },
-  { id: 'enabled', header: t('workflows.columns.enabled'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+  ...(visibleColumns.value.software ? [{ id: 'software', header: t('workflows.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<WorkflowSummary>] : []),
+  ...(visibleColumns.value.adapters ? [{ id: 'adapters', header: t('workflows.columns.adapters'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<WorkflowSummary>] : []),
+  ...(visibleColumns.value.assets ? [{ id: 'assets', header: t('workflows.columns.assets') } satisfies TableColumn<WorkflowSummary>] : []),
+  ...(visibleColumns.value.status ? [{ id: 'status', header: t('workflows.columns.status'), meta: { class: { th: 'w-24 text-center', td: 'w-24 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
+  ...(visibleColumns.value.enabled ? [{ id: 'enabled', header: t('workflows.columns.enabled'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
   { id: 'actions', header: t('workflows.columns.actions'), meta: { class: { th: 'w-32 text-center', td: 'w-32 text-center' } } },
 ])
 const removalDescription = computed(() => pendingRemoval.value.length === 1
@@ -308,6 +323,8 @@ function runtimeIssueKind(item: WorkflowSummary) {
     'runtime.target_restart_required': 'targetRestartRequired',
     'runtime.activation_timed_out': 'activationTimedOut',
     'runtime.activation_failed': 'activationFailed',
+    'runtime.target_in_use_by_probe': 'targetInUseByProbe',
+    'runtime.target_in_use_by_workflow': 'targetInUseByWorkflow',
     'runtime.stop_unconfirmed': 'stopUnconfirmed',
     'runtime.unavailable': 'unavailable',
   }
@@ -459,13 +476,13 @@ usePageEscape(() => formOpen.value, requestCloseForm)
     </ManagementPageHeader>
 
     <UAlert v-if="workflowMessage" role="alert" color="error" variant="soft" :title="t('workflows.error')" :description="workflowMessage" class="mb-3" />
-    <ManagementTableFrame v-model:query="query" v-model:filter-value="statusFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('workflows.searchPlaceholder')" :search-label="t('workflows.searchLabel')" :filter-label="statusFilterOptions.find(option => option.value === statusFilter)?.label" :filter-aria-label="t('workflows.filterLabel')" :filter-options="statusFilterOptions" :selected-count="selected.size" :selected-label="t('workflows.itemLabel')" :total="filtered.length" :item-label="t('workflows.itemLabel')">
+    <ManagementTableFrame v-model:query="query" v-model:filter-value="statusFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('workflows.searchPlaceholder')" :search-label="t('workflows.searchLabel')" :filter-label="statusFilterOptions.find(option => option.value === statusFilter)?.label" :filter-aria-label="t('workflows.filterLabel')" :filter-options="statusFilterOptions" :column-options="columnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('workflows.itemLabel')" :total="filtered.length" :item-label="t('workflows.itemLabel')" @toggle-column="toggleColumn">
       <template #bulk-actions>
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-play" :label="t('workflows.bulkEnable')" :disabled="busy" @click="emit('toggleMany', [...selected], true)" />
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-stop" :label="t('workflows.bulkDisable')" :disabled="busy" @click="emit('toggleMany', [...selected], false)" />
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('workflows.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.id))" />
       </template>
-      <UTable :data="pageItems" :columns="columns" sticky :ui="{ base: 'min-w-[1080px]' }" @dblclick="openOnDoubleClick">
+      <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[1080px]' }" @dblclick="openOnDoubleClick">
         <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('workflows.selectPage')" @update:model-value="togglePageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleSelection(row.original.id)" /></template>
         <template #workflow-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.description || t('workflows.revision', { revision: row.original.revision }) }}</div></template>

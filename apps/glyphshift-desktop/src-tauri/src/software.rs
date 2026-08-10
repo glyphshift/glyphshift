@@ -294,6 +294,36 @@ impl DesktopApplication {
         Ok(self.snapshot())
     }
 
+    pub(super) fn software_launch_path(&self, extension_id: &str) -> Result<PathBuf, CommandError> {
+        let snapshot = self.backend.snapshot();
+        let software = snapshot
+            .software()
+            .iter()
+            .find(|software| software.id() == extension_id)
+            .ok_or_else(|| CommandError::new("software.not_found"))?;
+        let executable_path = software
+            .executable_path()
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| CommandError::new("software.executable_missing"))?;
+        if !executable_path.is_file() {
+            return Err(CommandError::new("software.executable_missing"));
+        }
+        Ok(executable_path)
+    }
+
+    pub(super) fn launch_software(&self, extension_id: &str) -> Result<(), CommandError> {
+        let executable_path = self.software_launch_path(extension_id)?;
+        let mut command = std::process::Command::new(&executable_path);
+        if let Some(parent) = executable_path.parent() {
+            command.current_dir(parent);
+        }
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|_| CommandError::new("software.launch_failed"))
+    }
+
     pub(super) fn remove_software(
         &mut self,
         extension_id: &str,
@@ -417,6 +447,17 @@ pub(super) fn desktop_select_software(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .select_software(&extension_id)
+}
+
+#[tauri::command]
+pub(super) fn desktop_launch_software(
+    software_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .launch_software(&software_id)
 }
 
 #[tauri::command]

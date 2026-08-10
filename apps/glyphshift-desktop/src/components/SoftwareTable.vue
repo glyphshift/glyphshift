@@ -8,6 +8,7 @@ import { translateCommandError } from '../commandError'
 import type { SoftwarePreflight, SoftwareRecord } from '../model'
 import { editableRowIndex } from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
+import { useTableColumns } from '../useTableColumns'
 
 const props = defineProps<{
   items: SoftwareRecord[]
@@ -35,7 +36,10 @@ const query = ref('')
 const page = ref(1)
 const pageSize = ref(20)
 const selected = ref(new Set<string>())
-const columns = ref({ description: true, binding: true })
+const { columns, toggleColumn } = useTableColumns('glyphshift.table-columns.software', {
+  description: true,
+  binding: true,
+})
 const editing = ref<SoftwareRecord | null>(null)
 const editName = ref('')
 const editDescription = ref('')
@@ -194,10 +198,6 @@ function togglePageSelection() {
   if (pageSelected.value) pageItems.value.forEach(item => next.delete(item.id))
   else pageItems.value.forEach(item => next.add(item.id))
   selected.value = next
-}
-
-function toggleColumn(key: string, visible: boolean) {
-  if (key === 'description' || key === 'binding') columns.value[key] = visible
 }
 
 function startEdit(item: SoftwareRecord) {

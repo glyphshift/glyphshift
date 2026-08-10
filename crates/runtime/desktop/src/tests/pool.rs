@@ -395,7 +395,9 @@ fn capture_owns_one_software_and_cannot_overlap_a_translation_workflow() {
     assert_eq!(diagnostics.dropped(), 3);
     assert_eq!(
         pool.reconcile_workflow(&intent),
-        Err(DesktopRuntimeError::InvalidState)
+        Err(DesktopRuntimeError::TargetInUse(
+            TargetExecutionOwner::Capture
+        ))
     );
 
     pool.stop_capture(software_id.as_str())
@@ -405,6 +407,23 @@ fn capture_owns_one_software_and_cannot_overlap_a_translation_workflow() {
         .expect("start workflow after capture")
         .errors()
         .is_empty());
+    let workflow_conflict_configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-workflow-conflict").expect("session id"),
+        root.path().join("capture-workflow-conflict.json"),
+        100,
+    )
+    .expect("workflow conflict capture configuration");
+    assert_eq!(
+        pool.start_capture(
+            software_id.as_str(),
+            &spec,
+            None,
+            workflow_conflict_configuration,
+        ),
+        Err(DesktopRuntimeError::TargetInUse(
+            TargetExecutionOwner::Workflow
+        ))
+    );
 }
 
 #[test]
@@ -482,6 +501,44 @@ fn failed_capture_start_is_discarded_so_connect_and_continue_can_retry() {
     let connected = pool
         .start_capture(software_id.as_str(), &spec, None, configuration)
         .expect("retry should rediscover a clean Runtime");
+
+    assert!(connected.is_feature_active(Feature::TextObserve));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn offline_probe_start_is_discarded_so_reopened_target_can_reconnect() {
+    let root = tempdir().expect("offline capture Runtime data");
+    let executable = root.path().join("ReopenedCaptureHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+        .expect("capture spec");
+    let configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-after-reopen").expect("session id"),
+        root.path().join("capture.json"),
+        100,
+    )
+    .expect("capture configuration");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(OfflineThenRunningRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+    }));
+
+    assert_eq!(
+        pool.start_capture(software_id.as_str(), &spec, None, configuration.clone()),
+        Err(DesktopRuntimeError::UnknownTarget)
+    );
+    let connected = pool
+        .start_capture(software_id.as_str(), &spec, None, configuration)
+        .expect("reopened target should trigger fresh discovery");
 
     assert!(connected.is_feature_active(Feature::TextObserve));
     assert_eq!(discoveries.load(Ordering::SeqCst), 2);

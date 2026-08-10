@@ -103,6 +103,25 @@ fn software_mutations_return_the_same_product_snapshot_shape() {
 }
 
 #[test]
+fn software_launch_resolves_only_an_existing_bound_executable() {
+    let (application, _calls, software_id, data_root) = workflow_application();
+    let expected = data_root.path().join("SyntheticWorkflowHost.exe");
+
+    assert_eq!(
+        application
+            .software_launch_path(&software_id)
+            .expect("resolve the bound executable"),
+        expected
+    );
+
+    let error = application
+        .software_launch_path("software.missing")
+        .expect_err("unknown software must not launch");
+    let serialized = serde_json::to_value(error).expect("serialize missing software error");
+    assert_eq!(serialized["code"], "software.not_found");
+}
+
+#[test]
 fn software_delete_reports_references_before_touching_the_runtime() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     application

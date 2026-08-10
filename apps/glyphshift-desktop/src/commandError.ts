@@ -82,6 +82,9 @@ const messageKeys: Record<string, string> = {
   'software.quick_capture_self': 'errors.software.quickCaptureSelf',
   'software.quick_capture_failed': 'errors.software.quickCaptureFailed',
   'software.select_failed': 'errors.software.selectFailed',
+  'software.not_found': 'errors.software.notFound',
+  'software.executable_missing': 'errors.software.executableMissing',
+  'software.launch_failed': 'errors.software.launchFailed',
   'software.runtime_stop_unconfirmed': 'errors.software.runtimeStopUnconfirmed',
   'software.referenced': 'errors.software.referencedByWorkflowAndProbe',
   'software.delete_failed': 'errors.software.deleteFailed',
@@ -95,6 +98,8 @@ const messageKeys: Record<string, string> = {
   'runtime.target_restart_required': 'errors.runtime.targetRestartRequired',
   'runtime.activation_timed_out': 'errors.runtime.activationTimedOut',
   'runtime.activation_failed': 'errors.runtime.activationFailed',
+  'runtime.target_in_use_by_probe': 'errors.runtime.targetInUseByProbe',
+  'runtime.target_in_use_by_workflow': 'errors.runtime.targetInUseByWorkflow',
   'runtime.stop_unconfirmed': 'errors.runtime.stopUnconfirmed',
   'runtime.unavailable': 'errors.runtime.unavailable',
   'runtime.diagnostics_inactive': 'errors.runtime.diagnosticsInactive',
@@ -107,6 +112,7 @@ const messageKeys: Record<string, string> = {
   'capture.unknown_adapter': 'errors.capture.unknownAdapter',
   'capture.adapters_required': 'errors.capture.adaptersRequired',
   'capture.adapter_cannot_observe': 'errors.capture.adapterCannotObserve',
+  'capture.target_in_use_by_workflow': 'errors.capture.targetInUseByWorkflow',
   'capture.invalid_configuration': 'errors.capture.invalidConfiguration',
   'capture.read_failed': 'errors.capture.readFailed',
   'capture.write_failed': 'errors.capture.writeFailed',
@@ -162,7 +168,7 @@ const messageKeys: Record<string, string> = {
   'interactive_translation.execution_failed': 'errors.interactiveTranslation.executionFailed',
 }
 
-function isCommandError(value: unknown): value is CommandError {
+export function isCommandError(value: unknown): value is CommandError {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<CommandError>
   return candidate.schemaVersion === 1
@@ -194,6 +200,23 @@ export function translateCommandError(error: unknown): string {
     const probeCount = Number(error.args.probeCount ?? 0)
     if (workflowCount > 0 && probeCount === 0) key = 'errors.software.referencedByWorkflow'
     else if (probeCount > 0 && workflowCount === 0) key = 'errors.software.referencedByProbe'
+  }
+  if (error.code === 'runtime.target_access_failed') {
+    const operation = String(error.args.operation ?? '')
+    const controllerElevated = error.args.controllerElevated === true
+    if (operation === 'targetProcess') key = 'errors.runtime.targetProcessUnavailable'
+    else if (operation === 'observer') {
+      key = controllerElevated
+        ? 'errors.runtime.observerAccessFailedElevated'
+        : 'errors.runtime.observerAccessFailed'
+    }
+    else if (operation === 'remoteMemory' && controllerElevated) {
+      key = 'errors.runtime.targetMemoryAccessFailedElevated'
+    }
+    else if (operation === 'remoteThread' && controllerElevated) {
+      key = 'errors.runtime.targetThreadAccessFailedElevated'
+    }
+    else if (controllerElevated) key = 'errors.runtime.targetAccessFailedElevated'
   }
   return i18n.global.t(key, error.args)
 }

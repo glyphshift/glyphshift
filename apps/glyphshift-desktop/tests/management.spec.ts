@@ -82,6 +82,35 @@ test('software rows expose a direct delete action', async ({ page }) => {
   await expect(row.getByRole('button', { name: '删除 Vector Studio' })).toBeVisible()
 })
 
+test('management tables share independent persisted column controls', async ({ page }) => {
+  const columnsButton = page.getByRole('button', { name: '显示列', exact: true })
+
+  await expect(columnsButton).toBeVisible()
+  await columnsButton.click()
+  await page.getByRole('menuitemcheckbox', { name: '拦截方式', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('columnheader', { name: '拦截方式', exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await expect(columnsButton).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '描述', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await columnsButton.click()
+  await page.getByRole('menuitemcheckbox', { name: '发布', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('columnheader', { name: '发布', exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await columnsButton.click()
+  await page.getByRole('menuitemcheckbox', { name: '更新时间', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('columnheader', { name: '更新时间', exact: true })).toHaveCount(0)
+
+  await page.reload()
+  await expect(page.getByRole('columnheader', { name: '拦截方式', exact: true })).toHaveCount(0)
+})
+
 test('software direct and batch delete remove unreferenced records', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.software.push({
@@ -116,7 +145,7 @@ test('software batch delete keeps a rejected record and explains why', async ({ 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 26 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 27 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_remove_software') {
           throw {

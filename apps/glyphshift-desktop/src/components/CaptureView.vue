@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { save } from '@tauri-apps/plugin-dialog'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
@@ -16,6 +17,7 @@ import { editableRowIndex } from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
 import { useProbeRuns, type QuickProbeCleanupResult } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
+import { useTableColumns } from '../useTableColumns'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
@@ -66,6 +68,19 @@ const listQuery = ref('')
 const listPage = ref(1)
 const listPageSize = ref(20)
 const listSelected = ref(new Set<string>())
+const { columns: runVisibleColumns, toggleColumn: toggleRunColumn } = useTableColumns('glyphshift.table-columns.probes.runs', {
+  software: true,
+  dictionary: true,
+  status: true,
+  progress: true,
+  updated: true,
+})
+const { columns: entryVisibleColumns, toggleColumn: toggleEntryColumn } = useTableColumns('glyphshift.table-columns.probes.entries', {
+  status: true,
+  adapters: true,
+  count: true,
+  lastSeen: true,
+})
 const pendingRemoval = ref<ProbeRunSummary[]>([])
 const quickProbeOpen = ref(false)
 const pendingQuickCleanup = ref<ProbeRunSummary | null>(null)
@@ -79,6 +94,11 @@ const settingsCompatibleAdapterIds = ref<string[] | null>(null)
 const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const dictionaryNotice = ref('')
+const launchingSoftware = ref(false)
+const collectionRecoveryAdapterIds = ref<string[]>([])
+const collectionRecoveryLoading = ref(false)
+const collectionRecoveryChecked = ref(false)
+const collectionRecoveryNotice = ref('')
 const translationValues = ref<Record<string, string>>({})
 const {
   tableShell,
@@ -97,6 +117,7 @@ const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let settingsCompatibilityRequest = 0
+let collectionRecoveryRequest = 0
 let translationSaveQueue = Promise.resolve()
 
 const observableAdapters = computed(() => props.adapters.filter(adapter => adapter.features.includes('textObserve')))
@@ -106,6 +127,17 @@ const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.v
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
+const collectionRecoveryEligible = computed(() => {
+  const error = probe.lastError.value
+  const operation = String(error?.args.operation ?? '')
+  return error?.code === 'runtime.target_access_failed'
+    && ['remoteMemory', 'remoteThread'].includes(operation)
+    && Boolean(selectedRun.value)
+})
+const collectionRecoveryAvailable = computed(() => collectionRecoveryEligible.value
+  && collectionRecoveryAdapterIds.value.length > 0)
+const collectionRecoveryActionVisible = computed(() => collectionRecoveryEligible.value
+  && (collectionRecoveryLoading.value || collectionRecoveryChecked.value))
 const settingsDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === settingsDictionaryId.value))
 const settingsDictionaryItems = computed(() => props.dictionaries.map(item => ({
   value: item.metadata.id,
@@ -144,6 +176,7 @@ const selectedDictionaryEntries = computed(() => selectedRows.value
 const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
+const clearEntriesLocked = computed(() => selectedRun.value?.status === 'running')
 const settingsValid = computed(() => Boolean(
   !settingsCompatibilityLoading.value
   &&
@@ -162,7 +195,7 @@ const settingsChanged = computed(() => {
     || settingsLivePreview.value !== run.livePreviewEnabled
   )
 })
-const activeRunExists = computed(() => probe.runs.value.some(run => ['running', 'paused'].includes(run.status)))
+const activeRunExists = computed(() => Boolean(probe.activityStatus.value))
 const bulkRunDeletionBlocked = computed(() => [...listSelected.value].some((id) => {
   const run = probe.runs.value.find(item => item.id === id)
   return Boolean(run?.quickProbe) || ['running', 'paused'].includes(run?.status ?? '')
@@ -183,24 +216,37 @@ const listPageItems = computed(() => filteredRuns.value.slice(
 const listPageSelected = computed(() => Boolean(listPageItems.value.length)
   && listPageItems.value.every(run => listSelected.value.has(run.id)))
 
+const runColumnOptions = computed(() => [
+  { key: 'software', label: t('capture.columns.software'), visible: runVisibleColumns.value.software },
+  { key: 'dictionary', label: t('capture.columns.dictionary'), visible: runVisibleColumns.value.dictionary },
+  { key: 'status', label: t('capture.columns.status'), visible: runVisibleColumns.value.status },
+  { key: 'progress', label: t('capture.columns.progress'), visible: runVisibleColumns.value.progress },
+  { key: 'updated', label: t('capture.columns.updated'), visible: runVisibleColumns.value.updated },
+])
 const runColumns = computed<TableColumn<ProbeRunSummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
   { id: 'run', header: t('capture.columns.run'), meta: { class: { th: 'w-[25%]', td: 'w-[25%]' } } },
-  { id: 'software', header: t('capture.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } },
-  { id: 'dictionary', header: t('capture.columns.dictionary'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } },
-  { accessorKey: 'status', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } },
-  { id: 'progress', header: t('capture.columns.progress'), meta: { class: { th: 'w-32', td: 'w-32' } } },
-  { accessorKey: 'updatedAtMs', header: t('capture.columns.updated'), meta: { class: { th: 'w-28', td: 'w-28' } } },
+  ...(runVisibleColumns.value.software ? [{ id: 'software', header: t('capture.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
+  ...(runVisibleColumns.value.dictionary ? [{ id: 'dictionary', header: t('capture.columns.dictionary'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
+  ...(runVisibleColumns.value.status ? [{ accessorKey: 'status', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeRunSummary>] : []),
+  ...(runVisibleColumns.value.progress ? [{ id: 'progress', header: t('capture.columns.progress'), meta: { class: { th: 'w-32', td: 'w-32' } } } satisfies TableColumn<ProbeRunSummary>] : []),
+  ...(runVisibleColumns.value.updated ? [{ accessorKey: 'updatedAtMs', header: t('capture.columns.updated'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   { id: 'actions', header: t('capture.columns.actions'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+])
+const entryColumnOptions = computed(() => [
+  { key: 'status', label: t('capture.columns.status'), visible: entryVisibleColumns.value.status },
+  { key: 'adapters', label: t('capture.columns.adapter'), visible: entryVisibleColumns.value.adapters },
+  { key: 'count', label: t('capture.columns.count'), visible: entryVisibleColumns.value.count },
+  { key: 'lastSeen', label: t('capture.columns.lastSeen'), visible: entryVisibleColumns.value.lastSeen },
 ])
 const entryColumns = computed<TableColumn<ProbeEntryRow>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
   { accessorKey: 'source', header: t('capture.columns.source'), meta: { class: { th: 'w-[24%]', td: 'w-[24%]' } } },
   { accessorKey: 'translation', header: t('capture.columns.translation'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
-  { accessorKey: 'state', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } },
-  { id: 'adapters', header: t('capture.columns.adapter'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } },
-  { accessorKey: 'count', header: t('capture.columns.count'), meta: { class: { th: 'w-20 text-right', td: 'w-20 text-right' } } },
-  { accessorKey: 'lastSeenMs', header: t('capture.columns.lastSeen'), meta: { class: { th: 'w-28', td: 'w-28' } } },
+  ...(entryVisibleColumns.value.status ? [{ accessorKey: 'state', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeEntryRow>] : []),
+  ...(entryVisibleColumns.value.adapters ? [{ id: 'adapters', header: t('capture.columns.adapter'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeEntryRow>] : []),
+  ...(entryVisibleColumns.value.count ? [{ accessorKey: 'count', header: t('capture.columns.count'), meta: { class: { th: 'w-20 text-right', td: 'w-20 text-right' } } } satisfies TableColumn<ProbeEntryRow>] : []),
+  ...(entryVisibleColumns.value.lastSeen ? [{ accessorKey: 'lastSeenMs', header: t('capture.columns.lastSeen'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeEntryRow>] : []),
 ])
 const exportItems = computed<DropdownMenuItem[][]>(() => [[
   { label: t('capture.exportEntriesCsv'), icon: 'i-tabler-file-type-csv', onSelect: () => void chooseExport('entries_csv') },
@@ -228,6 +274,26 @@ const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
 watch(settingsAdapterIds, () => {
   if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
 }, { deep: true })
+
+watch([collectionRecoveryEligible, () => selectedRun.value?.id], async ([eligible, runId]) => {
+  const request = ++collectionRecoveryRequest
+  collectionRecoveryAdapterIds.value = []
+  collectionRecoveryChecked.value = false
+  collectionRecoveryLoading.value = Boolean(eligible && runId)
+  if (!eligible || !runId) return
+  const run = selectedRun.value
+  if (!run || run.id !== runId) return
+  const compatible = await probe.compatibleAdapters(run.softwareId, run.id)
+  if (request !== collectionRecoveryRequest || selectedRun.value?.id !== runId) return
+  const compatibleIds = new Set(compatible ?? [])
+  collectionRecoveryAdapterIds.value = props.adapters
+    .filter(adapter => adapter.features.includes('textObserve')
+      && !adapter.features.includes('textReplace')
+      && compatibleIds.has(adapter.id))
+    .map(adapter => adapter.id)
+  collectionRecoveryChecked.value = true
+  collectionRecoveryLoading.value = false
+})
 
 watch(() => probe.selectedRunId.value, async (id, previous) => {
   if (id === previous) return
@@ -316,7 +382,7 @@ async function loadPage() {
     if (page.value > maxPage) page.value = maxPage
   }
   catch (error) {
-    probe.report(error)
+    probe.report(error, runId)
   }
   finally {
     loading.value = false
@@ -350,7 +416,7 @@ async function openSettings() {
   settingsOpen.value = true
   const request = ++settingsCompatibilityRequest
   settingsCompatibilityLoading.value = true
-  const compatible = await probe.compatibleAdapters(run.softwareId)
+  const compatible = await probe.compatibleAdapters(run.softwareId, run.id)
   if (request !== settingsCompatibilityRequest || run.id !== selectedRun.value?.id) {
     if (request === settingsCompatibilityRequest) settingsCompatibilityLoading.value = false
     return
@@ -514,7 +580,7 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
     await loadPage()
   }
   catch (error) {
-    probe.report(error)
+    probe.report(error, run.id)
   }
 }
 
@@ -543,7 +609,7 @@ function saveTranslation(source: string) {
       await loadPage()
     }
     catch (error) {
-      probe.report(error)
+      probe.report(error, run.id)
     }
   })
   translationSaveQueue = task
@@ -598,6 +664,42 @@ async function openBoundDictionary() {
   if (!dictionaryId) return
   for (const source of [...dirtyTranslations]) await saveTranslation(source)
   if (!dirtyTranslations.size) emit('open-dictionary', dictionaryId)
+}
+
+async function launchSelectedSoftware() {
+  const run = selectedRun.value
+  if (!run || launchingSoftware.value) return
+  probe.clearMessage()
+  launchingSoftware.value = true
+  try {
+    if ('__TAURI_INTERNALS__' in window) await invoke('desktop_launch_software', { softwareId: run.softwareId })
+  }
+  catch (error) {
+    probe.report(error, run.id)
+  }
+  finally {
+    launchingSoftware.value = false
+  }
+}
+
+async function recoverWithCollectionOnly() {
+  const run = selectedRun.value
+  const adapterIds = [...collectionRecoveryAdapterIds.value]
+  if (!run || !adapterIds.length || probe.busy.value) return
+  collectionRecoveryNotice.value = ''
+  const updated = await probe.update({
+    runId: run.id,
+    name: run.name,
+    dictionaryId: run.dictionaryId,
+    adapterIds,
+    livePreviewEnabled: false,
+  })
+  if (!updated) return
+  const resumed = await probe.resume(updated.id)
+  if (!resumed) return
+  collectionRecoveryNotice.value = t('capture.collectionRecoveryStarted')
+  emit('workspace-changed')
+  await loadPage()
 }
 
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
@@ -753,6 +855,16 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </template>
       <template #actions>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-tabler-app-window"
+          :label="t('capture.launchSoftware')"
+          :loading="launchingSoftware"
+          :disabled="!selectedSoftware?.executablePath"
+          @click="launchSelectedSoftware"
+        />
         <template v-if="selectedRun.quickProbe">
           <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-bookmark" :label="t('capture.quickProbe.retain')" :loading="probe.busy.value" @click="retainQuickProbe" />
           <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.quickProbe.cleanup')" :disabled="probe.busy.value" @click="pendingQuickCleanup = selectedRun" />
@@ -776,7 +888,16 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
+    <div v-if="probe.message.value" class="mb-3">
+      <UAlert role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" />
+      <div v-if="collectionRecoveryActionVisible" class="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
+        <span class="text-[10px] leading-4 text-[var(--text-muted)]">
+          {{ collectionRecoveryLoading ? t('capture.collectionRecoveryChecking') : collectionRecoveryAvailable ? t('capture.collectionRecoveryHint') : t('capture.collectionRecoveryUnavailable') }}
+        </span>
+        <UButton v-if="collectionRecoveryAvailable" color="primary" variant="soft" size="sm" icon="i-tabler-eye" :label="t('capture.collectionRecoveryAction')" :loading="probe.busy.value" @click="recoverWithCollectionOnly" />
+      </div>
+    </div>
+    <UAlert v-else-if="collectionRecoveryNotice" role="status" color="success" variant="soft" :title="t('capture.collectionRecoveryTitle')" :description="collectionRecoveryNotice" class="mb-3" />
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
 
@@ -798,7 +919,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </section>
 
     <template v-if="selectedRun">
-      <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')">
+      <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
@@ -842,7 +963,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </ManagementTableFrame>
     </template>
 
-    <ManagementTableFrame v-else v-model:query="listQuery" v-model:page="listPage" v-model:page-size="listPageSize" :search-placeholder="t('capture.searchRuns')" :search-label="t('capture.searchRuns')" :selected-count="listSelected.size" :selected-label="t('capture.runItemLabel')" :total="filteredRuns.length" :item-label="t('capture.runItemLabel')">
+    <ManagementTableFrame v-else v-model:query="listQuery" v-model:page="listPage" v-model:page-size="listPageSize" :search-placeholder="t('capture.searchRuns')" :search-label="t('capture.searchRuns')" :column-options="runColumnOptions" :columns-label="t('table.columns')" :selected-count="listSelected.size" :selected-label="t('capture.runItemLabel')" :total="filteredRuns.length" :item-label="t('capture.runItemLabel')" @toggle-column="toggleRunColumn">
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('capture.bulkDelete')" :disabled="bulkRunDeletionBlocked" @click="pendingRemoval = probe.runs.value.filter(run => listSelected.has(run.id))" />
       </template>
@@ -933,9 +1054,9 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <h3 id="capture-danger-title" class="m-0 text-[11px] font-semibold text-[var(--text)]">{{ t('capture.dangerTitle') }}</h3>
-              <p class="mt-1 mb-0 max-w-[42ch] text-[9px] leading-4 text-[var(--text-muted)]">{{ settingsConfigurationLocked ? t('capture.clearAllLocked') : t('capture.clearAllHint') }}</p>
+              <p class="mt-1 mb-0 max-w-[42ch] text-[9px] leading-4 text-[var(--text-muted)]">{{ clearEntriesLocked ? t('capture.clearAllLocked') : t('capture.clearAllHint') }}</p>
             </div>
-            <UButton data-testid="capture-clear-all" color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.clearAll')" :disabled="settingsConfigurationLocked || (!selectedRun?.observedCount && !selectedRun?.dictionaryEntryCount)" @click="requestClearAll" />
+            <UButton data-testid="capture-clear-all" color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.clearAll')" :disabled="clearEntriesLocked || (!selectedRun?.observedCount && !selectedRun?.dictionaryEntryCount)" @click="requestClearAll" />
           </div>
         </section>
       </div>

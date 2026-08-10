@@ -385,7 +385,9 @@ impl DesktopRuntimePool {
             .iter()
             .any(|software_id| self.capture_targets.contains(software_id))
         {
-            return Err(DesktopRuntimeError::InvalidState);
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Capture,
+            ));
         }
         if self.workflow_targets.iter().any(|(workflow_id, owned)| {
             workflow_id.as_ref() != intent.workflow_id()
@@ -393,7 +395,9 @@ impl DesktopRuntimePool {
                     .iter()
                     .any(|software_id| target_ids.contains(software_id))
         }) {
-            return Err(DesktopRuntimeError::InvalidState);
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Workflow,
+            ));
         }
 
         let mut statuses = Vec::new();
@@ -528,13 +532,19 @@ impl DesktopRuntimePool {
         capture: CaptureConfiguration,
     ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
         let application_id = application_id.into();
-        if self.capture_targets.contains(application_id.as_ref())
-            || self
-                .workflow_targets
-                .values()
-                .any(|targets| targets.contains(application_id.as_ref()))
+        if self.capture_targets.contains(application_id.as_ref()) {
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Capture,
+            ));
+        }
+        if self
+            .workflow_targets
+            .values()
+            .any(|targets| targets.contains(application_id.as_ref()))
         {
-            return Err(DesktopRuntimeError::InvalidState);
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Workflow,
+            ));
         }
         let status = self.discover(application_id.clone(), spec)?;
         if !status.supports(Feature::TextObserve) || status.is_active() {
@@ -554,6 +564,7 @@ impl DesktopRuntimePool {
                 .collect::<Vec<_>>()
         };
         if target_ids.is_empty() {
+            self.discard_session(application_id.as_ref());
             return Err(DesktopRuntimeError::UnknownTarget);
         }
         let mut requested_features = BTreeSet::from([Feature::TextObserve]);
@@ -561,10 +572,7 @@ impl DesktopRuntimePool {
             requested_features.insert(Feature::TextReplace);
         }
         if let Err(error) = runtime.start_capture(&target_ids, &requested_features, capture) {
-            if let Some(mut failed) = self.sessions.remove(application_id.as_ref()) {
-                failed.abandon();
-            }
-            self.requested_features.remove(application_id.as_ref());
+            self.discard_session(application_id.as_ref());
             return Err(error);
         }
         let runtime = self
@@ -575,6 +583,13 @@ impl DesktopRuntimePool {
             .insert(application_id.clone(), requested_features.clone());
         self.capture_targets.insert(application_id.clone());
         Ok(runtime_status(runtime.as_ref(), requested_features))
+    }
+
+    fn discard_session(&mut self, application_id: &str) {
+        if let Some(mut runtime) = self.sessions.remove(application_id) {
+            runtime.abandon();
+        }
+        self.requested_features.remove(application_id);
     }
 
     pub fn stop_capture(
@@ -744,7 +759,9 @@ const fn map_runtime_acquisition_error(error: DesktopRuntimeError) -> DesktopAcq
         DesktopRuntimeError::AcquisitionWorkerUnavailable => {
             DesktopAcquisitionError::WorkerUnavailable
         }
-        DesktopRuntimeError::InvalidState => DesktopAcquisitionError::InvalidState,
+        DesktopRuntimeError::TargetInUse(_) | DesktopRuntimeError::InvalidState => {
+            DesktopAcquisitionError::InvalidState
+        }
         DesktopRuntimeError::ControllerUnavailable
         | DesktopRuntimeError::ControllerRejected
         | DesktopRuntimeError::ProtocolRejected

@@ -115,6 +115,30 @@ fn capture_sink_caps_unique_entries_without_blocking_the_observer() {
 }
 
 #[test]
+fn preferred_sources_displace_fallback_evidence_when_capacity_is_full() {
+    let root = tempdir().expect("capture root");
+    let output = root.path().join("capture.json");
+    let configuration = CaptureConfiguration::new(
+        CaptureSessionId::new("capture-source-priority").expect("session id"),
+        &output,
+        1,
+    )
+    .expect("configuration")
+    .with_fallback_adapters(["synthetic.a-observer"])
+    .expect("fallback source policy");
+    let sink = FileCaptureSink::start(configuration).expect("capture sink");
+
+    sink.observe("synthetic.a-observer", "Fallback text");
+    sink.observe("synthetic.z-writeback", "Writeback text");
+    let catalog = sink.finish().expect("finished catalog");
+
+    assert_eq!(catalog.entries().len(), 1);
+    assert_eq!(catalog.entries()[0].adapter_id(), "synthetic.z-writeback");
+    assert_eq!(catalog.entries()[0].source(), "Writeback text");
+    assert_eq!(catalog.dropped_observations(), 1);
+}
+
+#[test]
 fn capture_sink_checkpoints_while_running_and_pause_does_not_end_the_session() {
     let root = tempdir().expect("capture root");
     let output = root.path().join("capture.json");

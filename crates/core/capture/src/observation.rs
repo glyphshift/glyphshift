@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub const CAPTURE_OBSERVATION_BATCH_SCHEMA: &str = "glyphshift.capture-observation-batch/1";
@@ -42,6 +43,7 @@ pub struct CaptureConfiguration {
     session_id: CaptureSessionId,
     output_path: PathBuf,
     max_entries: u32,
+    fallback_adapters: BTreeSet<Box<str>>,
 }
 
 impl CaptureConfiguration {
@@ -58,7 +60,26 @@ impl CaptureConfiguration {
             session_id,
             output_path,
             max_entries,
+            fallback_adapters: BTreeSet::new(),
         })
+    }
+
+    pub fn with_fallback_adapters(
+        mut self,
+        adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Result<Self, CaptureError> {
+        let adapter_ids = adapter_ids
+            .into_iter()
+            .map(Into::into)
+            .collect::<BTreeSet<_>>();
+        if adapter_ids
+            .iter()
+            .any(|adapter_id| !safe_identifier(adapter_id))
+        {
+            return Err(CaptureError::InvalidConfiguration);
+        }
+        self.fallback_adapters = adapter_ids;
+        Ok(self)
     }
 
     #[must_use]
@@ -74,6 +95,10 @@ impl CaptureConfiguration {
     #[must_use]
     pub const fn max_entries(&self) -> u32 {
         self.max_entries
+    }
+
+    pub(crate) fn fallback_adapters(&self) -> &BTreeSet<Box<str>> {
+        &self.fallback_adapters
     }
 }
 

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { translateCommandError } from './commandError'
+import { isCommandError, translateCommandError, type CommandError } from './commandError'
 import { i18n } from './i18n'
 import type { ProbeEntryPage, ProbeExportFormat, ProbeRunSummary } from './model'
 
@@ -52,11 +52,19 @@ export interface QuickProbeCleanupResult {
   dictionary: 'removed' | 'reused' | 'retained'
 }
 
+export type ProbeActivityStatus = 'running' | 'paused' | null
+
 const runs = ref<ProbeRunSummary[]>([])
+const activityStatus = computed<ProbeActivityStatus>(() => {
+  if (runs.value.some(run => run.status === 'running')) return 'running'
+  if (runs.value.some(run => run.status === 'paused')) return 'paused'
+  return null
+})
 const selectedRunId = ref(localStorage.getItem('glyphshift.probe.selectedRun') ?? '')
 const busy = ref(false)
 const polling = ref(false)
 const message = ref('')
+const lastError = ref<CommandError | null>(null)
 let connected = false
 
 function hasDesktopRuntime() {
@@ -71,6 +79,7 @@ function upsert(summary: ProbeRunSummary) {
 }
 
 function selectRun(id: string) {
+  if (selectedRunId.value !== id) clearMessage()
   selectedRunId.value = id
   if (id) localStorage.setItem('glyphshift.probe.selectedRun', id)
   else localStorage.removeItem('glyphshift.probe.selectedRun')
@@ -78,6 +87,13 @@ function selectRun(id: string) {
 
 function clearMessage() {
   message.value = ''
+  lastError.value = null
+}
+
+function reportError(error: unknown, runId?: string) {
+  if (runId && selectedRunId.value !== runId) return
+  lastError.value = isCommandError(error) ? error : null
+  message.value = translateCommandError(error)
 }
 
 export function useProbeRuns() {
@@ -86,25 +102,26 @@ export function useProbeRuns() {
   async function connect() {
     if (connected) return
     connected = true
-    message.value = ''
+    clearMessage()
     if (hasDesktopRuntime()) {
       try {
-        runs.value = await invoke<ProbeRunSummary[]>('desktop_probe_runs')
+        const loaded = await invoke<ProbeRunSummary[]>('desktop_probe_runs')
+        runs.value = Array.isArray(loaded) ? loaded : []
       }
       catch (error) {
-        message.value = translateCommandError(error)
+        reportError(error)
       }
     }
     if (!runs.value.some(item => item.id === selectedRunId.value)) selectRun('')
   }
 
-  async function compatibleAdapters(softwareId: string) {
+  async function compatibleAdapters(softwareId: string, runId?: string) {
     if (!hasDesktopRuntime()) return null
     try {
       return await invoke<string[]>('desktop_compatible_probe_adapters', { softwareId })
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return []
     }
   }
@@ -112,7 +129,7 @@ export function useProbeRuns() {
   async function createFromSources(input: ProbeCreationInput, fallback: ProbeCreationBrowserFallback) {
     if (busy.value) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const now = Date.now()
       const ownsSoftware = input.target.kind === 'active_process' && !fallback.softwareId
@@ -144,7 +161,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error)
       return null
     }
     finally {
@@ -157,7 +174,7 @@ export function useProbeRuns() {
     const current = runs.value.find(run => run.id === runId)
     if (!current) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const summary = hasDesktopRuntime()
         ? await invoke<ProbeRunSummary>('desktop_retain_quick_probe', { runId })
@@ -166,7 +183,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return null
     }
     finally {
@@ -177,7 +194,7 @@ export function useProbeRuns() {
   async function cleanupQuickProbe(runId: string) {
     if (busy.value) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const result = hasDesktopRuntime()
         ? await invoke<QuickProbeCleanupResult>('desktop_cleanup_quick_probe', { runId })
@@ -187,7 +204,7 @@ export function useProbeRuns() {
       return result
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return null
     }
     finally {
@@ -198,7 +215,7 @@ export function useProbeRuns() {
   async function remove(runIds: string[]) {
     if (busy.value || !runIds.length) return false
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       if (hasDesktopRuntime()) await invoke('desktop_delete_probe_runs', { runIds })
       runs.value = runs.value.filter(run => !runIds.includes(run.id))
@@ -206,7 +223,7 @@ export function useProbeRuns() {
       return true
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error)
       return false
     }
     finally {
@@ -217,7 +234,7 @@ export function useProbeRuns() {
   async function update(input: ProbeRunUpdateInput) {
     if (busy.value) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const summary = hasDesktopRuntime()
         ? await invoke<ProbeRunSummary>('desktop_update_probe_run', { request: input })
@@ -239,7 +256,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, input.runId)
       return null
     }
     finally {
@@ -250,7 +267,7 @@ export function useProbeRuns() {
   async function clearEntries(runId: string) {
     if (busy.value) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const summary = hasDesktopRuntime()
         ? await invoke<ProbeRunSummary>('desktop_clear_probe_run_entries', { runId })
@@ -274,7 +291,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return null
     }
     finally {
@@ -297,14 +314,14 @@ export function useProbeRuns() {
   async function runSummaryCommand(command: string, args: Record<string, unknown>) {
     if (busy.value || !hasDesktopRuntime()) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const summary = await invoke<ProbeRunSummary>(command, args)
       upsert(summary)
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, typeof args.runId === 'string' ? args.runId : undefined)
       return null
     }
     finally {
@@ -321,7 +338,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return null
     }
     finally {
@@ -355,7 +372,7 @@ export function useProbeRuns() {
   async function syncDictionaryEntries(runId: string, entries: ProbeDictionarySyncEntry[]) {
     if (busy.value || !entries.length) return null
     busy.value = true
-    message.value = ''
+    clearMessage()
     try {
       const summary = hasDesktopRuntime()
         ? await invoke<ProbeRunSummary>('desktop_sync_probe_dictionary_entries', {
@@ -377,7 +394,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return null
     }
     finally {
@@ -405,22 +422,24 @@ export function useProbeRuns() {
       return true
     }
     catch (error) {
-      message.value = translateCommandError(error)
+      reportError(error, runId)
       return false
     }
   }
 
-  function report(error: unknown) {
-    message.value = translateCommandError(error)
+  function report(error: unknown, runId?: string) {
+    reportError(error, runId)
   }
 
   return {
     runs,
+    activityStatus,
     selectedRunId,
     selectedRun,
     busy,
     polling,
     message,
+    lastError,
     connect,
     clearMessage,
     selectRun,

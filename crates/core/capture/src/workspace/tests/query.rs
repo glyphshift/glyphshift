@@ -93,3 +93,50 @@ fn query_filters_joined_rows_by_run_adapter_without_changing_full_exports() {
         observations_before
     );
 }
+
+#[test]
+fn joined_rows_preserve_the_run_source_priority_regardless_of_arrival_order() {
+    let (_root, mut store) = run_store();
+    let summary = store
+        .create(
+            ProbeRunCreate::new(
+                "probe-source-priority",
+                "Source priority probe",
+                "software-one",
+                "dictionary-one",
+                ["synthetic.z-writeback", "synthetic.a-observer"],
+                false,
+            )
+            .expect("probe create"),
+        )
+        .expect("create run");
+    let sink = FileCaptureSink::start(
+        store
+            .capture_configuration(summary.id(), 100)
+            .expect("capture config"),
+    )
+    .expect("capture sink");
+
+    // The fallback observer reports first, but the run's explicit source
+    // priority must remain authoritative for the joined presentation.
+    sink.observe("synthetic.a-observer", "Open");
+    sink.observe("synthetic.z-writeback", "Open");
+    sink.finish().expect("finish capture");
+
+    let page = store
+        .query_entries(
+            summary.id(),
+            &ProbeQuery::new("", 1, 20).expect("query"),
+            &ProbeDictionarySnapshot::new(1, []).expect("empty dictionary"),
+        )
+        .expect("joined page");
+
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(
+        page.rows[0].adapter_ids,
+        vec![
+            Box::<str>::from("synthetic.z-writeback"),
+            Box::<str>::from("synthetic.a-observer"),
+        ]
+    );
+}

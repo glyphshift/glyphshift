@@ -254,11 +254,23 @@ impl DesktopApplication {
         &mut self,
         request: ProbeRunCreateRequest,
     ) -> Result<ProbeRunView, CommandError> {
-        if self.active_probe_run_id.is_some() {
+        let held_probe_exists =
+            self.probe_runs
+                .list()
+                .map_err(probe_run_error)?
+                .iter()
+                .any(|summary| {
+                    matches!(
+                        summary.status(),
+                        ProbeRunStatus::Running | ProbeRunStatus::Paused
+                    )
+                });
+        if self.active_probe_run_id.is_some() || held_probe_exists {
             return Err(CommandError::new("capture.already_active"));
         }
-        self.ensure_compatible_probe_adapters(&request.software_id, &request.adapter_ids)?;
-        if request.live_preview_enabled && !self.adapters_support_preview(&request.adapter_ids) {
+        let adapter_ids = self.prioritize_probe_adapter_ids(&request.adapter_ids);
+        self.ensure_compatible_probe_adapters(&request.software_id, &adapter_ids)?;
+        if request.live_preview_enabled && !self.adapters_support_preview(&adapter_ids) {
             return Err(CommandError::new("capture.preview_unavailable"));
         }
         let dictionary_id = match request.dictionary {
@@ -289,7 +301,7 @@ impl DesktopApplication {
             request.name,
             request.software_id,
             dictionary_id,
-            request.adapter_ids,
+            adapter_ids,
             request.live_preview_enabled,
         )
         .map_err(probe_run_error)?;
@@ -324,23 +336,23 @@ impl DesktopApplication {
                 CommandError::new("dictionary.not_found")
                     .with_arg("dictionaryId", request.dictionary_id.to_string())
             })?;
-        let configuration_changed = current.adapter_ids() != request.adapter_ids.as_slice()
+        let adapter_ids = self.prioritize_probe_adapter_ids(&request.adapter_ids);
+        let configuration_changed = current.adapter_ids() != adapter_ids.as_slice()
             || current.dictionary_id() != request.dictionary_id.as_ref()
             || current.live_preview_enabled() != request.live_preview_enabled;
         if configuration_changed {
-            self.ensure_compatible_probe_adapters(current.software_id(), &request.adapter_ids)?;
+            self.ensure_compatible_probe_adapters(current.software_id(), &adapter_ids)?;
             self.backend
-                .capture_runtime_spec(current.software_id(), &request.adapter_ids)
+                .capture_runtime_spec(current.software_id(), &adapter_ids)
                 .map_err(capture_backend_error)?;
-            if request.live_preview_enabled && !self.adapters_support_preview(&request.adapter_ids)
-            {
+            if request.live_preview_enabled && !self.adapters_support_preview(&adapter_ids) {
                 return Err(CommandError::new("capture.preview_unavailable"));
             }
         }
         let update = ProbeRunUpdate::new(
             request.name,
             request.dictionary_id,
-            request.adapter_ids,
+            adapter_ids,
             request.live_preview_enabled,
         )
         .map_err(probe_run_error)?;
@@ -355,15 +367,27 @@ impl DesktopApplication {
         &mut self,
         run_id: &str,
     ) -> Result<ProbeRunView, CommandError> {
-        if self.active_probe_run_id.as_deref() == Some(run_id) {
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        let is_active = self.active_probe_run_id.as_deref() == Some(run_id);
+        if summary.status() == ProbeRunStatus::Running
+            || (is_active && summary.status() != ProbeRunStatus::Paused)
+        {
             return Err(CommandError::new("capture.invalid_state"));
         }
-        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        if matches!(
-            summary.status(),
-            ProbeRunStatus::Running | ProbeRunStatus::Paused
-        ) {
-            return Err(CommandError::new("capture.invalid_state"));
+        let preserve_paused = summary.status() == ProbeRunStatus::Paused;
+        if is_active {
+            self.runtimes
+                .as_mut()
+                .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+                .stop_capture(summary.software_id())
+                .map_err(|error| runtime_command_error(error, false))?;
+            self.active_probe_run_id = None;
+            self.active_probe_capability = None;
+        }
+        if preserve_paused {
+            self.probe_runs
+                .set_status(run_id, ProbeRunStatus::Ready)
+                .map_err(probe_run_error)?;
         }
         self.probe_runs
             .clear_observations(run_id)
@@ -384,6 +408,11 @@ impl DesktopApplication {
                 .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
             self.reconcile_enabled_workflows()?;
         }
+        if preserve_paused {
+            self.probe_runs
+                .set_status(run_id, ProbeRunStatus::Paused)
+                .map_err(probe_run_error)?;
+        }
         self.probe_run_summary(run_id)
     }
 
@@ -400,10 +429,22 @@ impl DesktopApplication {
             return Err(CommandError::new("capture.already_active"));
         }
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        if matches!(
-            summary.status(),
-            ProbeRunStatus::Running | ProbeRunStatus::Paused
-        ) {
+        let another_probe_is_held =
+            self.probe_runs
+                .list()
+                .map_err(probe_run_error)?
+                .iter()
+                .any(|candidate| {
+                    candidate.id() != run_id
+                        && matches!(
+                            candidate.status(),
+                            ProbeRunStatus::Running | ProbeRunStatus::Paused
+                        )
+                });
+        if another_probe_is_held {
+            return Err(CommandError::new("capture.already_active"));
+        }
+        if summary.status() == ProbeRunStatus::Running {
             return Err(CommandError::new("capture.already_active"));
         }
         self.ensure_compatible_probe_adapters(summary.software_id(), summary.adapter_ids())?;
@@ -414,7 +455,9 @@ impl DesktopApplication {
         let configuration = self
             .probe_runs
             .capture_configuration(run_id, DEFAULT_MAX_ENTRIES)
-            .map_err(probe_run_error)?;
+            .map_err(probe_run_error)?
+            .with_fallback_adapters(self.fallback_probe_adapter_ids(summary.adapter_ids()))
+            .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
         let start_result = self
             .runtimes
             .as_mut()
@@ -424,6 +467,9 @@ impl DesktopApplication {
             Ok(capability) => capability,
             Err(DesktopRuntimeError::UnknownTarget) if allow_offline_target => {
                 return self.probe_run_view(summary);
+            }
+            Err(DesktopRuntimeError::TargetInUse(TargetExecutionOwner::Workflow)) => {
+                return Err(CommandError::new("capture.target_in_use_by_workflow"));
             }
             Err(error) => return Err(runtime_command_error(error, true)),
         };
@@ -451,6 +497,10 @@ impl DesktopApplication {
         paused: bool,
     ) -> Result<ProbeRunView, CommandError> {
         if self.active_probe_run_id.as_deref() != Some(run_id) {
+            let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+            if !paused && summary.status() == ProbeRunStatus::Paused {
+                return self.start_probe_run_runtime(run_id, false);
+            }
             return Err(CommandError::new("capture.not_active"));
         }
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
@@ -478,6 +528,14 @@ impl DesktopApplication {
         run_id: &str,
     ) -> Result<ProbeRunView, CommandError> {
         if self.active_probe_run_id.as_deref() != Some(run_id) {
+            let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+            if summary.status() == ProbeRunStatus::Paused {
+                let summary = self
+                    .probe_runs
+                    .set_status(run_id, ProbeRunStatus::Ready)
+                    .map_err(probe_run_error)?;
+                return self.probe_run_view(summary);
+            }
             return Err(CommandError::new("capture.not_active"));
         }
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
@@ -686,18 +744,34 @@ impl DesktopApplication {
         !self.preview_adapter_ids(adapter_ids).is_empty()
     }
 
+    pub(super) fn prioritize_probe_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
+        let mut prioritized = adapter_ids.to_vec();
+        prioritized.sort_by_key(|adapter_id| !self.adapter_supports_replacement(adapter_id));
+        prioritized
+    }
+
+    pub(super) fn fallback_probe_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
+        adapter_ids
+            .iter()
+            .filter(|adapter_id| !self.adapter_supports_replacement(adapter_id))
+            .cloned()
+            .collect()
+    }
+
+    fn adapter_supports_replacement(&self, adapter_id: &str) -> bool {
+        self.adapters.iter().any(|adapter| {
+            adapter.id.as_ref() == adapter_id
+                && adapter
+                    .features
+                    .iter()
+                    .any(|feature| feature.as_ref() == "textReplace")
+        })
+    }
+
     pub(super) fn preview_adapter_ids(&self, adapter_ids: &[Box<str>]) -> Vec<Box<str>> {
         adapter_ids
             .iter()
-            .filter(|adapter_id| {
-                self.adapters.iter().any(|adapter| {
-                    adapter.id.as_ref() == adapter_id.as_ref()
-                        && adapter
-                            .features
-                            .iter()
-                            .any(|feature| feature.as_ref() == "textReplace")
-                })
-            })
+            .filter(|adapter_id| self.adapter_supports_replacement(adapter_id))
             .cloned()
             .collect()
     }

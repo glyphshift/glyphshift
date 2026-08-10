@@ -36,7 +36,7 @@ use glyphshift_desktop_runtime::{
     AcquisitionResult, DesktopAcquisitionCancellation, DesktopAcquisitionError, DesktopPoint,
     DesktopRect, DesktopRuntimeError, DesktopRuntimePool, DesktopRuntimeStatus,
     HostOperationFailure, RuntimeBundle, RuntimeTraceBatch, RuntimeTraceRecord,
-    WorkflowReconcileReport,
+    TargetExecutionOwner, WorkflowReconcileReport,
 };
 use glyphshift_dictionary_distribution::{
     ArtifactStatement, ArtifactTrustVerifier, CatalogPage, CatalogPortError, CatalogQuery,
@@ -75,9 +75,12 @@ use workflow::{
     idle_workflow_runtime_view, runtime_command_error, workflow_runtime_view, WorkflowRuntimeView,
 };
 #[cfg(test)]
-use workflow::{workflow_activation_command_error, WorkflowTargetRuntimeView};
+use workflow::{
+    runtime_command_error_with_privilege, workflow_activation_command_error,
+    WorkflowTargetRuntimeView,
+};
 
-const DESKTOP_API_VERSION: u16 = 26;
+const DESKTOP_API_VERSION: u16 = 27;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -836,6 +839,7 @@ pub fn run() {
             software::desktop_add_software,
             software::desktop_update_software,
             software::desktop_select_software,
+            software::desktop_launch_software,
             workflow::desktop_enable_workflow,
             workflow::desktop_disable_workflow,
             workflow::desktop_refresh_workflows,

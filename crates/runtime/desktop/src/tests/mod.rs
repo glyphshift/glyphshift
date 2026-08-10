@@ -128,6 +128,30 @@ struct RetryRuntimeFactory {
     discoveries: Arc<AtomicUsize>,
 }
 
+struct OfflineThenRunningRuntimeFactory {
+    discoveries: Arc<AtomicUsize>,
+}
+
+impl RuntimeFactory for OfflineThenRunningRuntimeFactory {
+    fn discover(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+        let offline = self.discoveries.fetch_add(1, Ordering::SeqCst) == 0;
+        Ok(Box::new(InMemoryRuntime {
+            application_id,
+            active_features: BTreeSet::new(),
+            generation: spec.publication().generation(),
+            stop_fails: false,
+            target_ids: if offline { Vec::new() } else { vec![1] },
+            captured_target_ids: None,
+            acquisition_instance_id: 0,
+            acquisition_calls: None,
+        }))
+    }
+}
+
 impl RuntimeFactory for RetryRuntimeFactory {
     fn discover(
         &mut self,

@@ -739,8 +739,22 @@ impl ProbeRunStore {
                 row.last_seen_ms = row.last_seen_ms.max(entry.last_seen_ms());
             }
         }
+        let priority = document
+            .summary
+            .adapter_ids
+            .iter()
+            .enumerate()
+            .map(|(index, adapter_id)| (adapter_id.as_ref(), index))
+            .collect::<BTreeMap<_, _>>();
         for row in aggregate.values_mut() {
-            row.adapter_ids.sort();
+            row.adapter_ids.sort_by(|left, right| {
+                priority
+                    .get(left.as_ref())
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .cmp(&priority.get(right.as_ref()).copied().unwrap_or(usize::MAX))
+                    .then_with(|| left.cmp(right))
+            });
             row.adapter_ids.dedup();
             if let Some(translation) = translations.get(row.source.as_ref()) {
                 row.translation = (*translation).into();

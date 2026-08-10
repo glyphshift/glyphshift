@@ -90,9 +90,16 @@ pub enum DesktopRuntimeError {
     ProtocolRejected,
     UnknownTarget,
     AcquisitionWorkerUnavailable,
+    TargetInUse(TargetExecutionOwner),
     InvalidState,
     SessionRejected,
     ActivationRejected(HostOperationFailure),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetExecutionOwner {
+    Workflow,
+    Capture,
 }
 
 #[cfg(test)]

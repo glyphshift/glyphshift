@@ -12,6 +12,7 @@ import type {
   DictionarySummary,
 } from '../model'
 import { editableRowIndex } from '../tableInteraction'
+import { useTableColumns } from '../useTableColumns'
 
 const props = defineProps<{
   items: DictionarySummary[]
@@ -47,6 +48,17 @@ const catalogTag = ref('')
 const catalogPageNumber = ref(1)
 const catalogPageSize = ref(20)
 const catalogCursors = ref<(string | null)[]>([null])
+const { columns: localVisibleColumns, toggleColumn: toggleLocalColumn } = useTableColumns('glyphshift.table-columns.dictionaries.local', {
+  languages: true,
+  release: true,
+  installation: true,
+  rules: true,
+})
+const { columns: catalogVisibleColumns, toggleColumn: toggleCatalogColumn } = useTableColumns('glyphshift.table-columns.dictionaries.catalog', {
+  languages: true,
+  release: true,
+  tags: true,
+})
 
 function emptyMetadata(): DictionaryMetadata {
   return {
@@ -75,20 +87,31 @@ const filtered = computed(() => {
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
 const pageSelected = computed(() => Boolean(pageItems.value.length) && pageItems.value.every(item => selected.value.has(item.metadata.id)))
+const localColumnOptions = computed(() => [
+  { key: 'languages', label: t('dictionaries.columns.languages'), visible: localVisibleColumns.value.languages },
+  { key: 'release', label: t('dictionaries.columns.release'), visible: localVisibleColumns.value.release },
+  { key: 'installation', label: t('dictionaries.columns.installation'), visible: localVisibleColumns.value.installation },
+  { key: 'rules', label: t('dictionaries.columns.rules'), visible: localVisibleColumns.value.rules },
+])
+const catalogColumnOptions = computed(() => [
+  { key: 'languages', label: t('dictionaries.columns.languages'), visible: catalogVisibleColumns.value.languages },
+  { key: 'release', label: t('dictionaries.columns.release'), visible: catalogVisibleColumns.value.release },
+  { key: 'tags', label: t('dictionaries.columns.tags'), visible: catalogVisibleColumns.value.tags },
+])
 const tableColumns = computed<TableColumn<DictionarySummary>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
   { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[32%]', td: 'w-[32%]' } } },
-  { id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } },
-  { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } },
-  { id: 'installation', header: t('dictionaries.columns.installation'), meta: { class: { th: 'w-40', td: 'w-40' } } },
-  { id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+  ...(localVisibleColumns.value.languages ? [{ id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionarySummary>] : []),
+  ...(localVisibleColumns.value.release ? [{ id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<DictionarySummary>] : []),
+  ...(localVisibleColumns.value.installation ? [{ id: 'installation', header: t('dictionaries.columns.installation'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionarySummary>] : []),
+  ...(localVisibleColumns.value.rules ? [{ id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } } satisfies TableColumn<DictionarySummary>] : []),
   { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
 ])
 const catalogColumns = computed<TableColumn<DictionaryCatalogRelease>[]>(() => [
   { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[36%]', td: 'w-[36%]' } } },
-  { id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } },
-  { id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-40', td: 'w-40' } } },
-  { id: 'tags', header: t('dictionaries.columns.tags') },
+  ...(catalogVisibleColumns.value.languages ? [{ id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionaryCatalogRelease>] : []),
+  ...(catalogVisibleColumns.value.release ? [{ id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionaryCatalogRelease>] : []),
+  ...(catalogVisibleColumns.value.tags ? [{ id: 'tags', header: t('dictionaries.columns.tags') } satisfies TableColumn<DictionaryCatalogRelease>] : []),
   { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
 ])
 const removalDescription = computed(() => pendingRemoval.value.length === 1
@@ -355,10 +378,13 @@ async function chooseExport(item: DictionarySummary) {
       v-model:page-size="pageSize"
       :search-placeholder="t('dictionaries.searchPlaceholder')"
       :search-label="t('dictionaries.searchLabel')"
+      :column-options="localColumnOptions"
+      :columns-label="t('table.columns')"
       :selected-count="selected.size"
       :selected-label="t('dictionaries.itemLabel')"
       :total="filtered.length"
       :item-label="t('dictionaries.itemLabel')"
+      @toggle-column="toggleLocalColumn"
     >
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
@@ -413,6 +439,8 @@ async function chooseExport(item: DictionarySummary) {
       :page="catalogPageNumber"
       :search-placeholder="t('dictionaries.catalog.searchPlaceholder')"
       :search-label="t('dictionaries.catalog.searchLabel')"
+      :column-options="catalogColumnOptions"
+      :columns-label="t('table.columns')"
       :total="catalogPage.releases.length"
       :item-label="t('dictionaries.catalog.itemLabel')"
       pagination-mode="cursor"
@@ -420,6 +448,7 @@ async function chooseExport(item: DictionarySummary) {
       :has-next-page="Boolean(catalogPage.nextCursor)"
       :footer-summary="t('dictionaries.catalog.pageSummary', { page: catalogPageNumber, count: catalogPage.releases.length })"
       @search="requestCatalog(true)"
+      @toggle-column="toggleCatalogColumn"
       @previous-page="previousCatalogPage"
       @next-page="nextCatalogPage"
     >
