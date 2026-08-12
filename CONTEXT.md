@@ -127,14 +127,17 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
 
-**AI Profile**：可复用的 AI 翻译配置，包含 Provider Protocol、Base URL、手工模型 ID、批量限制与
-本机过滤策略。凭据只以引用关联到系统凭据保险库，不进入 Profile 制品或 App Settings。
+**AI Profile**：可复用的 AI 翻译连接与候选规则，包含 Provider Protocol、Base URL、手工模型 ID、
+并发策略与本机过滤策略。凭据只以引用关联到系统凭据保险库；全局批次限制不属于 Profile。
+
+**Translation Batch Policy**：所有 AI Profile 共用的单批条目上限与输入 Token 预算。切换 Profile
+不会改变它，超过任一限制时 Translation Job 自动继续下一批。
 
 **Translation Plan**：针对一个带 revision 的 Dictionary 草稿或 Probe 联合视图生成的短期候选集合。
 它只选择空白译文，记录每个跳过原因，并在发出网络请求前保护占位符。
 
-**Translation Job**：使用一个 AI Profile 分小批执行 Translation Plan 的可查询、可取消运行。取消
-只停止后续排批与写入，并丢弃迟到结果；已经完成的结果仍需在写回时重新检查原文、空白状态与 revision。
+**Translation Job**：使用一个 AI Profile 与全局 Translation Batch Policy 执行 Translation Plan 的
+可查询、可取消运行。取消只停止后续排批与写入，并丢弃迟到结果；已完成结果写回时仍需检查原文、空白状态与 revision。
 
 **Provider Protocol**：由独立 wire codec 实现的供应商协议。首批包含 OpenAI Responses、OpenAI
 Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateContent` 与 Ollama native；
@@ -148,8 +151,8 @@ Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateCont
 
 ## Application
 
-**App Settings**：应用级设备偏好聚合。`AppSettings/1` 仅包含界面语言偏好与主题偏好；首次运行
-默认深色，语言默认跟随系统。Dictionary、Font、Adapter、Software 与 Workflow 都不能进入它。
+**App Settings**：应用级设备偏好聚合，包含界面、设备行为、软件捕获快捷键与 Translation Batch
+Policy。Dictionary、Font、Adapter、Software、Workflow 和 AI Profile 都不能进入它。
 
 **UI Locale**：Glyphshift 自身菜单、按钮、提示与错误的展示语言。它与目标软件语言、Dictionary
 内容语言及动态 Artifact presentation locale 相互独立。
@@ -189,6 +192,8 @@ Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateCont
 - AI Profile Catalog 独立保存供应商协议、服务地址、模型与过滤策略；密钥只进入系统凭据保险库，
   不进入 App Settings、Dictionary metadata、日志或错误。Dictionary 下载来源与安装状态仍进入独立
   Catalog/Artifact seam。
+- Translation Batch Policy 只由 App Settings 保存并由所有 AI Profile 共用；Profile Catalog 不复制
+  单批条目或 Token 限制。
 - 顶部主题切换与设置页操作共同写入唯一 App Settings；页面和组件不各自维护主题副本。
 - 本机路径、实机样本、截图与日志只存在于被忽略的 `local-test/`。
 - 外部产品调研进入 Flightdeck 或其他跟踪文档时，只保留匿名化、可复用的技术汇总结论；不记录

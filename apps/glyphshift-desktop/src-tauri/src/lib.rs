@@ -19,7 +19,7 @@ use dictionary::{
 use glyphshift_capture::{
     CaptureConfiguration, ProbeDictionaryEntry, ProbeDictionarySnapshot, ProbeEntryPage,
     ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus, ProbeRunStore,
-    ProbeRunSummary, ProbeRunUpdate, DEFAULT_MAX_ENTRIES,
+    ProbeRunSummary, ProbeRunUpdate, ProbeTranslationFilter, DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
     current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,
@@ -77,7 +77,7 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 29;
+const DESKTOP_API_VERSION: u16 = 30;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 

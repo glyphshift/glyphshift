@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { save } from '@tauri-apps/plugin-dialog'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
+import { useAppSettings } from '../appSettings'
 import type {
   AdapterOption,
   DictionarySummary,
@@ -16,7 +17,7 @@ import type {
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { editableRowIndex } from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
-import { useProbeRuns, type QuickProbeCleanupResult } from '../useProbeRuns'
+import { useProbeRuns, type ProbeTranslationFilter, type QuickProbeCleanupResult } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -47,8 +48,10 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
 const ai = useAiTranslation()
+const appSettings = useAppSettings()
 const query = ref('')
 const adapterFilterIds = ref<string[]>([])
+const translationFilter = ref<ProbeTranslationFilter>('all')
 const page = ref(1)
 const pageSize = ref(50)
 
@@ -103,6 +106,11 @@ const selectedAiProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
 const aiPlan = ref<AiTranslationPlan | null>(null)
 const aiNotice = ref('')
+const aiNoticeTone = ref<'success' | 'warning'>('success')
+const aiRetryAvailable = ref(false)
+const aiNoticeTitle = computed(() => aiNoticeTone.value === 'warning'
+  ? t('ai.partialCompletion')
+  : t('ai.translationCompleted'))
 const {
   tableShell,
   scrollThumbHeight,
@@ -119,6 +127,7 @@ const dirtyTranslations = new Set<string>()
 const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let pageRequest = 0
 let settingsCompatibilityRequest = 0
 let translationSaveQueue = Promise.resolve()
 
@@ -155,6 +164,13 @@ const adapterFilterLabel = computed(() => {
   if (adapterFilterIds.value.length === 1) return adapterName(adapterFilterIds.value[0]!)
   return t('capture.adapterFilterSelected', { count: adapterFilterIds.value.length })
 })
+const translationFilterOptions = computed(() => (['all', 'untranslated', 'translated'] as const).map(value => ({
+  value,
+  label: t(`capture.translationFilter.${value}`),
+})))
+const translationFilterLabel = computed(() => translationFilterOptions.value.find(option => (
+  option.value === translationFilter.value
+))?.label ?? t('capture.translationFilter.all'))
 const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
@@ -318,6 +334,13 @@ watch(adapterFilterIds, async () => {
   await loadPage()
 }, { deep: true })
 
+watch(translationFilter, async () => {
+  page.value = 1
+  selected.value = new Set()
+  persistViewState()
+  await loadPage()
+})
+
 watch([listQuery, listPageSize], () => {
   listPage.value = 1
   listSelected.value = new Set()
@@ -349,6 +372,7 @@ onBeforeUnmount(() => {
 })
 
 async function loadPage() {
+  const request = ++pageRequest
   const runId = probe.selectedRunId.value
   if (!runId) {
     entryPage.value = {
@@ -363,24 +387,29 @@ async function loadPage() {
   }
   loading.value = true
   try {
-    entryPage.value = await probe.queryEntries({
+    const nextPage = await probe.queryEntries({
       runId,
       search: query.value,
       adapterIds: [...adapterFilterIds.value],
+      translationFilter: translationFilter.value,
       page: page.value,
       pageSize: pageSize.value,
     })
+    if (request !== pageRequest || runId !== probe.selectedRunId.value) return
+    entryPage.value = nextPage
     synchronizeTranslationValues(entryPage.value.rows)
     const maxPage = Math.max(1, Math.ceil(entryPage.value.total / pageSize.value))
     if (page.value > maxPage) page.value = maxPage
   }
   catch (error) {
-    probe.report(error, runId)
+    if (request === pageRequest) probe.report(error, runId)
   }
   finally {
-    loading.value = false
-    await nextTick()
-    updateScrollMetrics()
+    if (request === pageRequest) {
+      loading.value = false
+      await nextTick()
+      updateScrollMetrics()
+    }
   }
 }
 
@@ -388,6 +417,7 @@ async function prepareAiPlan() {
   const run = selectedRun.value
   const dictionary = selectedDictionary.value
   aiNotice.value = ''
+  aiRetryAvailable.value = false
   ai.error.value = ''
   if (!run || !dictionary) return null
   if (!selectedAiProfile.value) {
@@ -447,10 +477,24 @@ async function runAiTranslation(plan?: AiTranslationPlan | null) {
         translationValues.value[row.source] = translated.translation
       }
     }
-    aiNotice.value = t('ai.probeCompleted', {
-      applied: result.appliedCount,
-      skipped: result.skippedCount,
-    })
+    if (job.status === 'completed') {
+      aiNoticeTone.value = 'success'
+      aiNotice.value = t('ai.probeCompleted', {
+        applied: result.appliedCount,
+        skipped: result.skippedCount,
+        batches: job.totalBatches,
+      })
+    }
+    else {
+      aiNoticeTone.value = 'warning'
+      aiRetryAvailable.value = job.completedCount < job.totalCount
+      aiNotice.value = t('ai.probePartial', {
+        completed: job.completedCount,
+        total: job.totalCount,
+        applied: result.appliedCount,
+        failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
+      })
+    }
     aiPlan.value = null
   }
   catch {
@@ -761,6 +805,7 @@ function restoreViewState(runId: string) {
     const value = JSON.parse(localStorage.getItem(`glyphshift.probe.view.${runId}`) ?? '{}') as {
       query?: string
       adapterIds?: string[]
+      translationFilter?: ProbeTranslationFilter
       page?: number
       pageSize?: number
     }
@@ -769,12 +814,16 @@ function restoreViewState(runId: string) {
     adapterFilterIds.value = Array.isArray(value.adapterIds)
       ? [...new Set(value.adapterIds.filter(id => typeof id === 'string' && available.has(id)))]
       : []
+    translationFilter.value = ['all', 'untranslated', 'translated'].includes(value.translationFilter ?? '')
+      ? value.translationFilter!
+      : 'all'
     page.value = Math.max(1, value.page ?? 1)
     pageSize.value = [20, 50, 100].includes(value.pageSize ?? 0) ? value.pageSize! : 50
   }
   catch {
     query.value = ''
     adapterFilterIds.value = []
+    translationFilter.value = 'all'
     page.value = 1
     pageSize.value = 50
   }
@@ -786,6 +835,7 @@ function persistViewState() {
   localStorage.setItem(`glyphshift.probe.view.${runId}`, JSON.stringify({
     query: query.value,
     adapterIds: adapterFilterIds.value,
+    translationFilter: translationFilter.value,
     page: page.value,
     pageSize: pageSize.value,
   }))
@@ -954,14 +1004,16 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
     <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
-    <UAlert v-else-if="aiNotice" role="status" color="success" variant="soft" icon="i-tabler-sparkles" :title="t('ai.translationCompleted')" :description="aiNotice" class="mb-3" />
+    <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
+      <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
+    </UAlert>
     <UAlert
       v-if="ai.busy.value && ai.currentJob.value"
       role="status"
       color="primary"
       variant="soft"
       :title="t('ai.translating')"
-      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount })"
+      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches })"
       class="mb-3"
     >
       <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
@@ -985,7 +1037,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </section>
 
     <template v-if="selectedRun">
-      <ManagementTableFrame v-model:query="query" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
+      <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
@@ -1019,7 +1071,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             </template>
             <template #count-cell="{ row }"><div class="text-right tabular-nums">{{ row.original.count || '—' }}</div></template>
             <template #lastSeenMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.lastSeenMs) }}</span></template>
-            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
+            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
           </UTable>
 
           <div v-if="scrollThumbHeight" data-testid="capture-scrollbar" aria-hidden="true" class="absolute inset-y-2 right-1 z-20 w-2 cursor-pointer rounded-full bg-[var(--surface-subtle)] ring-1 ring-inset ring-[var(--border)]" @pointerdown="jumpScrollbar">
@@ -1101,6 +1153,9 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @update:open="aiPreviewOpen = $event"
       @confirm="runAiTranslation(aiPlan)"
     >
+      <p v-if="aiPlan?.candidates.length && selectedAiProfile" class="mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 text-[10px] leading-4 text-[var(--text-muted)]">
+        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, tokens: appSettings.aiTranslationBatch.value.maxInputTokensPerRequest }) }}
+      </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
         <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
           <UIcon name="i-tabler-arrow-right" class="size-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />

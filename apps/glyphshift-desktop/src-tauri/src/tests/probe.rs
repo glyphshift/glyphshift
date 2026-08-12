@@ -459,6 +459,9 @@ fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
     capture.observe(TEST_ADAPTER_ID, "Save");
     capture.observe(TEST_ADAPTER_ID, "42");
     capture.observe(TEST_ADAPTER_ID, "Open");
+    for index in 1..=51 {
+        capture.observe(TEST_ADAPTER_ID, format!("Pending item {index}"));
+    }
     glyphshift_capture::FileCaptureSink::finish(capture).expect("finish observations");
 
     let mut translation = glyphshift_ai_translation::AiTranslation::new();
@@ -470,13 +473,12 @@ fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
         )
         .expect("plan probe translations");
 
-    assert_eq!(
-        plan.candidates()
-            .iter()
-            .map(|item| item.source())
-            .collect::<Vec<_>>(),
-        vec!["Save"]
-    );
+    assert_eq!(plan.candidates().len(), 52);
+    assert!(plan
+        .candidates()
+        .iter()
+        .any(|item| item.source() == "Pending item 51"));
+    assert!(plan.candidates().iter().any(|item| item.source() == "Save"));
     assert!(plan.skipped().iter().any(|item| item.source() == "42"
         && item.reason() == glyphshift_ai_translation::SkipReason::PureNumberOrSymbols));
     assert!(plan.skipped().iter().any(|item| item.source() == "Open"

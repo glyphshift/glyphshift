@@ -241,8 +241,18 @@ impl ProbeDictionarySnapshot {
 pub struct ProbeQuery {
     search: Box<str>,
     adapter_ids: Vec<Box<str>>,
+    translation_filter: ProbeTranslationFilter,
     page: usize,
     page_size: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeTranslationFilter {
+    #[default]
+    All,
+    Untranslated,
+    Translated,
 }
 
 impl ProbeQuery {
@@ -257,6 +267,7 @@ impl ProbeQuery {
         Ok(Self {
             search: search.into(),
             adapter_ids: Vec::new(),
+            translation_filter: ProbeTranslationFilter::All,
             page,
             page_size,
         })
@@ -275,6 +286,15 @@ impl ProbeQuery {
         adapter_ids.sort();
         self.adapter_ids = adapter_ids;
         Ok(self)
+    }
+
+    #[must_use]
+    pub const fn with_translation_filter(
+        mut self,
+        translation_filter: ProbeTranslationFilter,
+    ) -> Self {
+        self.translation_filter = translation_filter;
+        self
     }
 }
 
@@ -603,7 +623,12 @@ impl ProbeRunStore {
                         .adapter_ids
                         .iter()
                         .any(|adapter| adapter.to_lowercase().contains(&needle));
-                matches_adapter && matches_search
+                let matches_translation = match query.translation_filter {
+                    ProbeTranslationFilter::All => true,
+                    ProbeTranslationFilter::Untranslated => row.translation.trim().is_empty(),
+                    ProbeTranslationFilter::Translated => !row.translation.trim().is_empty(),
+                };
+                matches_adapter && matches_search && matches_translation
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| {

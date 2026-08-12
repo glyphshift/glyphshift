@@ -8,9 +8,12 @@ export interface ProbeRunQueryInput {
   runId: string
   search: string
   adapterIds: string[]
+  translationFilter: ProbeTranslationFilter
   page: number
   pageSize: number
 }
+
+export type ProbeTranslationFilter = 'all' | 'untranslated' | 'translated'
 
 export interface ProbeRunUpdateInput {
   runId: string

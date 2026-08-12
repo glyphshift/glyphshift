@@ -81,8 +81,10 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
     assert_eq!(openai.base_url(), "https://api.openai.com/v1");
     let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
         .expect("read persisted profiles");
-    assert!(persisted.contains("glyphshift.ai-profiles/1"));
+    assert!(persisted.contains("glyphshift.ai-profiles/2"));
     assert!(persisted.contains("credentialRef"));
+    assert!(!persisted.contains("maxItemsPerRequest"));
+    assert!(!persisted.contains("maxInputCharsPerRequest"));
     assert!(!persisted.contains("synthetic-secret-value"));
     drop(catalog);
 

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
+import { useAppSettings } from '../appSettings'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const ai = useAiTranslation()
+const appSettings = useAppSettings()
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -43,6 +45,11 @@ const selectedProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
 const aiPlan = ref<AiTranslationPlan | null>(null)
 const aiNotice = ref('')
+const aiNoticeTone = ref<'success' | 'warning'>('success')
+const aiRetryAvailable = ref(false)
+const aiNoticeTitle = computed(() => aiNoticeTone.value === 'warning'
+  ? t('ai.partialCompletion')
+  : t('ai.translationCompleted'))
 
 watch(() => props.detail, (value) => {
   saved.value = clone(value)
@@ -189,6 +196,7 @@ function saveDraft() {
 
 async function prepareAiPlan() {
   aiNotice.value = ''
+  aiRetryAvailable.value = false
   if (!selectedProfile.value) {
     emit('configure-ai')
     return null
@@ -228,7 +236,22 @@ async function runAiTranslation(plan?: AiTranslationPlan | null) {
       entry.translation = result.translation
       applied += 1
     }
-    aiNotice.value = t('ai.dictionaryCompleted', { count: applied })
+    if (job.status === 'completed') {
+      aiNoticeTone.value = 'success'
+      aiNotice.value = t('ai.dictionaryCompleted', {
+        count: applied,
+        batches: job.totalBatches,
+      })
+    }
+    else {
+      aiNoticeTone.value = 'warning'
+      aiRetryAvailable.value = job.completedCount < job.totalCount
+      aiNotice.value = t('ai.dictionaryPartial', {
+        completed: job.completedCount,
+        total: job.totalCount,
+        failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
+      })
+    }
     aiPlan.value = null
   }
   catch {
@@ -274,14 +297,16 @@ usePageEscape(() => true, () => emit('back'))
     </ManagementDetailHeader>
 
     <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
-    <UAlert v-else-if="aiNotice" role="status" color="success" variant="soft" icon="i-tabler-sparkles" :title="t('ai.translationCompleted')" :description="aiNotice" class="mb-3" />
+    <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
+      <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
+    </UAlert>
     <UAlert
       v-if="ai.busy.value && ai.currentJob.value"
       role="status"
       color="primary"
       variant="soft"
       :title="t('ai.translating')"
-      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount })"
+      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches })"
       class="mb-3"
     >
       <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
@@ -412,6 +437,9 @@ usePageEscape(() => true, () => emit('back'))
       @update:open="aiPreviewOpen = $event"
       @confirm="runAiTranslation(aiPlan)"
     >
+      <p v-if="aiPlan?.candidates.length && selectedProfile" class="mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 text-[10px] leading-4 text-[var(--text-muted)]">
+        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, tokens: appSettings.aiTranslationBatch.value.maxInputTokensPerRequest }) }}
+      </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
         <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
           <UIcon name="i-tabler-arrow-right" class="size-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />

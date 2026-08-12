@@ -27,8 +27,8 @@ Glyphshift 让用户在不修改软件安装文件的前提下，为多个桌面
    先跨页面准备资产。
 8. 由 Glyphshift 在一次原子创建中解析或创建 Software、Dictionary、兼容 Adapter Plan 与 Probe。
    任一临时资产存在时可整体保留为正式资料库资产，或只清理由本次创建拥有且未被引用的资产。
-9. 在设置中维护多个 AI Profile，选择主流云端协议、OpenAI-compatible 端点或本机 Ollama，并配置
-   模型、批量限制、凭据和请求前过滤规则。
+9. 在设置中统一维护 AI 单批条目数与输入 Token 预算，并管理多个 AI Profile；Profile 可选择主流
+   云端协议、OpenAI-compatible 端点或本机 Ollama，并配置模型、凭据和请求前过滤规则。
 10. 在 Dictionary 草稿或 Probe 详情中一键翻译尚无译文的候选；执行前可预览跳过结果，完成后只写回
     仍为空白且原文未变的条目。
 
@@ -44,11 +44,13 @@ Glyphshift 让用户在不修改软件安装文件的前提下，为多个桌面
   进程树的实例，任一成员退出或失败不覆盖其他成员事实。
 - 所有失败路径 fail-open，不终止或远程卸载用户正在工作的目标进程。
 - 普通用户只需按名称与能力选择 Adapter，无需理解 Controller、Route、进程标识或 DLL。
-- AI Profile 与 App Settings 分开持久化；供应商凭据只保存在 Windows Credential Manager，Profile
-  文件、Dictionary、日志和错误都不包含明文密钥。
+- AI Profile 与 App Settings 分开持久化；单批条目数与输入 Token 预算只属于 App Settings，切换
+  Profile 时不改变。供应商凭据只保存在 Windows Credential Manager，Profile 文件、Dictionary、
+  日志和错误都不包含明文密钥。
 - AI 一键翻译永远跳过已有译文，并默认过滤纯数字/符号、数值尺寸、单字符、URL、邮箱、文件路径与
   快捷键；用户可选择进一步跳过任何包含数字的文本、限制长度或添加排除正则。
-- 云端与本机请求都使用小批量、受控重试和结构校验；取消会停止后续排批和写入，并丢弃迟到结果。
+- 云端与本机请求都使用全局条目上限和保守输入 Token 估算自动分批，并执行受控重试和结构校验；取消
+  会停止后续排批和写入，并丢弃迟到结果。
 - 应用首次启动使用深色主题；用户可在标题栏一键切换明暗主题，也可在设置中选择深色、浅色或
   跟随系统，并在 `zh-CN` 与 `en-US` 界面之间切换。设置还提供当前用户开机启动、“最小化到
   任务栏 / 彻底退出”关闭行为，以及“始终以管理员身份启动”开关。该开关默认关闭；开启后立即

@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppSettings, type CloseBehavior, type LocalePreference, type ThemePreference } from '../appSettings'
+import {
+  AI_TRANSLATION_BATCH_LIMITS,
+  useAppSettings,
+  type CloseBehavior,
+  type LocalePreference,
+  type ThemePreference,
+} from '../appSettings'
 import AiProfilesPanel from './AiProfilesPanel.vue'
 
 const { t } = useI18n()
@@ -203,6 +209,26 @@ function updateLaunchElevated(value: boolean) {
   void appSettings.setLaunchElevated(value).catch(() => undefined)
 }
 
+function updateAiBatchItems(value: number | null | undefined) {
+  if (!Number.isInteger(value)
+    || (value ?? 0) < AI_TRANSLATION_BATCH_LIMITS.items.min
+    || (value ?? 0) > AI_TRANSLATION_BATCH_LIMITS.items.max) return
+  void appSettings.setAiTranslationBatch({
+    ...appSettings.aiTranslationBatch.value,
+    maxItemsPerRequest: value as number,
+  }).catch(() => undefined)
+}
+
+function updateAiBatchInputTokens(value: number | null | undefined) {
+  if (!Number.isInteger(value)
+    || (value ?? 0) < AI_TRANSLATION_BATCH_LIMITS.inputTokens.min
+    || (value ?? 0) > AI_TRANSLATION_BATCH_LIMITS.inputTokens.max) return
+  void appSettings.setAiTranslationBatch({
+    ...appSettings.aiTranslationBatch.value,
+    maxInputTokensPerRequest: value as number,
+  }).catch(() => undefined)
+}
+
 onMounted(() => void appSettings.refreshPrivilegeStatus())
 onBeforeUnmount(() => {
   shortcutAttempt += 1
@@ -274,6 +300,44 @@ onBeforeUnmount(() => {
                 class="w-full"
                 @update:model-value="updateTheme"
               />
+          </ManagementFormRow>
+        </ManagementFormSection>
+
+        <ManagementFormSection :title="t('settings.aiBatch.title')" :description="t('settings.aiBatch.description')">
+          <ManagementFormRow
+            :label="t('settings.aiBatch.items')"
+            :description="t('settings.aiBatch.itemsDescription')"
+            icon="i-tabler-list-numbers"
+            control-width="compact"
+          >
+            <UInputNumber
+              :model-value="appSettings.aiTranslationBatch.value.maxItemsPerRequest"
+              :min="AI_TRANSLATION_BATCH_LIMITS.items.min"
+              :max="AI_TRANSLATION_BATCH_LIMITS.items.max"
+              :step="1"
+              :aria-label="t('settings.aiBatch.items')"
+              :disabled="appSettings.settingsBusy.value"
+              class="w-full"
+              @update:model-value="updateAiBatchItems"
+            />
+          </ManagementFormRow>
+
+          <ManagementFormRow
+            :label="t('settings.aiBatch.inputTokens')"
+            :description="t('settings.aiBatch.inputTokensDescription')"
+            icon="i-tabler-braces"
+            control-width="compact"
+          >
+            <UInputNumber
+              :model-value="appSettings.aiTranslationBatch.value.maxInputTokensPerRequest"
+              :min="AI_TRANSLATION_BATCH_LIMITS.inputTokens.min"
+              :max="AI_TRANSLATION_BATCH_LIMITS.inputTokens.max"
+              :step="1000"
+              :aria-label="t('settings.aiBatch.inputTokens')"
+              :disabled="appSettings.settingsBusy.value"
+              class="w-full"
+              @update:model-value="updateAiBatchInputTokens"
+            />
           </ManagementFormRow>
         </ManagementFormSection>
 

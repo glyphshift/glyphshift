@@ -6,6 +6,53 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 100;
+pub const DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST: usize = 16_000;
+const REQUEST_TOKEN_RESERVE: usize = 384;
+const ITEM_TOKEN_RESERVE: usize = 12;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TranslationBatchPolicy {
+    max_items_per_request: u16,
+    max_input_tokens_per_request: usize,
+}
+
+impl TranslationBatchPolicy {
+    #[must_use]
+    pub const fn new(
+        max_items_per_request: u16,
+        max_input_tokens_per_request: usize,
+    ) -> Option<Self> {
+        if max_items_per_request == 0 || max_input_tokens_per_request == 0 {
+            None
+        } else {
+            Some(Self {
+                max_items_per_request,
+                max_input_tokens_per_request,
+            })
+        }
+    }
+
+    #[must_use]
+    pub const fn max_items_per_request(self) -> u16 {
+        self.max_items_per_request
+    }
+
+    #[must_use]
+    pub const fn max_input_tokens_per_request(self) -> usize {
+        self.max_input_tokens_per_request
+    }
+}
+
+impl Default for TranslationBatchPolicy {
+    fn default() -> Self {
+        Self {
+            max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
+            max_input_tokens_per_request: DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderErrorCategory {
@@ -257,6 +304,9 @@ pub struct TranslationJobSnapshot {
     total_count: usize,
     completed_count: usize,
     failed_count: usize,
+    total_batches: usize,
+    finished_batches: usize,
+    failed_batches: usize,
     results: Vec<ValidatedTranslation>,
     errors: Vec<ProviderError>,
 }
@@ -285,6 +335,21 @@ impl TranslationJobSnapshot {
     #[must_use]
     pub const fn failed_count(&self) -> usize {
         self.failed_count
+    }
+
+    #[must_use]
+    pub const fn total_batches(&self) -> usize {
+        self.total_batches
+    }
+
+    #[must_use]
+    pub const fn finished_batches(&self) -> usize {
+        self.finished_batches
+    }
+
+    #[must_use]
+    pub const fn failed_batches(&self) -> usize {
+        self.failed_batches
     }
 
     #[must_use]
@@ -347,6 +412,7 @@ impl AiTranslation {
         &mut self,
         plan_token: &str,
         profile: ResolvedAiProfile,
+        batch_policy: TranslationBatchPolicy,
     ) -> Result<TranslationJobId, TranslationJobError> {
         let plan = self
             .plans
@@ -361,6 +427,7 @@ impl AiTranslation {
         self.next_job_id = self.next_job_id.saturating_add(1);
         let job_id: Box<str> = format!("job-{}", self.next_job_id).into();
         let cancelled = Arc::new(AtomicBool::new(false));
+        let total_batches = batches(&plan.candidates, batch_policy).len();
         let cell = Arc::new(JobCell {
             state: Mutex::new(TranslationJobSnapshot {
                 job_id: job_id.clone(),
@@ -371,13 +438,16 @@ impl AiTranslation {
                 total_count: plan.candidates.len(),
                 completed_count: 0,
                 failed_count: 0,
+                total_batches,
+                finished_batches: 0,
+                failed_batches: 0,
                 results: Vec::new(),
                 errors: Vec::new(),
             }),
             cancelled: cancelled.clone(),
         });
         self.jobs.insert(job_id.clone(), cell.clone());
-        std::thread::spawn(move || run_job(cell, provider, profile, plan));
+        std::thread::spawn(move || run_job(cell, provider, profile, batch_policy, plan));
         Ok(TranslationJobId(job_id))
     }
 
@@ -420,6 +490,7 @@ fn run_job(
     cell: Arc<JobCell>,
     provider: Arc<dyn TranslationProvider>,
     profile: ResolvedAiProfile,
+    batch_policy: TranslationBatchPolicy,
     plan: TranslationPlan,
 ) {
     if let Ok(mut state) = cell.state.lock() {
@@ -428,11 +499,7 @@ fn run_job(
         return;
     }
     let token = CancellationToken::new(cell.cancelled.clone());
-    for candidates in batches(
-        &plan.candidates,
-        usize::from(profile.max_items_per_request()),
-        profile.max_input_chars_per_request(),
-    ) {
+    for candidates in batches(&plan.candidates, batch_policy) {
         if token.is_cancelled() {
             finish_cancelled(&cell);
             return;
@@ -477,6 +544,7 @@ fn run_job(
             Ok(results) => {
                 if let Ok(mut state) = cell.state.lock() {
                     state.completed_count += results.len();
+                    state.finished_batches += 1;
                     state.results.extend(results);
                 } else {
                     return;
@@ -485,6 +553,8 @@ fn run_job(
             Err(error) => {
                 if let Ok(mut state) = cell.state.lock() {
                     state.failed_count += candidates.len();
+                    state.finished_batches += 1;
+                    state.failed_batches += 1;
                     state.errors.push(error);
                 } else {
                     return;
@@ -509,27 +579,45 @@ fn finish_cancelled(cell: &JobCell) {
 
 fn batches(
     candidates: &[TranslationCandidate],
-    max_items: usize,
-    max_chars: usize,
+    policy: TranslationBatchPolicy,
 ) -> Vec<Vec<TranslationCandidate>> {
     let mut batches = Vec::new();
     let mut current = Vec::new();
-    let mut chars: usize = 0;
+    let mut estimated_tokens = REQUEST_TOKEN_RESERVE;
     for candidate in candidates {
-        let candidate_chars = candidate.source.chars().count();
+        let candidate_tokens = estimated_candidate_tokens(candidate);
         if !current.is_empty()
-            && (current.len() >= max_items || chars.saturating_add(candidate_chars) > max_chars)
+            && (current.len() >= usize::from(policy.max_items_per_request())
+                || estimated_tokens.saturating_add(candidate_tokens)
+                    > policy.max_input_tokens_per_request())
         {
             batches.push(std::mem::take(&mut current));
-            chars = 0;
+            estimated_tokens = REQUEST_TOKEN_RESERVE;
         }
-        chars = chars.saturating_add(candidate_chars);
+        estimated_tokens = estimated_tokens.saturating_add(candidate_tokens);
         current.push(candidate.clone());
     }
     if !current.is_empty() {
         batches.push(current);
     }
     batches
+}
+
+fn estimated_candidate_tokens(candidate: &TranslationCandidate) -> usize {
+    ITEM_TOKEN_RESERVE
+        .saturating_add(estimated_text_tokens(&candidate.item_id))
+        .saturating_add(estimated_text_tokens(&candidate.source))
+}
+
+fn estimated_text_tokens(value: &str) -> usize {
+    let (ascii, non_ascii) = value.chars().fold((0_usize, 0_usize), |counts, character| {
+        if character.is_ascii() {
+            (counts.0.saturating_add(1), counts.1)
+        } else {
+            (counts.0, counts.1.saturating_add(1))
+        }
+    });
+    non_ascii.saturating_add(ascii.saturating_add(3) / 4)
 }
 
 fn validate_response(

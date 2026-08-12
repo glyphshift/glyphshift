@@ -18,7 +18,7 @@ test('probe detail can launch its bound software', async ({ page }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [run]
         if (command === 'desktop_probe_run_entries') return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
@@ -66,7 +66,7 @@ test('empty libraries stay actionable and a running application can create a tem
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return currentSnapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -179,7 +179,7 @@ test('current-app source can end and clean up at compact English layout', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'light' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -260,7 +260,7 @@ test('paused probe remains visible on the navigation tab after startup', async (
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [pausedRun]
         return null
@@ -289,7 +289,7 @@ test('current-app source keeps creation recoverable after a target stops during 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -391,7 +391,7 @@ test('probe list hides technical detail behind one accessible hover target and u
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         return null
@@ -442,7 +442,7 @@ test('library sources create a normal probe without temporary ownership', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
         if (command === 'desktop_probe_run_summary') return createdRun
@@ -544,7 +544,7 @@ test('paused probe can clear its entries without releasing the runtime', async (
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -616,7 +616,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -709,7 +709,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -725,24 +725,32 @@ test('probe run keeps backend paging while adapter filters and view state recove
           summary = { ...summary, dictionaryRevision: summary.dictionaryRevision + 1, dictionaryEntryCount: summary.dictionaryEntryCount + 1, previewGeneration: summary.previewGeneration + 1 }
           return summary
         }
-        const request = args?.request as { search: string; adapterIds: string[]; page: number; pageSize: number }
+        const request = args?.request as { search: string; adapterIds: string[]; translationFilter: 'all' | 'untranslated' | 'translated'; page: number; pageSize: number }
         if (command === 'desktop_probe_run_entries') {
           ;(window as unknown as { __captureQueryRequests?: unknown[] }).__captureQueryRequests ??= []
           ;(window as unknown as { __captureQueryRequests: unknown[] }).__captureQueryRequests.push(structuredClone(request))
           const start = (request.page - 1) * request.pageSize
           const filtered = request.adapterIds.includes('synthetic.draw-text')
-          const total = filtered ? 30 : 5000
-          const rowCount = Math.max(0, Math.min(request.pageSize, total - start))
+          const sourceIndices = Array.from({ length: filtered ? 30 : 5000 }, (_, index) => index + 1)
+            .filter((sourceIndex) => {
+              const source = `Source ${String(sourceIndex).padStart(4, '0')}`
+              const translation = translations[source] ?? (sourceIndex % 2 === 0 ? `译文 ${sourceIndex}` : '')
+              if (request.translationFilter === 'untranslated') return !translation
+              if (request.translationFilter === 'translated') return Boolean(translation)
+              return true
+            })
+          const total = sourceIndices.length
+          const pageIndices = sourceIndices.slice(start, start + request.pageSize)
           return {
             observationRevision: 12, dictionaryRevision: summary.dictionaryRevision,
             page: request.page, pageSize: request.pageSize, total,
-            rows: Array.from({ length: rowCount }, (_, offset) => {
-              const source = `Source ${String(start + offset + 1).padStart(4, '0')}`
-              const translation = translations[source] ?? (offset % 2 ? `译文 ${start + offset + 1}` : '')
+            rows: pageIndices.map((sourceIndex) => {
+              const source = `Source ${String(sourceIndex).padStart(4, '0')}`
+              const translation = translations[source] ?? (sourceIndex % 2 === 0 ? `译文 ${sourceIndex}` : '')
               return {
                 source, translation,
                 state: translation ? 'translated' : 'pending',
-                adapterIds: filtered ? ['synthetic.draw-text'] : ['synthetic.text-out'], count: start + offset + 1,
+                adapterIds: filtered ? ['synthetic.draw-text'] : ['synthetic.text-out'], count: sourceIndex,
                 firstSeenMs: 1, lastSeenMs: 2,
               }
             }),
@@ -788,13 +796,28 @@ test('probe run keeps backend paging while adapter filters and view state recove
   await expect(page.getByText('50 条目已选择')).toBeVisible()
   await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)
 
+  const translationFilter = page.getByRole('button', { name: '按翻译状态筛选' })
+  await expect(translationFilter).toContainText('全部条目')
+  await translationFilter.click()
+  await expect(page.getByRole('menuitem', { name: '已翻译', exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: '未翻译', exact: true }).click()
+  await expect(translationFilter).toContainText('未翻译')
+  await expect(page.getByText('显示 1–50，共 2499 条目')).toBeVisible()
+  await expect(page.locator('tbody tr')).toHaveCount(50)
+  await expect(page.locator('tbody tr').filter({ hasText: '未进词典' })).toHaveCount(50)
+  await expect(page.locator('tbody tr').filter({ hasText: '已在词典' })).toHaveCount(0)
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/capture-untranslated-filter.png' })
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __captureQueryRequests?: Array<{ translationFilter: string }> }).__captureQueryRequests?.at(-1)?.translationFilter
+  ))).toBe('untranslated')
+
   const adapterFilter = page.getByTestId('capture-adapter-filter')
   await expect(adapterFilter).toContainText('全部技术')
   await adapterFilter.click()
   await page.getByRole('menuitemcheckbox', { name: 'DrawTextW / DrawTextExW' }).click()
   await expect(adapterFilter).toContainText('DrawTextW / DrawTextExW')
-  await expect(page.getByText('显示 1–30，共 30 条目')).toBeVisible()
-  await expect(page.locator('tbody tr')).toHaveCount(30)
+  await expect(page.getByText('显示 1–14，共 14 条目')).toBeVisible()
+  await expect(page.locator('tbody tr')).toHaveCount(14)
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureQueryRequests?: Array<{ adapterIds: string[] }> }).__captureQueryRequests?.at(-1)?.adapterIds
   ))).toEqual(['synthetic.draw-text'])
@@ -807,7 +830,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toBe('Source 00')
   await page.getByRole('button', { name: '暂停收集' }).click()
   await expect(page.getByRole('button', { name: '继续收集' })).toBeVisible()
-  const pausedTranslation = page.getByRole('textbox', { name: '“Source 0001”的译文' })
+  const pausedTranslation = page.getByRole('textbox', { name: '“Source 0003”的译文' })
   await pausedTranslation.fill('暂停时译文')
   await pausedTranslation.blur()
   await expect.poll(() => page.evaluate(() => (
@@ -818,6 +841,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toHaveValue('Source 00')
+  await expect(page.getByRole('button', { name: '按翻译状态筛选' })).toContainText('未翻译')
   await expect(page.getByTestId('capture-adapter-filter')).toContainText('DrawTextW / DrawTextExW')
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureQueryRequests?: Array<{ adapterIds: string[] }> }).__captureQueryRequests?.at(-1)?.adapterIds
@@ -836,7 +860,7 @@ test('elevated probe rejection explains the protected target without observer re
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -882,7 +906,7 @@ test('probe operation error closes when switching to another probe', async ({ pa
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_probe_run_summary') return runs.find(run => run.id === args?.runId)
@@ -940,7 +964,7 @@ test('probe reconnect explains that an enabled workflow owns the target', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 29 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary

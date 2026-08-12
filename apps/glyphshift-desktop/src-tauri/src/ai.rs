@@ -2,8 +2,8 @@ use super::*;
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProfileError, AiProfileView, AiTranslation,
     CancellationOutcome, CredentialVault, CredentialVaultError, PlanError, ReqwestHttpTransport,
-    TranslationItem, TranslationJobError, TranslationJobId, TranslationJobSnapshot,
-    TranslationPlan, TranslationPlanRequest,
+    TranslationBatchPolicy, TranslationItem, TranslationJobError, TranslationJobId,
+    TranslationJobSnapshot, TranslationPlan, TranslationPlanRequest,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -123,6 +123,7 @@ impl DesktopAiState {
     fn start_translation(
         &mut self,
         request: AiTranslationStartRequest,
+        batch_policy: TranslationBatchPolicy,
     ) -> Result<TranslationJobId, CommandError> {
         let profile_id = self.selected_profile_id(request.profile_id.as_deref())?;
         let profile = self
@@ -130,7 +131,7 @@ impl DesktopAiState {
             .resolve_profile(&profile_id)
             .map_err(ai_profile_error)?;
         self.translation
-            .start_translation(&request.plan_token, profile)
+            .start_translation(&request.plan_token, profile, batch_policy)
             .map_err(ai_job_error)
     }
 
@@ -582,11 +583,24 @@ pub(super) fn desktop_apply_probe_ai_results(
 pub(super) fn desktop_start_ai_translation(
     request: AiTranslationStartRequest,
     state: State<'_, Mutex<DesktopAiState>>,
+    settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<TranslationJobId, CommandError> {
+    let batch_policy = {
+        let settings = settings
+            .lock()
+            .map_err(|_| CommandError::new("settings.unavailable"))?
+            .current()
+            .map_err(settings_command_error)?;
+        let batch = settings.ai_translation_batch();
+        let max_input_tokens = usize::try_from(batch.max_input_tokens_per_request())
+            .map_err(|_| CommandError::new("settings.invalid_data"))?;
+        TranslationBatchPolicy::new(batch.max_items_per_request(), max_input_tokens)
+            .ok_or_else(|| CommandError::new("settings.invalid_data"))?
+    };
     state
         .lock()
         .map_err(|_| ai_state_unavailable())?
-        .start_translation(request)
+        .start_translation(request, batch_policy)
 }
 
 #[tauri::command]

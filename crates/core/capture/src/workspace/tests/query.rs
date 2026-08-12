@@ -140,3 +140,70 @@ fn joined_rows_preserve_the_run_source_priority_regardless_of_arrival_order() {
         ]
     );
 }
+
+#[test]
+fn translation_filter_runs_on_the_complete_joined_set_before_paging() {
+    let (_root, mut store) = run_store();
+    let summary = store
+        .create(
+            ProbeRunCreate::new(
+                "probe-translation-filter",
+                "Translation filter probe",
+                "software-one",
+                "dictionary-one",
+                ["synthetic.adapter-one"],
+                false,
+            )
+            .expect("probe create"),
+        )
+        .expect("create run");
+    let sink = FileCaptureSink::start(
+        store
+            .capture_configuration(summary.id(), 200)
+            .expect("capture config"),
+    )
+    .expect("capture sink");
+    for index in 1..=101 {
+        sink.observe("synthetic.adapter-one", format!("Source {index:03}"));
+    }
+    sink.finish().expect("finish capture");
+    let dictionary = ProbeDictionarySnapshot::new(
+        2,
+        (1..=51).map(|index| {
+            ProbeDictionaryEntry::new(format!("Source {index:03}"), format!("Translation {index}"))
+        }),
+    )
+    .expect("dictionary snapshot");
+
+    let untranslated = store
+        .query_entries(
+            summary.id(),
+            &ProbeQuery::new("", 1, 20)
+                .expect("query")
+                .with_translation_filter(ProbeTranslationFilter::Untranslated),
+            &dictionary,
+        )
+        .expect("untranslated page");
+    assert_eq!(untranslated.total, 50);
+    assert_eq!(untranslated.rows.len(), 20);
+    assert!(untranslated
+        .rows
+        .iter()
+        .all(|row| row.translation().is_empty()));
+
+    let translated = store
+        .query_entries(
+            summary.id(),
+            &ProbeQuery::new("", 2, 20)
+                .expect("query")
+                .with_translation_filter(ProbeTranslationFilter::Translated),
+            &dictionary,
+        )
+        .expect("translated page");
+    assert_eq!(translated.total, 51);
+    assert_eq!(translated.rows.len(), 20);
+    assert!(translated
+        .rows
+        .iter()
+        .all(|row| !row.translation().is_empty()));
+}

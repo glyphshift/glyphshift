@@ -21,8 +21,6 @@ interface ProfileForm {
   modelId: string
   timeoutMs: number
   maxConcurrency: number
-  maxItemsPerRequest: number
-  maxInputCharsPerRequest: number
   filterPolicy: AiFilterPolicy
   secret: string
   clearCredential: boolean
@@ -55,8 +53,6 @@ function newProfileForm(): ProfileForm {
     modelId: '',
     timeoutMs: 60_000,
     maxConcurrency: providerDefaults[protocol].concurrency,
-    maxItemsPerRequest: 20,
-    maxInputCharsPerRequest: 12_000,
     filterPolicy: defaultAiFilterPolicy(),
     secret: '',
     clearCredential: false,
@@ -73,8 +69,6 @@ const formValid = computed(() => Boolean(
   && form.value.modelId.trim()
   && form.value.timeoutMs >= 1_000
   && form.value.maxConcurrency > 0
-  && form.value.maxItemsPerRequest > 0
-  && form.value.maxInputCharsPerRequest > 0
   && (!credentialRequired.value
     || form.value.secret.trim()
     || editingProfile.value?.hasCredential),
@@ -113,8 +107,6 @@ function openEdit(profile: AiProfile) {
     modelId: profile.modelId,
     timeoutMs: profile.timeoutMs,
     maxConcurrency: profile.maxConcurrency,
-    maxItemsPerRequest: profile.maxItemsPerRequest,
-    maxInputCharsPerRequest: profile.maxInputCharsPerRequest,
     filterPolicy: JSON.parse(JSON.stringify(profile.filterPolicy)),
     secret: '',
     clearCredential: false,
@@ -139,8 +131,6 @@ async function save() {
     modelId: value.modelId.trim(),
     timeoutMs: Number(value.timeoutMs),
     maxConcurrency: Number(value.maxConcurrency),
-    maxItemsPerRequest: Number(value.maxItemsPerRequest),
-    maxInputCharsPerRequest: Number(value.maxInputCharsPerRequest),
     filterPolicy: {
       ...value.filterPolicy,
       maxSourceChars: Number(value.filterPolicy.maxSourceChars) > 0
@@ -266,9 +256,6 @@ onMounted(() => void ai.connect())
       </UFormField>
       <UFormField :label="t('ai.timeout')">
         <UInput v-model.number="form.timeoutMs" type="number" min="1000" max="600000" :aria-label="t('ai.timeout')" class="w-full" />
-      </UFormField>
-      <UFormField :label="t('ai.batchSize')">
-        <UInput v-model.number="form.maxItemsPerRequest" type="number" min="1" max="200" :aria-label="t('ai.batchSize')" class="w-full" />
       </UFormField>
     </div>
 

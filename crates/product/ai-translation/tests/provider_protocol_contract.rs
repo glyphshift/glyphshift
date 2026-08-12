@@ -1,8 +1,8 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiTranslation, CancellationToken,
     CredentialUpdate, CredentialVault, CredentialVaultError, HttpRequest, HttpResponse,
-    HttpTransport, HttpTransportError, TranslationItem, TranslationJobStatus,
-    TranslationPlanRequest,
+    HttpTransport, HttpTransportError, TranslationBatchPolicy, TranslationItem,
+    TranslationJobStatus, TranslationPlanRequest,
 };
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -176,7 +176,7 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
             ))
             .expect("plan protocol request");
         let job_id = translation
-            .start_translation(plan.token(), profile)
+            .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
             .expect("start protocol request");
         let deadline = Instant::now() + Duration::from_secs(2);
         let completed = loop {
@@ -249,7 +249,7 @@ fn remote_plain_http_endpoint_never_receives_a_profile_credential() {
         ))
         .expect("plan insecure request");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start insecure request");
     let deadline = Instant::now() + Duration::from_secs(2);
     let failed = loop {
@@ -313,7 +313,7 @@ fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
         ))
         .expect("plan retry request");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start retry request");
     let deadline = Instant::now() + Duration::from_secs(2);
     let completed = loop {

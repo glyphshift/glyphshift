@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
+import { useAppSettings } from './appSettings'
 import { translateCommandError } from './commandError'
 import type { DictionaryDetail, ProbeRunSummary } from './model'
 import { hasDesktopRuntime } from './workspace/state'
@@ -33,8 +34,6 @@ export interface AiProfile {
   modelId: string
   timeoutMs: number
   maxConcurrency: number
-  maxItemsPerRequest: number
-  maxInputCharsPerRequest: number
   filterPolicy: AiFilterPolicy
   hasCredential: boolean
   credentialRequired: boolean
@@ -117,6 +116,9 @@ export interface AiTranslationJob {
   totalCount: number
   completedCount: number
   failedCount: number
+  totalBatches: number
+  finishedBatches: number
+  failedBatches: number
   results: AiValidatedTranslation[]
   errors: AiProviderError[]
 }
@@ -167,7 +169,9 @@ export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; con
   ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', concurrency: 1, credentialRequired: false },
 }
 
-const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v1'
+const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v2'
+const REQUEST_TOKEN_RESERVE = 384
+const ITEM_TOKEN_RESERVE = 12
 const catalog = ref<AiProfilesView>({ defaultProfileId: null, profiles: [] })
 const busy = ref(false)
 const error = ref('')
@@ -178,6 +182,7 @@ const browserJobs = new Map<string, AiTranslationJob>()
 let browserPlanSequence = 0
 let browserJobSequence = 0
 let connected = false
+const appSettings = useAppSettings()
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -409,6 +414,48 @@ function browserTranslation(source: string) {
   return known[source] ?? `AI · ${source}`
 }
 
+function estimatedTextTokens(value: string) {
+  let ascii = 0
+  let nonAscii = 0
+  for (const character of value) {
+    if (/^[\x00-\x7F]$/.test(character)) ascii += 1
+    else nonAscii += 1
+  }
+  return nonAscii + Math.ceil(ascii / 4)
+}
+
+function estimatedCandidateTokens(candidate: AiTranslationCandidate) {
+  return ITEM_TOKEN_RESERVE
+    + estimatedTextTokens(candidate.itemId)
+    + estimatedTextTokens(candidate.source)
+}
+
+function browserBatches(plan: AiTranslationPlan, profileId?: string | null) {
+  const profile = catalog.value.profiles.find(item => (
+    item.id === (profileId ?? catalog.value.defaultProfileId)
+  ))
+  if (!profile) throw new Error('AI profile required')
+  const policy = appSettings.aiTranslationBatch.value
+  const batches: AiTranslationCandidate[][] = []
+  let current: AiTranslationCandidate[] = []
+  let currentTokens = REQUEST_TOKEN_RESERVE
+  for (const candidate of plan.candidates) {
+    const candidateTokens = estimatedCandidateTokens(candidate)
+    if (current.length && (
+      current.length >= policy.maxItemsPerRequest
+      || currentTokens + candidateTokens > policy.maxInputTokensPerRequest
+    )) {
+      batches.push(current)
+      current = []
+      currentTokens = REQUEST_TOKEN_RESERVE
+    }
+    current.push(candidate)
+    currentTokens += candidateTokens
+  }
+  if (current.length) batches.push(current)
+  return batches
+}
+
 async function startTranslation(planToken: string, profileId?: string | null) {
   if (hasDesktopRuntime()) {
     return invoke<string>('desktop_start_ai_translation', {
@@ -417,6 +464,7 @@ async function startTranslation(planToken: string, profileId?: string | null) {
   }
   const plan = browserPlans.get(planToken)
   if (!plan) throw new Error('Unknown browser AI plan')
+  const batches = browserBatches(plan, profileId)
   const jobId = `browser-job-${++browserJobSequence}`
   const job: AiTranslationJob = {
     jobId,
@@ -427,20 +475,31 @@ async function startTranslation(planToken: string, profileId?: string | null) {
     totalCount: plan.candidates.length,
     completedCount: 0,
     failedCount: 0,
+    totalBatches: batches.length,
+    finishedBatches: 0,
+    failedBatches: 0,
     results: [],
     errors: [],
   }
   browserJobs.set(jobId, job)
-  window.setTimeout(() => {
+  const completeBatch = (index: number) => window.setTimeout(() => {
     if (job.status === 'cancelling' || job.status === 'cancelled') return
-    job.results = plan.candidates.map(item => ({
+    const batch = batches[index]
+    if (!batch) {
+      job.status = 'completed'
+      return
+    }
+    job.results.push(...batch.map(item => ({
       itemId: item.itemId,
       source: item.source,
       translation: browserTranslation(item.source),
-    }))
+    })))
     job.completedCount = job.results.length
-    job.status = 'completed'
-  }, 60)
+    job.finishedBatches += 1
+    if (index + 1 < batches.length) completeBatch(index + 1)
+    else job.status = 'completed'
+  }, 30)
+  completeBatch(0)
   return jobId
 }
 

@@ -1,8 +1,8 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiTranslation, CancellationToken,
     CredentialVault, CredentialVaultError, ProviderBatchResult, ProviderError, ProviderRequest,
-    ProviderTranslation, TranslationItem, TranslationJobStatus, TranslationPlanRequest,
-    TranslationProvider,
+    ProviderTranslation, TranslationBatchPolicy, TranslationItem, TranslationJobStatus,
+    TranslationPlanRequest, TranslationProvider,
 };
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -57,6 +57,55 @@ struct DelayedSyntheticProvider {
 }
 
 struct TokenDroppingSyntheticProvider;
+
+#[derive(Default)]
+struct BatchRecordingSyntheticProvider {
+    request_sizes: Mutex<Vec<usize>>,
+}
+
+#[derive(Default)]
+struct SecondBatchFailsProvider {
+    request_sizes: Mutex<Vec<usize>>,
+}
+
+impl TranslationProvider for BatchRecordingSyntheticProvider {
+    fn translate(
+        &self,
+        request: &ProviderRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ProviderBatchResult, ProviderError> {
+        self.request_sizes
+            .lock()
+            .expect("record batch size")
+            .push(request.items().len());
+        Ok(ProviderBatchResult::new(request.items().iter().map(
+            |item| ProviderTranslation::new(item.item_id(), format!("译文：{}", item.source())),
+        )))
+    }
+}
+
+impl TranslationProvider for SecondBatchFailsProvider {
+    fn translate(
+        &self,
+        request: &ProviderRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ProviderBatchResult, ProviderError> {
+        let mut request_sizes = self.request_sizes.lock().expect("record batch size");
+        request_sizes.push(request.items().len());
+        let batch_number = request_sizes.len();
+        drop(request_sizes);
+        if batch_number == 2 {
+            return Err(ProviderError::new(
+                glyphshift_ai_translation::ProviderErrorCategory::InvalidRequest,
+                false,
+                "synthetic batch rejection",
+            ));
+        }
+        Ok(ProviderBatchResult::new(request.items().iter().map(
+            |item| ProviderTranslation::new(item.item_id(), format!("译文：{}", item.source())),
+        )))
+    }
+}
 
 fn wait_for_terminal_job(
     translation: &AiTranslation,
@@ -141,7 +190,7 @@ fn job_validates_provider_output_and_exposes_results_in_plan_order() {
         ))
         .expect("plan job");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start job");
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -200,7 +249,7 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
         ))
         .expect("plan translation");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start translation");
     let snapshot = wait_for_terminal_job(&translation, &job_id);
 
@@ -210,6 +259,9 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     assert_eq!(value["planToken"], plan.token());
     assert_eq!(value["snapshotRevision"], 7);
     assert_eq!(value["status"], "completed");
+    assert_eq!(value["totalBatches"], 1);
+    assert_eq!(value["finishedBatches"], 1);
+    assert_eq!(value["failedBatches"], 0);
     assert_eq!(value["results"][0]["itemId"], "save");
     assert_eq!(value["results"][0]["translation"], "保存");
     assert!(value.get("rawResponse").is_none());
@@ -252,7 +304,7 @@ fn cancelled_job_discards_a_provider_result_that_arrives_late() {
         ))
         .expect("plan cancelled job");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start cancelled job");
     entered_rx
         .recv_timeout(Duration::from_secs(2))
@@ -309,7 +361,7 @@ fn job_rejects_translation_that_changes_protected_tokens() {
         ))
         .expect("plan invalid-output job");
     let job_id = translation
-        .start_translation(plan.token(), profile)
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
         .expect("start invalid-output job");
     let deadline = Instant::now() + Duration::from_secs(2);
     let failed = loop {
@@ -330,5 +382,167 @@ fn job_rejects_translation_that_changes_protected_tokens() {
     assert_eq!(
         failed.errors()[0].category(),
         glyphshift_ai_translation::ProviderErrorCategory::MalformedOutput
+    );
+}
+
+#[test]
+fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
+    let root = tempdir().expect("batched AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(AiProfileDraft::new(
+            "profile.local",
+            "Local",
+            AiProviderProtocol::OllamaChat,
+            "synthetic-model",
+        ))
+        .expect("save local profile");
+    let profile = profiles
+        .resolve_profile("profile.local")
+        .expect("resolve local profile");
+    let provider = Arc::new(BatchRecordingSyntheticProvider::default());
+    let mut translation = AiTranslation::new();
+    translation.register_provider(AiProviderProtocol::OllamaChat, provider.clone());
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            9,
+            "en-US",
+            "zh-CN",
+            (1..=51).map(|index| {
+                TranslationItem::untranslated(format!("item-{index}"), format!("Source {index}"))
+            }),
+        ))
+        .expect("plan every candidate");
+    let job_id = translation
+        .start_translation(
+            plan.token(),
+            profile,
+            TranslationBatchPolicy::new(20, 16_000).expect("valid batch policy"),
+        )
+        .expect("start batched job");
+    let completed = wait_for_terminal_job(&translation, &job_id);
+
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.total_count(), 51);
+    assert_eq!(completed.completed_count(), 51);
+    assert_eq!(completed.total_batches(), 3);
+    assert_eq!(completed.finished_batches(), 3);
+    assert_eq!(completed.failed_batches(), 0);
+    assert_eq!(completed.results().len(), 51);
+    assert_eq!(
+        *provider.request_sizes.lock().expect("batch sizes"),
+        vec![20, 20, 11]
+    );
+}
+
+#[test]
+fn global_input_token_budget_splits_a_batch_before_the_item_limit() {
+    let root = tempdir().expect("token-budgeted AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(AiProfileDraft::new(
+            "profile.local",
+            "Local",
+            AiProviderProtocol::OllamaChat,
+            "synthetic-model",
+        ))
+        .expect("save local profile");
+    let profile = profiles
+        .resolve_profile("profile.local")
+        .expect("resolve local profile");
+    let provider = Arc::new(BatchRecordingSyntheticProvider::default());
+    let mut translation = AiTranslation::new();
+    translation.register_provider(AiProviderProtocol::OllamaChat, provider.clone());
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            10,
+            "en-US",
+            "zh-CN",
+            (1..=5).map(|index| {
+                TranslationItem::untranslated(format!("item-{index}"), format!("Source {index}"))
+            }),
+        ))
+        .expect("plan token-budgeted candidates");
+    let job_id = translation
+        .start_translation(
+            plan.token(),
+            profile,
+            TranslationBatchPolicy::new(100, 420).expect("valid batch policy"),
+        )
+        .expect("start token-budgeted job");
+    let completed = wait_for_terminal_job(&translation, &job_id);
+
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.total_batches(), 3);
+    assert_eq!(completed.completed_count(), 5);
+    assert_eq!(
+        *provider.request_sizes.lock().expect("batch sizes"),
+        vec![2, 2, 1]
+    );
+}
+
+#[test]
+fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
+    let root = tempdir().expect("partially failed AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(AiProfileDraft::new(
+            "profile.local",
+            "Local",
+            AiProviderProtocol::OllamaChat,
+            "synthetic-model",
+        ))
+        .expect("save local profile");
+    let profile = profiles
+        .resolve_profile("profile.local")
+        .expect("resolve local profile");
+    let provider = Arc::new(SecondBatchFailsProvider::default());
+    let mut translation = AiTranslation::new();
+    translation.register_provider(AiProviderProtocol::OllamaChat, provider.clone());
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            9,
+            "en-US",
+            "zh-CN",
+            (1..=51).map(|index| {
+                TranslationItem::untranslated(format!("item-{index}"), format!("Source {index}"))
+            }),
+        ))
+        .expect("plan every candidate");
+    let job_id = translation
+        .start_translation(
+            plan.token(),
+            profile,
+            TranslationBatchPolicy::new(20, 16_000).expect("valid batch policy"),
+        )
+        .expect("start batched job");
+    let completed = wait_for_terminal_job(&translation, &job_id);
+
+    assert_eq!(
+        completed.status(),
+        TranslationJobStatus::CompletedWithFailures
+    );
+    assert_eq!(
+        (completed.completed_count(), completed.failed_count()),
+        (31, 20)
+    );
+    assert_eq!(
+        (
+            completed.total_batches(),
+            completed.finished_batches(),
+            completed.failed_batches(),
+        ),
+        (3, 3, 1)
+    );
+    assert_eq!(completed.results().len(), 31);
+    assert_eq!(
+        *provider.request_sizes.lock().expect("batch sizes"),
+        vec![20, 20, 11]
     );
 }

@@ -82,6 +82,8 @@ pub(super) struct ProbeRunQueryRequest {
     pub(super) search: Box<str>,
     #[serde(default)]
     pub(super) adapter_ids: Vec<Box<str>>,
+    #[serde(default)]
+    pub(super) translation_filter: ProbeTranslationFilter,
     pub(super) page: usize,
     pub(super) page_size: usize,
 }
@@ -602,6 +604,7 @@ impl DesktopApplication {
     ) -> Result<ProbeEntryPage, CommandError> {
         let query = ProbeQuery::new(request.search, request.page, request.page_size)
             .and_then(|query| query.with_adapter_ids(request.adapter_ids))
+            .map(|query| query.with_translation_filter(request.translation_filter))
             .map_err(probe_run_error)?;
         let summary = self
             .probe_runs

@@ -7,6 +7,10 @@ use tempfile::NamedTempFile;
 pub(crate) const APP_SETTINGS_SCHEMA_VERSION: u16 = 1;
 pub(crate) const DEFAULT_SOFTWARE_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 const SETTINGS_FILE_NAME: &str = "app-settings.json";
+const MIN_AI_BATCH_ITEMS: u16 = 1;
+const MAX_AI_BATCH_ITEMS: u16 = 1_000;
+const MIN_AI_BATCH_INPUT_TOKENS: u32 = 1_000;
+const MAX_AI_BATCH_INPUT_TOKENS: u32 = 1_000_000;
 
 fn default_software_capture_shortcut() -> Box<str> {
     DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
@@ -40,6 +44,42 @@ pub(crate) enum CloseBehavior {
     Quit,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AiTranslationBatchSettings {
+    max_items_per_request: u16,
+    max_input_tokens_per_request: u32,
+}
+
+impl Default for AiTranslationBatchSettings {
+    fn default() -> Self {
+        Self {
+            max_items_per_request: glyphshift_ai_translation::DEFAULT_MAX_ITEMS_PER_REQUEST,
+            max_input_tokens_per_request: u32::try_from(
+                glyphshift_ai_translation::DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST,
+            )
+            .expect("default AI token budget fits in app settings"),
+        }
+    }
+}
+
+impl AiTranslationBatchSettings {
+    pub(crate) const fn max_items_per_request(self) -> u16 {
+        self.max_items_per_request
+    }
+
+    pub(crate) const fn max_input_tokens_per_request(self) -> u32 {
+        self.max_input_tokens_per_request
+    }
+
+    const fn is_valid(self) -> bool {
+        self.max_items_per_request >= MIN_AI_BATCH_ITEMS
+            && self.max_items_per_request <= MAX_AI_BATCH_ITEMS
+            && self.max_input_tokens_per_request >= MIN_AI_BATCH_INPUT_TOKENS
+            && self.max_input_tokens_per_request <= MAX_AI_BATCH_INPUT_TOKENS
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSettings {
@@ -56,6 +96,8 @@ pub(crate) struct AppSettings {
     _legacy_removed_shortcut: Option<Box<str>>,
     #[serde(default = "default_software_capture_shortcut")]
     software_capture_shortcut: Box<str>,
+    #[serde(default)]
+    ai_translation_batch: AiTranslationBatchSettings,
 }
 
 impl Default for AppSettings {
@@ -69,6 +111,7 @@ impl Default for AppSettings {
             close_behavior: CloseBehavior::default(),
             _legacy_removed_shortcut: None,
             software_capture_shortcut: default_software_capture_shortcut(),
+            ai_translation_batch: AiTranslationBatchSettings::default(),
         }
     }
 }
@@ -85,6 +128,15 @@ impl AppSettings {
     pub(crate) fn software_capture_shortcut(&self) -> &str {
         &self.software_capture_shortcut
     }
+
+    pub(crate) const fn ai_translation_batch(&self) -> AiTranslationBatchSettings {
+        self.ai_translation_batch
+    }
+
+    const fn is_valid(&self) -> bool {
+        self.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION
+            && self.ai_translation_batch.is_valid()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -96,6 +148,7 @@ pub(crate) struct AppSettingsUpdate {
     launch_elevated: bool,
     close_behavior: CloseBehavior,
     software_capture_shortcut: Box<str>,
+    ai_translation_batch: AiTranslationBatchSettings,
 }
 
 impl AppSettingsUpdate {
@@ -123,6 +176,7 @@ impl From<AppSettingsUpdate> for AppSettings {
             close_behavior: update.close_behavior,
             _legacy_removed_shortcut: None,
             software_capture_shortcut: update.software_capture_shortcut,
+            ai_translation_batch: update.ai_translation_batch,
         }
     }
 }
@@ -176,9 +230,7 @@ impl AppSettingsStore {
         let (current, load_error) = if path.exists() {
             let reader = BufReader::new(File::open(&path).map_err(|_| SettingsError::Storage)?);
             match serde_json::from_reader::<_, AppSettings>(reader) {
-                Ok(settings) if settings.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION => {
-                    (settings, None)
-                }
+                Ok(settings) if settings.is_valid() => (settings, None),
                 _ => (AppSettings::default(), Some(SettingsError::InvalidData)),
             }
         } else {
@@ -209,6 +261,9 @@ impl AppSettingsStore {
         update: AppSettingsUpdate,
     ) -> Result<AppSettings, SettingsError> {
         let next = AppSettings::from(update);
+        if !next.is_valid() {
+            return Err(SettingsError::InvalidData);
+        }
         self.persist(&next)?;
         self.current = next;
         self.load_error = None;
@@ -282,6 +337,10 @@ mod tests {
                 launch_elevated: true,
                 close_behavior: CloseBehavior::Minimize,
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
+                ai_translation_batch: AiTranslationBatchSettings {
+                    max_items_per_request: 120,
+                    max_input_tokens_per_request: 32_000,
+                },
             })
             .expect("save settings");
         let reopened = AppSettingsStore::open(root.path()).expect("reopen settings store");
@@ -290,6 +349,13 @@ mod tests {
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
+        assert_eq!(
+            saved.ai_translation_batch(),
+            AiTranslationBatchSettings {
+                max_items_per_request: 120,
+                max_input_tokens_per_request: 32_000,
+            }
+        );
         assert_eq!(reopened.current(), Ok(saved));
     }
 
@@ -313,6 +379,7 @@ mod tests {
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
+                ai_translation_batch: AiTranslationBatchSettings::default(),
             })
             .expect("replace invalid settings");
         assert_eq!(store.current(), Ok(recovered));
@@ -340,9 +407,36 @@ mod tests {
             settings.software_capture_shortcut(),
             DEFAULT_SOFTWARE_CAPTURE_SHORTCUT
         );
+        assert_eq!(
+            settings.ai_translation_batch(),
+            AiTranslationBatchSettings::default()
+        );
         assert!(serde_json::to_value(settings)
             .expect("serialize migrated settings")
             .get("interactiveTranslationShortcut")
             .is_none());
+    }
+
+    #[test]
+    fn invalid_global_ai_batch_policy_is_rejected_without_replacing_current_settings() {
+        let root = tempdir().expect("temporary settings root");
+        let mut store = AppSettingsStore::open(root.path()).expect("open settings store");
+
+        let result = store.update(AppSettingsUpdate {
+            locale_preference: LocalePreference::ZhCn,
+            theme_preference: ThemePreference::Dark,
+            launch_at_startup: false,
+            launch_elevated: false,
+            close_behavior: CloseBehavior::Quit,
+            software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
+            ai_translation_batch: AiTranslationBatchSettings {
+                max_items_per_request: 0,
+                max_input_tokens_per_request: 999,
+            },
+        });
+
+        assert_eq!(result, Err(SettingsError::InvalidData));
+        assert_eq!(store.current(), Ok(AppSettings::default()));
+        assert!(!root.path().join(SETTINGS_FILE_NAME).exists());
     }
 }
