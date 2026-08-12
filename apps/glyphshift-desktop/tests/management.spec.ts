@@ -1,10 +1,132 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { model, replaceModel, storageKey } from './fixtures/productModel'
+
+async function visibleHeadingLevels(page: Page) {
+  return page.locator('h1, h2, h3, h4, h5, h6').evaluateAll(elements => elements
+    .filter((element) => {
+      const html = element as HTMLElement
+      const style = getComputedStyle(html)
+      return html.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+    })
+    .map(element => ({
+      level: Number(element.tagName.slice(1)),
+      text: element.textContent?.trim() ?? '',
+    })))
+}
+
+function expectNoHeadingJumps(headings: Array<{ level: number; text: string }>) {
+  expect(headings[0]?.level).toBe(1)
+  for (let index = 1; index < headings.length; index += 1) {
+    expect(headings[index]!.level, `heading jump before “${headings[index]!.text}”: ${JSON.stringify(headings)}`)
+      .toBeLessThanOrEqual(headings[index - 1]!.level + 1)
+  }
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
 })
+
+test('compact workflow table keeps object identity and actions in view', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
+
+  const table = page.getByTestId('workflow-management-table')
+  const row = table.getByRole('row').filter({ hasText: '默认创作工作流' })
+  const identity = row.locator('.management-table-identity-cell')
+  const actions = row.locator('.management-table-actions-cell')
+
+  await expect(table).toBeVisible()
+  await expect(identity).toBeVisible()
+  await expect(actions).toBeVisible()
+  await expect.poll(() => table.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth
+    return element.scrollWidth > element.clientWidth
+  })).toBe(true)
+
+  await expect.poll(async () => {
+    const tableBox = await table.boundingBox()
+    const identityBox = await identity.boundingBox()
+    const actionsBox = await actions.boundingBox()
+    if (!tableBox || !identityBox || !actionsBox) return false
+    return identityBox.x >= tableBox.x
+      && identityBox.x + identityBox.width <= tableBox.x + tableBox.width
+      && actionsBox.x >= tableBox.x
+      && actionsBox.x + actionsBox.width <= tableBox.x + tableBox.width
+  }).toBe(true)
+
+  await table.focus()
+  await expect(table).toBeFocused()
+  const moreActions = actions.getByRole('button', { name: '更多操作：默认创作工作流' })
+  await moreActions.click()
+  await expect(page.getByRole('menuitem', { name: '复制 默认创作工作流' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '删除 默认创作工作流' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(moreActions).toBeFocused()
+})
+
+test('shell offers a discoverable main-content shortcut and named toolbars', async ({ page }) => {
+  const skipLink = page.getByRole('link', { name: /跳到主要内容/ })
+  const main = page.getByRole('main', { name: '主要内容' })
+
+  await page.keyboard.press('Tab')
+  await expect(skipLink).toBeFocused()
+  await expect(skipLink).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(main).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect.poll(() => main.evaluate(element => element.contains(document.activeElement))).toBe(true)
+
+  await page.getByRole('button', { name: '切换到浅色主题' }).focus()
+  await page.keyboard.press('Alt+m')
+  await expect(main).toBeFocused()
+  await expect(page.getByRole('toolbar', { name: '工作流页面操作' })).toBeVisible()
+  await expect(page.getByRole('toolbar', { name: '列表工具栏' })).toBeVisible()
+
+  await page.getByRole('checkbox', { name: '选择 默认创作工作流' }).click()
+  await expect(page.getByRole('toolbar', { name: '批量操作' })).toBeVisible()
+})
+
+test('workflow sections and Help keep a continuous visible heading outline', async ({ page }) => {
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  await expect(page.getByTestId('workflow-editor')).toBeVisible()
+  expectNoHeadingJumps(await visibleHeadingLevels(page))
+
+  for (const tab of ['软件与拦截', '翻译词典', '字体策略']) {
+    await page.getByRole('tab', { name: tab }).click()
+    expectNoHeadingJumps(await visibleHeadingLevels(page))
+  }
+
+  await page.getByRole('button', { name: '帮助' }).click()
+  expectNoHeadingJumps(await visibleHeadingLevels(page))
+})
+
+test('functional copy follows the semantic desktop type ramp', async ({ page }) => {
+  const typeRamp = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement)
+    return {
+      caption: style.getPropertyValue('--type-caption').trim(),
+      label: style.getPropertyValue('--type-label').trim(),
+      metadata: style.getPropertyValue('--type-metadata').trim(),
+      body: style.getPropertyValue('--type-body').trim(),
+      sectionTitle: style.getPropertyValue('--type-section-title').trim(),
+      pageTitle: style.getPropertyValue('--type-page-title').trim(),
+    }
+  })
+
+  expect(typeRamp).toEqual({
+    caption: '10px',
+    label: '11px',
+    metadata: '11px',
+    body: '12px',
+    sectionTitle: '13px',
+    pageTitle: '20px',
+  })
+
+  const description = page.getByText('按软件目标组合拦截方式、有序词典与字体策略，并持续维持运行期望。')
+  await expect(description).toBeVisible()
+  await expect.poll(() => description.evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+})
+
 test('management table body stays continuous for empty and populated states', async ({ page }) => {
   const emptyModel = JSON.parse(JSON.stringify(model))
   emptyModel.workflows = []

@@ -178,10 +178,10 @@ onMounted(() => void ai.connect())
             <strong class="truncate text-[12px] text-[var(--text)]">{{ profile.name }}</strong>
             <UBadge v-if="ai.catalog.value.defaultProfileId === profile.id" color="primary" variant="soft" size="sm" :label="t('ai.defaultProfile')" />
           </div>
-          <p class="m-0 mt-1 truncate text-[10px] leading-4 text-[var(--text-muted)]">
+          <p class="type-metadata m-0 mt-1 truncate leading-4 text-[var(--text-muted)]">
             {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }} · {{ profile.baseUrl }}
           </p>
-          <div v-if="ai.connectionReports.value[profile.id]" class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] leading-4">
+          <div v-if="ai.connectionReports.value[profile.id]" class="type-metadata mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 leading-4">
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
               {{ ai.connectionReports.value[profile.id]?.status === 'passed' ? t('ai.connectionPassed') : t('ai.connectionFailed') }}
             </span>
@@ -216,12 +216,12 @@ onMounted(() => void ai.connect())
     </div>
     <div v-else class="flex min-h-24 items-center gap-3 py-4 text-[var(--text-muted)]">
       <UIcon name="i-tabler-sparkles-off" class="size-6 shrink-0" aria-hidden="true" />
-      <p class="m-0 max-w-[68ch] text-[10px] leading-4">{{ t('ai.emptyProfiles') }}</p>
+      <p class="type-metadata m-0 max-w-[68ch] leading-4">{{ t('ai.emptyProfiles') }}</p>
     </div>
 
     <template #after>
       <div class="flex items-center justify-between gap-4">
-        <p class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
+        <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
         <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" @click="openCreate" />
       </div>
     </template>
@@ -261,7 +261,7 @@ onMounted(() => void ai.connect())
 
     <div class="mt-5 border-t border-[var(--border)] pt-4">
       <h3 class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.filterTitle') }}</h3>
-      <p class="mb-3 mt-1 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.filterDescription') }}</p>
+      <p class="type-metadata mb-3 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.filterDescription') }}</p>
       <div class="grid grid-cols-2 gap-x-6 gap-y-3 @max-[560px]:grid-cols-1">
         <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterPureNumbers') }}</span><USwitch v-model="form.filterPolicy.skipPureNumbersOrSymbols" /></label>
         <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterMeasurements') }}</span><USwitch v-model="form.filterPolicy.skipNumericMeasurements" /></label>

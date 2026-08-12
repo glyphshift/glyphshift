@@ -101,7 +101,7 @@ function updatePageSize(value: unknown) {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--surface)]">
-    <div class="flex shrink-0 gap-2 border-b border-[var(--border)] p-3">
+    <div role="toolbar" :aria-label="t('table.toolbar')" class="flex shrink-0 gap-2 border-b border-[var(--border)] p-3">
       <UInput
         :model-value="query"
         icon="i-tabler-search"
@@ -148,10 +148,10 @@ function updatePageSize(value: unknown) {
 
     <div
       v-if="selectedCount"
-      class="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-subtle)] px-3 text-[10px]"
+      class="type-label flex h-11 shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-subtle)] px-3"
     >
       <strong>{{ t('table.selected', { count: selectedCount, items: selectedLabel || t('table.items') }) }}</strong>
-      <div class="ml-auto flex items-center gap-2">
+      <div role="toolbar" :aria-label="t('table.bulkToolbar')" class="ml-auto flex items-center gap-2">
         <slot name="bulk-actions" />
       </div>
     </div>
@@ -163,7 +163,7 @@ function updatePageSize(value: unknown) {
       <slot />
     </div>
 
-    <footer class="flex h-14 shrink-0 items-center border-t border-[var(--border)] px-3 text-[10px] text-[var(--text-muted)]">
+    <footer class="type-label flex h-14 shrink-0 items-center border-t border-[var(--border)] px-3 text-[var(--text-muted)]">
       <span>{{ footerSummary || t('table.range', { start: rangeStart, end: rangeEnd, total, items: itemLabel }) }}</span>
       <div class="ml-auto flex items-center gap-3">
         <UPagination
@@ -204,7 +204,7 @@ function updatePageSize(value: unknown) {
             :aria-label="t('table.previousPage')"
             @click="emit('previousPage')"
           />
-          <span class="min-w-14 text-center text-[10px] text-[var(--text-secondary)]">{{ t('table.pageNumber', { page: cursorPage }) }}</span>
+          <span class="type-label min-w-14 text-center text-[var(--text-secondary)]">{{ t('table.pageNumber', { page: cursorPage }) }}</span>
           <UButton
             color="neutral"
             variant="outline"

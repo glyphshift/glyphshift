@@ -64,7 +64,7 @@ function platformLabel(value: string) {
             :aria-label="t('workflows.adapterTable.toggleAll')"
             @update:model-value="toggleAll"
           />
-          <span class="whitespace-nowrap text-[9px] font-medium">{{ t(allSelectionState === true ? 'workflows.adapterTable.clearAll' : 'workflows.adapterTable.selectAll') }}</span>
+          <span class="type-label whitespace-nowrap font-medium">{{ t(allSelectionState === true ? 'workflows.adapterTable.clearAll' : 'workflows.adapterTable.selectAll') }}</span>
         </div>
       </template>
       <template #select-cell="{ row }">
@@ -76,20 +76,20 @@ function platformLabel(value: string) {
       </template>
       <template #adapter-cell="{ row }">
         <div class="min-w-0">
-          <div class="truncate text-[10px] font-semibold text-[var(--text)]">{{ row.original.name }}</div>
-          <div class="mt-0.5 line-clamp-2 text-[9px] leading-4 text-[var(--text-muted)]">{{ row.original.summary }}</div>
+          <div class="type-label truncate font-semibold text-[var(--text)]">{{ row.original.name }}</div>
+          <div class="type-metadata mt-0.5 line-clamp-2 leading-4 text-[var(--text-muted)]">{{ row.original.summary }}</div>
         </div>
       </template>
       <template #platform-cell="{ row }">
         <div class="flex flex-wrap gap-1">
           <UBadge v-for="platform in row.original.platforms" :key="platform" color="neutral" variant="soft" size="sm" :label="platformLabel(platform)" />
-          <span v-if="!row.original.platforms.length" class="text-[9px] text-[var(--text-muted)]">{{ t('workflows.crossPlatform') }}</span>
+          <span v-if="!row.original.platforms.length" class="type-metadata text-[var(--text-muted)]">{{ t('workflows.crossPlatform') }}</span>
         </div>
       </template>
       <template #technology-cell="{ row }">
         <div class="flex flex-wrap gap-1">
           <UBadge v-for="technology in row.original.technologies" :key="technology" color="neutral" variant="outline" size="sm" :label="technology" />
-          <span v-if="!row.original.technologies.length" class="text-[9px] text-[var(--text-muted)]">{{ t('workflows.otherTechnology') }}</span>
+          <span v-if="!row.original.technologies.length" class="type-metadata text-[var(--text-muted)]">{{ t('workflows.otherTechnology') }}</span>
         </div>
       </template>
     </UTable>

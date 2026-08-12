@@ -245,27 +245,28 @@ onBeforeUnmount(() => {
     FORM: established Operate surface；现有管理器结构的局部扩展。
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
   -->
-  <section class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--app-bg)] p-4" aria-labelledby="settings-title">
-    <ManagementDetailHeader
+  <UtilityPageShell
       title-id="settings-title"
       :title="t('settings.title')"
       :description="t('settings.description')"
-    />
+      content-test-id="settings-layout"
+  >
+    <div class="space-y-4">
+        <UAlert
+          v-if="appSettings.settingsError.value"
+          role="alert"
+          color="error"
+          variant="soft"
+          :title="t('settings.saveFailed')"
+          :description="appSettings.settingsError.value"
+          class="w-full"
+        />
 
-    <UAlert
-      v-if="appSettings.settingsError.value"
-      role="alert"
-      color="error"
-      variant="soft"
-      :title="t('settings.saveFailed')"
-      :description="appSettings.settingsError.value"
-      class="mx-auto mb-4 w-full max-w-[980px]"
-    />
-
-    <ManagementWorkspaceSurface variant="canvas">
-      <div class="h-full overflow-y-auto p-5 [scrollbar-gutter:stable]">
-        <div class="space-y-4">
-        <ManagementFormSection :title="t('settings.appearance')" :description="t('settings.appearanceDescription')">
+        <ManagementFormSection
+          data-testid="settings-section-appearance"
+          :title="t('settings.appearance')"
+          :description="t('settings.appearanceDescription')"
+        >
           <ManagementFormRow
             :label="t('settings.language')"
             :description="t('settings.languageDescription')"
@@ -370,7 +371,7 @@ onBeforeUnmount(() => {
               >
                 <span class="flex min-w-0 flex-wrap items-center gap-1" aria-hidden="true">
                   <template v-for="(part, index) in visibleShortcutParts(row.target)" :key="`${part}-${index}`">
-                    <span v-if="index" class="text-[10px] text-[var(--text-muted)]">+</span>
+                    <span v-if="index" class="type-caption text-[var(--text-muted)]">+</span>
                     <kbd class="min-w-6 rounded border border-[var(--border-strong)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold text-[var(--text)] shadow-sm">
                       {{ part }}
                     </kbd>
@@ -382,7 +383,7 @@ onBeforeUnmount(() => {
                   aria-hidden="true"
                 />
               </UButton>
-              <p class="m-0 text-[10px] leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
+              <p class="type-metadata m-0 leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
                 {{ shortcutStatusMessage(row.target) }}
               </p>
             </div>
@@ -457,8 +458,6 @@ onBeforeUnmount(() => {
             </div>
           </ManagementFormRow>
         </ManagementFormSection>
-        </div>
-      </div>
-    </ManagementWorkspaceSurface>
-  </section>
+    </div>
+  </UtilityPageShell>
 </template>

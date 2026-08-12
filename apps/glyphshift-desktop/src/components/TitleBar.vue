@@ -58,9 +58,9 @@ async function native(action: 'minimize' | 'maximize') {
 <template>
   <header class="flex h-12 shrink-0 select-none items-stretch border-b border-[var(--border)] bg-[var(--titlebar)] text-[var(--text-secondary)]" data-tauri-drag-region>
     <div class="flex items-center gap-2 border-r border-[var(--border)] px-3" data-tauri-drag-region>
-      <span class="grid h-6 w-6 place-items-center rounded-[5px] bg-[var(--accent)] text-[10px] font-bold text-[var(--accent-foreground)]">G</span>
+      <span class="type-caption grid h-6 w-6 place-items-center rounded-[5px] bg-[var(--accent)] font-bold text-[var(--accent-foreground)]">G</span>
       <strong class="text-[13px] font-semibold tracking-[-0.015em] text-[var(--text)]">Glyphshift</strong>
-      <span class="text-[9px] text-[var(--text-muted)]">v0.2</span>
+      <span class="type-caption text-[var(--text-muted)]">v0.2</span>
     </div>
     <nav class="flex items-stretch" :aria-label="t('titleBar.navigation')">
       <UButton
@@ -89,7 +89,7 @@ async function native(action: 'minimize' | 'maximize') {
           variant="soft"
           size="sm"
           :label="probeActivityLabel"
-          class="h-4 shrink-0 px-1.5 text-[9px] font-semibold leading-none"
+          class="type-caption h-4 shrink-0 px-1.5 font-semibold leading-none"
           aria-live="polite"
         />
       </UButton>

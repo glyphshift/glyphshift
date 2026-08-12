@@ -270,11 +270,11 @@ async function start() {
             />
             <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :aria-label="t('capture.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
           </div>
-          <p class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('capture.runningSoftwareHint') }}</p>
+          <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('capture.runningSoftwareHint') }}</p>
           <UAlert v-if="runningTargetsError" role="alert" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('capture.error')" :description="runningTargetsError" />
           <UAlert v-else-if="runningTargetsLoaded && !runningTargets.length" color="neutral" variant="soft" icon="i-tabler-apps-off" :title="t('capture.runningSoftwareEmptyTitle')" :description="t('capture.runningSoftwareEmptyDescription')" />
           <div class="flex items-center justify-between gap-3 rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5">
-            <p class="m-0 min-w-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('capture.shortcutCaptureHint', { shortcut: captureShortcut }) }}</p>
+            <p class="type-metadata m-0 min-w-0 leading-4 text-[var(--text-muted)]">{{ t('capture.shortcutCaptureHint', { shortcut: captureShortcut }) }}</p>
             <UButton color="neutral" :variant="captureArmed ? 'soft' : 'outline'" size="sm" :icon="captureArmed ? 'i-tabler-x' : 'i-tabler-focus-centered'" :label="captureArmed ? t('capture.quickProbe.cancelCapture') : t('capture.quickProbe.captureForeground')" @click="toggleForegroundCapture" />
           </div>
         </div>

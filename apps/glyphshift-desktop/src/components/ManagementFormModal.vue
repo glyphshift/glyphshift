@@ -47,7 +47,7 @@ const bodyClass = computed(() => props.workspace
       content: contentClass,
       header: 'min-h-0 shrink-0 px-5 py-4',
       title: 'text-[15px]',
-      description: 'mt-1 text-[10px] leading-4',
+      description: 'type-metadata mt-1 leading-4',
       body: bodyClass,
       footer: 'shrink-0 px-5 py-4',
     }"

@@ -1,5 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { model, replaceModel, storageKey } from './fixtures/productModel'
+
+async function openProbeTaskActions(page: Page) {
+  await page.getByTestId('probe-task-actions').click()
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
@@ -161,11 +165,19 @@ test('empty libraries stay actionable and a running application can create a tem
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-tab-running-zh.png' })
   await activeCaptureTab.click()
   await expect(page.getByRole('heading', { name: 'QuickTarget 探针', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '保留', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '结束并清理', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '保留', exact: true }).click()
-  await expect(page.getByRole('button', { name: '探针设置', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '保留', exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(3)
+  await expect(page.getByTestId('probe-ai-actions')).toBeVisible()
+  await expect(page.getByTestId('probe-temporary-task-badge')).toHaveText('临时')
+  await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('临时词典')
+  await expect(page.getByTestId('probe-temporary-dictionary-badge')).toHaveText('临时')
+  await openProbeTaskActions(page)
+  await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '结束并清理临时资产', exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: '保留为常规任务', exact: true }).click()
+  await expect(page.getByTestId('probe-task-actions')).toHaveText('任务操作')
+  await openProbeTaskActions(page)
+  await expect(page.getByRole('menuitem', { name: '探针设置', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toHaveCount(0)
 })
 
 test('current-app source can end and clean up at compact English layout', async ({ page }) => {
@@ -233,7 +245,11 @@ test('current-app source can end and clean up at compact English layout', async 
   await expect(activeCaptureTab).toHaveAccessibleDescription('Running')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-tab-running-compact-en.png' })
-  await page.getByRole('button', { name: 'End and clean up', exact: true }).click()
+  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(3)
+  await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('Temporary dictionary')
+  await expect(page.getByText('quick-dictionary-captured', { exact: false })).toHaveCount(0)
+  await openProbeTaskActions(page)
+  await page.getByRole('menuitem', { name: 'End and clean up temporary assets', exact: true }).click()
   const confirmation = page.getByRole('dialog', { name: 'End temporary probe' })
   await expect(confirmation).toContainText('Library assets and assets referenced elsewhere are kept')
   await confirmation.getByRole('button', { name: 'End and clean up' }).click()
@@ -475,8 +491,10 @@ test('library sources create a normal probe without temporary ownership', async 
 
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '离线软件探针', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '探针设置', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '保留', exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('probe-task-actions')).toHaveText('任务操作')
+  await openProbeTaskActions(page)
+  await expect(page.getByRole('menuitem', { name: '探针设置', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toHaveCount(0)
 })
 
 test('new probe resets temporary source choices after cancellation', async ({ page }) => {
@@ -585,7 +603,8 @@ test('paused probe can clear its entries without releasing the runtime', async (
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
-  await page.getByRole('button', { name: '探针设置' }).click()
+  await openProbeTaskActions(page)
+  await page.getByRole('menuitem', { name: '探针设置' }).click()
   const clearButton = page.getByTestId('capture-clear-all')
   await expect(clearButton).toBeEnabled()
   await expect(page.getByText('删除全部观察证据以及绑定词典中的全部词条，保留任务和配置。')).toBeVisible()
@@ -671,7 +690,8 @@ test('probe detail edits settings and clears all joined entries behind confirmat
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
-  await page.getByRole('button', { name: '探针设置' }).click()
+  await openProbeTaskActions(page)
+  await page.getByRole('menuitem', { name: '探针设置' }).click()
   const settings = page.getByRole('dialog', { name: '探针设置' })
   await settings.getByRole('textbox', { name: '任务名称' }).fill('整理后的探针')
   await settings.getByRole('button', { name: '保存设置' }).click()
@@ -684,7 +704,8 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     livePreviewEnabled: true,
   })
 
-  await page.getByRole('button', { name: '探针设置' }).click()
+  await openProbeTaskActions(page)
+  await page.getByRole('menuitem', { name: '探针设置' }).click()
   await page.getByTestId('capture-clear-all').click()
   const confirmation = page.getByRole('dialog', { name: '清空全部探针条目' })
   await expect(confirmation.getByText(/界面基础词典/)).toBeVisible()
@@ -836,7 +857,9 @@ test('probe run keeps backend paging while adapter filters and view state recove
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureEditRequests?: Array<{ translation: string }> }).__captureEditRequests?.at(-1)?.translation
   ))).toBe('暂停时译文')
-  await expect(page.getByRole('button', { name: '导出' })).toBeEnabled()
+  await openProbeTaskActions(page)
+  await expect(page.getByRole('menuitem', { name: '当前联合表 CSV', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
 
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()

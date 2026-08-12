@@ -17,11 +17,11 @@ withDefaults(defineProps<{
     <header class="border-b border-[var(--border)] px-5 py-4">
       <component
         :is="`h${headingLevel}`"
-        class="m-0 text-[13px] font-semibold tracking-[-0.01em] text-[var(--text)]"
+        class="type-section-title m-0 font-semibold tracking-[-0.01em] text-[var(--text)]"
       >
         {{ title }}
       </component>
-      <p v-if="description" class="mb-0 mt-1 max-w-[72ch] text-[10px] leading-4 text-[var(--text-muted)]">
+      <p v-if="description" class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">
         {{ description }}
       </p>
     </header>

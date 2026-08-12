@@ -161,7 +161,7 @@ test('capture help and settings surfaces', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '当前适配器' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/help-adapters.png' })
-  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByRole('heading', { name: '设置' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/settings-local-assets.png' })

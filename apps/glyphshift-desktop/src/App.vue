@@ -32,6 +32,7 @@ const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
 const shellCompatibilityErrorKey = ref('')
 const quickProbeCaptureActive = ref(false)
+const mainContent = ref<HTMLElement | null>(null)
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
 let unlistenSoftwareCapture: UnlistenFn | null = null
@@ -120,6 +121,16 @@ function guardBrowserExit(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 
+function focusMainContent() {
+  mainContent.value?.focus({ preventScroll: true })
+}
+
+function handleShellShortcut(event: KeyboardEvent) {
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.code !== 'KeyM' || event.defaultPrevented) return
+  event.preventDefault()
+  focusMainContent()
+}
+
 async function createWorkflow(name: string, description: string, targets: WorkflowTarget[]) {
   await workspace.createWorkflow(name, description, targets)
 }
@@ -196,6 +207,7 @@ async function connectSoftwareQuickCaptureEvents() {
 
 onMounted(() => {
   window.addEventListener('beforeunload', guardBrowserExit)
+  window.addEventListener('keydown', handleShellShortcut)
   void connectDesktopShell()
   void connectSoftwareQuickCaptureEvents()
   void connectWindowCloseBehavior()
@@ -203,6 +215,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', guardBrowserExit)
+  window.removeEventListener('keydown', handleShellShortcut)
   window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
   unlistenSoftwareCapture?.()
   unlistenWindowClose?.()
@@ -212,14 +225,25 @@ onBeforeUnmount(() => {
 <template>
   <UApp :locale="nuxtLocale">
     <div class="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--text)]">
+      <a
+        href="#main-content"
+        class="fixed left-3 top-2 z-[120] flex h-8 -translate-y-14 items-center rounded-[6px] border border-[var(--border-strong)] bg-[var(--surface)] px-3 type-label font-semibold text-[var(--text)] outline-none focus:translate-y-0 focus:ring-2 focus:ring-[var(--focus)] focus:ring-offset-2 focus:ring-offset-[var(--titlebar)]"
+        :aria-label="t('app.skipToMain')"
+        aria-keyshortcuts="Alt+M"
+        @click.prevent="focusMainContent"
+      >
+        <span>{{ t('app.skipToMain') }}</span>
+        <span class="type-caption ml-2 font-normal text-[var(--text-muted)]" aria-hidden="true">Alt+M</span>
+      </a>
       <TitleBar
         :current="view"
         :probe-activity-status="probe.activityStatus.value"
         @navigate="requestNavigation"
         @close="requestWindowClose"
       />
-      <main class="flex min-h-0 flex-1 overflow-hidden">
+      <main id="main-content" ref="mainContent" tabindex="-1" class="flex min-h-0 flex-1 overflow-hidden outline-none" :aria-label="t('app.mainContent')">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
+        <h1 class="sr-only">{{ t('app.desktopReloadTitle') }}</h1>
         <UAlert
           color="warning"
           variant="soft"
@@ -316,7 +340,7 @@ onBeforeUnmount(() => {
         @workspace-changed="refreshWorkspaceAfterQuickProbe"
         @configure-ai="requestNavigation('settings')"
       />
-      <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
+      <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="requestNavigation" />
       <SettingsView v-else @navigate="view = $event" />
       </main>
       <ConfirmDialog

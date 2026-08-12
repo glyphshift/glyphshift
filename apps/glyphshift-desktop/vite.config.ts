@@ -14,7 +14,7 @@ export default defineConfig({
           warning: 'amber',
         },
         button: {
-          slots: { base: 'justify-center text-[10px] font-semibold' },
+          slots: { base: 'type-label justify-center font-semibold' },
           compoundVariants: [
             {
               color: 'primary',
@@ -24,40 +24,40 @@ export default defineConfig({
           ],
         },
         input: {
-          slots: { base: 'bg-[var(--field-bg)] text-[11px]' },
+          slots: { base: 'type-label bg-[var(--field-bg)]' },
         },
         textarea: {
-          slots: { base: 'bg-[var(--field-bg)] text-[11px]' },
+          slots: { base: 'type-label bg-[var(--field-bg)]' },
         },
         select: {
           slots: {
-            base: 'bg-[var(--field-bg)] text-[11px]',
+            base: 'type-label bg-[var(--field-bg)]',
             content: 'relative z-[90] rounded-[6px]',
           },
         },
         formField: {
           slots: {
-            label: 'text-[10px] font-medium',
-            hint: 'text-[9px]',
-            description: 'text-[9px]',
+            label: 'type-label font-medium',
+            hint: 'type-metadata',
+            description: 'type-metadata',
           },
         },
         checkbox: {
           slots: {
             root: 'items-center',
-            label: 'text-[10px]',
+            label: 'type-label',
           },
         },
         dropdownMenu: {
           slots: {
             content: 'z-[60] min-w-32 rounded-[6px]',
-            item: 'min-h-8 items-center rounded-[4px] text-[10px]',
+            item: 'type-label min-h-8 items-center rounded-[4px]',
             itemTrailingIcon: 'size-4',
           },
         },
         selectMenu: {
           slots: {
-            base: 'bg-[var(--field-bg)] text-[11px]',
+            base: 'type-label bg-[var(--field-bg)]',
             content: 'relative z-[90] rounded-[6px]',
             viewport: 'overscroll-contain',
           },
@@ -75,21 +75,21 @@ export default defineConfig({
         },
         table: {
           slots: {
-            root: 'h-full rounded-none',
-            base: 'w-full table-fixed text-[11px]',
+            root: 'isolate h-full rounded-none',
+            base: 'type-label w-full table-fixed',
             thead: 'bg-[var(--surface-subtle)]',
             tbody: 'divide-y divide-[var(--border)]',
-            tr: 'hover:bg-[var(--surface-subtle)]',
-            th: 'h-8 px-3 py-2 text-[9px] font-medium text-[var(--text-muted)]',
-            td: 'px-3 py-3 text-[11px] text-[var(--text)]',
+            tr: 'group hover:bg-[var(--surface-subtle)]',
+            th: 'type-label h-8 px-3 py-2 font-medium text-[var(--text-muted)]',
+            td: 'type-label px-3 py-3 text-[var(--text)]',
             empty: 'h-52 p-0',
           },
         },
         empty: {
           slots: {
             root: 'h-full justify-center rounded-none border-0 bg-transparent p-6',
-            title: 'text-[13px]',
-            description: 'text-[10px]',
+            title: 'type-section-title',
+            description: 'type-metadata',
           },
         },
       },

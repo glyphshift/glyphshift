@@ -56,13 +56,13 @@ test('management pages share the project management-page modules', () => {
   const dictionaryEditor = readFileSync(join(sourceRoot, 'components', 'DictionaryProof.vue'), 'utf8')
   expect(dictionaryEditor, 'DictionaryProof.vue must use the shared table frame.').toContain('<ManagementTableFrame')
 
-  const detailPages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryProof.vue', 'CaptureView.vue', 'SettingsView.vue']
+  const detailPages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryProof.vue', 'CaptureView.vue']
   for (const page of detailPages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared detail header.`).toContain('<ManagementDetailHeader')
   }
 
-  const workspacePages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'SettingsView.vue']
+  const workspacePages = ['WorkflowTable.vue', 'SoftwareTable.vue']
   for (const page of workspacePages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared workspace surface.`).toContain('<ManagementWorkspaceSurface')
@@ -70,6 +70,18 @@ test('management pages share the project management-page modules', () => {
     expect(source, `${basename(page)} must use the shared form section.`).toContain('<ManagementFormSection')
     expect(source, `${basename(page)} must use the shared form row.`).toContain('<ManagementFormRow')
   }
+
+  const utilityPages = ['SettingsView.vue', 'HelpView.vue']
+  for (const page of utilityPages) {
+    const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
+    expect(source, `${basename(page)} must use the shared utility-page shell.`).toContain('<UtilityPageShell')
+  }
+
+  const utilityPageShell = readFileSync(join(sourceRoot, 'components', 'UtilityPageShell.vue'), 'utf8')
+  expect(utilityPageShell).toContain('<ManagementDetailHeader')
+  expect(utilityPageShell).toContain('<ManagementWorkspaceSurface variant="canvas">')
+  expect(utilityPageShell).toContain('--utility-page-content-width: 980px')
+  expect(utilityPageShell).toContain('[scrollbar-gutter:stable_both-edges]')
 
   const workspaceSurface = readFileSync(join(sourceRoot, 'components', 'ManagementWorkspaceSurface.vue'), 'utf8')
   const detailHeader = readFileSync(join(sourceRoot, 'components', 'ManagementDetailHeader.vue'), 'utf8')
@@ -89,6 +101,36 @@ test('management pages share the project management-page modules', () => {
   const themeSource = readFileSync(join(sourceRoot, 'main.css'), 'utf8')
   expect(themeSource).toContain('--surface-inset:')
   expect(themeSource).toContain('--field-bg:')
+})
+
+test('management tables share pinned compact context and semantic type roles', () => {
+  const compactTables = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'CaptureView.vue']
+  for (const page of compactTables) {
+    const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
+    expect(source, `${basename(page)} must pin its object identity column.`).toContain('managementIdentityColumnMeta')
+    expect(source, `${basename(page)} must expose a keyboard-focusable table region.`).toContain('management-table-scroll')
+    expect(source, `${basename(page)} must name the table region.`).toMatch(/aria-label(?:ledby)?=/)
+  }
+
+  const tableInteraction = readFileSync(join(sourceRoot, 'tableInteraction.ts'), 'utf8')
+  expect(tableInteraction).toContain('managementSelectionColumnMeta')
+  expect(tableInteraction).toContain('managementActionsColumnMeta')
+  expect(tableInteraction).toContain('management-table-identity-cell')
+  expect(tableInteraction).toContain('management-table-actions-cell')
+
+  const smallTypeViolations = vueSources().flatMap(path => {
+    const source = readFileSync(path, 'utf8')
+    return [...source.matchAll(/text-\[(?:8|9|10)px\]/g)].map(match => ({
+      file: relative(sourceRoot, path).replaceAll('\\', '/'),
+      utility: match[0],
+    }))
+  })
+  expect(smallTypeViolations, 'Use semantic type roles instead of 8–10px functional copy.').toEqual([])
+
+  const themeSource = readFileSync(join(sourceRoot, 'main.css'), 'utf8')
+  for (const token of ['caption', 'label', 'metadata', 'body', 'section-title', 'page-title']) {
+    expect(themeSource).toContain(`--type-${token}:`)
+  }
 })
 
 test('modal layers stay above sticky tables and transient menus', () => {

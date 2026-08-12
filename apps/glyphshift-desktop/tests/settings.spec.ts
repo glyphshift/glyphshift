@@ -5,11 +5,116 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
 })
+
+test('settings aligns its title and form surface across wide and compact windows', async ({ page }) => {
+  await page.setViewportSize({ width: 1520, height: 720 })
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+
+  const headerContent = page.getByTestId('management-detail-header-content')
+  const settingsLayout = page.getByTestId('settings-layout')
+  const appearanceSection = page.getByTestId('settings-section-appearance')
+
+  await expect(headerContent).toBeVisible()
+  await expect(settingsLayout).toBeVisible()
+
+  const geometry = await page.evaluate(() => {
+    const box = (selector: string) => {
+      const rect = document.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
+      if (!rect) throw new Error(`Missing ${selector}`)
+      return { left: rect.left, right: rect.right, width: rect.width }
+    }
+    return {
+      header: box('[data-testid="management-detail-header-content"]'),
+      layout: box('[data-testid="settings-layout"]'),
+      appearance: box('[data-testid="settings-section-appearance"]'),
+      headerBottom: document.querySelector<HTMLElement>('[data-testid="management-detail-header"]')!.getBoundingClientRect().bottom,
+      appearanceTop: document.querySelector<HTMLElement>('[data-testid="settings-section-appearance"]')!.getBoundingClientRect().top,
+    }
+  })
+  expect(geometry.header.width).toBeGreaterThanOrEqual(979)
+  expect(Math.abs(geometry.header.left - geometry.layout.left)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.right - geometry.layout.right)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.left - geometry.appearance.left)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.right - geometry.appearance.right)).toBeLessThanOrEqual(1)
+  expect(geometry.appearanceTop - geometry.headerBottom).toBeGreaterThanOrEqual(19)
+  expect(geometry.appearanceTop - geometry.headerBottom).toBeLessThanOrEqual(21)
+
+  await page.setViewportSize({ width: 960, height: 640 })
+  const compactGeometry = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('[data-testid="management-detail-header-content"]')!.getBoundingClientRect()
+    const layout = document.querySelector<HTMLElement>('[data-testid="settings-layout"]')!.getBoundingClientRect()
+    return { headerLeft: header.left, headerRight: header.right, layoutLeft: layout.left, layoutRight: layout.right }
+  })
+  expect(Math.abs(compactGeometry.headerLeft - compactGeometry.layoutLeft)).toBeLessThanOrEqual(1)
+  expect(Math.abs(compactGeometry.headerRight - compactGeometry.layoutRight)).toBeLessThanOrEqual(1)
+  await expect.poll(() => settingsLayout.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('help shares the settings utility-page width, title axis, and first-content rhythm', async ({ page }) => {
+  await page.setViewportSize({ width: 1520, height: 720 })
+  await page.getByRole('button', { name: '帮助', exact: true }).click()
+
+  const headerContent = page.getByTestId('management-detail-header-content')
+  const helpLayout = page.getByTestId('help-layout')
+  const recoverySection = page.getByTestId('help-section-recovery')
+
+  await expect(headerContent).toBeVisible()
+  await expect(helpLayout).toBeVisible()
+  const geometry = await page.evaluate(() => {
+    const rect = (selector: string) => {
+      const box = document.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
+      if (!box) throw new Error(`Missing ${selector}`)
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width }
+    }
+    return {
+      header: rect('[data-testid="management-detail-header"]'),
+      headerContent: rect('[data-testid="management-detail-header-content"]'),
+      layout: rect('[data-testid="help-layout"]'),
+      recovery: rect('[data-testid="help-section-recovery"]'),
+    }
+  })
+  expect(geometry.layout.width).toBeGreaterThanOrEqual(979)
+  expect(geometry.layout.width).toBeLessThanOrEqual(981)
+  expect(Math.abs(geometry.headerContent.left - geometry.layout.left)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.headerContent.right - geometry.layout.right)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.layout.left - geometry.recovery.left)).toBeLessThanOrEqual(1)
+  expect(geometry.recovery.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
+  expect(geometry.recovery.top - geometry.header.bottom).toBeLessThanOrEqual(21)
+
+  await page.setViewportSize({ width: 960, height: 640 })
+  const compactGeometry = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('[data-testid="management-detail-header-content"]')!.getBoundingClientRect()
+    const layout = document.querySelector<HTMLElement>('[data-testid="help-layout"]')!.getBoundingClientRect()
+    return { headerLeft: header.left, headerRight: header.right, layoutLeft: layout.left, layoutRight: layout.right }
+  })
+  expect(Math.abs(compactGeometry.headerLeft - compactGeometry.layoutLeft)).toBeLessThanOrEqual(1)
+  expect(Math.abs(compactGeometry.headerRight - compactGeometry.layoutRight)).toBeLessThanOrEqual(1)
+  await expect.poll(() => helpLayout.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
 test('help exposes adapter information without internal targets', async ({ page }) => {
+  await page.setViewportSize({ width: 960, height: 640 })
   await page.getByRole('button', { name: '帮助' }).click()
 
   await expect(page.getByRole('heading', { name: '帮助' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '当前适配器' })).toBeVisible()
+  const recoveryHeading = page.getByRole('heading', { name: '解决常见问题' })
+  const adapterHeading = page.getByRole('heading', { name: '当前适配器' })
+  await expect(recoveryHeading).toBeVisible()
+  await expect(page.getByRole('heading', { name: '软件未启动' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '权限不匹配' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '没有捕获到文字' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开软件管理' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '检查权限设置' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开探针' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Glyphshift 如何组织工作' })).toBeVisible()
+  await expect(adapterHeading).toBeVisible()
+  await expect.poll(async () => {
+    const recoveryBox = await recoveryHeading.boundingBox()
+    const adapterBox = await adapterHeading.boundingBox()
+    return Boolean(recoveryBox && adapterBox && recoveryBox.y < adapterBox.y)
+  }).toBe(true)
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
@@ -23,25 +128,44 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('文字观察', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('文字替换', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('字体替换', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('无需配置', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('v1.0.0', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /技术文档/ })).toHaveCount(5)
+  const adapterList = page.getByTestId('help-adapter-list')
+  await expect(adapterList).toBeVisible()
+  await expect.poll(() => adapterList.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  const extTextOut = page.getByTestId('help-adapter-item').filter({ hasText: 'ExtTextOutW' })
+  await expect(extTextOut.getByText('v1.0.0', { exact: true })).toHaveCount(0)
+  await extTextOut.getByRole('button', { name: '查看 ExtTextOutW 详情' }).click()
+  const extDetails = extTextOut.getByRole('region', { name: 'ExtTextOutW 详情' })
+  await expect(extDetails).toContainText('v1.0.0')
+  await expect(extDetails).toContainText('无需配置')
+  await expect(extTextOut.getByRole('button', { name: '查看 ExtTextOutW 技术文档' })).toBeVisible()
   await page.evaluate(() => {
     window.open = ((url?: string | URL) => {
       ;(window as unknown as { __openedAdapterDocumentation?: string }).__openedAdapterDocumentation = String(url)
       return window
     }) as typeof window.open
   })
-  await page.getByRole('button', { name: '查看 ExtTextOutW 技术文档' }).click()
+  await extTextOut.getByRole('button', { name: '查看 ExtTextOutW 技术文档' }).click()
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __openedAdapterDocumentation?: string }
   ).__openedAdapterDocumentation)).toBe('https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw')
-  await page.getByRole('button', { name: '查看 Unity Mono 标准界面 技术文档' }).click()
+  const unity = page.getByTestId('help-adapter-item').filter({ hasText: 'Unity Mono 标准界面' })
+  await unity.getByRole('button', { name: '查看 Unity Mono 标准界面 详情' }).click()
+  await unity.getByRole('button', { name: '查看 Unity Mono 标准界面 技术文档' }).click()
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __openedAdapterDocumentation?: string }
   ).__openedAdapterDocumentation)).toBe('https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html')
   await expect(page.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '检查权限设置' }).click()
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('button', { name: '打开探针' }).click()
+  await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('button', { name: '打开软件管理' }).click()
+  await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
 })
 
 test('settings applies and persists the real locale and theme preferences', async ({ page }) => {
@@ -78,7 +202,9 @@ test('settings applies and persists the real locale and theme preferences', asyn
 
   await page.getByRole('button', { name: 'Help', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Solve a problem' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Available adapters' })).toBeVisible()
+  await page.getByRole('button', { name: 'View details for ExtTextOutW' }).click()
   await expect(page.getByRole('button', { name: 'View technical documentation for ExtTextOutW' })).toBeVisible()
   await page.getByRole('button', { name: 'Software', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Software' })).toBeVisible()

@@ -32,10 +32,10 @@ function toggle(adapterId: string, checked: boolean | 'indeterminate') {
     <section>
       <div class="bg-[var(--surface-subtle)] px-3 py-2">
         <div class="flex items-center justify-between gap-3">
-          <strong class="text-[10px] font-semibold text-[var(--text)]">{{ t('capture.realtimeAdapters') }}</strong>
-          <span class="tabular-nums text-[9px] text-[var(--text-muted)]">{{ productAdapters.length }}</span>
+          <strong class="type-label font-semibold text-[var(--text)]">{{ t('capture.realtimeAdapters') }}</strong>
+          <span class="type-caption tabular-nums text-[var(--text-muted)]">{{ productAdapters.length }}</span>
         </div>
-        <p class="mt-0.5 mb-0 text-[9px] leading-4 text-[var(--text-muted)]">{{ t('capture.realtimeAdaptersHint') }}</p>
+        <p class="type-metadata mt-0.5 mb-0 leading-4 text-[var(--text-muted)]">{{ t('capture.realtimeAdaptersHint') }}</p>
       </div>
       <label
         v-for="adapter in productAdapters"
@@ -44,8 +44,8 @@ function toggle(adapterId: string, checked: boolean | 'indeterminate') {
         :class="disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-[var(--surface-hover)]'"
       >
         <UCheckbox :model-value="modelValue.includes(adapter.id)" :disabled="disabled" :aria-label="adapter.name" @update:model-value="toggle(adapter.id, $event)" />
-        <span class="min-w-0 flex-1 truncate text-[10px] font-medium">{{ adapter.name }}</span>
-        <span class="max-w-32 truncate text-[9px] text-[var(--text-muted)]">{{ adapter.technologies.join(' · ') }}</span>
+        <span class="type-label min-w-0 flex-1 truncate font-medium">{{ adapter.name }}</span>
+        <span class="type-metadata max-w-32 truncate text-[var(--text-muted)]">{{ adapter.technologies.join(' · ') }}</span>
       </label>
     </section>
   </div>

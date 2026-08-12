@@ -18,10 +18,10 @@ const { t } = useI18n()
     :aria-label="t('workflows.selectedFontsLabel')"
   >
     <div class="min-w-0">
-      <h4 class="m-0 text-[10px] font-semibold" aria-live="polite">
+      <h3 class="type-label m-0 font-semibold" aria-live="polite">
         {{ t('workflows.selectedFonts', { count: families.length }) }}
-      </h4>
-      <p class="m-0 mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">
+      </h3>
+      <p class="type-metadata m-0 mt-0.5 leading-4 text-[var(--text-muted)]">
         {{ t('workflows.selectedFontsHint') }}
       </p>
     </div>
@@ -33,10 +33,10 @@ const { t } = useI18n()
         :data-selected-font-family="family"
         class="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[6px] border border-[var(--border)] bg-[var(--surface)] py-0.5 pl-1.5 pr-0.5"
       >
-        <span class="grid size-5 shrink-0 place-items-center rounded-[4px] bg-[var(--surface-inset)] text-[8px] font-semibold tabular-nums text-[var(--text-secondary)]">
+        <span class="type-caption grid size-5 shrink-0 place-items-center rounded-[4px] bg-[var(--surface-inset)] font-semibold tabular-nums text-[var(--text-secondary)]">
           {{ index + 1 }}
         </span>
-        <span class="max-w-44 truncate text-[9px] font-medium" :title="family">{{ family }}</span>
+        <span class="type-label max-w-44 truncate font-medium" :title="family">{{ family }}</span>
         <div class="ml-0.5 flex shrink-0 items-center">
           <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-left" :disabled="index === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="emit('move', family, -1)" />
           <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-right" :disabled="index === families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="emit('move', family, 1)" />
@@ -44,7 +44,7 @@ const { t } = useI18n()
         </div>
       </div>
     </div>
-    <p v-else class="m-0 text-[9px] leading-4 text-[var(--text-muted)]">
+    <p v-else class="type-metadata m-0 leading-4 text-[var(--text-muted)]">
       {{ t('workflows.noSelectedFonts') }}
     </p>
   </section>

@@ -4,6 +4,12 @@
 @source "./**/*.{vue,ts,js}";
 
 :root {
+  --type-caption: 10px;
+  --type-label: 11px;
+  --type-metadata: 11px;
+  --type-body: 12px;
+  --type-section-title: 13px;
+  --type-page-title: 20px;
   --ui-surface: color-mix(in oklab, var(--ui-bg-elevated) 68%, var(--ui-bg));
   --ui-surface-hover: color-mix(in oklab, var(--ui-bg-accented) 20%, var(--ui-bg-elevated));
   --ui-surface-strong: color-mix(in oklab, var(--ui-bg-accented) 52%, var(--ui-bg-elevated));
@@ -168,8 +174,37 @@ body {
   background: var(--app-bg);
   color: var(--text);
   font-family: "Segoe UI Variable", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  font-size: 12px;
+  font-size: var(--type-body);
   -webkit-font-smoothing: antialiased;
+}
+
+.type-caption {
+  font-size: var(--type-caption);
+}
+
+.type-label {
+  font-size: var(--type-label);
+}
+
+.type-metadata {
+  font-size: var(--type-metadata);
+}
+
+.type-body {
+  font-size: var(--type-body);
+}
+
+.type-section-title {
+  font-size: var(--type-section-title);
+}
+
+.type-page-title {
+  font-size: var(--type-page-title);
+}
+
+.management-table-scroll:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 72%, transparent);
+  outline-offset: -2px;
 }
 
 ::selection {

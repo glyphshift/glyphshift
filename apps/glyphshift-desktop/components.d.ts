@@ -58,6 +58,7 @@ declare module 'vue' {
     UTable: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Table.vue')['default']
     UTabs: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Tabs.vue')['default']
     UTextarea: typeof import('./node_modules/@nuxt/ui/dist/runtime/components/Textarea.vue')['default']
+    UtilityPageShell: typeof import('./src/components/UtilityPageShell.vue')['default']
     WorkflowTable: typeof import('./src/components/WorkflowTable.vue')['default']
   }
 }

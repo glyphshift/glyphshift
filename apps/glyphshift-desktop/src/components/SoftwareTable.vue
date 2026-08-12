@@ -6,7 +6,12 @@ import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
 import { translateCommandError } from '../commandError'
 import type { SoftwarePreflight, SoftwareRecord } from '../model'
-import { editableRowIndex } from '../tableInteraction'
+import {
+  editableRowIndex,
+  managementActionsColumnMeta,
+  managementIdentityColumnMeta,
+  managementSelectionColumnMeta,
+} from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 
@@ -136,11 +141,11 @@ const columnOptions = computed(() => [
   { key: 'binding', label: t('software.columns.binding'), visible: columns.value.binding },
 ])
 const tableColumns = computed<TableColumn<SoftwareRecord>[]>(() => [
-  { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { id: 'software', header: t('software.columns.software'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } },
+  { id: 'select', header: '', meta: managementSelectionColumnMeta() },
+  { id: 'software', header: t('software.columns.software'), meta: managementIdentityColumnMeta('w-52') },
   ...(columns.value.description ? [{ id: 'description', header: t('software.columns.description'), meta: { class: { th: 'w-[28%]', td: 'w-[28%]' } } } satisfies TableColumn<SoftwareRecord>] : []),
   ...(columns.value.binding ? [{ id: 'binding', header: t('software.columns.binding') } satisfies TableColumn<SoftwareRecord>] : []),
-  { id: 'actions', header: t('software.columns.actions'), meta: { class: { th: 'w-24 text-center', td: 'w-24 text-center' } } },
+  { id: 'actions', header: t('software.columns.actions'), meta: managementActionsColumnMeta('w-24') },
 ])
 const editDirty = computed(() => Boolean(editing.value) && JSON.stringify({
   name: editName.value,
@@ -369,7 +374,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('software.bulkDelete')" :disabled="busy" @click="pendingRemoval = [...selected]" />
       </template>
 
-      <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[760px]' }" @dblclick="openOnDoubleClick">
+      <UTable data-testid="software-management-table" role="region" tabindex="0" aria-labelledby="software-title" :data="pageItems" :columns="tableColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[760px]' }" @dblclick="openOnDoubleClick">
         <template #select-header>
           <UCheckbox :model-value="pageSelected" :aria-label="t('software.selectPage')" @update:model-value="togglePageSelection" />
         </template>
@@ -388,7 +393,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
           <div class="truncate" :title="row.original.executablePath ?? row.original.executableName">
             {{ row.original.executablePath ?? row.original.executableName }}
           </div>
-          <div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.vendor }} · {{ row.original.version }}</div>
+          <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.vendor }} · {{ row.original.version }}</div>
         </template>
         <template #actions-cell="{ row }">
           <div class="flex items-center justify-center gap-1">
@@ -432,7 +437,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
           <div class="flex items-center justify-between gap-3">
             <div>
               <p class="m-0 text-xs font-semibold text-[var(--text)]">{{ t('software.runningSoftware') }}</p>
-              <p class="m-0 mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareHint') }}</p>
+              <p class="type-metadata m-0 mt-0.5 leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareHint') }}</p>
             </div>
             <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-refresh" :aria-label="t('software.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
           </div>
@@ -449,9 +454,9 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
             @update:model-value="chooseRunningTarget"
           />
           <UAlert v-if="runningTargetsError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('software.error')" :description="runningTargetsError" />
-          <p v-else-if="runningTargetsLoaded && !runningTargets.length" class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareEmpty') }}</p>
+          <p v-else-if="runningTargetsLoaded && !runningTargets.length" class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareEmpty') }}</p>
           <div class="flex items-center justify-between gap-3 pt-1">
-            <p class="m-0 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('software.captureWaitingDescription', { shortcut: captureShortcut }) }}</p>
+            <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('software.captureWaitingDescription', { shortcut: captureShortcut }) }}</p>
             <UButton color="neutral" :variant="captureArmed ? 'soft' : 'outline'" size="sm" :icon="captureArmed ? 'i-tabler-x' : 'i-tabler-focus-centered'" :label="captureArmed ? t('software.cancelCapture') : t('software.quickCapture')" @click="toggleForegroundCapture" />
           </div>
         </div>

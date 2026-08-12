@@ -15,7 +15,12 @@ import type {
   SoftwareRecord,
 } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
-import { editableRowIndex } from '../tableInteraction'
+import {
+  editableRowIndex,
+  managementActionsColumnMeta,
+  managementIdentityColumnMeta,
+  managementSelectionColumnMeta,
+} from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
 import { useProbeRuns, type ProbeTranslationFilter, type QuickProbeCleanupResult } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
@@ -138,6 +143,12 @@ const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.v
 const selectedRun = computed(() => probe.selectedRun.value)
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
+const selectedRunHasTemporaryDictionary = computed(() => Boolean(
+  selectedRun.value && isTemporaryProbeDictionary(selectedRun.value),
+))
+const selectedRunDictionaryName = computed(() => (
+  selectedRun.value ? runDictionaryName(selectedRun.value) : ''
+))
 const settingsDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === settingsDictionaryId.value))
 const settingsDictionaryItems = computed(() => props.dictionaries.map(item => ({
   value: item.metadata.id,
@@ -148,7 +159,7 @@ const selectedRunMetadata = computed(() => {
   if (!run) return ''
   const parts = [
     selectedSoftware.value?.name ?? run.softwareId,
-    selectedDictionary.value?.metadata.name ?? run.dictionaryId,
+    selectedRunDictionaryName.value,
     t('capture.runSummary', { observed: run.observedCount, entries: run.dictionaryEntryCount }),
   ]
   if (run.livePreviewEnabled) parts.push(t('capture.previewGeneration', { generation: run.previewGeneration }))
@@ -234,7 +245,7 @@ const filteredRuns = computed(() => {
   return probe.runs.value.filter(run => [
     run.name,
     softwareName(run.softwareId),
-    dictionaryName(run.dictionaryId),
+    runDictionaryName(run),
   ].some(value => value.toLowerCase().includes(needle)))
 })
 const listPageItems = computed(() => filteredRuns.value.slice(
@@ -252,14 +263,14 @@ const runColumnOptions = computed(() => [
   { key: 'updated', label: t('capture.columns.updated'), visible: runVisibleColumns.value.updated },
 ])
 const runColumns = computed<TableColumn<ProbeRunSummary>[]>(() => [
-  { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { id: 'run', header: t('capture.columns.run'), meta: { class: { th: 'w-[25%]', td: 'w-[25%]' } } },
+  { id: 'select', header: '', meta: managementSelectionColumnMeta() },
+  { id: 'run', header: t('capture.columns.run'), meta: managementIdentityColumnMeta('w-60') },
   ...(runVisibleColumns.value.software ? [{ id: 'software', header: t('capture.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.dictionary ? [{ id: 'dictionary', header: t('capture.columns.dictionary'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.status ? [{ accessorKey: 'status', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.progress ? [{ id: 'progress', header: t('capture.columns.progress'), meta: { class: { th: 'w-32', td: 'w-32' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.updated ? [{ accessorKey: 'updatedAtMs', header: t('capture.columns.updated'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeRunSummary>] : []),
-  { id: 'actions', header: t('capture.columns.actions'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } },
+  { id: 'actions', header: t('capture.columns.actions'), meta: managementActionsColumnMeta('w-20') },
 ])
 const entryColumnOptions = computed(() => [
   { key: 'status', label: t('capture.columns.status'), visible: entryVisibleColumns.value.status },
@@ -268,8 +279,8 @@ const entryColumnOptions = computed(() => [
   { key: 'lastSeen', label: t('capture.columns.lastSeen'), visible: entryVisibleColumns.value.lastSeen },
 ])
 const entryColumns = computed<TableColumn<ProbeEntryRow>[]>(() => [
-  { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { accessorKey: 'source', header: t('capture.columns.source'), meta: { class: { th: 'w-[24%]', td: 'w-[24%]' } } },
+  { id: 'select', header: '', meta: managementSelectionColumnMeta() },
+  { accessorKey: 'source', header: t('capture.columns.source'), meta: managementIdentityColumnMeta('w-60') },
   { accessorKey: 'translation', header: t('capture.columns.translation'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
   ...(entryVisibleColumns.value.status ? [{ accessorKey: 'state', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeEntryRow>] : []),
   ...(entryVisibleColumns.value.adapters ? [{ id: 'adapters', header: t('capture.columns.adapter'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeEntryRow>] : []),
@@ -283,6 +294,41 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [[
   { label: t('capture.exportObservationsCsv'), icon: 'i-tabler-file-type-csv', onSelect: () => void chooseExport('observations_csv') },
   { label: t('capture.exportObservationsJson'), icon: 'i-tabler-braces', onSelect: () => void chooseExport('observations_json') },
 ]])
+const taskActionLabel = computed(() => selectedRun.value?.quickProbe
+  ? t('capture.quickProbe.menu')
+  : t('capture.taskActions'))
+const taskActionItems = computed<DropdownMenuItem[][]>(() => {
+  const run = selectedRun.value
+  if (!run) return []
+  if (run.quickProbe) {
+    return [[{
+      label: t('capture.quickProbe.retainAsRegular'),
+      icon: 'i-tabler-bookmark',
+      disabled: probe.busy.value,
+      onSelect: () => void retainQuickProbe(),
+    }], [{
+      label: t('capture.quickProbe.cleanupTemporaryAssets'),
+      icon: 'i-tabler-trash-x',
+      color: 'error',
+      disabled: probe.busy.value,
+      onSelect: () => { pendingQuickCleanup.value = run },
+    }]]
+  }
+
+  const groups: DropdownMenuItem[][] = [[{
+    label: t('capture.settings'),
+    icon: 'i-tabler-settings',
+    onSelect: () => void openSettings(),
+  }], ...exportItems.value]
+  if (['running', 'paused'].includes(run.status)) {
+    groups.push([{
+      label: t('capture.disconnect'),
+      icon: 'i-tabler-plug-off',
+      onSelect: () => void probe.disconnect(run.id),
+    }])
+  }
+  return groups
+})
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
     type: 'checkbox' as const,
@@ -684,7 +730,7 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
       emit('workspace-changed')
       dictionaryNotice.value = t('capture.removedFromDictionary', {
         count: sources.length,
-        dictionary: selectedDictionary.value?.metadata.name ?? run.dictionaryId,
+        dictionary: runDictionaryName(run),
       })
     }
     selected.value = new Set()
@@ -850,7 +896,17 @@ function softwarePath(id: string) {
 }
 
 function dictionaryName(id: string) {
-  return props.dictionaries.find(item => item.metadata.id === id)?.metadata.name ?? id
+  return props.dictionaries.find(item => item.metadata.id === id)?.metadata.name ?? t('capture.dictionaryUnavailable')
+}
+
+function isTemporaryProbeDictionary(run: ProbeRunSummary) {
+  return run.quickProbe && run.dictionaryId.startsWith('quick-dictionary-')
+}
+
+function runDictionaryName(run: ProbeRunSummary) {
+  return isTemporaryProbeDictionary(run)
+    ? t('capture.quickProbe.temporaryDictionary')
+    : dictionaryName(run.dictionaryId)
 }
 
 function adapterName(id: string) {
@@ -941,6 +997,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <template #status>
         <div class="flex items-center gap-1.5">
           <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
+          <UBadge v-if="selectedRun.quickProbe" data-testid="probe-temporary-task-badge" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
           <UBadge
             v-if="selectedRun.runtimeCapability"
             data-testid="probe-runtime-capability"
@@ -952,46 +1009,23 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </template>
       <template #actions>
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-tabler-app-window"
-          :label="t('capture.launchSoftware')"
-          :loading="launchingSoftware"
-          :disabled="!selectedSoftware?.executablePath"
-          @click="launchSelectedSoftware"
-        />
-        <div class="inline-flex">
+        <div data-testid="probe-detail-actions" class="flex items-center gap-2">
           <UButton
-            color="primary"
-            variant="soft"
+            color="neutral"
+            variant="outline"
             size="sm"
-            icon="i-tabler-sparkles"
-            :label="selectedAiProfile ? t('ai.fillUntranslated') : t('ai.configure')"
-            :loading="ai.busy.value"
-            class="rounded-r-none"
-            @click="selectedAiProfile ? runAiTranslation() : emit('configure-ai')"
+            icon="i-tabler-app-window"
+            :label="t('capture.launchSoftware')"
+            :loading="launchingSoftware"
+            :disabled="!selectedSoftware?.executablePath"
+            @click="launchSelectedSoftware"
           />
-          <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
-            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
-          </UDropdownMenu>
-        </div>
-        <template v-if="selectedRun.quickProbe">
-          <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-bookmark" :label="t('capture.quickProbe.retain')" :loading="probe.busy.value" @click="retainQuickProbe" />
-          <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.quickProbe.cleanup')" :disabled="probe.busy.value" @click="pendingQuickCleanup = selectedRun" />
-          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="ghost" size="sm" icon="i-tabler-player-pause" :aria-label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
-          <UButton v-else color="neutral" variant="ghost" size="sm" icon="i-tabler-player-play" :aria-label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
-        </template>
-        <template v-else>
-          <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('capture.settings')" @click="openSettings" />
-          <UDropdownMenu :items="exportItems" :content="{ align: 'end' }">
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-download" trailing-icon="i-tabler-chevron-down" :label="t('capture.export')" />
-          </UDropdownMenu>
-          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" color="neutral" variant="ghost" size="sm" icon="i-tabler-plug-off" :aria-label="t('capture.disconnect')" @click="probe.disconnect(selectedRun.id)" />
           <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
           <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
-        </template>
+          <UDropdownMenu :items="taskActionItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-60' }">
+            <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" />
+          </UDropdownMenu>
+        </div>
       </template>
     </ManagementDetailHeader>
     <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
@@ -1020,20 +1054,21 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </UAlert>
 
     <section
-      v-if="selectedRun && selectedDictionary"
+      v-if="selectedRun"
       class="mb-3 flex items-center gap-3 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5"
       :aria-label="t('capture.boundDictionary')"
     >
       <UIcon name="i-tabler-book-2" class="size-5 shrink-0 text-[var(--primary)]" aria-hidden="true" />
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 items-center gap-2">
-          <strong class="truncate text-xs text-[var(--text)]">{{ selectedDictionary.metadata.name }}</strong>
-          <UBadge color="neutral" variant="soft" size="sm" :label="`${selectedDictionary.metadata.sourceLocale} → ${selectedDictionary.metadata.targetLocale}`" />
-          <span class="shrink-0 text-[9px] text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: selectedRun.dictionaryEntryCount }) }}</span>
+          <strong data-testid="probe-bound-dictionary-name" class="truncate text-xs text-[var(--text)]">{{ selectedRunDictionaryName }}</strong>
+          <UBadge v-if="selectedRunHasTemporaryDictionary" data-testid="probe-temporary-dictionary-badge" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
+          <UBadge v-if="selectedDictionary" color="neutral" variant="soft" size="sm" :label="`${selectedDictionary.metadata.sourceLocale} → ${selectedDictionary.metadata.targetLocale}`" />
+          <span class="type-metadata shrink-0 text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: selectedRun.dictionaryEntryCount }) }}</span>
         </div>
-        <p class="m-0 mt-0.5 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('capture.dictionaryLinkHint') }}</p>
+        <p class="type-metadata m-0 mt-0.5 leading-4 text-[var(--text-muted)]">{{ selectedDictionary ? t('capture.dictionaryLinkHint') : t('capture.dictionaryUnavailableHint') }}</p>
       </div>
-      <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-external-link" :label="t('capture.openDictionary')" @click="openBoundDictionary" />
+      <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-external-link" :label="t('capture.openDictionary')" :disabled="!selectedDictionary" @click="openBoundDictionary" />
     </section>
 
     <template v-if="selectedRun">
@@ -1042,6 +1077,21 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
           </UDropdownMenu>
+          <div data-testid="probe-ai-actions" class="inline-flex">
+            <UButton
+              color="primary"
+              variant="soft"
+              size="sm"
+              icon="i-tabler-sparkles"
+              :label="selectedAiProfile ? t('ai.fillUntranslated') : t('ai.configure')"
+              :loading="ai.busy.value"
+              class="rounded-r-none"
+              @click="selectedAiProfile ? runAiTranslation() : emit('configure-ai')"
+            />
+            <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
+              <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
+            </UDropdownMenu>
+          </div>
         </template>
         <template #bulk-actions>
           <UButton color="primary" variant="soft" size="sm" icon="i-tabler-book-upload" :label="t('capture.saveSelectedToDictionary')" :disabled="!selectedDictionaryEntries.length || probe.busy.value" @click="syncSelectedToDictionary" />
@@ -1051,7 +1101,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </template>
 
         <div ref="tableShell" class="relative h-full min-h-0 overflow-hidden">
-          <UTable data-testid="capture-table-scroll" role="region" tabindex="0" :aria-label="t('capture.tableLabel')" :data="entryPage.rows" :columns="entryColumns" sticky :loading="loading" class="capture-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1040px]' }" @scroll.passive="updateScrollMetrics">
+          <UTable data-testid="capture-table-scroll" role="region" tabindex="0" :aria-label="t('capture.tableLabel')" :data="entryPage.rows" :columns="entryColumns" sticky :loading="loading" class="capture-table-scroll management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1040px]' }" @scroll.passive="updateScrollMetrics">
             <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('capture.selectPage')" @update:model-value="togglePageSelection" /></template>
             <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.source)" :aria-label="t('common.selectNamed', { name: row.original.source })" @update:model-value="toggleSelection(row.original.source)" /></template>
             <template #source-cell="{ row }"><div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div></template>
@@ -1065,9 +1115,9 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             <template #adapters-cell="{ row }">
               <div v-if="row.original.adapterIds.length" class="flex min-w-0 flex-wrap gap-1">
                 <UBadge v-for="adapterId in row.original.adapterIds.slice(0, 2)" :key="adapterId" color="neutral" variant="soft" size="sm" :label="adapterName(adapterId)" />
-                <span v-if="row.original.adapterIds.length > 2" class="text-[9px] text-[var(--text-muted)]">+{{ row.original.adapterIds.length - 2 }}</span>
+                <span v-if="row.original.adapterIds.length > 2" class="type-caption text-[var(--text-muted)]">+{{ row.original.adapterIds.length - 2 }}</span>
               </div>
-              <span v-else class="text-[9px] text-[var(--text-muted)]">—</span>
+              <span v-else class="type-caption text-[var(--text-muted)]">—</span>
             </template>
             <template #count-cell="{ row }"><div class="text-right tabular-nums">{{ row.original.count || '—' }}</div></template>
             <template #lastSeenMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.lastSeenMs) }}</span></template>
@@ -1085,7 +1135,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('capture.bulkDelete')" :disabled="bulkRunDeletionBlocked" @click="pendingRemoval = probe.runs.value.filter(run => listSelected.has(run.id))" />
       </template>
-      <UTable :data="listPageItems" :columns="runColumns" sticky :ui="{ base: 'min-w-[920px]' }" @dblclick="openRunOnDoubleClick">
+      <UTable data-testid="capture-run-management-table" role="region" tabindex="0" aria-labelledby="capture-title" :data="listPageItems" :columns="runColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[920px]' }" @dblclick="openRunOnDoubleClick">
         <template #select-header><UCheckbox :model-value="listPageSelected" :aria-label="t('capture.selectRunPage')" @update:model-value="toggleListPageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="listSelected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleListSelection(row.original.id)" /></template>
         <template #run-cell="{ row }">
@@ -1097,13 +1147,13 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
               <template #content>
                 <div class="space-y-3 p-3">
                   <div>
-                    <div class="text-[9px] font-medium text-[var(--text-secondary)]">{{ t('capture.executablePath') }}</div>
-                    <div class="mt-1 break-all text-[10px] leading-4 text-[var(--text)]">{{ softwarePath(row.original.softwareId) }}</div>
+                    <div class="type-label font-medium text-[var(--text-secondary)]">{{ t('capture.executablePath') }}</div>
+                    <div class="type-metadata mt-1 break-all leading-4 text-[var(--text)]">{{ softwarePath(row.original.softwareId) }}</div>
                   </div>
                   <div>
-                    <div class="text-[9px] font-medium text-[var(--text-secondary)]">{{ t('capture.adapters') }}</div>
+                    <div class="type-label font-medium text-[var(--text-secondary)]">{{ t('capture.adapters') }}</div>
                     <ul class="m-0 mt-1 space-y-1 p-0" role="list">
-                      <li v-for="adapter in adapterDetails(row.original)" :key="adapter.id" class="list-none text-[10px] leading-4 text-[var(--text)]">
+                      <li v-for="adapter in adapterDetails(row.original)" :key="adapter.id" class="type-metadata list-none leading-4 text-[var(--text)]">
                         <span class="text-[var(--text-secondary)]">{{ adapter.technologies }}</span>
                         <span aria-hidden="true"> · </span>{{ adapter.name }}
                       </li>
@@ -1115,14 +1165,14 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           </div>
         </template>
         <template #software-cell="{ row }"><div class="truncate">{{ softwareName(row.original.softwareId) }}</div></template>
-        <template #dictionary-cell="{ row }"><div class="truncate font-medium">{{ dictionaryName(row.original.dictionaryId) }}</div><div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: row.original.dictionaryEntryCount }) }}</div></template>
+        <template #dictionary-cell="{ row }"><div class="truncate font-medium">{{ runDictionaryName(row.original) }}</div><div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: row.original.dictionaryEntryCount }) }}</div></template>
         <template #status-cell="{ row }">
           <div class="flex flex-col items-start gap-1">
             <UBadge :color="statusColor(row.original.status)" variant="soft" size="sm" :label="statusLabel(row.original.status)" />
             <UBadge v-if="row.original.runtimeCapability" :color="runtimeCapabilityColor(row.original.runtimeCapability)" variant="soft" size="sm" :label="runtimeCapabilityLabel(row.original.runtimeCapability)" />
           </div>
         </template>
-        <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
+        <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
         <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton v-if="row.original.quickProbe" color="error" variant="ghost" size="xs" icon="i-tabler-trash-x" :aria-label="t('capture.quickProbe.cleanupNamed', { name: row.original.name })" @click="pendingQuickCleanup = row.original" /><UButton v-else color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
         <template #empty><UEmpty icon="i-tabler-radar-off" :title="listQuery ? t('capture.noRunMatch') : t('capture.empty')" :description="listQuery ? t('capture.adjustSearch') : t('capture.emptyHint')" /></template>
@@ -1153,7 +1203,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @update:open="aiPreviewOpen = $event"
       @confirm="runAiTranslation(aiPlan)"
     >
-      <p v-if="aiPlan?.candidates.length && selectedAiProfile" class="mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 text-[10px] leading-4 text-[var(--text-muted)]">
+      <p v-if="aiPlan?.candidates.length && selectedAiProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
         {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, tokens: appSettings.aiTranslationBatch.value.maxInputTokensPerRequest }) }}
       </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
@@ -1163,7 +1213,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </div>
       <UEmpty v-else icon="i-tabler-check" :title="t('ai.nothingToTranslate')" :description="t('ai.nothingToTranslateHint')" />
-      <p v-if="aiPlan?.skipped.length" class="mb-0 mt-3 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
+      <p v-if="aiPlan?.skipped.length" class="type-metadata mb-0 mt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
 
     <ManagementFormModal
@@ -1196,7 +1246,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
               <h3 id="capture-danger-title" class="m-0 text-[11px] font-semibold text-[var(--text)]">{{ t('capture.dangerTitle') }}</h3>
-              <p class="mt-1 mb-0 max-w-[42ch] text-[9px] leading-4 text-[var(--text-muted)]">{{ clearEntriesLocked ? t('capture.clearAllLocked') : t('capture.clearAllHint') }}</p>
+              <p class="type-metadata mt-1 mb-0 max-w-[42ch] leading-4 text-[var(--text-muted)]">{{ clearEntriesLocked ? t('capture.clearAllLocked') : t('capture.clearAllHint') }}</p>
             </div>
             <UButton data-testid="capture-clear-all" color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.clearAll')" :disabled="clearEntriesLocked || (!selectedRun?.observedCount && !selectedRun?.dictionaryEntryCount)" @click="requestClearAll" />
           </div>

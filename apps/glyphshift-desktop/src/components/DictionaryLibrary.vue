@@ -11,7 +11,12 @@ import type {
   DictionaryMetadata,
   DictionarySummary,
 } from '../model'
-import { editableRowIndex } from '../tableInteraction'
+import {
+  editableRowIndex,
+  managementActionsColumnMeta,
+  managementIdentityColumnMeta,
+  managementSelectionColumnMeta,
+} from '../tableInteraction'
 import { useTableColumns } from '../useTableColumns'
 
 const props = defineProps<{
@@ -99,20 +104,20 @@ const catalogColumnOptions = computed(() => [
   { key: 'tags', label: t('dictionaries.columns.tags'), visible: catalogVisibleColumns.value.tags },
 ])
 const tableColumns = computed<TableColumn<DictionarySummary>[]>(() => [
-  { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
-  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[32%]', td: 'w-[32%]' } } },
+  { id: 'select', header: '', meta: managementSelectionColumnMeta() },
+  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: managementIdentityColumnMeta('w-64') },
   ...(localVisibleColumns.value.languages ? [{ id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionarySummary>] : []),
   ...(localVisibleColumns.value.release ? [{ id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<DictionarySummary>] : []),
   ...(localVisibleColumns.value.installation ? [{ id: 'installation', header: t('dictionaries.columns.installation'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionarySummary>] : []),
   ...(localVisibleColumns.value.rules ? [{ id: 'rules', header: t('dictionaries.columns.rules'), meta: { class: { th: 'w-20 text-center', td: 'w-20 text-center' } } } satisfies TableColumn<DictionarySummary>] : []),
-  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
+  { id: 'actions', header: t('dictionaries.columns.actions'), meta: managementActionsColumnMeta('w-28') },
 ])
 const catalogColumns = computed<TableColumn<DictionaryCatalogRelease>[]>(() => [
-  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: { class: { th: 'w-[36%]', td: 'w-[36%]' } } },
+  { id: 'dictionary', header: t('dictionaries.columns.dictionary'), meta: managementIdentityColumnMeta('w-64', false) },
   ...(catalogVisibleColumns.value.languages ? [{ id: 'languages', header: t('dictionaries.columns.languages'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionaryCatalogRelease>] : []),
   ...(catalogVisibleColumns.value.release ? [{ id: 'release', header: t('dictionaries.columns.release'), meta: { class: { th: 'w-40', td: 'w-40' } } } satisfies TableColumn<DictionaryCatalogRelease>] : []),
   ...(catalogVisibleColumns.value.tags ? [{ id: 'tags', header: t('dictionaries.columns.tags') } satisfies TableColumn<DictionaryCatalogRelease>] : []),
-  { id: 'actions', header: t('dictionaries.columns.actions'), meta: { class: { th: 'w-28 text-center', td: 'w-28 text-center' } } },
+  { id: 'actions', header: t('dictionaries.columns.actions'), meta: managementActionsColumnMeta('w-28') },
 ])
 const removalDescription = computed(() => pendingRemoval.value.length === 1
   ? t('dictionaries.deleteOne', { name: pendingRemoval.value[0]?.metadata.name ?? '' })
@@ -390,7 +395,7 @@ async function chooseExport(item: DictionarySummary) {
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
       </template>
 
-      <UTable :data="pageItems" :columns="tableColumns" sticky :ui="{ base: 'min-w-[860px]' }" @dblclick="openOnDoubleClick">
+      <UTable data-testid="dictionary-management-table" role="region" tabindex="0" aria-labelledby="dictionary-library-title" :data="pageItems" :columns="tableColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[860px]' }" @dblclick="openOnDoubleClick">
         <template #select-header>
           <UCheckbox :model-value="pageSelected" :aria-label="t('dictionaries.selectPage')" @update:model-value="togglePageSelection" />
         </template>
@@ -400,7 +405,7 @@ async function chooseExport(item: DictionarySummary) {
         <template #dictionary-cell="{ row }">
           <UButton color="neutral" variant="link" class="block min-w-0 max-w-full justify-start p-0 text-left" @click="emit('open', row.original.metadata.id)">
             <span class="block truncate font-semibold text-[var(--text)]">{{ row.original.metadata.name }}</span>
-            <span class="mt-0.5 block truncate text-[9px] text-[var(--text-muted)]">{{ row.original.metadata.description || t('common.noDescription') }}</span>
+            <span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.metadata.description || t('common.noDescription') }}</span>
           </UButton>
         </template>
         <template #languages-cell="{ row }">
@@ -412,11 +417,11 @@ async function chooseExport(item: DictionarySummary) {
         </template>
         <template #release-cell="{ row }">
           <div>v{{ row.original.metadata.releaseVersion }}</div>
-          <div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('dictionaries.localRevision', { revision: row.original.revision }) }}</div>
+          <div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('dictionaries.localRevision', { revision: row.original.revision }) }}</div>
         </template>
         <template #installation-cell="{ row }">
           <UBadge :color="installationColor(row.original)" variant="soft" size="sm" :label="installationLabel(row.original)" />
-          <div class="mt-1 max-w-36 truncate text-[9px] text-[var(--text-muted)]">{{ installationDetail(row.original) }}</div>
+          <div class="type-metadata mt-1 max-w-36 truncate text-[var(--text-muted)]">{{ installationDetail(row.original) }}</div>
         </template>
         <template #rules-cell="{ row }">{{ row.original.entryCount }}</template>
         <template #actions-cell="{ row }">
@@ -467,11 +472,11 @@ async function chooseExport(item: DictionarySummary) {
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-search" :label="t('dictionaries.catalog.searchAction')" :loading="catalogBusy" @click="requestCatalog(true)" />
       </template>
 
-      <UTable :data="catalogPage.releases" :columns="catalogColumns" :loading="catalogBusy" sticky :ui="{ base: 'min-w-[860px]' }">
+      <UTable data-testid="dictionary-catalog-table" role="region" tabindex="0" aria-labelledby="dictionary-library-title" :data="catalogPage.releases" :columns="catalogColumns" :loading="catalogBusy" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[860px]' }">
         <template #dictionary-cell="{ row }">
           <div class="min-w-0">
             <div class="truncate font-semibold text-[var(--text)]">{{ row.original.name }}</div>
-            <div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.summary || t('common.noDescription') }}</div>
+            <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.summary || t('common.noDescription') }}</div>
           </div>
         </template>
         <template #languages-cell="{ row }">
@@ -483,7 +488,7 @@ async function chooseExport(item: DictionarySummary) {
         </template>
         <template #release-cell="{ row }">
           <div>v{{ row.original.releaseVersion }}</div>
-          <div class="mt-0.5 max-w-36 truncate text-[9px] text-[var(--text-muted)]">{{ row.original.publisherIdentity }}</div>
+          <div class="type-metadata mt-0.5 max-w-36 truncate text-[var(--text-muted)]">{{ row.original.publisherIdentity }}</div>
         </template>
         <template #tags-cell="{ row }">
           <div class="flex flex-wrap gap-1">

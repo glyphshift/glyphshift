@@ -367,7 +367,7 @@ usePageEscape(() => true, () => emit('back'))
               :ui="{ base: 'px-0' }"
               class="w-full"
             />
-            <p v-if="row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index)" class="m-0 text-[9px] leading-4 text-[var(--danger)]">
+            <p v-if="row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index)" class="type-metadata m-0 leading-4 text-[var(--danger)]">
               {{ row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index) }}
             </p>
           </div>
@@ -399,7 +399,7 @@ usePageEscape(() => true, () => emit('back'))
           </div>
         </template>
         <template #actions-cell="{ row }">
-          <span v-if="row.original.kind === 'new'" class="text-[9px] text-[var(--text-muted)]">{{ t('dictionaryEditor.pressEnterToAdd') }}</span>
+          <span v-if="row.original.kind === 'new'" class="type-metadata text-[var(--text-muted)]">{{ t('dictionaryEditor.pressEnterToAdd') }}</span>
           <UButton
             v-else
             color="error"
@@ -437,7 +437,7 @@ usePageEscape(() => true, () => emit('back'))
       @update:open="aiPreviewOpen = $event"
       @confirm="runAiTranslation(aiPlan)"
     >
-      <p v-if="aiPlan?.candidates.length && selectedProfile" class="mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 text-[10px] leading-4 text-[var(--text-muted)]">
+      <p v-if="aiPlan?.candidates.length && selectedProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
         {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, tokens: appSettings.aiTranslationBatch.value.maxInputTokensPerRequest }) }}
       </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
@@ -447,7 +447,7 @@ usePageEscape(() => true, () => emit('back'))
         </div>
       </div>
       <UEmpty v-else icon="i-tabler-check" :title="t('ai.nothingToTranslate')" :description="t('ai.nothingToTranslateHint')" />
-      <p v-if="aiPlan?.skipped.length" class="mb-0 mt-3 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
+      <p v-if="aiPlan?.skipped.length" class="type-metadata mb-0 mt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
 
     <ConfirmDialog

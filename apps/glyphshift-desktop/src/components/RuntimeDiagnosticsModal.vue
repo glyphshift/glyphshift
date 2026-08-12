@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
       content: 'flex max-h-[calc(100dvh-32px)] max-w-[900px] flex-col',
       header: 'min-h-0 shrink-0 px-5 py-4',
       title: 'text-[15px]',
-      description: 'mt-1 text-[10px] leading-4',
+      description: 'type-metadata mt-1 leading-4',
       body: 'flex min-h-0 flex-1 flex-col gap-3 px-5 py-4',
       footer: 'shrink-0 px-5 py-4',
     }"
@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
 
       <div class="flex items-center gap-2">
         <UInput v-model="query" icon="i-tabler-search" size="sm" class="min-w-0 flex-1" :placeholder="t('workflows.diagnostics.search')" :aria-label="t('workflows.diagnostics.search')" />
-        <span class="shrink-0 text-[9px] text-[var(--text-muted)]" aria-live="polite">{{ t('workflows.diagnostics.recentCount', { count: records.length }) }}</span>
+        <span class="type-metadata shrink-0 text-[var(--text-muted)]" aria-live="polite">{{ t('workflows.diagnostics.recentCount', { count: records.length }) }}</span>
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('workflows.diagnostics.refresh')" :loading="loading" @click="refresh" />
       </div>
 
@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
           </template>
           <template #origin-cell="{ row }">
             <div class="truncate font-medium" :title="row.original.softwareName">{{ row.original.softwareName }}</div>
-            <div class="mt-0.5 truncate text-[9px] text-[var(--text-muted)]" :title="row.original.adapterName">{{ row.original.adapterName }}</div>
+            <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]" :title="row.original.adapterName">{{ row.original.adapterName }}</div>
           </template>
           <template #decision-cell="{ row }">
             <div class="flex flex-wrap gap-1">
@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
           </template>
           <template #publication-cell="{ row }">
             <div class="font-medium tabular-nums" :title="row.original.publicationIdentity">G{{ row.original.generation }} · {{ shortIdentity(row.original.publicationIdentity) }}</div>
-            <div class="mt-0.5 text-[9px] text-[var(--text-muted)]">{{ t('workflows.diagnostics.publicationIdentity') }}</div>
+            <div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('workflows.diagnostics.publicationIdentity') }}</div>
           </template>
           <template #empty>
             <UEmpty icon="i-tabler-activity-heartbeat" :title="query ? t('workflows.diagnostics.noMatch') : t('workflows.diagnostics.waiting')" :description="query ? t('workflows.diagnostics.noMatchDescription') : t('workflows.diagnostics.waitingDescription')" />
@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
       </div>
     </template>
     <template #footer>
-      <span class="text-[9px] text-[var(--text-muted)]">{{ t('workflows.diagnostics.autoRefresh') }}</span>
+      <span class="type-metadata text-[var(--text-muted)]">{{ t('workflows.diagnostics.autoRefresh') }}</span>
       <UButton class="ml-auto" color="neutral" variant="outline" size="sm" :label="t('workflows.diagnostics.close')" @click="stop" />
     </template>
   </UModal>
