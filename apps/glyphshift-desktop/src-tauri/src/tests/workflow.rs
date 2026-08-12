@@ -39,22 +39,20 @@ fn font_only_workflow_does_not_misclassify_a_product_adapter_as_unavailable() {
     application
         .create_workflow(
             WorkflowCreate::new("workflow.font-only", "Font only").with_targets([
-                WorkflowTargetCreate::new(
-                    software_id,
-                    [TEST_ADAPTER_ID],
-                    Vec::<Box<str>>::new(),
-                )
-                .with_font_policy(glyphshift_desktop_backend::WorkflowFontPolicy::new(
-                    ["Synthetic Sans"],
-                    glyphshift_desktop_backend::FontCoverage::AllObservations,
-                )),
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], Vec::<Box<str>>::new())
+                    .with_font_policy(glyphshift_desktop_backend::WorkflowFontPolicy::new(
+                        ["Synthetic Sans"],
+                        glyphshift_desktop_backend::FontCoverage::AllObservations,
+                    )),
             ]),
         )
         .expect("create a font-only workflow");
 
     application
         .enable_workflow("workflow.font-only", false)
-        .expect("a current product adapter must remain valid when only font substitution is requested");
+        .expect(
+            "a current product adapter must remain valid when only font substitution is requested",
+        );
 }
 
 #[test]
@@ -63,10 +61,7 @@ fn workflow_with_an_adapter_missing_from_the_current_environment_stays_rejected(
     drop(application);
     let backend = DesktopBackend::open_with_environment(
         data_root.path(),
-        DesktopEnvironment::new(
-            Vec::<AdapterRequirement>::new(),
-            Vec::<Box<str>>::new(),
-        ),
+        DesktopEnvironment::new(Vec::<AdapterRequirement>::new(), Vec::<Box<str>>::new()),
     )
     .expect("reopen product data without the former adapter");
     let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));

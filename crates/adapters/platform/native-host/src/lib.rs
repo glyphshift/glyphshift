@@ -115,6 +115,12 @@ impl LoadedNativeAdapter {
             status => Err(NativeHostError::PackageFailure(status)),
         }
     }
+
+    /// Asks the package to enqueue any framework-specific invalidation needed after a Runtime
+    /// lifecycle change. This is deliberately best-effort, like the host's generic redraw request.
+    pub fn request_refresh(&self) {
+        (self.api.request_refresh)();
+    }
 }
 
 unsafe fn open_package(

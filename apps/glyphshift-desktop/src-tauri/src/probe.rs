@@ -471,6 +471,45 @@ impl DesktopApplication {
             }
             Err(error) => return Err(runtime_command_error(error, true)),
         };
+        let previous_status = summary.status();
+        // Quick probes intentionally hide adapter and preview settings. Enable
+        // writeback only after the active Runtime proves that it can replace text.
+        let enable_automatic_preview = self.quick_probe_sessions.contains(run_id)
+            && runtime_capability == ProbeRuntimeCapability::DirectReplace
+            && !summary.live_preview_enabled();
+        let summary = if enable_automatic_preview {
+            let preview_update = (|| {
+                if previous_status == ProbeRunStatus::Paused {
+                    self.probe_runs
+                        .set_status(run_id, ProbeRunStatus::Ready)
+                        .map_err(probe_run_error)?;
+                }
+                let update = ProbeRunUpdate::new(
+                    summary.name(),
+                    summary.dictionary_id(),
+                    summary.adapter_ids().iter().cloned(),
+                    true,
+                )
+                .map_err(probe_run_error)?;
+                self.probe_runs
+                    .update(run_id, update)
+                    .map_err(probe_run_error)
+            })();
+            match preview_update {
+                Ok(summary) => summary,
+                Err(error) => {
+                    if let Some(runtimes) = self.runtimes.as_mut() {
+                        let _ = runtimes.stop_capture(summary.software_id());
+                    }
+                    if previous_status == ProbeRunStatus::Paused {
+                        let _ = self.probe_runs.set_status(run_id, ProbeRunStatus::Paused);
+                    }
+                    return Err(error);
+                }
+            }
+        } else {
+            summary
+        };
         self.active_probe_run_id = Some(run_id.into());
         self.active_probe_capability = Some(runtime_capability);
         self.probe_runs

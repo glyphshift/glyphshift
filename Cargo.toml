@@ -63,6 +63,7 @@ members = [
     "test-support/reference-adapters",
     "test-support/controller-plugin",
     "test-support/isolated-worker",
+    "test-support/native-adapter",
     "test-support/acquisition-worker",
     "test-support/windows-host",
     "test-support/windows-runtime-target",

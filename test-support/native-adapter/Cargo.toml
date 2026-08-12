@@ -1,0 +1,17 @@
+[package]
+name = "glyphshift-test-native-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glyphshift-adapter-native-abi = { path = "../../crates/adapters/platform/native-abi" }
+glyphshift-adapter-sdk = { path = "../../crates/adapters/platform/sdk" }
+
+[lints.rust]
+unsafe_code = "allow"

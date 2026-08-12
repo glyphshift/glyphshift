@@ -33,8 +33,10 @@ glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi"
 glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/native/gdiplus" }
 glyphshift-adapter-qt-painter = { path = "../../../adapters/implementations/framework/qt-painter" }
 glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
+glyphshift-test-native-adapter = { path = "../../../../test-support/native-adapter" }
 glyphshift-translation = { path = "../../../core/translation" }
 glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
+libloading = "0.8"
 
 [lints.rust]
 unsafe_code = "allow"

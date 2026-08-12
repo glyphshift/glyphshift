@@ -224,6 +224,13 @@ pub struct NativeRuntimeHostV1 {
 pub type NegotiateFeaturesV1 = extern "C" fn(u64, u64) -> NativeNegotiationV1;
 pub type ActivateV1 = extern "C" fn(*const NativeRuntimeHostV1, u64, u64) -> NativeNegotiationV1;
 pub type DeactivateV1 = extern "C" fn() -> i32;
+/// Requests that framework-owned visual state be invalidated asynchronously.
+///
+/// The callback can run on a Runtime control thread. Implementations must only enqueue or request
+/// work that is safe for the framework's owning thread; they must not synchronously repaint.
+pub type RequestRefreshV1 = extern "C" fn();
+
+pub extern "C" fn request_refresh_noop() {}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -233,6 +240,7 @@ pub struct NativeAdapterApiV1 {
     pub negotiate_features: NegotiateFeaturesV1,
     pub activate: ActivateV1,
     pub deactivate: DeactivateV1,
+    pub request_refresh: RequestRefreshV1,
 }
 
 pub type NativeAdapterEntryV1 = extern "C" fn() -> NativeAdapterApiV1;

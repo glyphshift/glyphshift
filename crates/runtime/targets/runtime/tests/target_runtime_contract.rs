@@ -120,6 +120,15 @@ fn qt_painter_native_package() -> PathBuf {
     profile.join("glyphshift_adapter_qt_painter_native.dll")
 }
 
+fn refresh_native_package() -> PathBuf {
+    let executable = std::env::current_exe().expect("current test executable");
+    let profile = executable
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("Cargo profile directory");
+    profile.join("glyphshift_test_native_adapter.dll")
+}
+
 fn pass_decision() -> RenderDecision {
     RenderDecision {
         text: TextDecision::Keep,
@@ -296,6 +305,59 @@ fn qt_painter_binding(
         },
         features: features.into_iter().collect(),
     }
+}
+
+fn refresh_binding(hash: ArtifactHash) -> AdapterBinding {
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    AdapterBinding {
+        descriptor: descriptor.clone(),
+        adapter_id: descriptor.adapter_id().clone(),
+        version: descriptor.version(),
+        apply_model: descriptor.apply_model(),
+        artifact_hash: hash,
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/synthetic-refresh"),
+        },
+        features: vec![Feature::TextReplace],
+    }
+}
+
+#[test]
+#[ignore = "requires the synthetic Native Adapter DLL built before the target Runtime contract"]
+fn trh_004_requests_adapter_refresh_after_each_lifecycle_change() {
+    let package = refresh_native_package();
+    let hash = artifact_hash(&package);
+    let counter_library =
+        unsafe { libloading::Library::new(&package) }.expect("load synthetic refresh Adapter");
+    let refresh_count = unsafe {
+        counter_library
+            .get::<unsafe extern "C" fn() -> u32>(b"glyphshift_test_refresh_count_v1\0")
+            .expect("resolve synthetic refresh counter")
+    };
+    let baseline = unsafe { refresh_count() };
+    let deployment = TargetRuntimeDeployment::new(
+        scoped_publication(
+            1,
+            "First translation",
+            glyphshift_test_native_adapter::ADAPTER_ID,
+        ),
+        [NativeAdapterDeployment::new(package, refresh_binding(hash))
+            .expect("synthetic refresh deployment")],
+    );
+
+    activate_deployment(deployment).expect("activate synthetic refresh Adapter");
+    assert_eq!(unsafe { refresh_count() }, baseline + 1);
+
+    update_publication(scoped_publication(
+        2,
+        "Second translation",
+        glyphshift_test_native_adapter::ADAPTER_ID,
+    ))
+    .expect("publish next synthetic refresh generation");
+    assert_eq!(unsafe { refresh_count() }, baseline + 2);
+
+    deactivate_runtime().expect("deactivate synthetic refresh Adapter");
+    assert_eq!(unsafe { refresh_count() }, baseline + 3);
 }
 
 #[test]

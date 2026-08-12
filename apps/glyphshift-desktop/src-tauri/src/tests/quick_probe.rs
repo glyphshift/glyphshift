@@ -97,6 +97,55 @@ fn quick_probe_reuses_software_and_cleans_only_its_owned_assets() {
 }
 
 #[test]
+fn automatic_quick_probe_publishes_dictionary_edits_when_writeback_is_available() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    let executable = software_executable(&application, &software_id);
+
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
+        .expect("start automatic quick probe");
+
+    assert!(started.summary.live_preview_enabled());
+    assert_eq!(started.summary.preview_generation(), 1);
+
+    let edited = application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: started.summary.id().into(),
+            source: "Assets".into(),
+            translation: "资产".into(),
+        })
+        .expect("publish quick-probe dictionary edit");
+
+    assert_eq!(edited.summary.preview_generation(), 2);
+    let calls = calls.lock().expect("runtime call log");
+    assert_eq!(calls.capture_publications.len(), 2);
+    assert_eq!(calls.capture_publications[1].1.generation().value(), 2);
+}
+
+#[test]
+fn automatic_quick_probe_remains_collection_only_without_active_writeback() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    let executable = software_executable(&application, &software_id);
+    application.runtimes = Some(Box::new(RecordingWorkflowRuntime {
+        calls: Arc::clone(&calls),
+        start_capture_error: None,
+        capture_capability: ProbeRuntimeCapability::CollectionOnly,
+    }));
+
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
+        .expect("start collection-only quick probe");
+
+    assert!(!started.summary.live_preview_enabled());
+    assert_eq!(started.summary.preview_generation(), 0);
+    assert!(calls
+        .lock()
+        .expect("runtime call log")
+        .capture_publications
+        .is_empty());
+}
+
+#[test]
 fn probe_creation_reuses_both_library_sources_without_temporary_ownership() {
     let (mut application, _calls, software_id, data_root) = workflow_application();
     let dictionary_id = first_dictionary_id(&application);

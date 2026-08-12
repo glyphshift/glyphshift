@@ -140,7 +140,9 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                     .apply_publication(publication.clone())
                     .map_err(|_| TargetRuntimeError::UpdateRejected)?;
                 runtime.publication = publication;
+                let refresh_adapters = active_native_adapters(runtime);
                 drop(state);
+                request_adapter_refreshes(&refresh_adapters);
                 request_current_process_redraw();
                 return Ok(());
             }
@@ -219,6 +221,12 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         }
         return Err(TargetRuntimeError::AdapterActivation);
     }
+    let refresh_adapters = adapters
+        .iter()
+        .zip(&active_adapters)
+        .filter(|(_, active)| **active)
+        .map(|(adapter, _)| Arc::clone(adapter))
+        .collect::<Vec<_>>();
     {
         let mut state = runtime_state()
             .lock()
@@ -229,6 +237,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         runtime.active_adapters = active_adapters;
         runtime.active = true;
     }
+    request_adapter_refreshes(&refresh_adapters);
     request_current_process_redraw();
     Ok(())
 }
@@ -274,7 +283,7 @@ fn file_sha256(path: &Path) -> Result<[u8; 32], std::io::Error> {
 }
 
 pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetRuntimeError> {
-    {
+    let refresh_adapters = {
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
@@ -289,7 +298,9 @@ pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetR
             .apply_publication(publication.clone())
             .map_err(|_| TargetRuntimeError::UpdateRejected)?;
         runtime.publication = publication;
-    }
+        active_native_adapters(runtime)
+    };
+    request_adapter_refreshes(&refresh_adapters);
     request_current_process_redraw();
     Ok(())
 }
@@ -378,7 +389,7 @@ pub fn query_activation() -> Result<RuntimeActivationReport, TargetRuntimeError>
 }
 
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
-    let capture = {
+    let (capture, refresh_adapters) = {
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
@@ -388,6 +399,7 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         if !runtime.active {
             return Err(TargetRuntimeError::RuntimeUnavailable);
         }
+        let refresh_adapters = active_native_adapters(runtime);
         if runtime
             .adapters
             .iter()
@@ -400,13 +412,30 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         } else {
             return Err(TargetRuntimeError::AdapterActivation);
         }
-        runtime.capture.take()
+        (runtime.capture.take(), refresh_adapters)
     };
     if let Some(capture) = capture {
         capture.finish()?;
     }
+    request_adapter_refreshes(&refresh_adapters);
     request_current_process_redraw();
     Ok(())
+}
+
+fn active_native_adapters(runtime: &RuntimeState) -> Vec<Arc<LoadedNativeAdapter>> {
+    runtime
+        .adapters
+        .iter()
+        .zip(&runtime.active_adapters)
+        .filter(|(_, active)| **active)
+        .map(|(adapter, _)| Arc::clone(adapter))
+        .collect()
+}
+
+fn request_adapter_refreshes(adapters: &[Arc<LoadedNativeAdapter>]) {
+    for adapter in adapters {
+        adapter.request_refresh();
+    }
 }
 
 #[cfg(windows)]

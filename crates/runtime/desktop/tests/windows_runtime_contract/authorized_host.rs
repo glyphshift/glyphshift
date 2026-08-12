@@ -123,9 +123,11 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
                 .expect("compile updated authorized host Runtime spec");
             let updated_generation = updated_spec.publication().generation().value();
             assert!(updated_generation > initial_generation);
+            println!("authorized host publishing updated generation");
             runtime
                 .publish(updated_spec.publication().clone())
                 .expect("publish updated authorized host dictionary");
+            println!("authorized host published updated generation");
 
             let deadline = Instant::now() + Duration::from_millis(hold_ms - initial_hold_ms);
             while Instant::now() < deadline {

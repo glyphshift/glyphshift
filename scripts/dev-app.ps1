@@ -143,9 +143,9 @@ foreach ($targetRuntimeContract in $targetRuntimeContracts) {
     }
 }
 $runtimeContracts = @(
-    'desktop_runtime_changes_pixels_updates_and_restores_pass_through',
-    'desktop_runtime_pool_keeps_two_software_active_and_isolates_stop',
-    'desktop_runtime_refresh_reconnects_requested_features_after_target_restart'
+    'synthetic_runtime::desktop_runtime_changes_pixels_updates_and_restores_pass_through',
+    'pool::desktop_runtime_pool_keeps_two_software_active_and_isolates_stop',
+    'synthetic_runtime::desktop_runtime_refresh_reconnects_requested_features_after_target_restart'
 )
 foreach ($runtimeContract in $runtimeContracts) {
     & cargo test `
