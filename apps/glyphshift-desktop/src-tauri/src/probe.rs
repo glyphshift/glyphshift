@@ -237,6 +237,7 @@ impl DesktopApplication {
             dictionary
                 .entries()
                 .iter()
+                .filter(|entry| !entry.translation().trim().is_empty())
                 .map(|entry| ProbeDictionaryEntry::new(entry.source(), entry.translation())),
         )
         .map_err(probe_run_error)

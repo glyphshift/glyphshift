@@ -13,6 +13,7 @@ import type {
   SoftwarePreflight,
   SoftwareRecord,
 } from '../model'
+import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { editableRowIndex } from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
 import { useProbeRuns, type QuickProbeCleanupResult } from '../useProbeRuns'
@@ -40,10 +41,12 @@ const emit = defineEmits<{
   'cancel-capture': []
   'open-dictionary': [id: string]
   'workspace-changed': []
+  'configure-ai': []
 }>()
 
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
+const ai = useAiTranslation()
 const query = ref('')
 const adapterFilterIds = ref<string[]>([])
 const page = ref(1)
@@ -96,6 +99,10 @@ const clearAllOpen = ref(false)
 const dictionaryNotice = ref('')
 const launchingSoftware = ref(false)
 const translationValues = ref<Record<string, string>>({})
+const selectedAiProfileId = ref<string | null>(null)
+const aiPreviewOpen = ref(false)
+const aiPlan = ref<AiTranslationPlan | null>(null)
+const aiNotice = ref('')
 const {
   tableShell,
   scrollThumbHeight,
@@ -161,6 +168,27 @@ const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
 const clearEntriesLocked = computed(() => selectedRun.value?.status === 'running')
+const selectedAiProfile = computed(() => ai.profiles.value.find(profile => (
+  profile.id === (selectedAiProfileId.value ?? ai.catalog.value.defaultProfileId)
+)) ?? ai.defaultProfile.value)
+const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
+  [{
+    label: t('ai.previewCandidates'),
+    icon: 'i-tabler-list-check',
+    disabled: !selectedAiProfile.value || ai.busy.value,
+    onSelect: () => void previewAiTranslation(),
+  }],
+  ai.profiles.value.map(profile => ({
+    label: t('ai.useProfile', { name: profile.name }),
+    icon: selectedAiProfile.value?.id === profile.id ? 'i-tabler-check' : 'i-tabler-sparkles',
+    onSelect: () => { selectedAiProfileId.value = profile.id },
+  })),
+  [{
+    label: t('ai.manageProfiles'),
+    icon: 'i-tabler-settings',
+    onSelect: () => emit('configure-ai'),
+  }],
+])
 const settingsValid = computed(() => Boolean(
   !settingsCompatibilityLoading.value
   &&
@@ -301,6 +329,7 @@ watch(() => selected.value.size, async () => {
 })
 
 onMounted(async () => {
+  await ai.connect().catch(() => undefined)
   await probe.connect()
   restoreViewState(probe.selectedRunId.value)
   await loadPage()
@@ -352,6 +381,80 @@ async function loadPage() {
     loading.value = false
     await nextTick()
     updateScrollMetrics()
+  }
+}
+
+async function prepareAiPlan() {
+  const run = selectedRun.value
+  const dictionary = selectedDictionary.value
+  aiNotice.value = ''
+  ai.error.value = ''
+  if (!run || !dictionary) return null
+  if (!selectedAiProfile.value) {
+    emit('configure-ai')
+    return null
+  }
+  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  try {
+    const plan = await ai.planProbe(run.id, selectedAiProfile.value.id, {
+      snapshotRevision: entryPage.value.dictionaryRevision,
+      sourceLocale: dictionary.metadata.sourceLocale,
+      targetLocale: dictionary.metadata.targetLocale,
+      items: entryPage.value.rows.map((row, index) => ({
+        itemId: `probe-row-${index + 1}`,
+        source: row.source,
+        translation: (translationValues.value[row.source] ?? row.translation) || null,
+        ignored: row.state === 'ignored',
+      })),
+    })
+    aiPlan.value = plan
+    return plan
+  }
+  catch {
+    return null
+  }
+}
+
+async function previewAiTranslation() {
+  const plan = await prepareAiPlan()
+  if (plan) aiPreviewOpen.value = true
+}
+
+async function runAiTranslation(plan?: AiTranslationPlan | null) {
+  const run = selectedRun.value
+  const nextPlan = plan ?? await prepareAiPlan()
+  if (!run || !nextPlan || !selectedAiProfile.value) return
+  if (!nextPlan.candidates.length) {
+    aiPreviewOpen.value = true
+    return
+  }
+  aiPreviewOpen.value = false
+  try {
+    const job = await ai.runPlan(nextPlan, selectedAiProfile.value.id)
+    const result = await ai.applyProbeResults(run.id, job)
+    if ('__TAURI_INTERNALS__' in window) {
+      await probe.refreshSummary(run.id)
+      emit('workspace-changed')
+      await loadPage()
+    }
+    else {
+      for (const translated of job.results) {
+        const row = entryPage.value.rows.find(candidate => (
+          candidate.source === translated.source && !candidate.translation.trim()
+        ))
+        if (!row) continue
+        row.translation = translated.translation
+        translationValues.value[row.source] = translated.translation
+      }
+    }
+    aiNotice.value = t('ai.probeCompleted', {
+      applied: result.appliedCount,
+      skipped: result.skippedCount,
+    })
+    aiPlan.value = null
+  }
+  catch {
+    // The composable exposes the localized error near the probe header.
   }
 }
 
@@ -809,6 +912,21 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           :disabled="!selectedSoftware?.executablePath"
           @click="launchSelectedSoftware"
         />
+        <div class="inline-flex">
+          <UButton
+            color="primary"
+            variant="soft"
+            size="sm"
+            icon="i-tabler-sparkles"
+            :label="selectedAiProfile ? t('ai.fillUntranslated') : t('ai.configure')"
+            :loading="ai.busy.value"
+            class="rounded-r-none"
+            @click="selectedAiProfile ? runAiTranslation() : emit('configure-ai')"
+          />
+          <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
+            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
+          </UDropdownMenu>
+        </div>
         <template v-if="selectedRun.quickProbe">
           <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-bookmark" :label="t('capture.quickProbe.retain')" :loading="probe.busy.value" @click="retainQuickProbe" />
           <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash-x" :label="t('capture.quickProbe.cleanup')" :disabled="probe.busy.value" @click="pendingQuickCleanup = selectedRun" />
@@ -835,6 +953,19 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
+    <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
+    <UAlert v-else-if="aiNotice" role="status" color="success" variant="soft" icon="i-tabler-sparkles" :title="t('ai.translationCompleted')" :description="aiNotice" class="mb-3" />
+    <UAlert
+      v-if="ai.busy.value && ai.currentJob.value"
+      role="status"
+      color="primary"
+      variant="soft"
+      :title="t('ai.translating')"
+      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount })"
+      class="mb-3"
+    >
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
+    </UAlert>
 
     <section
       v-if="selectedRun && selectedDictionary"
@@ -958,6 +1089,27 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @cancel-capture="emit('cancel-capture')"
       @started="handleQuickProbeStarted"
     />
+
+    <ManagementFormModal
+      :open="aiPreviewOpen"
+      :title="t('ai.previewTitle')"
+      :description="aiPlan ? t('ai.previewSummary', { eligible: aiPlan.candidates.length, skipped: aiPlan.skipped.length }) : ''"
+      :confirm-label="t('ai.translateCount', { count: aiPlan?.candidates.length ?? 0 })"
+      :confirm-disabled="!aiPlan?.candidates.length"
+      :busy="ai.busy.value"
+      width="md"
+      @update:open="aiPreviewOpen = $event"
+      @confirm="runAiTranslation(aiPlan)"
+    >
+      <div v-if="aiPlan?.candidates.length" class="space-y-1">
+        <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
+          <UIcon name="i-tabler-arrow-right" class="size-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+          <span class="min-w-0 flex-1 truncate text-[11px] text-[var(--text)]">{{ candidate.source }}</span>
+        </div>
+      </div>
+      <UEmpty v-else icon="i-tabler-check" :title="t('ai.nothingToTranslate')" :description="t('ai.nothingToTranslateHint')" />
+      <p v-if="aiPlan?.skipped.length" class="mb-0 mt-3 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
+    </ManagementFormModal>
 
     <ManagementFormModal
       :open="settingsOpen"

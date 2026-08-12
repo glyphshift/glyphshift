@@ -720,7 +720,11 @@ fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::Di
 fn package_dictionary_entry(
     entry: DictionaryEntryCreate,
 ) -> dictionary_package::DictionaryEntryCreate {
-    dictionary_package::DictionaryEntryCreate::new(entry.source, entry.translation)
+    if entry.translation.trim().is_empty() {
+        dictionary_package::DictionaryEntryCreate::pending(entry.source)
+    } else {
+        dictionary_package::DictionaryEntryCreate::new(entry.source, entry.translation)
+    }
 }
 
 fn dictionary_view(artifact: &DictionaryArtifact) -> DictionaryView {
@@ -745,7 +749,7 @@ fn dictionary_view(artifact: &DictionaryArtifact) -> DictionaryView {
             .iter()
             .map(|entry| DictionaryEntryView {
                 source: entry.source().into(),
-                translation: entry.translation().into(),
+                translation: entry.translation().unwrap_or_default().into(),
             })
             .collect(),
     }
@@ -762,6 +766,7 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
     let entries = dictionary
         .entries
         .iter()
+        .filter(|entry| !entry.translation.trim().is_empty())
         .map(|entry| WorkflowDictionaryEntry::new(entry.source.clone(), entry.translation.clone()));
     WorkflowDictionary::new(
         dictionary.id(),

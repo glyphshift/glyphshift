@@ -20,7 +20,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 28
+const desktopApiVersion = 29
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -298,6 +298,7 @@ onBeforeUnmount(() => {
         :busy="workspace.workspaceBusy.value"
         @back="requestNavigation('dictionaries')"
         @save="workspace.saveDictionary"
+        @configure-ai="requestNavigation('settings')"
         @dirty-change="editorDirty = $event"
       />
       <CaptureView
@@ -313,6 +314,7 @@ onBeforeUnmount(() => {
         @cancel-capture="cancelQuickProbeCapture"
         @open-dictionary="openDictionary"
         @workspace-changed="refreshWorkspaceAfterQuickProbe"
+        @configure-ai="requestNavigation('settings')"
       />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="view = $event" />
       <SettingsView v-else @navigate="view = $event" />

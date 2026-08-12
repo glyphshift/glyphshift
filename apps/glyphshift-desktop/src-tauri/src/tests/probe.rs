@@ -408,3 +408,150 @@ fn cleared_paused_probe_can_be_released_without_stopping_runtime_twice() {
     let calls = calls.lock().expect("runtime call log");
     assert_eq!(calls.captures_stopped.len(), 1);
 }
+
+#[test]
+fn pending_dictionary_entries_are_excluded_from_probe_snapshots() {
+    let (mut application, _calls, _software_id, _data_root) = workflow_application();
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .expect("product dictionary")
+        .clone();
+    application
+        .backend
+        .upsert_dictionary_entry(
+            dictionary.id(),
+            DictionaryEntryCreate::new("Pending", ""),
+            None,
+            dictionary.revision(),
+        )
+        .expect("store pending entry");
+
+    let snapshot = application
+        .probe_dictionary_snapshot("dictionary.product")
+        .expect("build completed-only probe snapshot");
+
+    assert_eq!(snapshot.revision(), dictionary.revision() + 1);
+}
+
+#[test]
+fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-ai-plan".into(),
+            name: "AI plan probe".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create AI plan probe");
+    let capture = glyphshift_capture::FileCaptureSink::start(
+        application
+            .probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .expect("capture configuration"),
+    )
+    .expect("start synthetic observation sink");
+    capture.observe(TEST_ADAPTER_ID, "Save");
+    capture.observe(TEST_ADAPTER_ID, "42");
+    capture.observe(TEST_ADAPTER_ID, "Open");
+    glyphshift_capture::FileCaptureSink::finish(capture).expect("finish observations");
+
+    let mut translation = glyphshift_ai_translation::AiTranslation::new();
+    let plan = translation
+        .plan_translation(
+            application
+                .probe_ai_plan_request(run.summary.id())
+                .expect("build full probe AI request"),
+        )
+        .expect("plan probe translations");
+
+    assert_eq!(
+        plan.candidates()
+            .iter()
+            .map(|item| item.source())
+            .collect::<Vec<_>>(),
+        vec!["Save"]
+    );
+    assert!(plan.skipped().iter().any(|item| item.source() == "42"
+        && item.reason() == glyphshift_ai_translation::SkipReason::PureNumberOrSymbols));
+    assert!(plan.skipped().iter().any(|item| item.source() == "Open"
+        && item.reason() == glyphshift_ai_translation::SkipReason::AlreadyTranslated));
+}
+
+#[test]
+fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-ai-writeback".into(),
+            name: "AI writeback probe".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create AI writeback probe");
+    let capture = glyphshift_capture::FileCaptureSink::start(
+        application
+            .probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .expect("capture configuration"),
+    )
+    .expect("start synthetic observation sink");
+    capture.observe(TEST_ADAPTER_ID, "Save");
+    capture.observe(TEST_ADAPTER_ID, "Close");
+    glyphshift_capture::FileCaptureSink::finish(capture).expect("finish observations");
+    let base_revision = application
+        .backend
+        .dictionary("dictionary.product")
+        .expect("bound dictionary")
+        .revision();
+    application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Save".into(),
+            translation: "人工保存".into(),
+        })
+        .expect("user translation wins before AI writeback");
+
+    let applied = application
+        .apply_probe_ai_results(ai::ProbeAiApplyRequest {
+            run_id: run.summary.id().into(),
+            snapshot_revision: base_revision,
+            results: vec![
+                ai::ProbeAiTranslationResult {
+                    item_id: "probe-row-save".into(),
+                    source: "Save".into(),
+                    translation: "AI 保存".into(),
+                },
+                ai::ProbeAiTranslationResult {
+                    item_id: "probe-row-close".into(),
+                    source: "Close".into(),
+                    translation: "关闭".into(),
+                },
+            ],
+        })
+        .expect("apply AI results with compare-and-set semantics");
+
+    assert_eq!(applied.applied_count, 1);
+    assert_eq!(applied.skipped_count, 1);
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .expect("updated dictionary");
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Save" && entry.translation() == "人工保存"));
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Close" && entry.translation() == "关闭"));
+}

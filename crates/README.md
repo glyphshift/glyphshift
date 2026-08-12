@@ -20,7 +20,8 @@ navigation, not a second dependency policy.
   `runtime/controller/{sdk,host,windows}`, `runtime/worker/{sdk,host}` and
   `runtime/targets/{contract,process-host,runtime}`. The plural avoids Cargo's reserved/ignored `target/` build
   directory name.
-- Product model: `product/desktop-backend`. Application composition roots remain under `apps/`.
+- Product modules: `product/{desktop-backend,ai-translation}`. The AI translation module owns provider-independent
+  planning, profiles, jobs, validation, and protocol adapters; application composition roots remain under `apps/`.
 - Deterministic and authorized fixtures remain under `test-support/`; production packages must not depend on them.
 
 ## Dependency direction

@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 pub const PROBE_RUN_SCHEMA: &str = "glyphshift.probe-run/1";
-const MAX_PAGE_SIZE: usize = 100;
+pub const MAX_PROBE_QUERY_PAGE_SIZE: usize = 100;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeRunError {
@@ -251,7 +251,7 @@ impl ProbeQuery {
         page: usize,
         page_size: usize,
     ) -> Result<Self, ProbeRunError> {
-        if page == 0 || page_size == 0 || page_size > MAX_PAGE_SIZE {
+        if page == 0 || page_size == 0 || page_size > MAX_PROBE_QUERY_PAGE_SIZE {
             return Err(ProbeRunError::InvalidInput);
         }
         Ok(Self {
@@ -308,6 +308,45 @@ pub struct ProbeEntryPage {
     page_size: usize,
     total: usize,
     rows: Vec<ProbeEntryRow>,
+}
+
+impl ProbeEntryRow {
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    #[must_use]
+    pub fn translation(&self) -> &str {
+        &self.translation
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> ProbeEntryState {
+        self.state
+    }
+}
+
+impl ProbeEntryPage {
+    #[must_use]
+    pub const fn observation_revision(&self) -> u64 {
+        self.observation_revision
+    }
+
+    #[must_use]
+    pub const fn dictionary_revision(&self) -> u64 {
+        self.dictionary_revision
+    }
+
+    #[must_use]
+    pub const fn total(&self) -> usize {
+        self.total
+    }
+
+    #[must_use]
+    pub fn rows(&self) -> &[ProbeEntryRow] {
+        &self.rows
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -69,8 +69,8 @@ function Assert-Dependencies {
 Assert-Dependencies -PackageName 'glyphshift-domain' -Expected @()
 Assert-Dependencies -PackageName 'glyphshift-acquisition' -Expected @()
 Assert-Dependencies `
-    -PackageName 'glyphshift-interactive-translation' `
-    -Expected @('glyphshift-acquisition')
+    -PackageName 'glyphshift-ai-translation' `
+    -Expected @('regex', 'reqwest', 'serde', 'serde_json', 'tempfile')
 Assert-Dependencies `
     -PackageName 'glyphshift-acquisition-worker-sdk' `
     -Expected @('glyphshift-acquisition', 'serde', 'serde_json')
@@ -190,7 +190,7 @@ Assert-Dependencies `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-qt-painter-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-painter', 'retour', 'windows')
+    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-painter', 'retour', 'windows', 'windows-sys')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-raylib' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
@@ -198,14 +198,29 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-raylib-native' `
     -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-raylib', 'retour', 'windows')
 Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-unity-standard-ui' `
+    -Expected @()
+Assert-Dependencies `
     -PackageName 'glyphshift-adapter-unity-mono-standard-ui' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-adapter-unity-standard-ui', 'glyphshift-domain')
 Assert-Dependencies `
     -PackageName 'glyphshift-adapter-unity-mono-standard-ui-native' `
     -Expected @(
         'glyphshift-adapter-native-abi',
         'glyphshift-adapter-unity-mono-standard-ui',
+        'glyphshift-adapter-unity-standard-ui',
         'retour',
+        'windows'
+    )
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-unity-il2cpp-standard-ui' `
+    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies `
+    -PackageName 'glyphshift-adapter-unity-il2cpp-standard-ui-native' `
+    -Expected @(
+        'glyphshift-adapter-native-abi',
+        'glyphshift-adapter-unity-il2cpp-standard-ui',
+        'glyphshift-adapter-unity-standard-ui',
         'windows'
     )
 Assert-Dependencies `
@@ -355,6 +370,9 @@ Assert-Dependencies `
     -PackageName 'glyphshift-reference-adapters' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
+    -PackageName 'glyphshift-test-native-adapter' `
+    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-sdk')
+Assert-Dependencies `
     -PackageName 'glyphshift-windows-host' `
     -Expected @(
         'glyphshift-adapter-gdi',
@@ -439,11 +457,12 @@ Assert-Dependencies `
     -Expected @(
         'glyphshift-capture',
         'glyphshift-controller-windows',
+        'glyphshift-ai-translation',
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
         'glyphshift-dictionary-distribution',
         'glyphshift-domain',
-        'glyphshift-interactive-translation',
+        'keyring',
         'glyphshift-runtime-contract',
         'glyphshift-translation',
         'glyphshift-workflow',
@@ -527,13 +546,17 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-qt-painter-native',
     'glyphshift-adapter-raylib',
     'glyphshift-adapter-raylib-native',
+    'glyphshift-adapter-unity-standard-ui',
     'glyphshift-adapter-unity-mono-standard-ui',
     'glyphshift-adapter-unity-mono-standard-ui-native',
+    'glyphshift-adapter-unity-il2cpp-standard-ui',
+    'glyphshift-adapter-unity-il2cpp-standard-ui-native',
     'glyphshift-adapter-uia',
     'glyphshift-adapter-uia-worker'
 )
 $testSupportPackages = @(
     'glyphshift-reference-adapters',
+    'glyphshift-test-native-adapter',
     'glyphshift-test-acquisition-worker',
     'glyphshift-test-controller-plugin',
     'glyphshift-test-isolated-worker',
@@ -581,8 +604,8 @@ $packageFamilies = @{
         'glyphshift-worker-process-grant'
     )
     Product = @(
-        'glyphshift-desktop-backend',
-        'glyphshift-interactive-translation'
+        'glyphshift-ai-translation',
+        'glyphshift-desktop-backend'
     )
     Application = @('glyphshift-desktop-shell', 'glyphshift-service')
     TestSupport = $testSupportPackages
@@ -606,7 +629,7 @@ $dependencyLayers = @{
         'glyphshift-decision',
         'glyphshift-dictionary-distribution',
         'glyphshift-extension',
-        'glyphshift-interactive-translation',
+        'glyphshift-ai-translation',
         'glyphshift-runtime-contract',
         'glyphshift-workflow'
     )
@@ -756,7 +779,7 @@ $productionScanPackageNames = @(
     'glyphshift-extension',
     'glyphshift-isolated-worker-host',
     'glyphshift-isolated-worker-sdk',
-    'glyphshift-interactive-translation',
+    'glyphshift-ai-translation',
     'glyphshift-worker-process-grant',
     'glyphshift-translation',
     'glyphshift-decision',

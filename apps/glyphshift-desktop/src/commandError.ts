@@ -130,6 +130,22 @@ const messageKeys: Record<string, string> = {
   'quick_probe.target_stopped': 'errors.quickProbe.targetStopped',
   'quick_probe.not_found': 'errors.quickProbe.notFound',
   'quick_probe.cleanup_failed': 'errors.quickProbe.cleanupFailed',
+  'ai.profile_storage_failed': 'errors.ai.profileStorageFailed',
+  'ai.profile_invalid': 'errors.ai.profileInvalid',
+  'ai.profile_not_found': 'errors.ai.profileNotFound',
+  'ai.profile_required': 'errors.ai.profileRequired',
+  'ai.credential_missing': 'errors.ai.credentialMissing',
+  'ai.credential_unavailable': 'errors.ai.credentialUnavailable',
+  'ai.credential_rejected': 'errors.ai.credentialRejected',
+  'ai.filter_pattern_invalid': 'errors.ai.filterPatternInvalid',
+  'ai.plan_not_found': 'errors.ai.planNotFound',
+  'ai.provider_unavailable': 'errors.ai.providerUnavailable',
+  'ai.job_not_found': 'errors.ai.jobNotFound',
+  'ai.job_state_unavailable': 'errors.ai.jobStateUnavailable',
+  'ai.state_unavailable': 'errors.ai.stateUnavailable',
+  'ai.writeback_revision_invalid': 'errors.ai.writebackRevisionInvalid',
+  'ai.writeback_invalid': 'errors.ai.writebackInvalid',
+  'ai.writeback_conflict': 'errors.ai.writebackConflict',
 }
 
 export function isCommandError(value: unknown): value is CommandError {

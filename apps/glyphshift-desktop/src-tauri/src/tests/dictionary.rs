@@ -148,7 +148,7 @@ fn dictionary_file_exchange_uses_one_portable_json_without_a_publish_service() {
         Some("dictionary.exchange"),
     )
     .expect("portable export");
-    assert_eq!(reopened.view().entries()[0].translation(), "保存");
+    assert_eq!(reopened.view().entries()[0].translation(), Some("保存"));
 }
 
 #[test]

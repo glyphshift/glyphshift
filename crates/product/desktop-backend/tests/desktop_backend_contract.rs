@@ -134,7 +134,7 @@ fn desktop_summary_derives_verified_then_modified_without_polluting_dictionary_c
 }
 
 #[test]
-fn desktop_imports_and_exports_one_portable_dictionary_v2_file() {
+fn desktop_imports_and_exports_one_portable_dictionary_v3_file() {
     let root = tempdir().expect("temporary product data");
     let exchange = tempdir().expect("temporary exchange data");
     let input = exchange.path().join("portable-dictionary.json");
@@ -179,7 +179,7 @@ fn desktop_imports_and_exports_one_portable_dictionary_v2_file() {
     )
     .expect("export remains a valid dictionary package");
     assert_eq!(reopened.revision(), package.revision());
-    assert_eq!(reopened.view().entries()[0].translation(), "打开");
+    assert_eq!(reopened.view().entries()[0].translation(), Some("打开"));
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_
         .expect("dictionary artifact");
     let workflow_json = fs::read_to_string(root.path().join("workflows/workflow-ui.json"))
         .expect("workflow artifact");
-    assert!(dictionary_json.contains("glyphshift.dictionary/2"));
+    assert!(dictionary_json.contains("glyphshift.dictionary/3"));
     assert!(!dictionary_json.contains("adapterPlan"));
     assert!(!dictionary_json.contains("fontProfile"));
     assert!(workflow_json.contains("glyphshift.workflow/3"));
@@ -385,6 +385,68 @@ fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_
             .requested_features(),
         &[Feature::TextReplace, Feature::FontSubstitute]
     );
+}
+
+#[test]
+fn desktop_persists_pending_dictionary_entries_but_publishes_only_completed_entries() {
+    let root = tempdir().expect("pending dictionary product data");
+    let executable = root.path().join("SyntheticPendingHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            executable,
+        ))
+        .expect("add synthetic software")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+
+    let dictionary = backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.pending", "Pending", "en-US", "zh-CN").with_entries(
+                [
+                    DictionaryEntryCreate::new("Open", "打开"),
+                    DictionaryEntryCreate::new("Save", ""),
+                ],
+            ),
+        )
+        .expect("persist completed and pending entries");
+    assert_eq!(dictionary.entries().len(), 2);
+    assert_eq!(dictionary.entries()[1].translation(), "");
+
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.pending", "Pending Workflow").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.clone(),
+                    ["adapter-gdi"],
+                    ["dictionary.pending"],
+                ),
+            ]),
+        )
+        .expect("create workflow");
+    let runtime = backend
+        .workflow_runtime_spec("workflow.pending", &software_id)
+        .expect("compile runtime spec");
+    let mut published = Vec::new();
+    runtime
+        .publication()
+        .snapshot()
+        .visit_entries(|_, source, translation| {
+            published.push((source.to_owned(), translation.to_owned()));
+        });
+
+    assert_eq!(published, vec![("Open".to_owned(), "打开".to_owned())]);
+    let encoded = String::from_utf8(
+        backend
+            .dictionary_json("dictionary.pending")
+            .expect("read pending dictionary"),
+    )
+    .expect("dictionary utf8");
+    assert!(encoded.contains("glyphshift.dictionary/3"));
+    assert!(encoded.contains(r#"{"source":"Save"}"#));
 }
 
 #[test]

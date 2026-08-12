@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings, type CloseBehavior, type LocalePreference, type ThemePreference } from '../appSettings'
+import AiProfilesPanel from './AiProfilesPanel.vue'
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -275,6 +276,8 @@ onBeforeUnmount(() => {
               />
           </ManagementFormRow>
         </ManagementFormSection>
+
+        <AiProfilesPanel />
 
         <ManagementFormSection :title="t('settings.shortcuts')" :description="t('settings.shortcutsDescription')">
           <ManagementFormRow

@@ -60,6 +60,7 @@ members = [
     "crates/runtime/targets/runtime",
     "crates/core/translation",
     "crates/core/workflow",
+    "crates/product/ai-translation",
     "test-support/reference-adapters",
     "test-support/controller-plugin",
     "test-support/isolated-worker",

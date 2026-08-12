@@ -1,3 +1,4 @@
+mod ai;
 mod command_error;
 mod dictionary;
 mod font_catalog;
@@ -76,7 +77,7 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 28;
+const DESKTOP_API_VERSION: u16 = 29;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -662,9 +663,11 @@ pub fn run() {
                 app.handle().exit(0);
                 return Ok(());
             }
+            let ai_state = ai::DesktopAiState::open(&data_root).map_err(std::io::Error::other)?;
             let application =
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
             app.manage(Mutex::new(settings));
+            app.manage(Mutex::new(ai_state));
             app.manage(Mutex::new(application));
             software::manage_quick_capture(app);
             Ok(())
@@ -678,6 +681,16 @@ pub fn run() {
             desktop_restart_elevated,
             desktop_snapshot,
             desktop_refresh_font_families,
+            ai::desktop_ai_profiles,
+            ai::desktop_save_ai_profile,
+            ai::desktop_set_default_ai_profile,
+            ai::desktop_delete_ai_profile,
+            ai::desktop_plan_ai_translation,
+            ai::desktop_plan_probe_ai_translation,
+            ai::desktop_apply_probe_ai_results,
+            ai::desktop_start_ai_translation,
+            ai::desktop_ai_translation_job,
+            ai::desktop_cancel_ai_translation,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,
             probe::desktop_create_probe_run,

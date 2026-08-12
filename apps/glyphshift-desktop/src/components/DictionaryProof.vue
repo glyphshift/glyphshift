@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
+import type { DropdownMenuItem } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
+import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
 
 interface DictionaryTableRow {
@@ -15,9 +17,11 @@ const props = defineProps<{ detail: DictionaryDetail; busy: boolean }>()
 const emit = defineEmits<{
   back: []
   save: [detail: DictionaryDetail]
+  'configure-ai': []
   'dirty-change': [dirty: boolean]
 }>()
 const { t } = useI18n()
+const ai = useAiTranslation()
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -35,6 +39,10 @@ const metadataDraft = ref<DictionaryMetadata>(clone(props.detail.metadata))
 const newEntry = ref<DictionaryEntry>(emptyEntry())
 const pendingRemoval = ref<number[]>([])
 const selected = ref(new Set<number>())
+const selectedProfileId = ref<string | null>(null)
+const aiPreviewOpen = ref(false)
+const aiPlan = ref<AiTranslationPlan | null>(null)
+const aiNotice = ref('')
 
 watch(() => props.detail, (value) => {
   saved.value = clone(value)
@@ -84,21 +92,14 @@ function entrySourceError(index: number) {
   return ''
 }
 
-function entryTranslationError(index: number) {
-  return draft.value.entries[index]?.translation.trim() ? '' : t('dictionaryEditor.translationRequired')
-}
-
 const newEntryTouched = computed(() => Boolean(newEntry.value.source.trim() || newEntry.value.translation.trim()))
 const newSourceError = computed(() => {
   if (!newEntryTouched.value) return ''
   if (!newEntry.value.source.trim()) return t('dictionaryEditor.sourceRequired')
   return sourceIsDuplicate(newEntry.value.source) ? t('dictionaryEditor.duplicateSource') : ''
 })
-const newTranslationError = computed(() => (
-  newEntryTouched.value && !newEntry.value.translation.trim() ? t('dictionaryEditor.translationRequired') : ''
-))
 const newEntryValid = computed(() => (
-  newEntryTouched.value && !newSourceError.value && !newTranslationError.value
+  newEntryTouched.value && !newSourceError.value
 ))
 const metadataValid = computed(() => Boolean(
   draft.value.metadata.name.trim()
@@ -107,7 +108,7 @@ const metadataValid = computed(() => Boolean(
   && draft.value.metadata.releaseVersion.trim(),
 ))
 const entriesValid = computed(() => draft.value.entries.every((_, index) => (
-  !entrySourceError(index) && !entryTranslationError(index)
+  !entrySourceError(index)
 )))
 const hasUnsavedChanges = computed(() => (
   JSON.stringify(draft.value) !== JSON.stringify(saved.value) || newEntryTouched.value
@@ -118,6 +119,27 @@ const canSave = computed(() => (
   && entriesValid.value
   && (!newEntryTouched.value || newEntryValid.value)
 ))
+const selectedProfile = computed(() => ai.profiles.value.find(profile => (
+  profile.id === (selectedProfileId.value ?? ai.catalog.value.defaultProfileId)
+)) ?? ai.defaultProfile.value)
+const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
+  [{
+    label: t('ai.previewCandidates'),
+    icon: 'i-tabler-list-check',
+    disabled: !selectedProfile.value || ai.busy.value,
+    onSelect: () => void previewAiTranslation(),
+  }],
+  ai.profiles.value.map(profile => ({
+    label: t('ai.useProfile', { name: profile.name }),
+    icon: selectedProfile.value?.id === profile.id ? 'i-tabler-check' : 'i-tabler-sparkles',
+    onSelect: () => { selectedProfileId.value = profile.id },
+  })),
+  [{
+    label: t('ai.manageProfiles'),
+    icon: 'i-tabler-settings',
+    onSelect: () => emit('configure-ai'),
+  }],
+])
 
 watch(hasUnsavedChanges, value => emit('dirty-change', value), { immediate: true })
 
@@ -165,6 +187,57 @@ function saveDraft() {
   emit('save', next)
 }
 
+async function prepareAiPlan() {
+  aiNotice.value = ''
+  if (!selectedProfile.value) {
+    emit('configure-ai')
+    return null
+  }
+  if (!commitNewEntry()) return null
+  try {
+    const plan = await ai.planDictionary(draft.value, selectedProfile.value.id)
+    aiPlan.value = plan
+    return plan
+  }
+  catch {
+    return null
+  }
+}
+
+async function previewAiTranslation() {
+  const plan = await prepareAiPlan()
+  if (plan) aiPreviewOpen.value = true
+}
+
+async function runAiTranslation(plan?: AiTranslationPlan | null) {
+  const nextPlan = plan ?? await prepareAiPlan()
+  if (!nextPlan || !selectedProfile.value) return
+  if (!nextPlan.candidates.length) {
+    aiPreviewOpen.value = true
+    return
+  }
+  aiPreviewOpen.value = false
+  try {
+    const job = await ai.runPlan(nextPlan, selectedProfile.value.id)
+    let applied = 0
+    for (const result of job.results) {
+      const entry = draft.value.entries.find(candidate => (
+        candidate.source.trim() === result.source && !candidate.translation.trim()
+      ))
+      if (!entry) continue
+      entry.translation = result.translation
+      applied += 1
+    }
+    aiNotice.value = t('ai.dictionaryCompleted', { count: applied })
+    aiPlan.value = null
+  }
+  catch {
+    // The composable exposes the localized error below the header.
+  }
+}
+
+onMounted(() => void ai.connect().catch(() => undefined))
+
 usePageEscape(() => true, () => emit('back'))
 </script>
 
@@ -180,9 +253,39 @@ usePageEscape(() => true, () => emit('back'))
       <template #status><UBadge v-if="hasUnsavedChanges" color="warning" variant="subtle" size="sm" :label="t('dictionaryEditor.unsaved')" /></template>
       <template #actions>
         <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" @click="openMetadata" />
+        <div class="inline-flex">
+          <UButton
+            color="primary"
+            variant="soft"
+            size="sm"
+            icon="i-tabler-sparkles"
+            :label="selectedProfile ? t('ai.fillUntranslated') : t('ai.configure')"
+            :loading="ai.busy.value"
+            :disabled="busy"
+            class="rounded-r-none"
+            @click="selectedProfile ? runAiTranslation() : emit('configure-ai')"
+          />
+          <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
+            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="busy || ai.busy.value" />
+          </UDropdownMenu>
+        </div>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('dictionaryEditor.saveDictionary')" :loading="busy" :disabled="busy || !canSave" @click="saveDraft" />
       </template>
     </ManagementDetailHeader>
+
+    <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
+    <UAlert v-else-if="aiNotice" role="status" color="success" variant="soft" icon="i-tabler-sparkles" :title="t('ai.translationCompleted')" :description="aiNotice" class="mb-3" />
+    <UAlert
+      v-if="ai.busy.value && ai.currentJob.value"
+      role="status"
+      color="primary"
+      variant="soft"
+      :title="t('ai.translating')"
+      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount })"
+      class="mb-3"
+    >
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
+    </UAlert>
 
     <ManagementTableFrame
       v-model:query="query"
@@ -254,7 +357,6 @@ usePageEscape(() => true, () => emit('back'))
               size="sm"
               :aria-label="t('dictionaryEditor.newTranslationLabel')"
               :placeholder="t('dictionaryEditor.newTranslationPlaceholder')"
-              :aria-invalid="Boolean(newTranslationError)"
               :ui="{ base: 'px-0' }"
               class="w-full"
               @keydown.enter.prevent="commitNewEntry"
@@ -262,17 +364,13 @@ usePageEscape(() => true, () => emit('back'))
             <UInput
               v-else
               v-model="row.original.entry.translation"
-              :color="entryTranslationError(row.original.index) ? 'error' : 'neutral'"
+              color="neutral"
               variant="none"
               size="sm"
               :aria-label="t('dictionaryEditor.entryTranslationLabel', { source: row.original.entry.source || row.original.index + 1 })"
-              :aria-invalid="Boolean(entryTranslationError(row.original.index))"
               :ui="{ base: 'px-0' }"
               class="w-full"
             />
-            <p v-if="row.original.kind === 'new' ? newTranslationError : entryTranslationError(row.original.index)" class="m-0 text-[9px] leading-4 text-[var(--danger)]">
-              {{ row.original.kind === 'new' ? newTranslationError : entryTranslationError(row.original.index) }}
-            </p>
           </div>
         </template>
         <template #actions-cell="{ row }">
@@ -301,6 +399,27 @@ usePageEscape(() => true, () => emit('back'))
       @confirm="applyMetadata"
     >
       <DictionaryMetadataForm v-model="metadataDraft" />
+    </ManagementFormModal>
+
+    <ManagementFormModal
+      :open="aiPreviewOpen"
+      :title="t('ai.previewTitle')"
+      :description="aiPlan ? t('ai.previewSummary', { eligible: aiPlan.candidates.length, skipped: aiPlan.skipped.length }) : ''"
+      :confirm-label="t('ai.translateCount', { count: aiPlan?.candidates.length ?? 0 })"
+      :confirm-disabled="!aiPlan?.candidates.length"
+      :busy="ai.busy.value"
+      width="md"
+      @update:open="aiPreviewOpen = $event"
+      @confirm="runAiTranslation(aiPlan)"
+    >
+      <div v-if="aiPlan?.candidates.length" class="space-y-1">
+        <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
+          <UIcon name="i-tabler-arrow-right" class="size-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+          <span class="min-w-0 flex-1 truncate text-[11px] text-[var(--text)]">{{ candidate.source }}</span>
+        </div>
+      </div>
+      <UEmpty v-else icon="i-tabler-check" :title="t('ai.nothingToTranslate')" :description="t('ai.nothingToTranslateHint')" />
+      <p v-if="aiPlan?.skipped.length" class="mb-0 mt-3 text-[10px] leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
 
     <ConfirmDialog

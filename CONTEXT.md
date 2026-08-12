@@ -15,8 +15,8 @@ Glyphshift 是通用运行时界面替换工具。当前交付面向 Windows，�
 不是当前运行进程或 Runtime 状态的唯一来源。_Avoid_: 软件列表即运行目标全集。
 
 **词典（Dictionary）**：可独立编辑、安装、发布和复用的纯翻译资产，承载便携元数据以及唯一的
-`source → translation` 映射。词典不拥有位置、语境、字体、Platform、Technology、Adapter、Hook
-或保护原文策略。
+`source → optional translation` 条目。空译文表示待完成条目；只有非空译文进入 Runtime。词典不拥有
+位置、语境、字体、Platform、Technology、Adapter、Hook 或保护原文策略。
 
 **字典元数据（Dictionary Metadata）**：词典自身的身份、发布版本、语言、作者、许可、主页与
 标签。下载来源、内容摘要、签名、安装状态和运行配置不属于字典元数据。
@@ -45,6 +45,10 @@ Adapter 捕获的全部文字。_Avoid_: 全部位置、指定位置、main-ui�
 
 **翻译词条（Translation Entry）**：由非空原文和非空译文构成的唯一映射。同一词典内原文唯一；
 空译文和“保持原文”不属于翻译词条。_Avoid_: Replacement Rule、Keep Rule。
+
+**待翻译词条（Pending Dictionary Entry）**：Dictionary 中已经保存非空原文、但译文仍为空的编辑
+条目。它可以参与 AI 候选规划，但不会编译进 Translation Snapshot。_Avoid_: Keep Translation、
+运行时空字符串替换。
 
 **保护策略（Protection Policy）**：显式阻止某段原文被后续翻译命中的独立策略。它不伪装成空
 译文，也不进入 Dictionary；需要真实产品用例后再建立持久合同。_Avoid_: Keep Translation。
@@ -123,6 +127,19 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
 
+**AI Profile**：可复用的 AI 翻译配置，包含 Provider Protocol、Base URL、手工模型 ID、批量限制与
+本机过滤策略。凭据只以引用关联到系统凭据保险库，不进入 Profile 制品或 App Settings。
+
+**Translation Plan**：针对一个带 revision 的 Dictionary 草稿或 Probe 联合视图生成的短期候选集合。
+它只选择空白译文，记录每个跳过原因，并在发出网络请求前保护占位符。
+
+**Translation Job**：使用一个 AI Profile 分小批执行 Translation Plan 的可查询、可取消运行。取消
+只停止后续排批与写入，并丢弃迟到结果；已经完成的结果仍需在写回时重新检查原文、空白状态与 revision。
+
+**Provider Protocol**：由独立 wire codec 实现的供应商协议。首批包含 OpenAI Responses、OpenAI
+Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateContent` 与 Ollama native；
+共享候选、验证和错误模型，不共享未经验证的请求形状。
+
 **Compiled Font Policy**：由工作流目标的字体策略编译并与 Translation Snapshot 一起发布的不可变
 字体决策。它在词典命中模式下复用 Translation Snapshot 的最终匹配集合。
 
@@ -147,7 +164,7 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 - 工作流期望、软件身份、词典内容、Adapter Catalog 和 Runtime 实际状态必须分开；字体策略只属于
   Workflow Target。
 - Dictionary metadata 与 entry 都不能携带 Location、Context、字体、Platform、Technology、Adapter、
-  Hook 或执行配置；entry 只能是非空 `source + translation`。
+  Hook 或执行配置；entry 必须有非空 `source`，可以是 pending 或非空 `translation`，只有后者进入 Runtime。
 - 只有 Adapter 或专用 Detector 实际提供稳定区域信号时，Region Binding 才能增加 `all` 以外的
   选择器；UI 标签、窗口猜测和硬编码路由不构成区域事实。
 - 一个 Probe Run 必须绑定且只绑定一个 Dictionary；探针发现的原文只有在存在非空译文后才成为
@@ -155,7 +172,7 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 - Probe Run 与 Dictionary 不做转换或双向同步；探针编辑直接修改其绑定 Dictionary，已有
   Dictionary 可以直接继续探针工作。
 - Presentation 不能改变 Registry 使用的 Platform、Architecture、ABI、Feature 或执行入口事实。
-- 当前未发布结构直接使用 Dictionary `/2`、Workflow `/3` 与 Target Runtime
+- 当前未发布结构直接使用 Dictionary `/3`、Workflow `/3` 与 Target Runtime
   Deployment `/2`；不保留旧结构的兼容读取、迁移或双写。
 - 普通界面不显示进程标识、Controller token、DLL 路径或内部 Adapter ID。
 - `runtime.target_not_found` 只表示按已授权程序路径没有发现运行实例，界面表述为“软件未启动”；
@@ -169,8 +186,9 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
   绘制并清除 glyph-index 与旧 spacing；否则保留原调用 fail-open，禁止新字体解释旧字体 glyph ID。
 - 帮助页从 Runtime Bundle 的公开 Catalog 展示 Adapter 名称、版本、Platform、Technology、Feature
   与配置要求；标题栏不显示桌面服务连接徽标。
-- 设置不保存在线翻译器或服务地址。当前 Dictionary 是本地版本化资产；未来下载来源与安装状态
-  进入独立 Catalog/Artifact seam，不进入 Dictionary metadata。
+- AI Profile Catalog 独立保存供应商协议、服务地址、模型与过滤策略；密钥只进入系统凭据保险库，
+  不进入 App Settings、Dictionary metadata、日志或错误。Dictionary 下载来源与安装状态仍进入独立
+  Catalog/Artifact seam。
 - 顶部主题切换与设置页操作共同写入唯一 App Settings；页面和组件不各自维护主题副本。
 - 本机路径、实机样本、截图与日志只存在于被忽略的 `local-test/`。
 - 外部产品调研进入 Flightdeck 或其他跟踪文档时，只保留匿名化、可复用的技术汇总结论；不记录

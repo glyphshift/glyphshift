@@ -1,9 +1,9 @@
-//! Portable Dictionary `/2` package codec and validation.
+//! Portable Dictionary `/3` package codec and validation.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub const DICTIONARY_SCHEMA: &str = "glyphshift.dictionary/2";
+pub const DICTIONARY_SCHEMA: &str = "glyphshift.dictionary/3";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackageError {
@@ -24,7 +24,8 @@ pub enum DictionaryMutationError {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct DictionaryEntryCreate {
     source: Box<str>,
-    translation: Box<str>,
+    #[serde(default)]
+    translation: Option<Box<str>>,
 }
 
 impl DictionaryEntryCreate {
@@ -32,7 +33,15 @@ impl DictionaryEntryCreate {
     pub fn new(source: impl Into<Box<str>>, translation: impl Into<Box<str>>) -> Self {
         Self {
             source: source.into(),
-            translation: translation.into(),
+            translation: Some(translation.into()),
+        }
+    }
+
+    #[must_use]
+    pub fn pending(source: impl Into<Box<str>>) -> Self {
+        Self {
+            source: source.into(),
+            translation: None,
         }
     }
 
@@ -287,7 +296,7 @@ impl DictionaryEdit {
 #[serde(rename_all = "camelCase")]
 pub struct DictionaryEntryView {
     source: Box<str>,
-    translation: Box<str>,
+    translation: Option<Box<str>>,
 }
 
 impl DictionaryEntryView {
@@ -297,8 +306,13 @@ impl DictionaryEntryView {
     }
 
     #[must_use]
-    pub fn translation(&self) -> &str {
-        &self.translation
+    pub fn translation(&self) -> Option<&str> {
+        self.translation.as_deref()
+    }
+
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
+        self.translation.is_none()
     }
 
     fn key(&self) -> Box<str> {
@@ -356,7 +370,8 @@ struct DictionaryArtifact {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct DictionaryEntryArtifact {
     source: Box<str>,
-    translation: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation: Option<Box<str>>,
 }
 
 #[derive(Clone, Debug)]
@@ -510,10 +525,13 @@ fn validate_dictionary(
     artifact: &DictionaryArtifact,
     expected_id: Option<&str>,
 ) -> Result<(), PackageError> {
-    let valid_entries = artifact
-        .entries
-        .iter()
-        .all(|entry| !entry.source.trim().is_empty() && !entry.translation.trim().is_empty());
+    let valid_entries = artifact.entries.iter().all(|entry| {
+        !entry.source.trim().is_empty()
+            && entry
+                .translation
+                .as_deref()
+                .is_none_or(|translation| !translation.trim().is_empty())
+    });
     let unique_entries = artifact
         .entries
         .iter()
@@ -585,7 +603,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn package_round_trips_the_dictionary_v2_contract() {
+    fn package_round_trips_the_dictionary_v3_contract() {
         let package = DictionaryPackage::create(
             DictionaryCreate::new("dictionary.ui", "UI", "en-US", "zh-CN")
                 .with_release_version("1.2.0")
@@ -596,13 +614,35 @@ mod tests {
         let decoded = DictionaryPackage::decode_json(&encoded, Some("dictionary.ui"))
             .expect("decode package");
 
-        assert!(encoded.contains("glyphshift.dictionary/2"));
+        assert!(encoded.contains("glyphshift.dictionary/3"));
         assert_eq!(decoded.id(), "dictionary.ui");
-        assert_eq!(decoded.view().entries()[0].translation(), "打开");
+        assert_eq!(decoded.view().entries()[0].translation(), Some("打开"));
         assert!(encoded.contains("\"source\":\"Open\",\"translation\":\"打开\""));
         assert!(!encoded.contains("location"));
         assert!(!encoded.contains("context"));
         assert!(!encoded.contains("kind"));
+    }
+
+    #[test]
+    fn package_round_trips_a_source_only_pending_entry() {
+        let package = DictionaryPackage::create(
+            DictionaryCreate::new("dictionary.pending", "Pending", "en-US", "zh-CN").with_entries(
+                [
+                    DictionaryEntryCreate::new("Open", "打开"),
+                    DictionaryEntryCreate::pending("Save"),
+                ],
+            ),
+        )
+        .expect("create package with pending entry");
+
+        let encoded = package.encode_json().expect("encode package");
+        let reopened = DictionaryPackage::decode_json(&encoded, Some("dictionary.pending"))
+            .expect("decode package with pending entry");
+
+        assert_eq!(reopened.view().entries()[0].translation(), Some("打开"));
+        assert_eq!(reopened.view().entries()[1].translation(), None);
+        assert!(reopened.view().entries()[1].is_pending());
+        assert!(encoded.contains(r#"{"source":"Save"}"#));
     }
 
     #[test]
@@ -616,7 +656,7 @@ mod tests {
         .expect("create package")
         .encode_json()
         .expect("encode package");
-        let unknown_schema = source.replace("glyphshift.dictionary/2", "glyphshift.dictionary/1");
+        let unknown_schema = source.replace("glyphshift.dictionary/3", "glyphshift.dictionary/2");
 
         assert_eq!(
             DictionaryPackage::decode_json(&unknown_schema, Some("dictionary.ui"))
@@ -633,7 +673,7 @@ mod tests {
     #[test]
     fn package_rejects_obsolete_location_context_and_text_behavior_fields() {
         let obsolete = r#"{
-            "schema":"glyphshift.dictionary/2",
+            "schema":"glyphshift.dictionary/3",
             "revision":1,
             "metadata":{
                 "id":"dictionary.ui",
@@ -657,7 +697,7 @@ mod tests {
 
         assert_eq!(
             DictionaryPackage::decode_json(obsolete, Some("dictionary.ui"))
-                .expect_err("obsolete entry fields must not survive inside Dictionary /2"),
+                .expect_err("obsolete entry fields must not survive inside Dictionary /3"),
             PackageError::InvalidJson,
         );
     }
