@@ -1245,7 +1245,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       @confirm="runAiTranslation(aiPlan, true)"
     >
       <p v-if="aiPlan?.candidates.length && selectedAiProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
-        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, batches: Math.ceil(aiPlan.candidates.length / appSettings.aiTranslationBatch.value.maxItemsPerRequest), concurrency: selectedAiProfile.maxConcurrency }) }}
+        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: selectedAiProfile.maxItemsPerRequest, batches: Math.ceil(aiPlan.candidates.length / selectedAiProfile.maxItemsPerRequest), concurrency: selectedAiProfile.maxConcurrency }) }}
       </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
         <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
@@ -1261,7 +1261,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       v-model:open="aiPreflightOpen"
       :plan="aiPlan"
       :profile="selectedAiProfile"
-      :max-items-per-request="appSettings.aiTranslationBatch.value.maxItemsPerRequest"
       @proceed="executeAiTranslation"
     />
 

@@ -33,7 +33,7 @@ fn worker_executable() -> PathBuf {
 
 fn producer() -> CaptureProducerConfiguration {
     CaptureProducerConfiguration::new(
-        CaptureProducerId::new("worker-uia-1").expect("producer id"),
+        CaptureProducerId::new("worker-observer-1").expect("producer id"),
         7,
     )
     .expect("producer configuration")
@@ -64,7 +64,7 @@ fn iwh_001_worker_handshake_health_pause_and_deactivation_tail_use_one_capture_o
     let mut worker = ProcessIsolatedWorker::spawn(
         artifact,
         Duration::from_secs(2),
-        &AdapterId::new("windows.uia.synthetic"),
+        &AdapterId::new("synthetic.observe"),
         target_grant("target:authorized"),
         producer(),
         0,
@@ -125,7 +125,7 @@ fn iwh_002_worker_rejects_an_unauthorized_target_during_handshake() {
     let result = ProcessIsolatedWorker::spawn(
         artifact,
         Duration::from_secs(2),
-        &AdapterId::new("windows.uia.synthetic"),
+        &AdapterId::new("synthetic.observe"),
         target_grant("target:not-authorized"),
         producer(),
         11,
@@ -149,7 +149,7 @@ fn iwh_003_permission_rejection_reaches_the_generic_host_contract() {
         .expect("capture configuration"),
     )
     .expect("capture owner");
-    let artifact_id = PackageArtifactId::new("workers/uia-permission");
+    let artifact_id = PackageArtifactId::new("workers/synthetic-permission");
     let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
         .expect("worker catalog");
     let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_secs(2));
@@ -161,7 +161,7 @@ fn iwh_003_permission_rejection_reaches_the_generic_host_contract() {
         target.id().clone(),
         target_grant("target:permission-denied"),
     );
-    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let adapter_id = AdapterId::new("synthetic.observe");
     let version = AdapterVersion::new(1, 0, 0);
     let binding = AdapterBinding {
         descriptor: AdapterDescriptor::new(
@@ -203,7 +203,7 @@ fn iwh_004_adapter_host_supervises_generation_capture_health_and_stop() {
         .expect("capture configuration"),
     )
     .expect("capture owner");
-    let artifact_id = PackageArtifactId::new("workers/uia-synthetic");
+    let artifact_id = PackageArtifactId::new("workers/synthetic-observer");
     let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
         .expect("worker catalog");
     let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_secs(2));
@@ -212,7 +212,7 @@ fn iwh_004_adapter_host_supervises_generation_capture_health_and_stop() {
         TargetFacts::new("windows", "x86_64"),
     );
     host.register_target(target.id().clone(), target_grant("target:authorized"));
-    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let adapter_id = AdapterId::new("synthetic.observe");
     let version = AdapterVersion::new(1, 0, 0);
     let binding = AdapterBinding {
         descriptor: AdapterDescriptor::new(
@@ -279,7 +279,7 @@ fn iwh_005_timeout_immediately_reclaims_the_worker_process() {
     let mut worker = ProcessIsolatedWorker::spawn(
         artifact,
         Duration::from_millis(100),
-        &AdapterId::new("windows.uia.synthetic"),
+        &AdapterId::new("synthetic.observe"),
         target_grant("target:hang-on-query"),
         producer(),
         11,
@@ -307,7 +307,7 @@ fn iwh_006_supervisor_restarts_a_timed_out_worker_with_a_new_generation() {
         .expect("capture configuration"),
     )
     .expect("capture owner");
-    let artifact_id = PackageArtifactId::new("workers/uia-restart");
+    let artifact_id = PackageArtifactId::new("workers/synthetic-restart");
     let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
         .expect("worker catalog");
     let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_millis(100));
@@ -316,7 +316,7 @@ fn iwh_006_supervisor_restarts_a_timed_out_worker_with_a_new_generation() {
         TargetFacts::new("windows", "x86_64"),
     );
     host.register_target(target.id().clone(), target_grant("target:hang-once"));
-    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let adapter_id = AdapterId::new("synthetic.observe");
     let version = AdapterVersion::new(1, 0, 0);
     let binding = AdapterBinding {
         descriptor: AdapterDescriptor::new(
@@ -365,7 +365,7 @@ fn iwh_007_restart_budget_exhaustion_remains_visible_in_health() {
         .expect("capture configuration"),
     )
     .expect("capture owner");
-    let artifact_id = PackageArtifactId::new("workers/uia-restart-budget");
+    let artifact_id = PackageArtifactId::new("workers/synthetic-restart-budget");
     let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
         .expect("worker catalog");
     let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_millis(100));
@@ -374,7 +374,7 @@ fn iwh_007_restart_budget_exhaustion_remains_visible_in_health() {
         TargetFacts::new("windows", "x86_64"),
     );
     host.register_target(target.id().clone(), target_grant("target:hang-on-query"));
-    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let adapter_id = AdapterId::new("synthetic.observe");
     let version = AdapterVersion::new(1, 0, 0);
     let binding = AdapterBinding {
         descriptor: AdapterDescriptor::new(
@@ -423,7 +423,7 @@ fn iwh_008_manual_reactivation_recovers_after_restart_budget_exhaustion() {
         .expect("capture configuration"),
     )
     .expect("capture owner");
-    let artifact_id = PackageArtifactId::new("workers/uia-manual-recovery");
+    let artifact_id = PackageArtifactId::new("workers/synthetic-manual-recovery");
     let artifacts = WorkerArtifactCatalog::new([(artifact_id.clone(), worker_executable())])
         .expect("worker catalog");
     let mut host = IsolatedWorkerHost::new(artifacts, sink.ingress(), Duration::from_millis(100));
@@ -435,7 +435,7 @@ fn iwh_008_manual_reactivation_recovers_after_restart_budget_exhaustion() {
         target.id().clone(),
         target_grant("target:hang-until-reconnect"),
     );
-    let adapter_id = AdapterId::new("windows.uia.synthetic");
+    let adapter_id = AdapterId::new("synthetic.observe");
     let version = AdapterVersion::new(1, 0, 0);
     let binding = AdapterBinding {
         descriptor: AdapterDescriptor::new(

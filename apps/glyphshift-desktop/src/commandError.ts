@@ -92,6 +92,7 @@ const messageKeys: Record<string, string> = {
   'runtime.target_not_found': 'errors.runtime.targetNotFound',
   'runtime.session_rejected': 'errors.runtime.sessionRejected',
   'runtime.bundle_unavailable': 'errors.runtime.bundleUnavailable',
+  'runtime.bundle_incompatible': 'errors.runtime.bundleIncompatible',
   'runtime.target_access_failed': 'errors.runtime.targetAccessFailed',
   'runtime.component_load_failed': 'errors.runtime.componentLoadFailed',
   'runtime.component_incompatible': 'errors.runtime.componentIncompatible',

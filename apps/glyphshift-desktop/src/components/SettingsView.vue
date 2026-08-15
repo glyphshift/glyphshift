@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  AI_TRANSLATION_BATCH_LIMITS,
   useAppSettings,
   type CloseBehavior,
   type LocalePreference,
@@ -209,16 +208,6 @@ function updateLaunchElevated(value: boolean) {
   void appSettings.setLaunchElevated(value).catch(() => undefined)
 }
 
-function updateAiBatchItems(value: number | null | undefined) {
-  if (!Number.isInteger(value)
-    || (value ?? 0) < AI_TRANSLATION_BATCH_LIMITS.items.min
-    || (value ?? 0) > AI_TRANSLATION_BATCH_LIMITS.items.max) return
-  void appSettings.setAiTranslationBatch({
-    ...appSettings.aiTranslationBatch.value,
-    maxItemsPerRequest: value as number,
-  }).catch(() => undefined)
-}
-
 function updateAiConfirmation(value: boolean) {
   void appSettings.setConfirmAiTranslation(value).catch(() => undefined)
 }
@@ -298,33 +287,16 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
-        <ManagementFormSection :title="t('settings.aiBatch.title')" :description="t('settings.aiBatch.description')">
+        <ManagementFormSection :title="t('settings.aiExecution.title')" :description="t('settings.aiExecution.description')">
           <ManagementFormRow
-            :label="t('settings.aiBatch.items')"
-            :description="t('settings.aiBatch.itemsDescription')"
-            icon="i-tabler-list-numbers"
-            control-width="compact"
-          >
-            <UInputNumber
-              :model-value="appSettings.aiTranslationBatch.value.maxItemsPerRequest"
-              :min="AI_TRANSLATION_BATCH_LIMITS.items.min"
-              :max="AI_TRANSLATION_BATCH_LIMITS.items.max"
-              :step="1"
-              :aria-label="t('settings.aiBatch.items')"
-              :disabled="appSettings.settingsBusy.value"
-              class="w-full"
-              @update:model-value="updateAiBatchItems"
-            />
-          </ManagementFormRow>
-          <ManagementFormRow
-            :label="t('settings.aiBatch.confirm')"
-            :description="t('settings.aiBatch.confirmDescription')"
+            :label="t('settings.aiExecution.confirm')"
+            :description="t('settings.aiExecution.confirmDescription')"
             icon="i-tabler-message-question"
             control-width="compact"
           >
             <USwitch
               :model-value="appSettings.confirmAiTranslation.value"
-              :aria-label="t('settings.aiBatch.confirm')"
+              :aria-label="t('settings.aiExecution.confirm')"
               :disabled="appSettings.settingsBusy.value"
               @update:model-value="updateAiConfirmation"
             />

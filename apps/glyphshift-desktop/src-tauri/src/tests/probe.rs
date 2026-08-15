@@ -41,6 +41,31 @@ fn incompatible_probe_plan_is_rejected_before_its_draft_dictionary_is_created() 
 }
 
 #[test]
+fn probe_reports_an_incompatible_runtime_bundle_before_adapter_availability() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    application.runtimes = None;
+    application.runtime_bundle_error = Some(DesktopRuntimeError::AdapterAbiMismatch);
+
+    let error = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-incompatible-runtime-bundle".into(),
+            name: "Incompatible Runtime Bundle".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect_err("an ABI-mismatched Runtime Bundle must stop probe creation");
+
+    assert_eq!(
+        serde_json::to_value(error).expect("serialize Runtime Bundle error")["code"],
+        "runtime.bundle_incompatible"
+    );
+}
+
+#[test]
 fn probe_translation_edit_publishes_the_next_live_preview_generation() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     application.adapters = vec![AdapterView {

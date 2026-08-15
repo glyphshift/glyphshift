@@ -7,7 +7,6 @@ const props = defineProps<{
   open: boolean
   plan: AiTranslationPlan | null
   profile: AiProfile | null
-  maxItemsPerRequest: number
 }>()
 
 const emit = defineEmits<{
@@ -17,7 +16,7 @@ const emit = defineEmits<{
 
 const { n, t } = useI18n()
 const estimate = computed(() => props.plan
-  ? estimateAiTranslationInput(props.plan, props.maxItemsPerRequest)
+  ? estimateAiTranslationInput(props.plan, props.profile?.maxItemsPerRequest ?? 50)
   : { estimatedInputTokens: 0, totalBatches: 0 })
 const formattedTokens = computed(() => n(estimate.value.estimatedInputTokens))
 
@@ -54,7 +53,7 @@ function proceed() {
         </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightBatchPolicy') }}</dt>
-          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.preflightBatchPolicyValue', { batchSize: maxItemsPerRequest, concurrency: profile?.maxConcurrency ?? 1 }) }}</dd>
+          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.preflightBatchPolicyValue', { batchSize: profile?.maxItemsPerRequest ?? 50, concurrency: profile?.maxConcurrency ?? 1 }) }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightFailurePolicy') }}</dt>

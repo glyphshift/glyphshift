@@ -772,6 +772,7 @@ const fn map_runtime_acquisition_error(error: DesktopRuntimeError) -> DesktopAcq
         | DesktopRuntimeError::InvalidArtifactPath
         | DesktopRuntimeError::InvalidArtifactHash
         | DesktopRuntimeError::ArtifactHashMismatch
+        | DesktopRuntimeError::AdapterAbiMismatch
         | DesktopRuntimeError::AdapterInspectionFailed
         | DesktopRuntimeError::AdapterRegistryRejected => {
             DesktopAcquisitionError::ControllerUnavailable

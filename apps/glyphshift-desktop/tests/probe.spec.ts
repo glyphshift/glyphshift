@@ -916,6 +916,44 @@ test('elevated probe rejection explains the protected target without observer re
   await expect(page.getByRole('button', { name: '切换为仅采集并重试' })).toHaveCount(0)
 })
 
+test('probe reconnect explains a desktop and Runtime Bundle build mismatch', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const summary = {
+      id: 'probe-runtime-bundle-mismatch', name: 'Runtime 版本诊断', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.ext-text-out'], status: 'ready', livePreviewEnabled: true,
+      observationRevision: 0, observedCount: 0, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 0, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 1,
+      dictionaryEntryCount: 0, runtimeCapability: null,
+    }
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_probe_run_entries') {
+          return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+        }
+        if (command === 'desktop_resume_probe_run') {
+          throw { schemaVersion: 1, code: 'runtime.bundle_incompatible', args: {} }
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', summary.id)
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  await page.getByRole('button', { name: '连接并继续' }).click()
+
+  await expect(page.getByRole('alert')).toContainText('Glyphshift 与本地 Runtime Bundle 版本不一致')
+  await expect(page.getByRole('alert')).toContainText('重启目标软件无法解决此问题')
+  await expect(page.getByRole('alert')).not.toContainText('选择的探针技术当前不可用')
+})
+
 test('probe operation error closes when switching to another probe', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     let resumeAttempts = 0

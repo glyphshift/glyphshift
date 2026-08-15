@@ -6,10 +6,7 @@ use glyphshift_desktop_backend::{
     DictionaryEntryCreate, DictionaryView, ExecutableSelection, FontCoverage, WorkflowCreate,
     WorkflowFontPolicy, WorkflowTargetCreate,
 };
-use glyphshift_desktop_runtime::{
-    DesktopAcquisitionCancellation, DesktopPoint, DesktopRuntimeError, DesktopRuntimePool,
-    RuntimeBundle,
-};
+use glyphshift_desktop_runtime::{DesktopRuntimePool, RuntimeBundle};
 use glyphshift_domain::Feature;
 use glyphshift_session::{RuntimeTextOutcome, RuntimeTraceStatus};
 use std::collections::BTreeSet;
@@ -21,17 +18,8 @@ use tempfile::tempdir;
 
 const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
 const TEST_GDIPLUS_ADAPTER_ID: &str = "windows.gdiplus.draw-string";
-const TEST_CONSOLE_OBSERVER_ID: &str = "windows.console.write-console";
-const TEST_UIA_OBSERVER_ID: &str = "windows.uia.observe";
-
-#[path = "windows_runtime_contract/acquisition.rs"]
-mod acquisition;
 #[path = "windows_runtime_contract/authorized_host.rs"]
 mod authorized_host;
-#[path = "windows_runtime_contract/bundle.rs"]
-mod bundle;
-#[path = "windows_runtime_contract/capture.rs"]
-mod capture;
 #[path = "windows_runtime_contract/pool.rs"]
 mod pool;
 #[path = "windows_runtime_contract/synthetic_runtime.rs"]

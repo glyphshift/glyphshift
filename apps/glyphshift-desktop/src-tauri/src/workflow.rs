@@ -409,6 +409,7 @@ pub(super) fn runtime_command_error_with_privilege(
             CommandError::new("runtime.session_rejected")
         }
         DesktopRuntimeError::BundleUnavailable => CommandError::new("runtime.bundle_unavailable"),
+        DesktopRuntimeError::AdapterAbiMismatch => CommandError::new("runtime.bundle_incompatible"),
         DesktopRuntimeError::ProtocolRejected if enabling => {
             CommandError::new("runtime.component_incompatible")
         }

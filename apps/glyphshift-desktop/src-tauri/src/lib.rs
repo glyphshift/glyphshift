@@ -326,6 +326,7 @@ struct DesktopApplication {
     backend: DesktopBackend,
     dictionary_distribution: DictionaryDistribution,
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
+    runtime_bundle_error: Option<DesktopRuntimeError>,
     workflow_runtime_status: BTreeMap<Box<str>, WorkflowRuntimeView>,
     adapters: Vec<AdapterView>,
     adapter_target_support: BTreeMap<Box<str>, AdapterTargetSupport>,
@@ -344,7 +345,9 @@ impl DesktopApplication {
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
         let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
-        let runtime_bundle = RuntimeBundle::open(runtime_root).ok();
+        let runtime_bundle = RuntimeBundle::open(runtime_root);
+        let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
+        let runtime_bundle = runtime_bundle.ok();
         let adapter_target_support = runtime_bundle
             .as_ref()
             .into_iter()
@@ -411,6 +414,7 @@ impl DesktopApplication {
             runtimes: runtime_bundle.map(|bundle| {
                 Box::new(DesktopRuntimePool::new(bundle)) as Box<dyn WorkflowRuntimeService>
             }),
+            runtime_bundle_error,
             workflow_runtime_status: BTreeMap::new(),
             adapters,
             adapter_target_support,
@@ -428,6 +432,15 @@ impl DesktopApplication {
             .restore_enabled_workflows()
             .map_err(|error| format!("{error:?}"))?;
         Ok(application)
+    }
+
+    fn runtime_bundle_command_error(&self) -> Option<CommandError> {
+        self.runtime_bundle_error.map(|error| match error {
+            DesktopRuntimeError::AdapterAbiMismatch => {
+                CommandError::new("runtime.bundle_incompatible")
+            }
+            _ => CommandError::new("runtime.bundle_unavailable"),
+        })
     }
 
     fn snapshot(&self) -> DesktopProductSnapshot {
@@ -631,10 +644,10 @@ pub fn run() {
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
-                if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    if software::matches_software_quick_capture_shortcut(app, shortcut) {
-                        software::handle_software_quick_capture_shortcut(app);
-                    }
+                if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed
+                    && software::matches_software_quick_capture_shortcut(app, shortcut)
+                {
+                    software::handle_software_quick_capture_shortcut(app);
                 }
             })
             .build(),

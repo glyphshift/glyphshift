@@ -292,8 +292,8 @@ impl RuntimeBundle {
             let path = verified_artifact(&root, &adapter.file, hash)?;
             // SAFETY: `verified_artifact` measured the exact file against the bundle manifest hash
             // before native code is loaded. The bundle authority is fixed by the product above.
-            let descriptor = unsafe { LoadedNativeAdapter::inspect(&path) }
-                .map_err(|_| DesktopRuntimeError::AdapterInspectionFailed)?;
+            let descriptor =
+                unsafe { LoadedNativeAdapter::inspect(&path) }.map_err(adapter_inspection_error)?;
             let features = descriptor
                 .features()
                 .filter(|feature| {
@@ -531,6 +531,16 @@ impl RuntimeBundle {
         )
     }
 }
+
+pub(super) fn adapter_inspection_error(error: NativeHostError) -> DesktopRuntimeError {
+    match error {
+        NativeHostError::ApiSizeMismatch | NativeHostError::DescriptorSizeMismatch => {
+            DesktopRuntimeError::AdapterAbiMismatch
+        }
+        _ => DesktopRuntimeError::AdapterInspectionFailed,
+    }
+}
+
 fn artifact_path(root: &Path, file: &str) -> Result<PathBuf, DesktopRuntimeError> {
     let path = Path::new(file);
     let mut components = path.components();

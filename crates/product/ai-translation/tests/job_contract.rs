@@ -198,7 +198,7 @@ fn job_validates_provider_output_and_exposes_results_in_plan_order() {
         ))
         .expect("plan job");
     let job_id = translation
-        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .start_translation(plan.token(), profile)
         .expect("start job");
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -257,7 +257,7 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
         ))
         .expect("plan translation");
     let job_id = translation
-        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .start_translation(plan.token(), profile)
         .expect("start translation");
     let snapshot = wait_for_terminal_job(&translation, &job_id);
 
@@ -315,7 +315,7 @@ fn cancelled_job_discards_a_provider_result_that_arrives_late() {
         ))
         .expect("plan cancelled job");
     let job_id = translation
-        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .start_translation(plan.token(), profile)
         .expect("start cancelled job");
     entered_rx
         .recv_timeout(Duration::from_secs(2))
@@ -380,7 +380,7 @@ fn job_rejects_translation_that_changes_protected_tokens() {
         ))
         .expect("plan invalid-output job");
     let job_id = translation
-        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .start_translation(plan.token(), profile)
         .expect("start invalid-output job");
     let deadline = Instant::now() + Duration::from_secs(2);
     let failed = loop {
@@ -410,12 +410,15 @@ fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
     let mut profiles =
         AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
     profiles
-        .save_profile(AiProfileDraft::new(
-            "profile.local",
-            "Local",
-            AiProviderProtocol::OllamaChat,
-            "synthetic-model",
-        ))
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.local",
+                "Local",
+                AiProviderProtocol::OllamaChat,
+                "synthetic-model",
+            )
+            .with_max_items_per_request(20),
+        )
         .expect("save local profile");
     let profile = profiles
         .resolve_profile("profile.local")
@@ -435,11 +438,7 @@ fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
         ))
         .expect("plan every candidate");
     let job_id = translation
-        .start_translation(
-            plan.token(),
-            profile,
-            TranslationBatchPolicy::new(20).expect("valid batch policy"),
-        )
+        .start_translation(plan.token(), profile)
         .expect("start batched job");
     let completed = wait_for_terminal_job(&translation, &job_id);
 
@@ -462,12 +461,15 @@ fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
     let mut profiles =
         AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
     profiles
-        .save_profile(AiProfileDraft::new(
-            "profile.local",
-            "Local",
-            AiProviderProtocol::OllamaChat,
-            "synthetic-model",
-        ))
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.local",
+                "Local",
+                AiProviderProtocol::OllamaChat,
+                "synthetic-model",
+            )
+            .with_max_items_per_request(20),
+        )
         .expect("save local profile");
     let profile = profiles
         .resolve_profile("profile.local")
@@ -487,11 +489,7 @@ fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
         ))
         .expect("plan every candidate");
     let job_id = translation
-        .start_translation(
-            plan.token(),
-            profile,
-            TranslationBatchPolicy::new(20).expect("valid batch policy"),
-        )
+        .start_translation(plan.token(), profile)
         .expect("start batched job");
     let completed = wait_for_terminal_job(&translation, &job_id);
 
@@ -559,7 +557,7 @@ fn profile_concurrency_starts_multiple_short_text_batches_in_parallel() {
         ))
         .expect("plan short-text job");
     let job_id = translation
-        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .start_translation(plan.token(), profile)
         .expect("start concurrent job");
 
     entered_rx

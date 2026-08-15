@@ -421,7 +421,6 @@ impl AiTranslation {
         &mut self,
         plan_token: &str,
         profile: ResolvedAiProfile,
-        batch_policy: TranslationBatchPolicy,
     ) -> Result<TranslationJobId, TranslationJobError> {
         let plan = self
             .plans
@@ -433,6 +432,8 @@ impl AiTranslation {
             .get(&profile.protocol())
             .cloned()
             .ok_or(TranslationJobError::MissingProvider(profile.protocol()))?;
+        let batch_policy = TranslationBatchPolicy::new(profile.max_items_per_request())
+            .expect("resolved AI profile must contain a valid batch size");
         self.next_job_id = self.next_job_id.saturating_add(1);
         let job_id: Box<str> = format!("job-{}", self.next_job_id).into();
         let cancelled = Arc::new(AtomicBool::new(false));

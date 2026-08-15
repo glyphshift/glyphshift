@@ -522,6 +522,27 @@ fn http_status_error(response: &HttpResponse) -> ProviderError {
         )
 }
 
+fn malformed_response(message: &'static str) -> ProviderError {
+    ProviderError::new(ProviderErrorCategory::MalformedOutput, false, message)
+}
+
+fn invalid_request(message: &'static str) -> ProviderError {
+    ProviderError::new(ProviderErrorCategory::InvalidRequest, false, message)
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,25 +597,4 @@ mod tests {
             Err(HttpTransportError::Cancelled)
         ));
     }
-}
-
-fn malformed_response(message: &'static str) -> ProviderError {
-    ProviderError::new(ProviderErrorCategory::MalformedOutput, false, message)
-}
-
-fn invalid_request(message: &'static str) -> ProviderError {
-    ProviderError::new(ProviderErrorCategory::InvalidRequest, false, message)
-}
-
-fn encode_path_segment(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(char::from(byte));
-        } else {
-            use std::fmt::Write as _;
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
 }

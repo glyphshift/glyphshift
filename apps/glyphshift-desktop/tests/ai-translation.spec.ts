@@ -34,6 +34,7 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await page.getByRole('option', { name: 'Ollama', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: 'API Key' })).toHaveCount(0)
   await expect(dialog.getByRole('spinbutton', { name: '单批超时（秒）' })).toHaveValue('300')
+  await expect(dialog.getByRole('spinbutton', { name: '单批最多条目' })).toHaveValue('50')
   await expect(dialog.getByRole('spinbutton', { name: '并发批数' })).toHaveValue('1')
   await expect(dialog.getByRole('spinbutton', { name: '失败重试次数' })).toHaveValue('2')
   await dialog.getByRole('textbox', { name: '模型 ID' }).fill('qwen3:8b')
@@ -53,7 +54,7 @@ test('AI profile connection test reports model invocation separately from option
     profiles: [{
       id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
       baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
-      timeoutMs: 60_000, maxConcurrency: 1,
+      timeoutMs: 60_000, maxItemsPerRequest: 50, maxConcurrency: 1,
       filterPolicy, hasCredential: false, credentialRequired: false,
     }],
   }
@@ -69,30 +70,39 @@ test('AI profile connection test reports model invocation separately from option
   await expect(page.getByText('模型发现未测试，不影响手工填写的模型 ID')).toBeVisible()
 })
 
-test('settings owns the global batch size and confirmation preference without exposing a token budget', async ({ page }) => {
+test('settings keeps confirmation global while batch size belongs to each AI profile', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
 
   await expect(page.getByRole('heading', { name: 'AI 翻译执行' })).toBeVisible()
-  const items = page.getByRole('spinbutton', { name: '单批最多条目' })
   const confirmation = page.getByRole('switch', { name: '翻译前询问' })
-  await expect(items).toHaveValue('50')
+  await expect(page.getByRole('spinbutton', { name: '单批最多条目' })).toHaveCount(0)
   await expect(confirmation).toBeChecked()
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
-  await items.fill('75')
   await confirmation.click()
 
   await page.getByRole('button', { name: '添加 AI Profile' }).click()
   const dialog = page.getByRole('dialog', { name: '添加 AI Profile' })
-  await expect(dialog.getByRole('spinbutton', { name: '单批最多条目' })).toHaveCount(0)
+  await dialog.getByRole('textbox', { name: 'Profile 名称' }).fill('自定义批次')
+  await dialog.getByRole('combobox', { name: '协议' }).click()
+  await page.getByRole('option', { name: 'Ollama', exact: true }).click()
+  await dialog.getByRole('textbox', { name: '模型 ID' }).fill('local-model')
+  const items = dialog.getByRole('spinbutton', { name: '单批最多条目' })
+  await expect(items).toHaveValue('50')
+  await items.fill('75')
+  await dialog.getByRole('spinbutton', { name: '并发批数' }).fill('3')
   await expect(dialog.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
-  await page.getByRole('button', { name: '取消' }).click()
+  await dialog.getByRole('button', { name: '保存 Profile' }).click()
 
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
-  await expect(page.getByRole('spinbutton', { name: '单批最多条目' })).toHaveValue('75')
+  await expect(page.getByRole('spinbutton', { name: '单批最多条目' })).toHaveCount(0)
   await expect(page.getByRole('switch', { name: '翻译前询问' })).not.toBeChecked()
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
+  await page.getByRole('button', { name: '编辑 AI Profile：自定义批次' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑 AI Profile' })
+  await expect(editor.getByRole('spinbutton', { name: '单批最多条目' })).toHaveValue('75')
+  await expect(editor.getByRole('spinbutton', { name: '并发批数' })).toHaveValue('3')
 })
 
 test('AI fill asks with token and request policy before submitting', async ({ page }) => {
@@ -104,7 +114,7 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
     profiles: [{
       id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
       baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
-      timeoutMs: 60_000, maxConcurrency: 1,
+      timeoutMs: 60_000, maxItemsPerRequest: 25, maxConcurrency: 1,
       filterPolicy, hasCredential: false, credentialRequired: false,
     }],
   }
@@ -120,7 +130,7 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
   const preflight = page.getByRole('dialog', { name: '确认 AI 翻译' })
   await expect(preflight.getByText('预计输入约 402 Token')).toBeVisible()
   await expect(preflight.getByText('1 条 · 1 批')).toBeVisible()
-  await expect(preflight.getByText('每批最多 50 条 · 并发 1 批')).toBeVisible()
+  await expect(preflight.getByText('每批最多 25 条 · 并发 1 批')).toBeVisible()
   await expect(preflight.getByText('单批 60 秒 · 失败重试 2 次')).toBeVisible()
   await expect(preflight.getByText(/秒后自动开始/)).toHaveCount(0)
   await preflight.getByRole('button', { name: '取消' }).click()
@@ -240,7 +250,7 @@ test('dictionary AI fill reports all candidates completed across automatic batch
     profiles: [{
       id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
       baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
-      timeoutMs: 60_000, maxConcurrency: 1,
+      timeoutMs: 60_000, maxItemsPerRequest: 20, maxConcurrency: 1,
       filterPolicy, hasCredential: false, credentialRequired: false,
     }],
   }
@@ -252,7 +262,6 @@ test('dictionary AI fill reports all candidates completed across automatic batch
       localePreference: 'zh-CN',
       themePreference: 'dark',
       confirmAiTranslation: false,
-      aiTranslationBatch: { maxItemsPerRequest: 20 },
     }))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles, settingsKey: appSettingsStorageKey })
   await page.goto('/')
@@ -277,7 +286,7 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
     profiles: [{
       id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
       baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
-      timeoutMs: 60_000, maxConcurrency: 1,
+      timeoutMs: 60_000, maxItemsPerRequest: 1, maxConcurrency: 1,
       filterPolicy, hasCredential: false, credentialRequired: false,
     }],
   }
@@ -289,7 +298,6 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
       localePreference: 'zh-CN',
       themePreference: 'dark',
       confirmAiTranslation: false,
-      aiTranslationBatch: { maxItemsPerRequest: 1 },
     }))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles, settingsKey: appSettingsStorageKey })
   await page.goto('/')

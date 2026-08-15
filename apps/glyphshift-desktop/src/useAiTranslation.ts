@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
-import { useAppSettings } from './appSettings'
 import { translateCommandError } from './commandError'
 import type { DictionaryDetail, ProbeRunSummary } from './model'
 import { hasDesktopRuntime } from './workspace/state'
@@ -33,6 +32,7 @@ export interface AiProfile {
   baseUrl: string
   modelId: string
   timeoutMs: number
+  maxItemsPerRequest: number
   maxConcurrency: number
   maxRetries: number
   filterPolicy: AiFilterPolicy
@@ -214,7 +214,6 @@ let browserPlanSequence = 0
 let browserJobSequence = 0
 let connected = false
 let elapsedTimer: number | undefined
-const appSettings = useAppSettings()
 
 function formatElapsedDuration(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
@@ -239,6 +238,11 @@ function persistBrowserCatalog() {
 function normalizeProfile(profile: AiProfile): AiProfile {
   return {
     ...profile,
+    maxItemsPerRequest: Number.isInteger(profile.maxItemsPerRequest)
+      && profile.maxItemsPerRequest >= 1
+      && profile.maxItemsPerRequest <= 1_000
+      ? profile.maxItemsPerRequest
+      : 50,
     maxRetries: Number.isInteger(profile.maxRetries) && profile.maxRetries >= 0 && profile.maxRetries <= 10
       ? profile.maxRetries
       : 2,
@@ -476,7 +480,7 @@ function browserBatches(plan: AiTranslationPlan, profileId?: string | null) {
     item.id === (profileId ?? catalog.value.defaultProfileId)
   ))
   if (!profile) throw new Error('AI profile required')
-  const maxItems = appSettings.aiTranslationBatch.value.maxItemsPerRequest
+  const maxItems = profile.maxItemsPerRequest
   const batches: AiTranslationCandidate[][] = []
   for (let start = 0; start < plan.candidates.length; start += maxItems) {
     batches.push(plan.candidates.slice(start, start + maxItems))
@@ -497,7 +501,7 @@ async function startTranslation(planToken: string, profileId?: string | null) {
   ))
   if (!profile) throw new Error('AI profile required')
   const batches = browserBatches(plan, profileId)
-  const batchSize = appSettings.aiTranslationBatch.value.maxItemsPerRequest
+  const batchSize = profile.maxItemsPerRequest
   const jobId = `browser-job-${++browserJobSequence}`
   const job: AiTranslationJob = {
     jobId,

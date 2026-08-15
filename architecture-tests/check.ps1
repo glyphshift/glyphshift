@@ -70,7 +70,7 @@ Assert-Dependencies -PackageName 'glyphshift-domain' -Expected @()
 Assert-Dependencies -PackageName 'glyphshift-acquisition' -Expected @()
 Assert-Dependencies `
     -PackageName 'glyphshift-ai-translation' `
-    -Expected @('regex', 'reqwest', 'serde', 'serde_json', 'tempfile')
+    -Expected @('regex', 'reqwest', 'serde', 'serde_json', 'tempfile', 'tokio')
 Assert-Dependencies `
     -PackageName 'glyphshift-acquisition-worker-sdk' `
     -Expected @('glyphshift-acquisition', 'serde', 'serde_json')
@@ -388,7 +388,6 @@ Assert-Dependencies `
 Assert-Dependencies `
     -PackageName 'glyphshift-test-isolated-worker' `
     -Expected @(
-        'glyphshift-adapter-uia',
         'glyphshift-capture',
         'glyphshift-isolated-worker-sdk'
     )
@@ -858,6 +857,100 @@ foreach ($relativeRoot in $productionSourceRoots) {
             throw "Machine-specific absolute path found in $relativeFile"
         }
     }
+}
+
+$reviewAppScript = [System.IO.File]::ReadAllText(
+    (Join-Path $workspaceRoot 'scripts\review-app.ps1')
+)
+foreach ($requiredToken in @(
+    'build-runtime-bundle.ps1',
+    'glyphshift-runtime-bundle-verify',
+    'glyphshift-desktop-shell'
+)) {
+    if ($reviewAppScript.IndexOf($requiredToken, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Desktop review build must include '$requiredToken'."
+    }
+}
+
+$runtimeBundleScript = [System.IO.File]::ReadAllText(
+    (Join-Path $workspaceRoot 'scripts\build-runtime-bundle.ps1')
+)
+foreach ($pausedProductToken in @(
+    'glyphshift-adapter-console-native',
+    'glyphshift-adapter-uia-worker',
+    'glyphshift-adapter-ocr-worker',
+    'windows.console.write-console',
+    'windows.uia.observe',
+    'windows.uia.acquire',
+    'windows.ocr.acquire'
+)) {
+    if ($runtimeBundleScript.IndexOf(
+        $pausedProductToken,
+        [System.StringComparison]::Ordinal
+    ) -ge 0) {
+        throw "Paused observer/acquisition capability leaked into the shipping Runtime Bundle: $pausedProductToken"
+    }
+}
+foreach ($emptyWorkerCatalog in @('isolated_workers = @()', 'acquisition_workers = @()')) {
+    if ($runtimeBundleScript.IndexOf(
+        $emptyWorkerCatalog,
+        [System.StringComparison]::Ordinal
+    ) -lt 0) {
+        throw "Shipping Runtime Bundle must keep the paused worker catalog empty: $emptyWorkerCatalog"
+    }
+}
+
+$defaultTestScript = [System.IO.File]::ReadAllText(
+    (Join-Path $workspaceRoot 'scripts\test.ps1')
+)
+if ($defaultTestScript.IndexOf('--exclude', [System.StringComparison]::Ordinal) -lt 0) {
+    throw 'Default repository tests must exclude paused Adapter packages.'
+}
+foreach ($pausedAdapterPackage in @(
+    'glyphshift-adapter-console',
+    'glyphshift-adapter-console-native',
+    'glyphshift-adapter-ocr',
+    'glyphshift-adapter-ocr-worker',
+    'glyphshift-adapter-uia',
+    'glyphshift-adapter-uia-worker'
+)) {
+    $references = [regex]::Matches(
+        $defaultTestScript,
+        [regex]::Escape("'$pausedAdapterPackage'")
+    ).Count
+    if ($references -ne 1) {
+        throw "Paused Adapter must appear only in the default test exclusion list: $pausedAdapterPackage"
+    }
+}
+
+$pausedAdapterPackageNames = @(
+    'glyphshift-adapter-console',
+    'glyphshift-adapter-console-native',
+    'glyphshift-adapter-ocr',
+    'glyphshift-adapter-ocr-worker',
+    'glyphshift-adapter-uia',
+    'glyphshift-adapter-uia-worker'
+)
+foreach ($activeWorkspacePackage in $metadata.packages | Where-Object {
+    $metadata.workspace_members -contains $_.id -and
+    $pausedAdapterPackageNames -notcontains $_.name
+}) {
+    $pausedDependencies = @($activeWorkspacePackage.dependencies | Where-Object {
+        $pausedAdapterPackageNames -contains $_.name
+    })
+    if ($pausedDependencies.Count -gt 0) {
+        throw "Active package depends on a paused Adapter package: $($activeWorkspacePackage.name) <= $($pausedDependencies.name -join ', ')"
+    }
+}
+
+$repositoryInstructions = [System.IO.File]::ReadAllText(
+    (Join-Path $workspaceRoot 'AGENTS.md')
+)
+if ($repositoryInstructions.IndexOf(
+    'scripts/review-app.ps1',
+    [System.StringComparison]::Ordinal
+) -lt 0) {
+    throw 'Repository instructions must require the synchronized desktop review launcher.'
 }
 
 Write-Output 'Glyphshift architecture checks passed.'

@@ -12,7 +12,6 @@ struct SyntheticIsolatedWorker {
     publication_generation: u64,
     producer: Option<CaptureBatchProducer>,
     ingress: Option<CaptureBatchIngress>,
-    uia: UiaObserver,
     hang_on_query: bool,
     deactivated: bool,
 }
@@ -38,13 +37,6 @@ impl SyntheticIsolatedWorker {
         let _ = ingress.try_observe(adapter_id, source);
         Ok(())
     }
-
-    fn observe_snapshot(&mut self, snapshot: UiaElementSnapshot) -> Result<(), WorkerError> {
-        let UiaObservationOutcome::Observed(observation) = self.uia.observe(snapshot) else {
-            return Ok(());
-        };
-        self.observe(observation.text())
-    }
 }
 
 impl IsolatedWorker for SyntheticIsolatedWorker {
@@ -53,7 +45,7 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
             return Err(WorkerError::new("uia_permission_denied"));
         }
         if self.producer.is_some()
-            || activation.adapter_id != "windows.uia.synthetic"
+            || activation.adapter_id != "synthetic.observe"
             || activation.target_grant.platform != "synthetic-process-v1"
             || !matches!(
                 activation.target_grant.payload.as_str(),
@@ -82,9 +74,9 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
                 && activation.producer_generation < 5);
         self.producer = Some(producer);
         self.ingress = Some(ingress);
-        self.observe_snapshot(UiaElementSnapshot::new("window-title").with_name("Window title"))?;
-        self.observe_snapshot(UiaElementSnapshot::new("document").with_text("Document text"))?;
-        self.observe_snapshot(UiaElementSnapshot::new("field").with_value("Field value"))?;
+        self.observe("Window title")?;
+        self.observe("Document text")?;
+        self.observe("Field value")?;
         Ok(())
     }
 
@@ -95,9 +87,7 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
             .ok_or_else(|| WorkerError::new("worker_not_active"))?
             .set_paused(paused);
         if !paused {
-            self.observe_snapshot(
-                UiaElementSnapshot::new("resumed-label").with_name("Resumed label"),
-            )?;
+            self.observe("Resumed label")?;
         }
         Ok(())
     }
@@ -134,9 +124,7 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
             .as_ref()
             .ok_or_else(|| WorkerError::new("worker_not_active"))?
             .set_paused(false);
-        self.observe_snapshot(
-            UiaElementSnapshot::new("handler-removal-tail").with_name("Handler removal tail"),
-        )?;
+        self.observe("Handler removal tail")?;
         self.producer
             .as_ref()
             .ok_or_else(|| WorkerError::new("worker_not_active"))?
@@ -149,4 +137,3 @@ impl IsolatedWorker for SyntheticIsolatedWorker {
 fn main() -> std::io::Result<()> {
     serve_stdio(SyntheticIsolatedWorker::default())
 }
-use glyphshift_adapter_uia::{UiaElementSnapshot, UiaObservationOutcome, UiaObserver};

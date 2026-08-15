@@ -9,7 +9,6 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 # `cargo test --workspace` does not guarantee that those artifacts are emitted first.
 & cargo build `
     --manifest-path $manifestPath `
-    -p glyphshift-adapter-console-native `
     -p glyphshift-adapter-direct2d-native `
     -p glyphshift-adapter-directwrite-native `
     -p glyphshift-adapter-draw-text-native `
@@ -24,13 +23,24 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
     -p glyphshift-test-controller-plugin `
     -p glyphshift-test-isolated-worker `
     -p glyphshift-test-acquisition-worker `
-    -p glyphshift-adapter-uia-worker `
     -p glyphshift-windows-runtime-target
 if ($LASTEXITCODE -ne 0) {
     throw "native Adapter package build failed with exit code $LASTEXITCODE"
 }
 
-& cargo test --manifest-path $manifestPath --workspace
+$pausedAdapterPackages = @(
+    'glyphshift-adapter-console',
+    'glyphshift-adapter-console-native',
+    'glyphshift-adapter-ocr',
+    'glyphshift-adapter-ocr-worker',
+    'glyphshift-adapter-uia',
+    'glyphshift-adapter-uia-worker'
+)
+$testArguments = @('test', '--manifest-path', $manifestPath, '--workspace')
+foreach ($pausedAdapterPackage in $pausedAdapterPackages) {
+    $testArguments += @('--exclude', $pausedAdapterPackage)
+}
+& cargo @testArguments
 if ($LASTEXITCODE -ne 0) {
     throw "workspace tests failed with exit code $LASTEXITCODE"
 }

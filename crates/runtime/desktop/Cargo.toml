@@ -8,6 +8,10 @@ publish.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "glyphshift-runtime-bundle-verify"
+path = "src/bin/verify_runtime_bundle.rs"
+
 [dependencies]
 glyphshift-acquisition = { path = "../acquisition" }
 glyphshift-acquisition-worker-host = { path = "../worker/acquisition-host" }

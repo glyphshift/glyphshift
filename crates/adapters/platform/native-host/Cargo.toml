@@ -15,7 +15,6 @@ glyphshift-domain = { path = "../../../core/domain" }
 libloading = "0.8"
 
 [dev-dependencies]
-glyphshift-adapter-console = { path = "../../implementations/native/console" }
 glyphshift-adapter-direct2d = { path = "../../implementations/native/direct2d" }
 glyphshift-adapter-directwrite = { path = "../../implementations/native/directwrite" }
 glyphshift-adapter-gdi = { path = "../../implementations/native/gdi" }

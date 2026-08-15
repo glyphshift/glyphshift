@@ -3,6 +3,10 @@
 - Route durable multi-session work through `flightdeck/deck.md` and the focused Work page.
 - Collaborate with project contributors in Chinese.
 - When running from Codex CLI, validate local GUI surfaces with the repository's Playwright CLI/test runner. Do not search for or depend on an in-app browser.
+- For every request to build or launch the latest desktop app for review, use `scripts/review-app.ps1`.
+  It rebuilds the desktop shell and Runtime Bundle from the same checkout and verifies the bundle
+  with the production loader before launch. Never launch a shell produced by a standalone
+  `cargo build`/`tauri build` or pair a newly built shell with a pre-existing Runtime directory.
 
 ## Local testing and privacy
 

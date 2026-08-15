@@ -20,6 +20,7 @@ interface ProfileForm {
   baseUrl: string
   modelId: string
   timeoutSeconds: number
+  maxItemsPerRequest: number
   maxConcurrency: number
   maxRetries: number
   filterPolicy: AiFilterPolicy
@@ -53,6 +54,7 @@ function newProfileForm(): ProfileForm {
     baseUrl: providerDefaults[protocol].baseUrl,
     modelId: '',
     timeoutSeconds: 300,
+    maxItemsPerRequest: 50,
     maxConcurrency: providerDefaults[protocol].concurrency,
     maxRetries: 2,
     filterPolicy: defaultAiFilterPolicy(),
@@ -72,6 +74,9 @@ const formValid = computed(() => Boolean(
   && Number.isInteger(form.value.timeoutSeconds)
   && form.value.timeoutSeconds >= 1
   && form.value.timeoutSeconds <= 600
+  && Number.isInteger(form.value.maxItemsPerRequest)
+  && form.value.maxItemsPerRequest >= 1
+  && form.value.maxItemsPerRequest <= 1_000
   && Number.isInteger(form.value.maxConcurrency)
   && form.value.maxConcurrency >= 1
   && form.value.maxConcurrency <= 16
@@ -84,7 +89,7 @@ const formValid = computed(() => Boolean(
 ))
 
 watch(() => form.value.protocol, (protocol, previous) => {
-  if (!editorOpen.value || protocol === previous) return
+  if (!editorOpen.value || protocol === previous || editingProfile.value?.protocol === protocol) return
   if (!editingProfile.value || form.value.baseUrl === providerDefaults[previous].baseUrl) {
     form.value.baseUrl = providerDefaults[protocol].baseUrl
   }
@@ -115,6 +120,7 @@ function openEdit(profile: AiProfile) {
     baseUrl: profile.baseUrl,
     modelId: profile.modelId,
     timeoutSeconds: profile.timeoutMs / 1_000,
+    maxItemsPerRequest: profile.maxItemsPerRequest,
     maxConcurrency: profile.maxConcurrency,
     maxRetries: profile.maxRetries,
     filterPolicy: JSON.parse(JSON.stringify(profile.filterPolicy)),
@@ -140,6 +146,7 @@ async function save() {
     baseUrl: value.baseUrl.trim(),
     modelId: value.modelId.trim(),
     timeoutMs: Number(value.timeoutSeconds) * 1_000,
+    maxItemsPerRequest: Number(value.maxItemsPerRequest),
     maxConcurrency: Number(value.maxConcurrency),
     maxRetries: Number(value.maxRetries),
     filterPolicy: {
@@ -193,7 +200,7 @@ onMounted(() => void ai.connect())
             {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }} · {{ profile.baseUrl }}
           </p>
           <p class="type-metadata m-0 mt-0.5 truncate leading-4 text-[var(--text-muted)]">
-            {{ t('ai.profileRequestPolicy', { timeout: profile.timeoutMs / 1_000, concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
+            {{ t('ai.profileRequestPolicy', { batchSize: profile.maxItemsPerRequest, timeout: profile.timeoutMs / 1_000, concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
           </p>
           <div v-if="ai.connectionReports.value[profile.id]" class="type-metadata mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 leading-4">
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
@@ -270,6 +277,9 @@ onMounted(() => void ai.connect())
       </UFormField>
       <UFormField :label="t('ai.timeout')">
         <UInput v-model.number="form.timeoutSeconds" type="number" min="1" max="600" step="1" :aria-label="t('ai.timeout')" class="w-full" />
+      </UFormField>
+      <UFormField :label="t('ai.maxItemsPerRequest')">
+        <UInput v-model.number="form.maxItemsPerRequest" type="number" min="1" max="1000" step="1" :aria-label="t('ai.maxItemsPerRequest')" class="w-full" />
       </UFormField>
       <UFormField :label="t('ai.concurrency')">
         <UInput v-model.number="form.maxConcurrency" type="number" min="1" max="16" step="1" :aria-label="t('ai.concurrency')" class="w-full" />

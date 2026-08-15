@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn preserves_native_adapter_abi_mismatch_as_a_bundle_compatibility_error() {
+    assert_eq!(
+        adapter_inspection_error(NativeHostError::ApiSizeMismatch),
+        DesktopRuntimeError::AdapterAbiMismatch
+    );
+    assert_eq!(
+        adapter_inspection_error(NativeHostError::DescriptorSizeMismatch),
+        DesktopRuntimeError::AdapterAbiMismatch
+    );
+    assert_eq!(
+        adapter_inspection_error(NativeHostError::EntryMissing),
+        DesktopRuntimeError::AdapterInspectionFailed
+    );
+}
+
+#[test]
 fn rejects_a_manifest_that_self_authorizes_an_unknown_bundle_authority() {
     let root = tempdir().expect("runtime bundle root");
     fs::write(

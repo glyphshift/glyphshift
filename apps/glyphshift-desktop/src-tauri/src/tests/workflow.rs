@@ -503,6 +503,7 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         dictionary_distribution: offline_dictionary_distribution(data_root.path())
             .expect("offline dictionary distribution"),
         runtimes: Some(runtimes),
+        runtime_bundle_error: None,
         workflow_runtime_status: BTreeMap::new(),
         adapters: Vec::new(),
         adapter_target_support: BTreeMap::new(),

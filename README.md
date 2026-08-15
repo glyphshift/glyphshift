@@ -13,6 +13,7 @@ crates/                        Domain、Extension、Decision、Runtime、Workflo
 test-support/                  合成 Adapter、Controller 与 Windows 测试宿主
 architecture-tests/            通用边界和禁止依赖检查
 scripts/dev-app.ps1            本地 Runtime Bundle 验证与桌面启动
+scripts/review-app.ps1         同步构建、校验并启动最新版桌面与 Runtime
 scripts/build-runtime-bundle.ps1  Debug/Release Runtime Bundle 共用构建器
 scripts/build-desktop-release.ps1 本地 unsigned Windows 安装候选构建器
 flightdeck/                    可恢复的当前工作与稳定知识
@@ -44,23 +45,20 @@ npm --prefix apps/glyphshift-desktop test
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
 ```
 
-首次构建默认 Runtime Bundle 前，先从固定版本的本地 vcpkg 与 `tessdata_fast` checkout 生成经过裁剪、
-摘要校验并携带许可证的 OCR 支持集：
+构建并启动供人工检查的最新版 Release 桌面时，只使用同步评审入口：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-ocr-runtime-support.ps1 -VcpkgRoot <local-vcpkg-root> -TessdataRoot <local-tessdata-fast-root> -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/review-app.ps1
 ```
 
-两个 checkout 与输出都必须位于仓库的本地测试目录；脚本会拒绝非固定提交、修改过的源码、模型摘要
-漂移和超出白名单的 DLL。默认输出位于本地测试构建目录，之后直接启动开发桌面：
+该入口让桌面壳、Controller、Target Runtime 和 Adapter 使用同一份源码与 Cargo 产物目录，并在
+启动前调用生产加载器校验 Bundle。不要把独立 `cargo build` 或 `tauri build` 产生的新桌面壳与旧的
+Runtime 目录组合运行。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
-```
-
-开发、独立 Runtime 和 Desktop Release 构建都会默认加入 OCR Worker，并逐文件写入 `/3` 清单；4 个
-原生 DLL、2 个中英模型、构建来源清单、第三方 notice 和全部许可证缺一不可。自定义支持目录时可传入
-`-OcrSupportRoot <verified-ocr-support-root>`，但该目录仍必须位于本地测试根目录下。
+UI Automation、WriteConsole 两个仅观察 Adapter，以及 UIA/OCR 取词 Worker 当前暂停产品使用。
+实现源码和隔离测试保留，但默认 Runtime Bundle、Desktop Release 和产品 Adapter Catalog 均不得注册或
+打包这些能力，默认 `scripts/test.ps1` 也不会构建或执行它们；默认 Bundle 只包含 9 个具备
+`TextReplace` 能力的 Adapter。暂停 Adapter 的专项合同只能从其自身目录显式运行。
 
 只生成严格分离的 Debug 或 Release Runtime Bundle：
 
@@ -68,9 +66,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-bundle.ps1 -Profile Release
 ```
 
-Release Bundle 只包含 manifest 声明的 Controller、Target Runtime、正式 Adapter、Acquisition Worker
-及其 support files，并使用 `/3` 清单；测试宿主只在显式 `-IncludeTestTarget` 时加入。所有输出仍只
-进入 `local-test/`。
+Release Bundle 只包含 manifest 声明的 Controller、Target Runtime 和正式写回 Adapter，并使用 `/3`
+清单；测试宿主只在显式 `-IncludeTestTarget` 时加入。所有输出仍只进入 `local-test/`。
 
 生成包含 Release Runtime Bundle 的本地 unsigned NSIS candidate：
 

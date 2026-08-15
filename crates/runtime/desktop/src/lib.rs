@@ -11,8 +11,8 @@ mod target;
 pub use acquisition::{DesktopAcquisitionCancellation, DesktopAcquisitionError};
 #[cfg(test)]
 use bundle::{
-    parse_documentation_url, parse_hash, AcquisitionSupportFileManifest, AcquisitionWorkerCatalog,
-    AcquisitionWorkerManifest, BundleManifest,
+    adapter_inspection_error, parse_documentation_url, parse_hash, AcquisitionSupportFileManifest,
+    AcquisitionWorkerCatalog, AcquisitionWorkerManifest, BundleManifest,
 };
 pub use bundle::{RuntimeAdapterOption, RuntimeBundle};
 use glyphshift_acquisition::{
@@ -25,7 +25,7 @@ use glyphshift_acquisition_worker_host::{
     AcquisitionWorkerArtifact, AcquisitionWorkerBinding, AcquisitionWorkerHost,
     AcquisitionWorkerHostError, CancellationToken,
 };
-use glyphshift_adapter_native_host::LoadedNativeAdapter;
+use glyphshift_adapter_native_host::{LoadedNativeAdapter, NativeHostError};
 use glyphshift_adapter_registry::{
     AdapterDescriptor, AdapterPackage, AdapterPackageSet, AdapterRegistry, AdapterRequirement,
     AdapterTrustPolicy, AdapterVersion, AdapterVersionRequirement, ArtifactHash, PackageArtifactId,
@@ -83,6 +83,7 @@ pub enum DesktopRuntimeError {
     InvalidArtifactPath,
     InvalidArtifactHash,
     ArtifactHashMismatch,
+    AdapterAbiMismatch,
     AdapterInspectionFailed,
     AdapterRegistryRejected,
     ControllerRejected,

@@ -7,8 +7,6 @@ use tempfile::NamedTempFile;
 pub(crate) const APP_SETTINGS_SCHEMA_VERSION: u16 = 1;
 pub(crate) const DEFAULT_SOFTWARE_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 const SETTINGS_FILE_NAME: &str = "app-settings.json";
-const MIN_AI_BATCH_ITEMS: u16 = 1;
-const MAX_AI_BATCH_ITEMS: u16 = 1_000;
 
 fn default_software_capture_shortcut() -> Box<str> {
     DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
@@ -48,29 +46,11 @@ pub(crate) enum CloseBehavior {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct AiTranslationBatchSettings {
-    max_items_per_request: u16,
+struct LegacyAiTranslationBatchSettings {
+    #[serde(rename = "maxItemsPerRequest")]
+    _max_items_per_request: u16,
     #[serde(default, rename = "maxInputTokensPerRequest", skip_serializing)]
     _legacy_removed_token_budget: Option<u32>,
-}
-
-impl Default for AiTranslationBatchSettings {
-    fn default() -> Self {
-        Self {
-            max_items_per_request: glyphshift_ai_translation::DEFAULT_MAX_ITEMS_PER_REQUEST,
-            _legacy_removed_token_budget: None,
-        }
-    }
-}
-
-impl AiTranslationBatchSettings {
-    pub(crate) const fn max_items_per_request(self) -> u16 {
-        self.max_items_per_request
-    }
-    const fn is_valid(self) -> bool {
-        self.max_items_per_request >= MIN_AI_BATCH_ITEMS
-            && self.max_items_per_request <= MAX_AI_BATCH_ITEMS
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -89,8 +69,8 @@ pub(crate) struct AppSettings {
     _legacy_removed_shortcut: Option<Box<str>>,
     #[serde(default = "default_software_capture_shortcut")]
     software_capture_shortcut: Box<str>,
-    #[serde(default)]
-    ai_translation_batch: AiTranslationBatchSettings,
+    #[serde(default, rename = "aiTranslationBatch", skip_serializing)]
+    _legacy_removed_ai_translation_batch: Option<LegacyAiTranslationBatchSettings>,
     #[serde(default = "default_confirm_ai_translation")]
     confirm_ai_translation: bool,
 }
@@ -106,7 +86,7 @@ impl Default for AppSettings {
             close_behavior: CloseBehavior::default(),
             _legacy_removed_shortcut: None,
             software_capture_shortcut: default_software_capture_shortcut(),
-            ai_translation_batch: AiTranslationBatchSettings::default(),
+            _legacy_removed_ai_translation_batch: None,
             confirm_ai_translation: true,
         }
     }
@@ -125,13 +105,8 @@ impl AppSettings {
         &self.software_capture_shortcut
     }
 
-    pub(crate) const fn ai_translation_batch(&self) -> AiTranslationBatchSettings {
-        self.ai_translation_batch
-    }
-
     const fn is_valid(&self) -> bool {
         self.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION
-            && self.ai_translation_batch.is_valid()
     }
 }
 
@@ -144,7 +119,8 @@ pub(crate) struct AppSettingsUpdate {
     launch_elevated: bool,
     close_behavior: CloseBehavior,
     software_capture_shortcut: Box<str>,
-    ai_translation_batch: AiTranslationBatchSettings,
+    #[serde(default, rename = "aiTranslationBatch")]
+    _legacy_removed_ai_translation_batch: Option<LegacyAiTranslationBatchSettings>,
     confirm_ai_translation: bool,
 }
 
@@ -173,7 +149,7 @@ impl From<AppSettingsUpdate> for AppSettings {
             close_behavior: update.close_behavior,
             _legacy_removed_shortcut: None,
             software_capture_shortcut: update.software_capture_shortcut,
-            ai_translation_batch: update.ai_translation_batch,
+            _legacy_removed_ai_translation_batch: None,
             confirm_ai_translation: update.confirm_ai_translation,
         }
     }
@@ -335,10 +311,7 @@ mod tests {
                 launch_elevated: true,
                 close_behavior: CloseBehavior::Minimize,
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
-                ai_translation_batch: AiTranslationBatchSettings {
-                    max_items_per_request: 120,
-                    _legacy_removed_token_budget: None,
-                },
+                _legacy_removed_ai_translation_batch: None,
                 confirm_ai_translation: false,
             })
             .expect("save settings");
@@ -349,13 +322,6 @@ mod tests {
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
         assert!(!saved.confirm_ai_translation);
-        assert_eq!(
-            saved.ai_translation_batch(),
-            AiTranslationBatchSettings {
-                max_items_per_request: 120,
-                _legacy_removed_token_budget: None,
-            }
-        );
         assert_eq!(reopened.current(), Ok(saved));
     }
 
@@ -379,7 +345,7 @@ mod tests {
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
-                ai_translation_batch: AiTranslationBatchSettings::default(),
+                _legacy_removed_ai_translation_batch: None,
                 confirm_ai_translation: true,
             })
             .expect("replace invalid settings");
@@ -408,36 +374,37 @@ mod tests {
             settings.software_capture_shortcut(),
             DEFAULT_SOFTWARE_CAPTURE_SHORTCUT
         );
-        assert_eq!(settings.ai_translation_batch().max_items_per_request(), 75);
         assert!(settings.confirm_ai_translation);
         let serialized = serde_json::to_value(settings).expect("serialize migrated settings");
         assert!(serialized.get("interactiveTranslationShortcut").is_none());
-        assert!(serialized["aiTranslationBatch"]
-            .get("maxInputTokensPerRequest")
-            .is_none());
+        assert!(serialized.get("aiTranslationBatch").is_none());
     }
 
     #[test]
-    fn invalid_global_ai_batch_policy_is_rejected_without_replacing_current_settings() {
+    fn removed_global_ai_batch_policy_is_ignored_on_update() {
         let root = tempdir().expect("temporary settings root");
         let mut store = AppSettingsStore::open(root.path()).expect("open settings store");
 
-        let result = store.update(AppSettingsUpdate {
-            locale_preference: LocalePreference::ZhCn,
-            theme_preference: ThemePreference::Dark,
-            launch_at_startup: false,
-            launch_elevated: false,
-            close_behavior: CloseBehavior::Quit,
-            software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
-            ai_translation_batch: AiTranslationBatchSettings {
-                max_items_per_request: 0,
-                _legacy_removed_token_budget: None,
-            },
-            confirm_ai_translation: true,
-        });
+        let saved = store
+            .update(AppSettingsUpdate {
+                locale_preference: LocalePreference::ZhCn,
+                theme_preference: ThemePreference::Dark,
+                launch_at_startup: false,
+                launch_elevated: false,
+                close_behavior: CloseBehavior::Quit,
+                software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
+                _legacy_removed_ai_translation_batch: Some(LegacyAiTranslationBatchSettings {
+                    _max_items_per_request: 75,
+                    _legacy_removed_token_budget: None,
+                }),
+                confirm_ai_translation: true,
+            })
+            .expect("save settings without the removed batch policy");
 
-        assert_eq!(result, Err(SettingsError::InvalidData));
-        assert_eq!(store.current(), Ok(AppSettings::default()));
-        assert!(!root.path().join(SETTINGS_FILE_NAME).exists());
+        assert_eq!(store.current(), Ok(saved.clone()));
+        assert!(serde_json::to_value(saved)
+            .expect("serialize settings")
+            .get("aiTranslationBatch")
+            .is_none());
     }
 }

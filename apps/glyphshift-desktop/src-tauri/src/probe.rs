@@ -191,6 +191,9 @@ impl DesktopApplication {
         software_id: &str,
         adapter_ids: &[Box<str>],
     ) -> Result<(), CommandError> {
+        if let Some(error) = self.runtime_bundle_command_error() {
+            return Err(error);
+        }
         if adapter_ids.is_empty() {
             return Err(CommandError::new("capture.adapters_required"));
         }

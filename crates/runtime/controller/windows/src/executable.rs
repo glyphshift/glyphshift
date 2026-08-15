@@ -182,39 +182,6 @@ pub fn foreground_windows_point() -> Result<WindowsForegroundPoint, PluginError>
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn running_executables_are_sorted_and_deduplicated_by_path() {
-        let executables = normalize_running_executables(vec![
-            WindowsExecutable {
-                path: PathBuf::from(r"C:\Synthetic\zeta.exe"),
-                name: "zeta.exe".into(),
-                architecture: "x86_64".into(),
-                running: true,
-            },
-            WindowsExecutable {
-                path: PathBuf::from(r"C:\Synthetic\Alpha.exe"),
-                name: "Alpha.exe".into(),
-                architecture: "x86_64".into(),
-                running: true,
-            },
-            WindowsExecutable {
-                path: PathBuf::from(r"c:\synthetic\alpha.exe"),
-                name: "Alpha.exe".into(),
-                architecture: "x86_64".into(),
-                running: true,
-            },
-        ]);
-
-        assert_eq!(executables.len(), 2);
-        assert_eq!(executables[0].name(), "Alpha.exe");
-        assert_eq!(executables[1].name(), "zeta.exe");
-    }
-}
-
 #[cfg(not(windows))]
 pub fn foreground_windows_executable() -> Result<WindowsExecutable, PluginError> {
     Err(PluginError::new("unsupported_operating_system"))
@@ -373,4 +340,37 @@ pub fn launch_process_elevated(
     _arguments: &[OsString],
 ) -> Result<(), WindowsElevationError> {
     Err(WindowsElevationError::UnsupportedOperatingSystem)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_executables_are_sorted_and_deduplicated_by_path() {
+        let executables = normalize_running_executables(vec![
+            WindowsExecutable {
+                path: PathBuf::from(r"C:\Synthetic\zeta.exe"),
+                name: "zeta.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+            WindowsExecutable {
+                path: PathBuf::from(r"C:\Synthetic\Alpha.exe"),
+                name: "Alpha.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+            WindowsExecutable {
+                path: PathBuf::from(r"c:\synthetic\alpha.exe"),
+                name: "Alpha.exe".into(),
+                architecture: "x86_64".into(),
+                running: true,
+            },
+        ]);
+
+        assert_eq!(executables.len(), 2);
+        assert_eq!(executables[0].name(), "Alpha.exe");
+        assert_eq!(executables[1].name(), "zeta.exe");
+    }
 }

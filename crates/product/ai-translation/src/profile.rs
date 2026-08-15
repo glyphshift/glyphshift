@@ -1,4 +1,5 @@
 use crate::FilterPolicy;
+use crate::DEFAULT_MAX_ITEMS_PER_REQUEST;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -12,6 +13,10 @@ pub const MAX_MAX_RETRIES: u16 = 10;
 
 const fn default_max_retries() -> u16 {
     DEFAULT_MAX_RETRIES
+}
+
+const fn default_max_items_per_request() -> u16 {
+    DEFAULT_MAX_ITEMS_PER_REQUEST
 }
 const PROFILE_FILE_NAME: &str = "ai-profiles.json";
 
@@ -96,6 +101,8 @@ pub struct AiProfileDraft {
     base_url: Box<str>,
     model_id: Box<str>,
     timeout_ms: u64,
+    #[serde(default = "default_max_items_per_request")]
+    max_items_per_request: u16,
     max_concurrency: u16,
     #[serde(default = "default_max_retries")]
     max_retries: u16,
@@ -119,6 +126,7 @@ impl AiProfileDraft {
             base_url: protocol.default_base_url().into(),
             model_id: model_id.into(),
             timeout_ms: 300_000,
+            max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
             max_concurrency: protocol.default_concurrency(),
             max_retries: DEFAULT_MAX_RETRIES,
             filter_policy: FilterPolicy::default(),
@@ -149,6 +157,12 @@ impl AiProfileDraft {
         self.max_retries = max_retries;
         self
     }
+
+    #[must_use]
+    pub const fn with_max_items_per_request(mut self, max_items_per_request: u16) -> Self {
+        self.max_items_per_request = max_items_per_request;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -161,6 +175,8 @@ struct StoredAiProfile {
     model_id: Box<str>,
     credential_ref: Box<str>,
     timeout_ms: u64,
+    #[serde(default = "default_max_items_per_request")]
+    max_items_per_request: u16,
     max_concurrency: u16,
     #[serde(default = "default_max_retries")]
     max_retries: u16,
@@ -194,6 +210,7 @@ pub struct AiProfileView {
     base_url: Box<str>,
     model_id: Box<str>,
     timeout_ms: u64,
+    max_items_per_request: u16,
     max_concurrency: u16,
     max_retries: u16,
     filter_policy: FilterPolicy,
@@ -208,6 +225,7 @@ pub struct ResolvedAiProfile {
     model_id: Box<str>,
     credential: Option<Box<str>>,
     timeout_ms: u64,
+    max_items_per_request: u16,
     max_concurrency: u16,
     max_retries: u16,
 }
@@ -246,6 +264,11 @@ impl ResolvedAiProfile {
     #[must_use]
     pub const fn max_concurrency(&self) -> u16 {
         self.max_concurrency
+    }
+
+    #[must_use]
+    pub const fn max_items_per_request(&self) -> u16 {
+        self.max_items_per_request
     }
 
     #[must_use]
@@ -381,6 +404,7 @@ impl AiProfileCatalog {
             model_id: profile.model_id.clone(),
             credential,
             timeout_ms: profile.timeout_ms,
+            max_items_per_request: profile.max_items_per_request,
             max_concurrency: profile.max_concurrency,
             max_retries: profile.max_retries,
         })
@@ -493,6 +517,7 @@ fn stored_profile(
         base_url,
         model_id,
         timeout_ms,
+        max_items_per_request,
         max_concurrency,
         max_retries,
         filter_policy,
@@ -515,6 +540,7 @@ fn stored_profile(
         return Err(AiProfileError::InvalidProfile("base-url"));
     }
     if !(1_000..=600_000).contains(&timeout_ms)
+        || !(1..=1_000).contains(&max_items_per_request)
         || max_concurrency == 0
         || max_retries > MAX_MAX_RETRIES
     {
@@ -530,6 +556,7 @@ fn stored_profile(
             model_id: model_id.into(),
             credential_ref,
             timeout_ms,
+            max_items_per_request,
             max_concurrency,
             max_retries,
             filter_policy,
@@ -552,6 +579,7 @@ fn profile_view(
         base_url: profile.base_url.clone(),
         model_id: profile.model_id.clone(),
         timeout_ms: profile.timeout_ms,
+        max_items_per_request: profile.max_items_per_request,
         max_concurrency: profile.max_concurrency,
         max_retries: profile.max_retries,
         filter_policy: profile.filter_policy.clone(),
@@ -579,6 +607,7 @@ fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
                 || profile.base_url.trim().is_empty()
                 || profile.timeout_ms == 0
                 || profile.max_concurrency == 0
+                || !(1..=1_000).contains(&profile.max_items_per_request)
                 || profile.max_retries > MAX_MAX_RETRIES
         })
     {

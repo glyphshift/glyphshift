@@ -69,6 +69,20 @@ if ($LASTEXITCODE -ne 0) {
     throw "The $Profile target-process Runtime bundle did not build."
 }
 
+$verifierArguments = @(
+    'build',
+    '--manifest-path', $manifestPath,
+    '-p', 'glyphshift-desktop-runtime',
+    '--bin', 'glyphshift-runtime-bundle-verify'
+)
+if ($Profile -eq 'Release') {
+    $verifierArguments += '--release'
+}
+& cargo @verifierArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "The $Profile Runtime Bundle verifier did not build."
+}
+
 $profileDirectory = $Profile.ToLowerInvariant()
 $stagingRoot = "$OutputRoot.staging"
 Assert-LocalTestPath $stagingRoot 'Runtime Bundle staging output'
@@ -284,6 +298,15 @@ foreach ($artifact in $declaredArtifacts) {
     }
 }
 
+$verifierPath = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-runtime-bundle-verify.exe"
+if (-not (Test-Path -LiteralPath $verifierPath -PathType Leaf)) {
+    throw 'Runtime Bundle verifier executable is missing.'
+}
+& $verifierPath $stagingRoot
+if ($LASTEXITCODE -ne 0) {
+    throw 'Runtime Bundle failed real-loader verification.'
+}
+
 if ((-not $KeepExistingOutput) -and (Test-Path -LiteralPath $OutputRoot)) {
     $stagedFiles = @(Get-ChildItem -LiteralPath $stagingRoot -File)
     $existingFiles = @(Get-ChildItem -LiteralPath $OutputRoot -File)
@@ -308,8 +331,28 @@ if ((-not $KeepExistingOutput) -and (Test-Path -LiteralPath $OutputRoot)) {
         Write-Output "Runtime Bundle unchanged: $OutputRoot"
         return
     }
+    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+    Get-ChildItem -LiteralPath $stagingRoot -File |
+        Where-Object { $_.Name -ne 'runtime-bundle.json' } |
+        ForEach-Object {
+            $destination = Join-Path $OutputRoot $_.Name
+            if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+                Copy-Item -LiteralPath $_.FullName -Destination $destination
+            }
+        }
+    $nextManifestPath = Join-Path $OutputRoot 'runtime-bundle.json.next'
+    Copy-Item `
+        -LiteralPath (Join-Path $stagingRoot 'runtime-bundle.json') `
+        -Destination $nextManifestPath `
+        -Force
+    [System.IO.File]::Move(
+        $nextManifestPath,
+        (Join-Path $OutputRoot 'runtime-bundle.json'),
+        $true
+    )
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force
-    throw 'Runtime Bundle output already contains a different generation. Choose a new output directory.'
+    Write-Output "Runtime Bundle updated: $OutputRoot"
+    return
 }
 
 if ($KeepExistingOutput) {

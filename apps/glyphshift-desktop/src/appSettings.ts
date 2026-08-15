@@ -8,14 +8,6 @@ export type ThemePreference = 'system' | 'dark' | 'light'
 export type CloseBehavior = 'minimize' | 'quit'
 export type EffectiveTheme = 'dark' | 'light'
 
-export interface AiTranslationBatchSettings {
-  maxItemsPerRequest: number
-}
-
-export const AI_TRANSLATION_BATCH_LIMITS = {
-  items: { min: 1, max: 1_000, default: 50 },
-} as const
-
 export interface GlobalShortcutProbe {
   shortcut: string
   available: boolean
@@ -29,7 +21,6 @@ export interface AppSettings {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
-  aiTranslationBatch: AiTranslationBatchSettings
   confirmAiTranslation: boolean
 }
 
@@ -40,7 +31,6 @@ interface AppSettingsUpdate {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
-  aiTranslationBatch: AiTranslationBatchSettings
   confirmAiTranslation: boolean
 }
 
@@ -57,9 +47,6 @@ const fallbackSettings: AppSettings = {
   launchElevated: false,
   closeBehavior: 'quit',
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
-  aiTranslationBatch: {
-    maxItemsPerRequest: AI_TRANSLATION_BATCH_LIMITS.items.default,
-  },
   confirmAiTranslation: true,
 }
 
@@ -79,9 +66,6 @@ function hasDesktopRuntime() {
 function normalizeAppSettings(value: unknown): AppSettings | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<AppSettings>
-  const batchValue = candidate.aiTranslationBatch as unknown
-  if (batchValue !== undefined && (!batchValue || typeof batchValue !== 'object')) return null
-  const batch = batchValue as Partial<AiTranslationBatchSettings> | undefined
   if (candidate.settingsSchemaVersion !== 1
     || !['system', 'zh-CN', 'en-US'].includes(candidate.localePreference ?? '')
     || !['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
@@ -92,12 +76,7 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
       && (typeof candidate.softwareCaptureShortcut !== 'string'
         || candidate.softwareCaptureShortcut.length === 0))
     || (candidate.confirmAiTranslation !== undefined
-      && typeof candidate.confirmAiTranslation !== 'boolean')
-    || (batch !== undefined && (
-      !Number.isInteger(batch.maxItemsPerRequest)
-      || (batch.maxItemsPerRequest ?? 0) < AI_TRANSLATION_BATCH_LIMITS.items.min
-      || (batch.maxItemsPerRequest ?? 0) > AI_TRANSLATION_BATCH_LIMITS.items.max
-    ))) return null
+      && typeof candidate.confirmAiTranslation !== 'boolean')) return null
   return {
     settingsSchemaVersion: 1,
     localePreference: candidate.localePreference as LocalePreference,
@@ -107,11 +86,6 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     closeBehavior: candidate.closeBehavior ?? 'quit',
     softwareCaptureShortcut: candidate.softwareCaptureShortcut ?? 'Ctrl+Shift+F8',
     confirmAiTranslation: candidate.confirmAiTranslation ?? true,
-    aiTranslationBatch: batch
-      ? {
-          maxItemsPerRequest: batch.maxItemsPerRequest as number,
-        }
-      : { ...fallbackSettings.aiTranslationBatch },
   }
 }
 
@@ -236,7 +210,6 @@ export function useAppSettings() {
       launchElevated: settings.value.launchElevated,
       closeBehavior: settings.value.closeBehavior,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
-      aiTranslationBatch: settings.value.aiTranslationBatch,
       confirmAiTranslation: settings.value.confirmAiTranslation,
       ...patch,
     })
@@ -256,7 +229,6 @@ export function useAppSettings() {
     launchElevated: computed(() => settings.value.launchElevated),
     closeBehavior: computed(() => settings.value.closeBehavior),
     softwareCaptureShortcut: computed(() => settings.value.softwareCaptureShortcut),
-    aiTranslationBatch: computed(() => settings.value.aiTranslationBatch),
     confirmAiTranslation: computed(() => settings.value.confirmAiTranslation),
     async setLocalePreference(localePreference: LocalePreference) {
       await update({ localePreference })
@@ -285,9 +257,6 @@ export function useAppSettings() {
     },
     async setCloseBehavior(closeBehavior: CloseBehavior) {
       await update({ closeBehavior })
-    },
-    async setAiTranslationBatch(aiTranslationBatch: AiTranslationBatchSettings) {
-      await update({ aiTranslationBatch })
     },
     async setConfirmAiTranslation(confirmAiTranslation: boolean) {
       await update({ confirmAiTranslation })

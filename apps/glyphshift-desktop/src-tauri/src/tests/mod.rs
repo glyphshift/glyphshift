@@ -351,6 +351,7 @@ fn test_desktop_application(
         dictionary_distribution: offline_dictionary_distribution(data_root)
             .expect("offline dictionary distribution"),
         runtimes: Some(runtimes),
+        runtime_bundle_error: None,
         workflow_runtime_status: BTreeMap::new(),
         adapters: vec![AdapterView {
             id: TEST_ADAPTER_ID.into(),

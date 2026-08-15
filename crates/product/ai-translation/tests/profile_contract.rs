@@ -87,11 +87,15 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
         serde_json::to_value(&openai).expect("serialize OpenAI profile")["maxRetries"],
         2
     );
+    assert_eq!(
+        serde_json::to_value(&openai).expect("serialize OpenAI profile")["maxItemsPerRequest"],
+        50
+    );
     let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
         .expect("read persisted profiles");
     assert!(persisted.contains("glyphshift.ai-profiles/2"));
     assert!(persisted.contains("credentialRef"));
-    assert!(!persisted.contains("maxItemsPerRequest"));
+    assert!(persisted.contains("maxItemsPerRequest"));
     assert!(!persisted.contains("maxInputCharsPerRequest"));
     assert!(!persisted.contains("synthetic-secret-value"));
     drop(catalog);
@@ -114,5 +118,44 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
             .map(Box::as_ref)
             .collect::<Vec<_>>(),
         vec!["synthetic-secret-value"]
+    );
+}
+
+#[test]
+fn existing_profiles_without_a_batch_size_gain_the_fifty_item_default() {
+    let root = tempdir().expect("profile migration data root");
+    std::fs::write(
+        root.path().join("ai-profiles.json"),
+        r#"{
+  "schema": "glyphshift.ai-profiles/2",
+  "defaultProfileId": "profile.local",
+  "profiles": [{
+    "id": "profile.local",
+    "name": "Local",
+    "protocol": "ollama_chat",
+    "baseUrl": "http://127.0.0.1:11434/api",
+    "modelId": "synthetic-model",
+    "credentialRef": "glyphshift.ai-profile/profile.local",
+    "timeoutMs": 300000,
+    "maxConcurrency": 1,
+    "maxRetries": 2,
+    "filterPolicy": {}
+  }]
+}"#,
+    )
+    .expect("write existing profile artifact");
+
+    let catalog = AiProfileCatalog::open(root.path(), Box::new(MemoryCredentialVault::default()))
+        .expect("open existing profile artifact");
+    let profile = catalog
+        .profiles()
+        .expect("list migrated profiles")
+        .into_iter()
+        .next()
+        .expect("migrated profile");
+
+    assert_eq!(
+        serde_json::to_value(profile).expect("serialize migrated profile")["maxItemsPerRequest"],
+        50
     );
 }

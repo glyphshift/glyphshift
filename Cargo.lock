@@ -1631,7 +1631,6 @@ dependencies = [
 name = "glyphshift-adapter-native-host"
 version = "0.1.0"
 dependencies = [
- "glyphshift-adapter-console",
  "glyphshift-adapter-direct2d",
  "glyphshift-adapter-directwrite",
  "glyphshift-adapter-gdi",
@@ -1839,7 +1838,6 @@ dependencies = [
 name = "glyphshift-controller-windows"
 version = "0.1.0"
 dependencies = [
- "glyphshift-adapter-console",
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-registry",
  "glyphshift-capture",
@@ -2132,7 +2130,6 @@ dependencies = [
 name = "glyphshift-test-isolated-worker"
 version = "0.1.0"
 dependencies = [
- "glyphshift-adapter-uia",
  "glyphshift-capture",
  "glyphshift-isolated-worker-sdk",
 ]

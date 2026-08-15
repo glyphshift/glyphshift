@@ -128,15 +128,15 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 **Translation Snapshot**：由有序词典集合编译出的不可变文字规则。
 
 **AI Profile**：可复用的 AI 翻译连接与候选规则，包含 Provider Protocol、Base URL、手工模型 ID、
-单批超时、并发、失败重试与本机过滤策略。凭据只以引用关联到系统凭据保险库；全局批次限制不属于 Profile。
+单批条目上限、单批超时、并发、失败重试与本机过滤策略。凭据只以引用关联到系统凭据保险库。
 
-**Translation Batch Policy**：所有 AI Profile 共用的单批条目上限。切换 Profile 不会改变它，超过
-条目上限时 Translation Job 自动继续下一批。
+**Translation Batch Policy**：AI Profile 所拥有的单批条目上限。切换 Profile 会同时切换该策略，超过
+当前 Profile 条目上限时 Translation Job 自动继续下一批。
 
 **Translation Plan**：针对一个带 revision 的 Dictionary 草稿或 Probe 联合视图生成的短期候选集合。
 它只选择空白译文，记录每个跳过原因，并在发出网络请求前保护占位符。
 
-**Translation Job**：使用一个 AI Profile 与全局 Translation Batch Policy 执行 Translation Plan 的
+**Translation Job**：使用一个 AI Profile 及其 Translation Batch Policy 执行 Translation Plan 的
 可查询、可取消运行。取消立即将任务置为终态，并以可取消网络请求停止当前调用，同时停止后续排批与写入、
 丢弃迟到结果；已完成结果写回时仍需检查原文、空白状态与 revision。
 
@@ -152,8 +152,8 @@ Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateCont
 
 ## Application
 
-**App Settings**：应用级设备偏好聚合，包含界面、设备行为、软件捕获快捷键与 Translation Batch
-Policy。Dictionary、Font、Adapter、Software、Workflow 和 AI Profile 都不能进入它。
+**App Settings**：应用级设备偏好聚合，包含界面、设备行为、软件捕获快捷键与 AI 翻译前询问偏好。
+Dictionary、Font、Adapter、Software、Workflow 和 AI Profile 都不能进入它。
 
 **UI Locale**：Glyphshift 自身菜单、按钮、提示与错误的展示语言。它与目标软件语言、Dictionary
 内容语言及动态 Artifact presentation locale 相互独立。
@@ -193,8 +193,8 @@ Policy。Dictionary、Font、Adapter、Software、Workflow 和 AI Profile 都不
 - AI Profile Catalog 独立保存供应商协议、服务地址、模型与过滤策略；密钥只进入系统凭据保险库，
   不进入 App Settings、Dictionary metadata、日志或错误。Dictionary 下载来源与安装状态仍进入独立
   Catalog/Artifact seam。
-- Translation Batch Policy 只由 App Settings 保存并由所有 AI Profile 共用；Profile Catalog 不复制
-  单批条目限制。输入 Token 只在执行前按计划做本机估算，不参与拆批或阻止请求。
+- Translation Batch Policy 只由 Profile Catalog 随 AI Profile 保存；App Settings 不再保存单批条目限制。
+  输入 Token 只在执行前按计划做本机估算，不参与拆批或阻止请求。
 - App Settings 保存默认开启的 AI 翻译前询问偏好；确认框展示计划与实际请求策略，不使用自动倒计时。
 - 顶部主题切换与设置页操作共同写入唯一 App Settings；页面和组件不各自维护主题副本。
 - 本机路径、实机样本、截图与日志只存在于被忽略的 `local-test/`。
