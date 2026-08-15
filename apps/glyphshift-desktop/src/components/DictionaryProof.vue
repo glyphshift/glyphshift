@@ -8,6 +8,7 @@ import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../m
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
+import AiTranslationProgress from './AiTranslationProgress.vue'
 
 interface DictionaryTableRow {
   entry: DictionaryEntry
@@ -55,6 +56,10 @@ const aiNoticeTitle = computed(() => aiNoticeCancelled.value
   : aiNoticeTone.value === 'warning'
   ? t('ai.partialCompletion')
   : t('ai.translationCompleted'))
+const displayedAiJob = computed(() => {
+  const job = ai.currentJob.value
+  return job?.scopeId === `dictionary:${draft.value.metadata.id}` ? job : null
+})
 
 watch(() => props.detail, (value) => {
   saved.value = clone(value)
@@ -331,17 +336,13 @@ usePageEscape(() => true, () => emit('back'))
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
     </UAlert>
-    <UAlert
-      v-if="ai.busy.value && ai.currentJob.value && !['completed', 'completed_with_failures', 'cancelled'].includes(ai.currentJob.value.status)"
-      role="status"
-      color="primary"
-      variant="soft"
-      :title="t('ai.translating')"
-      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches, batchSize: ai.currentJob.value.batchSize, concurrency: ai.currentJob.value.maxConcurrency, elapsed: ai.elapsed.value })"
-      class="mb-3"
-    >
-      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
-    </UAlert>
+    <AiTranslationProgress
+      v-if="displayedAiJob"
+      :job="displayedAiJob"
+      :elapsed="ai.elapsed.value"
+      @cancel="ai.cancelCurrentJob"
+      @dismiss="ai.dismissCurrentJob"
+    />
 
     <ManagementTableFrame
       v-model:query="query"

@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 50;
 
@@ -284,6 +285,53 @@ impl TranslationJobStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TranslationBatchStatus {
+    Queued,
+    Running,
+    Retrying,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl TranslationBatchStatus {
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationBatchSnapshot {
+    batch_number: usize,
+    item_count: usize,
+    status: TranslationBatchStatus,
+    attempt_count: u16,
+    started_after_ms: Option<u64>,
+    elapsed_ms: u64,
+    last_error: Option<ProviderError>,
+}
+
+impl TranslationBatchSnapshot {
+    #[must_use]
+    pub const fn batch_number(&self) -> usize {
+        self.batch_number
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> TranslationBatchStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn attempt_count(&self) -> u16 {
+        self.attempt_count
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TranslationJobSnapshot {
@@ -301,6 +349,9 @@ pub struct TranslationJobSnapshot {
     total_batches: usize,
     finished_batches: usize,
     failed_batches: usize,
+    elapsed_ms: u64,
+    peak_concurrency: usize,
+    batches: Vec<TranslationBatchSnapshot>,
     results: Vec<ValidatedTranslation>,
     errors: Vec<ProviderError>,
 }
@@ -362,6 +413,16 @@ impl TranslationJobSnapshot {
     }
 
     #[must_use]
+    pub const fn peak_concurrency(&self) -> usize {
+        self.peak_concurrency
+    }
+
+    #[must_use]
+    pub fn batches(&self) -> &[TranslationBatchSnapshot] {
+        &self.batches
+    }
+
+    #[must_use]
     pub fn results(&self) -> &[ValidatedTranslation] {
         &self.results
     }
@@ -373,8 +434,37 @@ impl TranslationJobSnapshot {
 }
 
 pub(crate) struct JobCell {
-    state: Mutex<TranslationJobSnapshot>,
+    state: Mutex<JobState>,
     cancelled: Arc<AtomicBool>,
+}
+
+struct JobState {
+    snapshot: TranslationJobSnapshot,
+    started_at: Instant,
+}
+
+impl JobState {
+    fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn visible_snapshot(&self) -> TranslationJobSnapshot {
+        let mut snapshot = self.snapshot.clone();
+        let elapsed_ms = if snapshot.status.is_terminal() {
+            snapshot.elapsed_ms
+        } else {
+            self.elapsed_ms()
+        };
+        snapshot.elapsed_ms = elapsed_ms;
+        for batch in &mut snapshot.batches {
+            if !batch.status.is_terminal() {
+                if let Some(started_after_ms) = batch.started_after_ms {
+                    batch.elapsed_ms = elapsed_ms.saturating_sub(started_after_ms);
+                }
+            }
+        }
+        snapshot
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -437,25 +527,45 @@ impl AiTranslation {
         self.next_job_id = self.next_job_id.saturating_add(1);
         let job_id: Box<str> = format!("job-{}", self.next_job_id).into();
         let cancelled = Arc::new(AtomicBool::new(false));
-        let total_batches = batches(&plan.candidates, batch_policy).len();
+        let job_batches = batches(&plan.candidates, batch_policy);
+        let total_batches = job_batches.len();
+        let batch_snapshots = job_batches
+            .iter()
+            .enumerate()
+            .map(|(index, batch)| TranslationBatchSnapshot {
+                batch_number: index + 1,
+                item_count: batch.len(),
+                status: TranslationBatchStatus::Queued,
+                attempt_count: 0,
+                started_after_ms: None,
+                elapsed_ms: 0,
+                last_error: None,
+            })
+            .collect();
         let cell = Arc::new(JobCell {
-            state: Mutex::new(TranslationJobSnapshot {
-                job_id: job_id.clone(),
-                plan_token: plan.token.clone(),
-                scope_id: plan.scope_id.clone(),
-                snapshot_revision: plan.snapshot_revision,
-                status: TranslationJobStatus::Queued,
-                total_count: plan.candidates.len(),
-                completed_count: 0,
-                failed_count: 0,
-                batch_size: batch_policy.max_items_per_request(),
-                max_concurrency: profile.max_concurrency(),
-                max_retries: profile.max_retries(),
-                total_batches,
-                finished_batches: 0,
-                failed_batches: 0,
-                results: Vec::new(),
-                errors: Vec::new(),
+            state: Mutex::new(JobState {
+                snapshot: TranslationJobSnapshot {
+                    job_id: job_id.clone(),
+                    plan_token: plan.token.clone(),
+                    scope_id: plan.scope_id.clone(),
+                    snapshot_revision: plan.snapshot_revision,
+                    status: TranslationJobStatus::Queued,
+                    total_count: plan.candidates.len(),
+                    completed_count: 0,
+                    failed_count: 0,
+                    batch_size: batch_policy.max_items_per_request(),
+                    max_concurrency: profile.max_concurrency(),
+                    max_retries: profile.max_retries(),
+                    total_batches,
+                    finished_batches: 0,
+                    failed_batches: 0,
+                    elapsed_ms: 0,
+                    peak_concurrency: 0,
+                    batches: batch_snapshots,
+                    results: Vec::new(),
+                    errors: Vec::new(),
+                },
+                started_at: Instant::now(),
             }),
             cancelled: cancelled.clone(),
         });
@@ -474,7 +584,7 @@ impl AiTranslation {
             .ok_or_else(|| TranslationJobError::UnknownJob(job_id.as_str().into()))?;
         cell.state
             .lock()
-            .map(|state| state.clone())
+            .map(|state| state.visible_snapshot())
             .map_err(|_| TranslationJobError::StateUnavailable)
     }
 
@@ -490,11 +600,11 @@ impl AiTranslation {
             .state
             .lock()
             .map_err(|_| TranslationJobError::StateUnavailable)?;
-        if state.status.is_terminal() {
+        if state.snapshot.status.is_terminal() {
             return Ok(CancellationOutcome::AlreadyFinished);
         }
         cell.cancelled.store(true, Ordering::Release);
-        state.status = TranslationJobStatus::Cancelled;
+        mark_cancelled(&mut state);
         Ok(CancellationOutcome::Requested)
     }
 }
@@ -507,11 +617,11 @@ fn run_job(
     plan: TranslationPlan,
 ) {
     if let Ok(mut state) = cell.state.lock() {
-        if cell.cancelled.load(Ordering::Acquire) || state.status.is_terminal() {
-            state.status = TranslationJobStatus::Cancelled;
+        if cell.cancelled.load(Ordering::Acquire) || state.snapshot.status.is_terminal() {
+            mark_cancelled(&mut state);
             return;
         }
-        state.status = TranslationJobStatus::Running;
+        state.snapshot.status = TranslationJobStatus::Running;
     } else {
         return;
     }
@@ -538,24 +648,44 @@ fn run_job(
                 let Some(candidates) = job_batches.get(batch_index) else {
                     return;
                 };
-                let response = translate_batch(provider.as_ref(), profile, plan, candidates, token);
+                if !mark_batch_running(cell, batch_index, 1) {
+                    return;
+                }
+                let response = translate_batch(
+                    provider.as_ref(),
+                    profile,
+                    plan,
+                    candidates,
+                    token,
+                    |status, attempt_count, error| {
+                        update_batch_attempt(cell, batch_index, status, attempt_count, error);
+                    },
+                );
                 if token.is_cancelled() {
                     return;
                 }
                 let Ok(mut state) = cell.state.lock() else {
                     return;
                 };
+                let elapsed_ms = state.elapsed_ms();
+                let Some(batch) = state.snapshot.batches.get_mut(batch_index) else {
+                    return;
+                };
+                batch.elapsed_ms = elapsed_ms.saturating_sub(batch.started_after_ms.unwrap_or(0));
                 match response {
                     Ok(results) => {
-                        state.completed_count += results.len();
-                        state.finished_batches += 1;
-                        state.results.extend(results);
+                        batch.status = TranslationBatchStatus::Completed;
+                        state.snapshot.completed_count += results.len();
+                        state.snapshot.finished_batches += 1;
+                        state.snapshot.results.extend(results);
                     }
                     Err(error) => {
-                        state.failed_count += candidates.len();
-                        state.finished_batches += 1;
-                        state.failed_batches += 1;
-                        state.errors.push(error);
+                        batch.status = TranslationBatchStatus::Failed;
+                        batch.last_error = Some(error.clone());
+                        state.snapshot.failed_count += candidates.len();
+                        state.snapshot.finished_batches += 1;
+                        state.snapshot.failed_batches += 1;
+                        state.snapshot.errors.push(error);
                     }
                 }
             });
@@ -566,19 +696,20 @@ fn run_job(
         return;
     }
     if let Ok(mut state) = cell.state.lock() {
+        state.snapshot.elapsed_ms = state.elapsed_ms();
         let result_order = plan
             .candidates
             .iter()
             .enumerate()
             .map(|(index, candidate)| (candidate.item_id.as_ref(), index))
             .collect::<BTreeMap<_, _>>();
-        state.results.sort_by_key(|result| {
+        state.snapshot.results.sort_by_key(|result| {
             result_order
                 .get(result.item_id())
                 .copied()
                 .unwrap_or(usize::MAX)
         });
-        state.status = if state.failed_count == 0 {
+        state.snapshot.status = if state.snapshot.failed_count == 0 {
             TranslationJobStatus::Completed
         } else {
             TranslationJobStatus::CompletedWithFailures
@@ -592,6 +723,7 @@ fn translate_batch(
     plan: &TranslationPlan,
     candidates: &[TranslationCandidate],
     token: &CancellationToken,
+    mut on_attempt: impl FnMut(TranslationBatchStatus, u16, Option<&ProviderError>),
 ) -> Result<Vec<ValidatedTranslation>, ProviderError> {
     let request = ProviderRequest {
         profile,
@@ -606,18 +738,19 @@ fn translate_batch(
             })
             .collect(),
     };
-    let mut attempt = 0_u32;
+    let mut attempt_count = 1_u16;
     let response = loop {
         let response = provider.translate(&request, token);
         match &response {
             Err(error)
                 if error.retryable()
-                    && attempt < u32::from(profile.max_retries())
+                    && attempt_count <= profile.max_retries()
                     && !token.is_cancelled() =>
             {
-                let exponential = 250_u64.saturating_mul(1_u64 << attempt);
+                let exponential = 250_u64.saturating_mul(1_u64 << (attempt_count - 1));
                 let delay_ms = error.retry_after_ms().unwrap_or(exponential).min(5_000);
-                attempt += 1;
+                attempt_count += 1;
+                on_attempt(TranslationBatchStatus::Retrying, attempt_count, Some(error));
                 if wait_for_retry(delay_ms, token) {
                     break Err(ProviderError::new(
                         ProviderErrorCategory::Cancelled,
@@ -625,6 +758,7 @@ fn translate_batch(
                         "provider request was cancelled",
                     ));
                 }
+                on_attempt(TranslationBatchStatus::Running, attempt_count, None);
             }
             _ => break response,
         }
@@ -634,7 +768,77 @@ fn translate_batch(
 
 fn finish_cancelled(cell: &JobCell) {
     if let Ok(mut state) = cell.state.lock() {
-        state.status = TranslationJobStatus::Cancelled;
+        mark_cancelled(&mut state);
+    }
+}
+
+fn mark_batch_running(cell: &JobCell, batch_index: usize, attempt_count: u16) -> bool {
+    let Ok(mut state) = cell.state.lock() else {
+        return false;
+    };
+    if cell.cancelled.load(Ordering::Acquire) || state.snapshot.status.is_terminal() {
+        return false;
+    }
+    let elapsed_ms = state.elapsed_ms();
+    let Some(batch) = state.snapshot.batches.get_mut(batch_index) else {
+        return false;
+    };
+    batch.status = TranslationBatchStatus::Running;
+    batch.attempt_count = attempt_count;
+    batch.started_after_ms.get_or_insert(elapsed_ms);
+    let running_count = state
+        .snapshot
+        .batches
+        .iter()
+        .filter(|batch| batch.status == TranslationBatchStatus::Running)
+        .count();
+    state.snapshot.peak_concurrency = state.snapshot.peak_concurrency.max(running_count);
+    true
+}
+
+fn update_batch_attempt(
+    cell: &JobCell,
+    batch_index: usize,
+    status: TranslationBatchStatus,
+    attempt_count: u16,
+    error: Option<&ProviderError>,
+) {
+    let Ok(mut state) = cell.state.lock() else {
+        return;
+    };
+    if cell.cancelled.load(Ordering::Acquire) || state.snapshot.status.is_terminal() {
+        return;
+    }
+    let Some(batch) = state.snapshot.batches.get_mut(batch_index) else {
+        return;
+    };
+    batch.status = status;
+    batch.attempt_count = attempt_count;
+    if let Some(error) = error {
+        batch.last_error = Some(error.clone());
+    }
+    if status == TranslationBatchStatus::Running {
+        let running_count = state
+            .snapshot
+            .batches
+            .iter()
+            .filter(|batch| batch.status == TranslationBatchStatus::Running)
+            .count();
+        state.snapshot.peak_concurrency = state.snapshot.peak_concurrency.max(running_count);
+    }
+}
+
+fn mark_cancelled(state: &mut JobState) {
+    let elapsed_ms = state.elapsed_ms();
+    state.snapshot.status = TranslationJobStatus::Cancelled;
+    state.snapshot.elapsed_ms = elapsed_ms;
+    for batch in &mut state.snapshot.batches {
+        if !batch.status.is_terminal() {
+            batch.status = TranslationBatchStatus::Cancelled;
+            if let Some(started_after_ms) = batch.started_after_ms {
+                batch.elapsed_ms = elapsed_ms.saturating_sub(started_after_ms);
+            }
+        }
     }
 }
 

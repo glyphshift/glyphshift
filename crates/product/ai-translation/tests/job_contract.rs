@@ -4,6 +4,7 @@ use glyphshift_ai_translation::{
     ProviderTranslation, TranslationBatchPolicy, TranslationItem, TranslationJobStatus,
     TranslationPlanRequest, TranslationProvider,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -57,6 +58,11 @@ struct DelayedSyntheticProvider {
 }
 
 struct TokenDroppingSyntheticProvider;
+
+#[derive(Default)]
+struct RetryOnceSyntheticProvider {
+    attempts: AtomicUsize,
+}
 
 #[derive(Default)]
 struct BatchRecordingSyntheticProvider {
@@ -134,6 +140,25 @@ impl TranslationProvider for TokenDroppingSyntheticProvider {
             request.items()[0].item_id(),
             "你好",
         )]))
+    }
+}
+
+impl TranslationProvider for RetryOnceSyntheticProvider {
+    fn translate(
+        &self,
+        request: &ProviderRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ProviderBatchResult, ProviderError> {
+        if self.attempts.fetch_add(1, Ordering::AcqRel) == 0 {
+            return Err(ProviderError::new(
+                glyphshift_ai_translation::ProviderErrorCategory::Overloaded,
+                true,
+                "synthetic provider overloaded",
+            ));
+        }
+        Ok(ProviderBatchResult::new(request.items().iter().map(
+            |item| ProviderTranslation::new(item.item_id(), format!("译文：{}", item.source())),
+        )))
     }
 }
 
@@ -273,6 +298,12 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     assert_eq!(value["maxRetries"], 2);
     assert_eq!(value["finishedBatches"], 1);
     assert_eq!(value["failedBatches"], 0);
+    assert_eq!(value["peakConcurrency"], 1);
+    assert_eq!(value["batches"][0]["batchNumber"], 1);
+    assert_eq!(value["batches"][0]["itemCount"], 1);
+    assert_eq!(value["batches"][0]["status"], "completed");
+    assert_eq!(value["batches"][0]["attemptCount"], 1);
+    assert!(value["batches"][0]["elapsedMs"].is_number());
     assert_eq!(value["results"][0]["itemId"], "save");
     assert_eq!(value["results"][0]["translation"], "保存");
     assert!(value.get("rawResponse").is_none());
@@ -333,6 +364,11 @@ fn cancelled_job_discards_a_provider_result_that_arrives_late() {
         cancelled_before_provider_returns.status(),
         TranslationJobStatus::Cancelled,
         "the user-visible job must stop before an in-flight provider request returns"
+    );
+    assert_eq!(
+        cancelled_before_provider_returns.batches()[0].status(),
+        glyphshift_ai_translation::TranslationBatchStatus::Cancelled,
+        "the visible in-flight batch must leave the running state immediately"
     );
     let deadline = Instant::now() + Duration::from_secs(2);
     let cancelled = loop {
@@ -574,4 +610,154 @@ fn profile_concurrency_starts_multiple_short_text_batches_in_parallel() {
     assert_eq!(completed.status(), TranslationJobStatus::Completed);
     assert_eq!(completed.completed_count(), 100);
     assert_eq!(completed.finished_batches(), 2);
+}
+
+#[test]
+fn running_job_snapshot_exposes_three_parallel_batches_instead_of_only_completion_count() {
+    let root = tempdir().expect("observable concurrent AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.concurrent",
+                "Concurrent",
+                AiProviderProtocol::OpenAiCompatible,
+                "synthetic-model",
+            )
+            .with_base_url("http://synthetic.invalid/v1")
+            .with_max_items_per_request(10)
+            .with_max_concurrency(3),
+        )
+        .expect("save concurrent profile");
+    let profile = profiles
+        .resolve_profile("profile.concurrent")
+        .expect("resolve concurrent profile");
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let provider = Arc::new(DelayedSyntheticProvider {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_provider(AiProviderProtocol::OpenAiCompatible, provider);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            13,
+            "en-US",
+            "zh-CN",
+            (1..=40).map(|index| {
+                TranslationItem::untranslated(format!("item-{index}"), format!("Text {index:03}"))
+            }),
+        ))
+        .expect("plan observable concurrent job");
+    let job_id = translation
+        .start_translation(plan.token(), profile)
+        .expect("start observable concurrent job");
+
+    for _ in 0..3 {
+        entered_rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("three provider requests start together");
+    }
+    let running = serde_json::to_value(
+        translation
+            .translation_job(&job_id)
+            .expect("query running job"),
+    )
+    .expect("serialize running job");
+    assert_eq!(running["peakConcurrency"], 3);
+    assert_eq!(
+        running["batches"]
+            .as_array()
+            .expect("batch telemetry")
+            .iter()
+            .filter(|batch| batch["status"] == "running")
+            .count(),
+        3
+    );
+    assert_eq!(
+        running["batches"]
+            .as_array()
+            .expect("batch telemetry")
+            .iter()
+            .filter(|batch| batch["status"] == "queued")
+            .count(),
+        1
+    );
+
+    for _ in 0..3 {
+        release_tx.send(()).expect("release provider request");
+    }
+    entered_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("remaining batch starts when a slot is free");
+    release_tx
+        .send(())
+        .expect("release remaining provider request");
+    let completed = wait_for_terminal_job(&translation, &job_id);
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+}
+
+#[test]
+fn retry_wait_is_visible_with_the_next_attempt_number_and_safe_error() {
+    let root = tempdir().expect("retry telemetry AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.retry",
+                "Retry",
+                AiProviderProtocol::OllamaChat,
+                "synthetic-model",
+            )
+            .with_max_retries(1),
+        )
+        .expect("save retry profile");
+    let profile = profiles
+        .resolve_profile("profile.retry")
+        .expect("resolve retry profile");
+    let mut translation = AiTranslation::new();
+    translation.register_provider(
+        AiProviderProtocol::OllamaChat,
+        Arc::new(RetryOnceSyntheticProvider::default()),
+    );
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            14,
+            "en-US",
+            "zh-CN",
+            [TranslationItem::untranslated("save", "Save")],
+        ))
+        .expect("plan retry telemetry job");
+    let job_id = translation
+        .start_translation(plan.token(), profile)
+        .expect("start retry telemetry job");
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    let retrying = loop {
+        let snapshot = translation
+            .translation_job(&job_id)
+            .expect("query retrying job");
+        if snapshot.batches()[0].status()
+            == glyphshift_ai_translation::TranslationBatchStatus::Retrying
+        {
+            break serde_json::to_value(snapshot).expect("serialize retrying job");
+        }
+        assert!(Instant::now() < deadline, "retry wait was never observable");
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert_eq!(retrying["batches"][0]["attemptCount"], 2);
+    assert_eq!(
+        retrying["batches"][0]["lastError"]["safeMessage"],
+        "synthetic provider overloaded"
+    );
+
+    let completed = wait_for_terminal_job(&translation, &job_id);
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.batches()[0].attempt_count(), 2);
 }

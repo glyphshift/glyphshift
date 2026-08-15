@@ -148,16 +148,25 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   const profile = {
     id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
     baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
-    timeoutMs: 60_000, maxConcurrency: 2, maxRetries: 2,
+    timeoutMs: 60_000, maxItemsPerRequest: 50, maxConcurrency: 3, maxRetries: 2,
     filterPolicy, hasCredential: false, credentialRequired: false,
   }
   await page.addInitScript(({ snapshot, profile }) => {
     let cancelled = false
     const job = () => ({
       jobId: 'job-stop', planToken: 'plan-stop', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
-      status: cancelled ? 'cancelled' : 'running', totalCount: 1, completedCount: 0, failedCount: 0,
-      totalBatches: 1, batchSize: 50, maxConcurrency: 2, maxRetries: 2,
-      finishedBatches: 0, failedBatches: 0, results: [], errors: [],
+      status: cancelled ? 'cancelled' : 'running', totalCount: 258, completedCount: 0, failedCount: 0,
+      totalBatches: 6, batchSize: 50, maxConcurrency: 3, maxRetries: 2,
+      finishedBatches: 0, failedBatches: 0, elapsedMs: 31_000, peakConcurrency: 3,
+      batches: [
+        { batchNumber: 1, itemCount: 50, status: cancelled ? 'cancelled' : 'running', attemptCount: 1, startedAfterMs: 0, elapsedMs: 31_000, lastError: null },
+        { batchNumber: 2, itemCount: 50, status: cancelled ? 'cancelled' : 'running', attemptCount: 1, startedAfterMs: 1, elapsedMs: 30_999, lastError: null },
+        { batchNumber: 3, itemCount: 50, status: cancelled ? 'cancelled' : 'running', attemptCount: 1, startedAfterMs: 2, elapsedMs: 30_998, lastError: null },
+        { batchNumber: 4, itemCount: 50, status: cancelled ? 'cancelled' : 'queued', attemptCount: 0, startedAfterMs: null, elapsedMs: 0, lastError: null },
+        { batchNumber: 5, itemCount: 50, status: cancelled ? 'cancelled' : 'queued', attemptCount: 0, startedAfterMs: null, elapsedMs: 0, lastError: null },
+        { batchNumber: 6, itemCount: 8, status: cancelled ? 'cancelled' : 'queued', attemptCount: 0, startedAfterMs: null, elapsedMs: 0, lastError: null },
+      ],
+      results: [], errors: [],
     })
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
@@ -188,6 +197,10 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
   await expect(page.getByText('AI 正在翻译')).toBeVisible()
+  await expect(page.getByText('当前请求 3/3 · 已观测并发峰值 3')).toBeVisible()
+  await expect(page.getByTestId('ai-batch-1')).toContainText('请求中')
+  await expect(page.getByTestId('ai-batch-4')).toContainText('排队')
+  await expect(page.getByText('已结束批次').locator('..')).toContainText('0/6')
   await page.getByRole('button', { name: '立即停止' }).click()
   await expect(page.getByText('AI 正在翻译')).toHaveCount(0, { timeout: 500 })
   await expect(page.getByText('AI 翻译已停止')).toBeVisible()
@@ -271,6 +284,10 @@ test('dictionary AI fill reports all candidates completed across automatic batch
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
   await expect(page.getByText(/已补全全部 51 条译文，自动完成 3 批；用时 \d+:\d{2}。/)).toBeVisible()
+  await expect(page.getByText('AI 翻译批次详情')).toBeVisible()
+  await expect(page.getByTestId('ai-batch-3')).toContainText('已完成')
+  await page.getByRole('button', { name: '关闭批次详情' }).click()
+  await expect(page.getByRole('region', { name: 'AI 翻译实时进度' })).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: '编辑译文：Source 51' })).toHaveValue('AI · Source 51')
 })
 
@@ -306,8 +323,10 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
-  await expect(page.getByText(/已完成 \d+\/60 条 · 批次 \d+\/60 · 每批 1 条 \/ 并发 1 批 · 已用时 0:01/)).toBeVisible()
-  await expect(page.getByText(/已补全全部 60 条译文，自动完成 60 批；用时 0:0[12]。/)).toBeVisible()
+  const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
+  await expect(progress.getByText(/已完成 \d+\/60 条 · 已用时 0:01/)).toBeVisible()
+  await expect(progress.getByText('当前请求 1/1 · 已观测并发峰值 1')).toBeVisible()
+  await expect(page.getByText(/已补全全部 60 条译文，自动完成 60 批；用时 0:0[4-6]。/)).toBeVisible()
 })
 
 test('dictionary AI fill exposes partial batches and retries only remaining blanks', async ({ page }) => {
@@ -355,6 +374,11 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
               jobId: 'job-1', planToken: 'plan-1', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
               status: 'completed_with_failures', totalCount: 3, completedCount: 2, failedCount: 1,
               totalBatches: 2, finishedBatches: 2, failedBatches: 1,
+              batchSize: 2, maxConcurrency: 1, maxRetries: 2, elapsedMs: 2_500, peakConcurrency: 1,
+              batches: [
+                { batchNumber: 1, itemCount: 2, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 400, lastError: null },
+                { batchNumber: 2, itemCount: 1, status: 'failed', attemptCount: 3, startedAfterMs: 401, elapsedMs: 2_099, lastError: { category: 'invalid_request', retryable: false, retryAfterMs: null, providerCode: null, requestId: null, httpStatus: 400, safeMessage: 'Request rejected' } },
+              ],
               results: translated.map(item => ({ ...item, translation: `AI · ${item.source}` })),
               errors: [{ category: 'invalid_request', retryable: false, retryAfterMs: null, providerCode: null, requestId: null, httpStatus: 400, safeMessage: 'Request rejected' }],
             }
@@ -363,6 +387,8 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
             jobId: 'job-2', planToken: 'plan-2', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
             status: 'completed', totalCount: 1, completedCount: 1, failedCount: 0,
             totalBatches: 1, finishedBatches: 1, failedBatches: 0,
+            batchSize: 1, maxConcurrency: 1, maxRetries: 2, elapsedMs: 300, peakConcurrency: 1,
+            batches: [{ batchNumber: 1, itemCount: 1, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 300, lastError: null }],
             results: latestCandidates.map(item => ({ ...item, translation: `AI · ${item.source}` })), errors: [],
           }
         }
@@ -378,6 +404,9 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
   await expect(page.getByText(/已完成 2\/3 条，1 条失败；用时 \d+:\d{2}，可重试剩余空白项。/)).toBeVisible()
+  await expect(page.getByTestId('ai-batch-2')).toContainText('失败')
+  await expect(page.getByTestId('ai-batch-2')).toContainText('第 3 次请求')
+  await expect(page.getByTestId('ai-batch-2')).toContainText('Request rejected')
   await expect(page.getByRole('textbox', { name: '编辑译文：Third source' })).toHaveValue('')
   await page.getByRole('button', { name: '重试剩余' }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Third source' })).toHaveValue('AI · Third source')

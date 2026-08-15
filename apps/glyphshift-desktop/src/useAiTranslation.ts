@@ -108,6 +108,19 @@ export interface AiProviderError {
   safeMessage: string
 }
 
+export type AiTranslationBatchStatus
+  = 'queued' | 'running' | 'retrying' | 'completed' | 'failed' | 'cancelled'
+
+export interface AiTranslationBatch {
+  batchNumber: number
+  itemCount: number
+  status: AiTranslationBatchStatus
+  attemptCount: number
+  startedAfterMs: number | null
+  elapsedMs: number
+  lastError: AiProviderError | null
+}
+
 export interface AiTranslationJob {
   jobId: string
   planToken: string
@@ -123,6 +136,9 @@ export interface AiTranslationJob {
   maxRetries: number
   finishedBatches: number
   failedBatches: number
+  elapsedMs: number
+  peakConcurrency: number
+  batches: AiTranslationBatch[]
   results: AiValidatedTranslation[]
   errors: AiProviderError[]
 }
@@ -210,6 +226,7 @@ const elapsedMs = ref(0)
 const connectionReports = ref<Record<string, AiConnectionReport>>({})
 const browserPlans = new Map<string, AiTranslationPlan>()
 const browserJobs = new Map<string, AiTranslationJob>()
+const browserJobStartedAt = new Map<string, number>()
 let browserPlanSequence = 0
 let browserJobSequence = 0
 let connected = false
@@ -518,28 +535,60 @@ async function startTranslation(planToken: string, profileId?: string | null) {
     maxRetries: profile.maxRetries,
     finishedBatches: 0,
     failedBatches: 0,
+    elapsedMs: 0,
+    peakConcurrency: 0,
+    batches: batches.map((batch, index) => ({
+      batchNumber: index + 1,
+      itemCount: batch.length,
+      status: 'queued',
+      attemptCount: 0,
+      startedAfterMs: null,
+      elapsedMs: 0,
+      lastError: null,
+    })),
     results: [],
     errors: [],
   }
   browserJobs.set(jobId, job)
-  const completeBatch = (index: number) => window.setTimeout(() => {
-    if (job.status === 'cancelling' || job.status === 'cancelled') return
-    const batch = batches[index]
-    if (!batch) {
-      job.status = 'completed'
-      return
+  const startedAtMs = Date.now()
+  browserJobStartedAt.set(jobId, startedAtMs)
+  let nextBatchIndex = 0
+  let activeBatches = 0
+  const startAvailableBatches = () => {
+    while (
+      job.status === 'running'
+      && activeBatches < profile.maxConcurrency
+      && nextBatchIndex < batches.length
+    ) {
+      const index = nextBatchIndex++
+      const batch = batches[index]
+      const batchState = job.batches[index]
+      if (!batch || !batchState) continue
+      activeBatches += 1
+      batchState.status = 'running'
+      batchState.attemptCount = 1
+      batchState.startedAfterMs = Date.now() - startedAtMs
+      job.peakConcurrency = Math.max(job.peakConcurrency, activeBatches)
+      window.setTimeout(() => {
+        if (job.status !== 'running') return
+        const completedAtMs = Date.now() - startedAtMs
+        batchState.status = 'completed'
+        batchState.elapsedMs = completedAtMs - (batchState.startedAfterMs ?? 0)
+        job.results.push(...batch.map(item => ({
+          itemId: item.itemId,
+          source: item.source,
+          translation: browserTranslation(item.source),
+        })))
+        job.completedCount = job.results.length
+        job.finishedBatches += 1
+        job.elapsedMs = completedAtMs
+        activeBatches -= 1
+        if (job.finishedBatches === batches.length) job.status = 'completed'
+        else startAvailableBatches()
+      }, 80)
     }
-    job.results.push(...batch.map(item => ({
-      itemId: item.itemId,
-      source: item.source,
-      translation: browserTranslation(item.source),
-    })))
-    job.completedCount = job.results.length
-    job.finishedBatches += 1
-    if (index + 1 < batches.length) completeBatch(index + 1)
-    else job.status = 'completed'
-  }, 30)
-  completeBatch(0)
+  }
+  startAvailableBatches()
   return jobId
 }
 
@@ -547,7 +596,17 @@ async function queryJob(jobId: string) {
   if (hasDesktopRuntime()) return invoke<AiTranslationJob>('desktop_ai_translation_job', { jobId })
   const job = browserJobs.get(jobId)
   if (!job) throw new Error('Unknown browser AI job')
-  return clone(job)
+  const visible = clone(job)
+  const startedAtMs = browserJobStartedAt.get(jobId)
+  if (startedAtMs !== undefined && !['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) {
+    visible.elapsedMs = Date.now() - startedAtMs
+    visible.batches.forEach((batch) => {
+      if (['running', 'retrying'].includes(batch.status) && batch.startedAfterMs !== null) {
+        batch.elapsedMs = visible.elapsedMs - batch.startedAfterMs
+      }
+    })
+  }
+  return visible
 }
 
 async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
@@ -641,9 +700,28 @@ async function cancelCurrentJob() {
   if (hasDesktopRuntime()) await invoke('desktop_cancel_ai_translation', { jobId: job.jobId })
   else {
     const browserJob = browserJobs.get(job.jobId)
-    if (browserJob) browserJob.status = 'cancelled'
+    if (browserJob) {
+      browserJob.status = 'cancelled'
+      browserJob.batches.forEach((batch) => {
+        if (!['completed', 'failed', 'cancelled'].includes(batch.status)) batch.status = 'cancelled'
+      })
+    }
   }
-  currentJob.value = { ...job, status: 'cancelled' }
+  currentJob.value = {
+    ...job,
+    status: 'cancelled',
+    batches: (job.batches ?? []).map(batch => (
+      ['completed', 'failed', 'cancelled'].includes(batch.status)
+        ? batch
+        : { ...batch, status: 'cancelled' as const }
+    )),
+  }
+}
+
+function dismissCurrentJob() {
+  const job = currentJob.value
+  if (!job || !['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) return
+  currentJob.value = null
 }
 
 async function applyProbeResults(runId: string, job: AiTranslationJob): Promise<ProbeAiApplyView> {
@@ -682,6 +760,7 @@ export function useAiTranslation() {
     runPlan,
     testProfile,
     cancelCurrentJob,
+    dismissCurrentJob,
     applyProbeResults,
   }
 }

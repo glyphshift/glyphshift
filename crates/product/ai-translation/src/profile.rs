@@ -163,6 +163,12 @@ impl AiProfileDraft {
         self.max_items_per_request = max_items_per_request;
         self
     }
+
+    #[must_use]
+    pub const fn with_max_concurrency(mut self, max_concurrency: u16) -> Self {
+        self.max_concurrency = max_concurrency;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -26,6 +26,7 @@ import { useProbeRuns, type ProbeTranslationFilter, type QuickProbeCleanupResult
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
+import AiTranslationProgress from './AiTranslationProgress.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
@@ -146,6 +147,10 @@ const compatibleSettingsAdapters = computed(() => settingsCompatibleAdapterIds.v
   ? observableAdapters.value
   : observableAdapters.value.filter(adapter => settingsCompatibleAdapterIds.value?.includes(adapter.id)))
 const selectedRun = computed(() => probe.selectedRun.value)
+const displayedAiJob = computed(() => {
+  const job = ai.currentJob.value
+  return job && selectedRun.value && job.scopeId === `probe:${selectedRun.value.id}` ? job : null
+})
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
 const selectedRunHasTemporaryDictionary = computed(() => Boolean(
@@ -1082,17 +1087,13 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
     </UAlert>
-    <UAlert
-      v-if="ai.busy.value && ai.currentJob.value && !['completed', 'completed_with_failures', 'cancelled'].includes(ai.currentJob.value.status)"
-      role="status"
-      color="primary"
-      variant="soft"
-      :title="t('ai.translating')"
-      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches, batchSize: ai.currentJob.value.batchSize, concurrency: ai.currentJob.value.maxConcurrency, elapsed: ai.elapsed.value })"
-      class="mb-3"
-    >
-      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
-    </UAlert>
+    <AiTranslationProgress
+      v-if="displayedAiJob"
+      :job="displayedAiJob"
+      :elapsed="ai.elapsed.value"
+      @cancel="ai.cancelCurrentJob"
+      @dismiss="ai.dismissCurrentJob"
+    />
 
     <section
       v-if="selectedRun"
