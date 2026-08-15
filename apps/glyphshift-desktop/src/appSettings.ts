@@ -10,12 +10,10 @@ export type EffectiveTheme = 'dark' | 'light'
 
 export interface AiTranslationBatchSettings {
   maxItemsPerRequest: number
-  maxInputTokensPerRequest: number
 }
 
 export const AI_TRANSLATION_BATCH_LIMITS = {
-  items: { min: 1, max: 1_000, default: 100 },
-  inputTokens: { min: 1_000, max: 1_000_000, default: 16_000 },
+  items: { min: 1, max: 1_000, default: 50 },
 } as const
 
 export interface GlobalShortcutProbe {
@@ -32,6 +30,7 @@ export interface AppSettings {
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
   aiTranslationBatch: AiTranslationBatchSettings
+  confirmAiTranslation: boolean
 }
 
 interface AppSettingsUpdate {
@@ -42,6 +41,7 @@ interface AppSettingsUpdate {
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
   aiTranslationBatch: AiTranslationBatchSettings
+  confirmAiTranslation: boolean
 }
 
 interface DesktopPrivilegeStatus {
@@ -59,8 +59,8 @@ const fallbackSettings: AppSettings = {
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
   aiTranslationBatch: {
     maxItemsPerRequest: AI_TRANSLATION_BATCH_LIMITS.items.default,
-    maxInputTokensPerRequest: AI_TRANSLATION_BATCH_LIMITS.inputTokens.default,
   },
+  confirmAiTranslation: true,
 }
 
 const settings = ref<AppSettings>({ ...fallbackSettings })
@@ -91,13 +91,12 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     || (candidate.softwareCaptureShortcut !== undefined
       && (typeof candidate.softwareCaptureShortcut !== 'string'
         || candidate.softwareCaptureShortcut.length === 0))
+    || (candidate.confirmAiTranslation !== undefined
+      && typeof candidate.confirmAiTranslation !== 'boolean')
     || (batch !== undefined && (
       !Number.isInteger(batch.maxItemsPerRequest)
       || (batch.maxItemsPerRequest ?? 0) < AI_TRANSLATION_BATCH_LIMITS.items.min
       || (batch.maxItemsPerRequest ?? 0) > AI_TRANSLATION_BATCH_LIMITS.items.max
-      || !Number.isInteger(batch.maxInputTokensPerRequest)
-      || (batch.maxInputTokensPerRequest ?? 0) < AI_TRANSLATION_BATCH_LIMITS.inputTokens.min
-      || (batch.maxInputTokensPerRequest ?? 0) > AI_TRANSLATION_BATCH_LIMITS.inputTokens.max
     ))) return null
   return {
     settingsSchemaVersion: 1,
@@ -107,10 +106,10 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     launchElevated: candidate.launchElevated ?? false,
     closeBehavior: candidate.closeBehavior ?? 'quit',
     softwareCaptureShortcut: candidate.softwareCaptureShortcut ?? 'Ctrl+Shift+F8',
+    confirmAiTranslation: candidate.confirmAiTranslation ?? true,
     aiTranslationBatch: batch
       ? {
           maxItemsPerRequest: batch.maxItemsPerRequest as number,
-          maxInputTokensPerRequest: batch.maxInputTokensPerRequest as number,
         }
       : { ...fallbackSettings.aiTranslationBatch },
   }
@@ -238,6 +237,7 @@ export function useAppSettings() {
       closeBehavior: settings.value.closeBehavior,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
       aiTranslationBatch: settings.value.aiTranslationBatch,
+      confirmAiTranslation: settings.value.confirmAiTranslation,
       ...patch,
     })
   }
@@ -257,6 +257,7 @@ export function useAppSettings() {
     closeBehavior: computed(() => settings.value.closeBehavior),
     softwareCaptureShortcut: computed(() => settings.value.softwareCaptureShortcut),
     aiTranslationBatch: computed(() => settings.value.aiTranslationBatch),
+    confirmAiTranslation: computed(() => settings.value.confirmAiTranslation),
     async setLocalePreference(localePreference: LocalePreference) {
       await update({ localePreference })
     },
@@ -287,6 +288,9 @@ export function useAppSettings() {
     },
     async setAiTranslationBatch(aiTranslationBatch: AiTranslationBatchSettings) {
       await update({ aiTranslationBatch })
+    },
+    async setConfirmAiTranslation(confirmAiTranslation: boolean) {
+      await update({ confirmAiTranslation })
     },
     async probeSoftwareCaptureShortcut(shortcut: string) {
       return hasDesktopRuntime()

@@ -34,6 +34,7 @@ export interface AiProfile {
   modelId: string
   timeoutMs: number
   maxConcurrency: number
+  maxRetries: number
   filterPolicy: AiFilterPolicy
   hasCredential: boolean
   credentialRequired: boolean
@@ -117,6 +118,9 @@ export interface AiTranslationJob {
   completedCount: number
   failedCount: number
   totalBatches: number
+  batchSize: number
+  maxConcurrency: number
+  maxRetries: number
   finishedBatches: number
   failedBatches: number
   results: AiValidatedTranslation[]
@@ -169,20 +173,60 @@ export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; con
   ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', concurrency: 1, credentialRequired: false },
 }
 
-const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v2'
 const REQUEST_TOKEN_RESERVE = 384
 const ITEM_TOKEN_RESERVE = 12
+
+function estimatedTextTokens(value: string) {
+  let ascii = 0
+  let nonAscii = 0
+  for (const character of value) {
+    if (/^[\x00-\x7F]$/.test(character)) ascii += 1
+    else nonAscii += 1
+  }
+  return nonAscii + Math.ceil(ascii / 4)
+}
+
+export function estimateAiTranslationInput(plan: AiTranslationPlan, maxItemsPerRequest: number) {
+  const batchSize = Math.max(1, Math.floor(maxItemsPerRequest))
+  const totalBatches = Math.ceil(plan.candidates.length / batchSize)
+  const itemTokens = plan.candidates.reduce((total, candidate) => (
+    total
+    + ITEM_TOKEN_RESERVE
+    + estimatedTextTokens(candidate.itemId)
+    + estimatedTextTokens(candidate.source)
+  ), 0)
+  return {
+    estimatedInputTokens: totalBatches * REQUEST_TOKEN_RESERVE + itemTokens,
+    totalBatches,
+  }
+}
+
+const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v2'
 const catalog = ref<AiProfilesView>({ defaultProfileId: null, profiles: [] })
 const busy = ref(false)
 const error = ref('')
 const currentJob = ref<AiTranslationJob | null>(null)
+const elapsedMs = ref(0)
 const connectionReports = ref<Record<string, AiConnectionReport>>({})
 const browserPlans = new Map<string, AiTranslationPlan>()
 const browserJobs = new Map<string, AiTranslationJob>()
 let browserPlanSequence = 0
 let browserJobSequence = 0
 let connected = false
+let elapsedTimer: number | undefined
 const appSettings = useAppSettings()
+
+function formatElapsedDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
+  const seconds = totalSeconds % 60
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const minutes = totalMinutes % 60
+  const hours = Math.floor(totalMinutes / 60)
+  const trailing = `${minutes}:${seconds.toString().padStart(2, '0')}`
+  return hours ? `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}` : trailing
+}
+
+const elapsed = computed(() => formatElapsedDuration(elapsedMs.value))
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -192,10 +236,25 @@ function persistBrowserCatalog() {
   localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(catalog.value))
 }
 
+function normalizeProfile(profile: AiProfile): AiProfile {
+  return {
+    ...profile,
+    maxRetries: Number.isInteger(profile.maxRetries) && profile.maxRetries >= 0 && profile.maxRetries <= 10
+      ? profile.maxRetries
+      : 2,
+  }
+}
+
+function normalizeCatalog(value: AiProfilesView | null): AiProfilesView {
+  return value && Array.isArray(value.profiles)
+    ? { ...value, profiles: value.profiles.map(normalizeProfile) }
+    : { defaultProfileId: null, profiles: [] }
+}
+
 function browserCatalog(): AiProfilesView {
   try {
     const value = JSON.parse(localStorage.getItem(BROWSER_STORAGE_KEY) ?? 'null') as AiProfilesView | null
-    if (value && Array.isArray(value.profiles)) return value
+    if (value && Array.isArray(value.profiles)) return normalizeCatalog(value)
   }
   catch {
     // A malformed browser-only preview value is treated as an empty catalog.
@@ -207,9 +266,7 @@ async function connect(force = false) {
   if (connected && !force) return catalog.value
   if (hasDesktopRuntime()) {
     const loaded = await invoke<AiProfilesView | null>('desktop_ai_profiles')
-    catalog.value = loaded && Array.isArray(loaded.profiles)
-      ? loaded
-      : { defaultProfileId: null, profiles: [] }
+    catalog.value = normalizeCatalog(loaded)
   }
   else catalog.value = browserCatalog()
   connected = true
@@ -414,45 +471,16 @@ function browserTranslation(source: string) {
   return known[source] ?? `AI · ${source}`
 }
 
-function estimatedTextTokens(value: string) {
-  let ascii = 0
-  let nonAscii = 0
-  for (const character of value) {
-    if (/^[\x00-\x7F]$/.test(character)) ascii += 1
-    else nonAscii += 1
-  }
-  return nonAscii + Math.ceil(ascii / 4)
-}
-
-function estimatedCandidateTokens(candidate: AiTranslationCandidate) {
-  return ITEM_TOKEN_RESERVE
-    + estimatedTextTokens(candidate.itemId)
-    + estimatedTextTokens(candidate.source)
-}
-
 function browserBatches(plan: AiTranslationPlan, profileId?: string | null) {
   const profile = catalog.value.profiles.find(item => (
     item.id === (profileId ?? catalog.value.defaultProfileId)
   ))
   if (!profile) throw new Error('AI profile required')
-  const policy = appSettings.aiTranslationBatch.value
+  const maxItems = appSettings.aiTranslationBatch.value.maxItemsPerRequest
   const batches: AiTranslationCandidate[][] = []
-  let current: AiTranslationCandidate[] = []
-  let currentTokens = REQUEST_TOKEN_RESERVE
-  for (const candidate of plan.candidates) {
-    const candidateTokens = estimatedCandidateTokens(candidate)
-    if (current.length && (
-      current.length >= policy.maxItemsPerRequest
-      || currentTokens + candidateTokens > policy.maxInputTokensPerRequest
-    )) {
-      batches.push(current)
-      current = []
-      currentTokens = REQUEST_TOKEN_RESERVE
-    }
-    current.push(candidate)
-    currentTokens += candidateTokens
+  for (let start = 0; start < plan.candidates.length; start += maxItems) {
+    batches.push(plan.candidates.slice(start, start + maxItems))
   }
-  if (current.length) batches.push(current)
   return batches
 }
 
@@ -464,7 +492,12 @@ async function startTranslation(planToken: string, profileId?: string | null) {
   }
   const plan = browserPlans.get(planToken)
   if (!plan) throw new Error('Unknown browser AI plan')
+  const profile = catalog.value.profiles.find(item => (
+    item.id === (profileId ?? catalog.value.defaultProfileId)
+  ))
+  if (!profile) throw new Error('AI profile required')
   const batches = browserBatches(plan, profileId)
+  const batchSize = appSettings.aiTranslationBatch.value.maxItemsPerRequest
   const jobId = `browser-job-${++browserJobSequence}`
   const job: AiTranslationJob = {
     jobId,
@@ -476,6 +509,9 @@ async function startTranslation(planToken: string, profileId?: string | null) {
     completedCount: 0,
     failedCount: 0,
     totalBatches: batches.length,
+    batchSize,
+    maxConcurrency: profile.maxConcurrency,
+    maxRetries: profile.maxRetries,
     finishedBatches: 0,
     failedBatches: 0,
     results: [],
@@ -514,6 +550,12 @@ async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
   busy.value = true
   error.value = ''
   currentJob.value = null
+  elapsedMs.value = 0
+  const startedAtMs = Date.now()
+  if (elapsedTimer !== undefined) window.clearInterval(elapsedTimer)
+  elapsedTimer = window.setInterval(() => {
+    elapsedMs.value = Date.now() - startedAtMs
+  }, 250)
   try {
     const jobId = await startTranslation(plan.token, profileId)
     const deadline = Date.now() + 10 * 60_000
@@ -530,6 +572,11 @@ async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
     throw reason
   }
   finally {
+    elapsedMs.value = Date.now() - startedAtMs
+    if (elapsedTimer !== undefined) {
+      window.clearInterval(elapsedTimer)
+      elapsedTimer = undefined
+    }
     busy.value = false
   }
 }
@@ -592,6 +639,7 @@ async function cancelCurrentJob() {
     const browserJob = browserJobs.get(job.jobId)
     if (browserJob) browserJob.status = 'cancelled'
   }
+  currentJob.value = { ...job, status: 'cancelled' }
 }
 
 async function applyProbeResults(runId: string, job: AiTranslationJob): Promise<ProbeAiApplyView> {
@@ -619,6 +667,7 @@ export function useAiTranslation() {
     busy,
     error,
     currentJob,
+    elapsed,
     connectionReports,
     connect,
     saveProfile,

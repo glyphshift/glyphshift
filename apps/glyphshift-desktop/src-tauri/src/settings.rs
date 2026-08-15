@@ -9,11 +9,13 @@ pub(crate) const DEFAULT_SOFTWARE_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 const SETTINGS_FILE_NAME: &str = "app-settings.json";
 const MIN_AI_BATCH_ITEMS: u16 = 1;
 const MAX_AI_BATCH_ITEMS: u16 = 1_000;
-const MIN_AI_BATCH_INPUT_TOKENS: u32 = 1_000;
-const MAX_AI_BATCH_INPUT_TOKENS: u32 = 1_000_000;
 
 fn default_software_capture_shortcut() -> Box<str> {
     DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
+}
+
+const fn default_confirm_ai_translation() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -48,17 +50,15 @@ pub(crate) enum CloseBehavior {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AiTranslationBatchSettings {
     max_items_per_request: u16,
-    max_input_tokens_per_request: u32,
+    #[serde(default, rename = "maxInputTokensPerRequest", skip_serializing)]
+    _legacy_removed_token_budget: Option<u32>,
 }
 
 impl Default for AiTranslationBatchSettings {
     fn default() -> Self {
         Self {
             max_items_per_request: glyphshift_ai_translation::DEFAULT_MAX_ITEMS_PER_REQUEST,
-            max_input_tokens_per_request: u32::try_from(
-                glyphshift_ai_translation::DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST,
-            )
-            .expect("default AI token budget fits in app settings"),
+            _legacy_removed_token_budget: None,
         }
     }
 }
@@ -67,16 +67,9 @@ impl AiTranslationBatchSettings {
     pub(crate) const fn max_items_per_request(self) -> u16 {
         self.max_items_per_request
     }
-
-    pub(crate) const fn max_input_tokens_per_request(self) -> u32 {
-        self.max_input_tokens_per_request
-    }
-
     const fn is_valid(self) -> bool {
         self.max_items_per_request >= MIN_AI_BATCH_ITEMS
             && self.max_items_per_request <= MAX_AI_BATCH_ITEMS
-            && self.max_input_tokens_per_request >= MIN_AI_BATCH_INPUT_TOKENS
-            && self.max_input_tokens_per_request <= MAX_AI_BATCH_INPUT_TOKENS
     }
 }
 
@@ -98,6 +91,8 @@ pub(crate) struct AppSettings {
     software_capture_shortcut: Box<str>,
     #[serde(default)]
     ai_translation_batch: AiTranslationBatchSettings,
+    #[serde(default = "default_confirm_ai_translation")]
+    confirm_ai_translation: bool,
 }
 
 impl Default for AppSettings {
@@ -112,6 +107,7 @@ impl Default for AppSettings {
             _legacy_removed_shortcut: None,
             software_capture_shortcut: default_software_capture_shortcut(),
             ai_translation_batch: AiTranslationBatchSettings::default(),
+            confirm_ai_translation: true,
         }
     }
 }
@@ -149,6 +145,7 @@ pub(crate) struct AppSettingsUpdate {
     close_behavior: CloseBehavior,
     software_capture_shortcut: Box<str>,
     ai_translation_batch: AiTranslationBatchSettings,
+    confirm_ai_translation: bool,
 }
 
 impl AppSettingsUpdate {
@@ -177,6 +174,7 @@ impl From<AppSettingsUpdate> for AppSettings {
             _legacy_removed_shortcut: None,
             software_capture_shortcut: update.software_capture_shortcut,
             ai_translation_batch: update.ai_translation_batch,
+            confirm_ai_translation: update.confirm_ai_translation,
         }
     }
 }
@@ -339,8 +337,9 @@ mod tests {
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
                 ai_translation_batch: AiTranslationBatchSettings {
                     max_items_per_request: 120,
-                    max_input_tokens_per_request: 32_000,
+                    _legacy_removed_token_budget: None,
                 },
+                confirm_ai_translation: false,
             })
             .expect("save settings");
         let reopened = AppSettingsStore::open(root.path()).expect("reopen settings store");
@@ -349,11 +348,12 @@ mod tests {
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
+        assert!(!saved.confirm_ai_translation);
         assert_eq!(
             saved.ai_translation_batch(),
             AiTranslationBatchSettings {
                 max_items_per_request: 120,
-                max_input_tokens_per_request: 32_000,
+                _legacy_removed_token_budget: None,
             }
         );
         assert_eq!(reopened.current(), Ok(saved));
@@ -380,6 +380,7 @@ mod tests {
                 close_behavior: CloseBehavior::Quit,
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
                 ai_translation_batch: AiTranslationBatchSettings::default(),
+                confirm_ai_translation: true,
             })
             .expect("replace invalid settings");
         assert_eq!(store.current(), Ok(recovered));
@@ -390,7 +391,7 @@ mod tests {
         let root = tempdir().expect("temporary settings root");
         fs::write(
             root.path().join(SETTINGS_FILE_NAME),
-            r#"{"settingsSchemaVersion":1,"localePreference":"zh-CN","themePreference":"dark","interactiveTranslationShortcut":"Ctrl+Shift+F9"}"#,
+            r#"{"settingsSchemaVersion":1,"localePreference":"zh-CN","themePreference":"dark","interactiveTranslationShortcut":"Ctrl+Shift+F9","aiTranslationBatch":{"maxItemsPerRequest":75,"maxInputTokensPerRequest":16000}}"#,
         )
         .expect("write legacy settings");
 
@@ -407,13 +408,12 @@ mod tests {
             settings.software_capture_shortcut(),
             DEFAULT_SOFTWARE_CAPTURE_SHORTCUT
         );
-        assert_eq!(
-            settings.ai_translation_batch(),
-            AiTranslationBatchSettings::default()
-        );
-        assert!(serde_json::to_value(settings)
-            .expect("serialize migrated settings")
-            .get("interactiveTranslationShortcut")
+        assert_eq!(settings.ai_translation_batch().max_items_per_request(), 75);
+        assert!(settings.confirm_ai_translation);
+        let serialized = serde_json::to_value(settings).expect("serialize migrated settings");
+        assert!(serialized.get("interactiveTranslationShortcut").is_none());
+        assert!(serialized["aiTranslationBatch"]
+            .get("maxInputTokensPerRequest")
             .is_none());
     }
 
@@ -431,8 +431,9 @@ mod tests {
             software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
             ai_translation_batch: AiTranslationBatchSettings {
                 max_items_per_request: 0,
-                max_input_tokens_per_request: 999,
+                _legacy_removed_token_budget: None,
             },
+            confirm_ai_translation: true,
         });
 
         assert_eq!(result, Err(SettingsError::InvalidData));

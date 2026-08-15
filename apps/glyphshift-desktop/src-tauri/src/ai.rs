@@ -592,9 +592,7 @@ pub(super) fn desktop_start_ai_translation(
             .current()
             .map_err(settings_command_error)?;
         let batch = settings.ai_translation_batch();
-        let max_input_tokens = usize::try_from(batch.max_input_tokens_per_request())
-            .map_err(|_| CommandError::new("settings.invalid_data"))?;
-        TranslationBatchPolicy::new(batch.max_items_per_request(), max_input_tokens)
+        TranslationBatchPolicy::new(batch.max_items_per_request())
             .ok_or_else(|| CommandError::new("settings.invalid_data"))?
     };
     state

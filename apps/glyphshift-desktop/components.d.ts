@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AdapterSelectionTable: typeof import('./src/components/AdapterSelectionTable.vue')['default']
     AiProfilesPanel: typeof import('./src/components/AiProfilesPanel.vue')['default']
+    AiTranslationPreflight: typeof import('./src/components/AiTranslationPreflight.vue')['default']
     CaptureView: typeof import('./src/components/CaptureView.vue')['default']
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']

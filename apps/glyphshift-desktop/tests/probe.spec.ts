@@ -165,6 +165,7 @@ test('empty libraries stay actionable and a running application can create a tem
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-tab-running-zh.png' })
   await activeCaptureTab.click()
   await expect(page.getByRole('heading', { name: 'QuickTarget 探针', exact: true })).toBeVisible()
+  await expect(page.getByTestId('probe-software-path')).toContainText('X:\\SyntheticFixtures\\QuickTarget.exe')
   await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(3)
   await expect(page.getByTestId('probe-ai-actions')).toBeVisible()
   await expect(page.getByTestId('probe-temporary-task-badge')).toHaveText('临时')

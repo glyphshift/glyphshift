@@ -219,14 +219,8 @@ function updateAiBatchItems(value: number | null | undefined) {
   }).catch(() => undefined)
 }
 
-function updateAiBatchInputTokens(value: number | null | undefined) {
-  if (!Number.isInteger(value)
-    || (value ?? 0) < AI_TRANSLATION_BATCH_LIMITS.inputTokens.min
-    || (value ?? 0) > AI_TRANSLATION_BATCH_LIMITS.inputTokens.max) return
-  void appSettings.setAiTranslationBatch({
-    ...appSettings.aiTranslationBatch.value,
-    maxInputTokensPerRequest: value as number,
-  }).catch(() => undefined)
+function updateAiConfirmation(value: boolean) {
+  void appSettings.setConfirmAiTranslation(value).catch(() => undefined)
 }
 
 onMounted(() => void appSettings.refreshPrivilegeStatus())
@@ -322,22 +316,17 @@ onBeforeUnmount(() => {
               @update:model-value="updateAiBatchItems"
             />
           </ManagementFormRow>
-
           <ManagementFormRow
-            :label="t('settings.aiBatch.inputTokens')"
-            :description="t('settings.aiBatch.inputTokensDescription')"
-            icon="i-tabler-braces"
+            :label="t('settings.aiBatch.confirm')"
+            :description="t('settings.aiBatch.confirmDescription')"
+            icon="i-tabler-message-question"
             control-width="compact"
           >
-            <UInputNumber
-              :model-value="appSettings.aiTranslationBatch.value.maxInputTokensPerRequest"
-              :min="AI_TRANSLATION_BATCH_LIMITS.inputTokens.min"
-              :max="AI_TRANSLATION_BATCH_LIMITS.inputTokens.max"
-              :step="1000"
-              :aria-label="t('settings.aiBatch.inputTokens')"
+            <USwitch
+              :model-value="appSettings.confirmAiTranslation.value"
+              :aria-label="t('settings.aiBatch.confirm')"
               :disabled="appSettings.settingsBusy.value"
-              class="w-full"
-              @update:model-value="updateAiBatchInputTokens"
+              @update:model-value="updateAiConfirmation"
             />
           </ManagementFormRow>
         </ManagementFormSection>

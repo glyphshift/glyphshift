@@ -7,6 +7,12 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/2";
+pub const DEFAULT_MAX_RETRIES: u16 = 2;
+pub const MAX_MAX_RETRIES: u16 = 10;
+
+const fn default_max_retries() -> u16 {
+    DEFAULT_MAX_RETRIES
+}
 const PROFILE_FILE_NAME: &str = "ai-profiles.json";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -91,6 +97,8 @@ pub struct AiProfileDraft {
     model_id: Box<str>,
     timeout_ms: u64,
     max_concurrency: u16,
+    #[serde(default = "default_max_retries")]
+    max_retries: u16,
     filter_policy: FilterPolicy,
     #[serde(default)]
     credential: CredentialUpdate,
@@ -110,8 +118,9 @@ impl AiProfileDraft {
             protocol,
             base_url: protocol.default_base_url().into(),
             model_id: model_id.into(),
-            timeout_ms: 60_000,
+            timeout_ms: 300_000,
             max_concurrency: protocol.default_concurrency(),
+            max_retries: DEFAULT_MAX_RETRIES,
             filter_policy: FilterPolicy::default(),
             credential: CredentialUpdate::Keep,
         }
@@ -134,6 +143,12 @@ impl AiProfileDraft {
         self.filter_policy = filter_policy;
         self
     }
+
+    #[must_use]
+    pub const fn with_max_retries(mut self, max_retries: u16) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -147,6 +162,8 @@ struct StoredAiProfile {
     credential_ref: Box<str>,
     timeout_ms: u64,
     max_concurrency: u16,
+    #[serde(default = "default_max_retries")]
+    max_retries: u16,
     filter_policy: FilterPolicy,
 }
 
@@ -178,6 +195,7 @@ pub struct AiProfileView {
     model_id: Box<str>,
     timeout_ms: u64,
     max_concurrency: u16,
+    max_retries: u16,
     filter_policy: FilterPolicy,
     has_credential: bool,
     credential_required: bool,
@@ -191,6 +209,7 @@ pub struct ResolvedAiProfile {
     credential: Option<Box<str>>,
     timeout_ms: u64,
     max_concurrency: u16,
+    max_retries: u16,
 }
 
 impl ResolvedAiProfile {
@@ -227,6 +246,11 @@ impl ResolvedAiProfile {
     #[must_use]
     pub const fn max_concurrency(&self) -> u16 {
         self.max_concurrency
+    }
+
+    #[must_use]
+    pub const fn max_retries(&self) -> u16 {
+        self.max_retries
     }
 }
 
@@ -358,6 +382,7 @@ impl AiProfileCatalog {
             credential,
             timeout_ms: profile.timeout_ms,
             max_concurrency: profile.max_concurrency,
+            max_retries: profile.max_retries,
         })
     }
 
@@ -469,6 +494,7 @@ fn stored_profile(
         model_id,
         timeout_ms,
         max_concurrency,
+        max_retries,
         filter_policy,
         credential,
     } = draft;
@@ -488,7 +514,10 @@ fn stored_profile(
     {
         return Err(AiProfileError::InvalidProfile("base-url"));
     }
-    if !(1_000..=600_000).contains(&timeout_ms) || max_concurrency == 0 {
+    if !(1_000..=600_000).contains(&timeout_ms)
+        || max_concurrency == 0
+        || max_retries > MAX_MAX_RETRIES
+    {
         return Err(AiProfileError::InvalidProfile("request-policy"));
     }
     let credential_ref: Box<str> = format!("glyphshift.ai-profile/{id}").into();
@@ -502,6 +531,7 @@ fn stored_profile(
             credential_ref,
             timeout_ms,
             max_concurrency,
+            max_retries,
             filter_policy,
         },
         credential,
@@ -523,6 +553,7 @@ fn profile_view(
         model_id: profile.model_id.clone(),
         timeout_ms: profile.timeout_ms,
         max_concurrency: profile.max_concurrency,
+        max_retries: profile.max_retries,
         filter_policy: profile.filter_policy.clone(),
         has_credential,
         credential_required: profile.protocol.credential_required(),
@@ -548,6 +579,7 @@ fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
                 || profile.base_url.trim().is_empty()
                 || profile.timeout_ms == 0
                 || profile.max_concurrency == 0
+                || profile.max_retries > MAX_MAX_RETRIES
         })
     {
         return Err(AiProfileError::InvalidArtifact);

@@ -115,47 +115,68 @@ impl HttpTransport for ReqwestHttpTransport {
         if cancellation.is_cancelled() {
             return Err(HttpTransportError::Cancelled);
         }
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(request.timeout_ms))
-            .redirect(reqwest::redirect::Policy::none())
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
             .build()
-            .map_err(|_| HttpTransportError::InvalidRequest)?;
-        let mut outgoing = client.post(request.url.as_ref());
-        for (name, value) in request.headers {
-            outgoing = outgoing.header(name.as_ref(), value.as_ref());
-        }
-        let response = outgoing.body(request.body).send().map_err(|error| {
-            if error.is_timeout() {
-                HttpTransportError::Timeout
-            } else if error.is_builder() {
-                HttpTransportError::InvalidRequest
-            } else {
-                HttpTransportError::Network
+            .map_err(|_| HttpTransportError::Network)?;
+        let request_future = async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_millis(request.timeout_ms))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| HttpTransportError::InvalidRequest)?;
+            let mut outgoing = client.post(request.url.as_ref());
+            for (name, value) in request.headers {
+                outgoing = outgoing.header(name.as_ref(), value.as_ref());
             }
-        })?;
-        let status = response.status().as_u16();
-        let headers = response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .to_str()
-                    .ok()
-                    .map(|value| (Box::<str>::from(name.as_str()), Box::<str>::from(value)))
+            let response = outgoing.body(request.body).send().await.map_err(|error| {
+                if error.is_timeout() {
+                    HttpTransportError::Timeout
+                } else if error.is_builder() {
+                    HttpTransportError::InvalidRequest
+                } else {
+                    HttpTransportError::Network
+                }
+            })?;
+            let status = response.status().as_u16();
+            let headers = response
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (Box::<str>::from(name.as_str()), Box::<str>::from(value)))
+                })
+                .collect::<Vec<_>>();
+            let body = response
+                .bytes()
+                .await
+                .map_err(|_| HttpTransportError::InvalidResponse)?
+                .to_vec();
+            Ok(HttpResponse {
+                status,
+                headers,
+                body,
             })
-            .collect::<Vec<_>>();
-        let body = response
-            .bytes()
-            .map_err(|_| HttpTransportError::InvalidResponse)?
-            .to_vec();
-        if cancellation.is_cancelled() {
-            return Err(HttpTransportError::Cancelled);
+        };
+        let mut request_future = Box::pin(request_future);
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(HttpTransportError::Cancelled);
+            }
+            match runtime.block_on(async {
+                tokio::time::timeout(Duration::from_millis(25), &mut request_future).await
+            }) {
+                Ok(response) => {
+                    if cancellation.is_cancelled() {
+                        return Err(HttpTransportError::Cancelled);
+                    }
+                    return response;
+                }
+                Err(_) => continue,
+            }
         }
-        Ok(HttpResponse {
-            status,
-            headers,
-            body,
-        })
     }
 }
 
@@ -499,6 +520,62 @@ fn http_status_error(response: &HttpResponse) -> ProviderError {
                         .map(|seconds| seconds.saturating_mul(1_000))
                 }),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+    use std::thread;
+
+    #[test]
+    fn reqwest_transport_aborts_an_in_flight_request_when_cancelled() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind delayed HTTP server");
+        let address = listener.local_addr().expect("delayed HTTP address");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept delayed request");
+            let mut request = [0_u8; 1_024];
+            let _ = stream.read(&mut request);
+            entered_tx.send(()).expect("report delayed request");
+            thread::sleep(Duration::from_secs(2));
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+            );
+        });
+
+        let token = CancellationToken::new(Arc::new(AtomicBool::new(false)));
+        let worker_token = token.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let result = ReqwestHttpTransport.send(
+                HttpRequest {
+                    method: "POST",
+                    url: format!("http://{address}/translate").into(),
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: b"{}".to_vec(),
+                    timeout_ms: 5_000,
+                },
+                &worker_token,
+            );
+            result_tx.send(result).expect("report transport result");
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("request reaches delayed server");
+
+        token.cancel();
+
+        assert!(matches!(
+            result_rx
+                .recv_timeout(Duration::from_millis(500))
+                .expect("cancelled transport returns promptly"),
+            Err(HttpTransportError::Cancelled)
+        ));
+    }
 }
 
 fn malformed_response(message: &'static str) -> ProviderError {

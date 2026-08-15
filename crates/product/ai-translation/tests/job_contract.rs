@@ -156,6 +156,14 @@ impl TranslationProvider for DelayedSyntheticProvider {
 }
 
 #[test]
+fn default_batch_policy_sends_at_most_fifty_items_per_json_request() {
+    assert_eq!(
+        TranslationBatchPolicy::default().max_items_per_request(),
+        50
+    );
+}
+
+#[test]
 fn job_validates_provider_output_and_exposes_results_in_plan_order() {
     let root = tempdir().expect("AI job data root");
     let mut profiles =
@@ -260,6 +268,9 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     assert_eq!(value["snapshotRevision"], 7);
     assert_eq!(value["status"], "completed");
     assert_eq!(value["totalBatches"], 1);
+    assert_eq!(value["batchSize"], 50);
+    assert_eq!(value["maxConcurrency"], 1);
+    assert_eq!(value["maxRetries"], 2);
     assert_eq!(value["finishedBatches"], 1);
     assert_eq!(value["failedBatches"], 0);
     assert_eq!(value["results"][0]["itemId"], "save");
@@ -314,7 +325,15 @@ fn cancelled_job_discards_a_provider_result_that_arrives_late() {
         translation.cancel_translation(&job_id).expect("cancel job"),
         glyphshift_ai_translation::CancellationOutcome::Requested
     );
+    let cancelled_before_provider_returns = translation
+        .translation_job(&job_id)
+        .expect("query immediately cancelled job");
     release_tx.send(()).expect("release delayed response");
+    assert_eq!(
+        cancelled_before_provider_returns.status(),
+        TranslationJobStatus::Cancelled,
+        "the user-visible job must stop before an in-flight provider request returns"
+    );
     let deadline = Instant::now() + Duration::from_secs(2);
     let cancelled = loop {
         let snapshot = translation.translation_job(&job_id).expect("query job");
@@ -419,7 +438,7 @@ fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
         .start_translation(
             plan.token(),
             profile,
-            TranslationBatchPolicy::new(20, 16_000).expect("valid batch policy"),
+            TranslationBatchPolicy::new(20).expect("valid batch policy"),
         )
         .expect("start batched job");
     let completed = wait_for_terminal_job(&translation, &job_id);
@@ -434,54 +453,6 @@ fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
     assert_eq!(
         *provider.request_sizes.lock().expect("batch sizes"),
         vec![20, 20, 11]
-    );
-}
-
-#[test]
-fn global_input_token_budget_splits_a_batch_before_the_item_limit() {
-    let root = tempdir().expect("token-budgeted AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
-    profiles
-        .save_profile(AiProfileDraft::new(
-            "profile.local",
-            "Local",
-            AiProviderProtocol::OllamaChat,
-            "synthetic-model",
-        ))
-        .expect("save local profile");
-    let profile = profiles
-        .resolve_profile("profile.local")
-        .expect("resolve local profile");
-    let provider = Arc::new(BatchRecordingSyntheticProvider::default());
-    let mut translation = AiTranslation::new();
-    translation.register_provider(AiProviderProtocol::OllamaChat, provider.clone());
-    let plan = translation
-        .plan_translation(TranslationPlanRequest::new(
-            "dictionary.pending",
-            10,
-            "en-US",
-            "zh-CN",
-            (1..=5).map(|index| {
-                TranslationItem::untranslated(format!("item-{index}"), format!("Source {index}"))
-            }),
-        ))
-        .expect("plan token-budgeted candidates");
-    let job_id = translation
-        .start_translation(
-            plan.token(),
-            profile,
-            TranslationBatchPolicy::new(100, 420).expect("valid batch policy"),
-        )
-        .expect("start token-budgeted job");
-    let completed = wait_for_terminal_job(&translation, &job_id);
-
-    assert_eq!(completed.status(), TranslationJobStatus::Completed);
-    assert_eq!(completed.total_batches(), 3);
-    assert_eq!(completed.completed_count(), 5);
-    assert_eq!(
-        *provider.request_sizes.lock().expect("batch sizes"),
-        vec![2, 2, 1]
     );
 }
 
@@ -519,7 +490,7 @@ fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
         .start_translation(
             plan.token(),
             profile,
-            TranslationBatchPolicy::new(20, 16_000).expect("valid batch policy"),
+            TranslationBatchPolicy::new(20).expect("valid batch policy"),
         )
         .expect("start batched job");
     let completed = wait_for_terminal_job(&translation, &job_id);
@@ -545,4 +516,64 @@ fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
         *provider.request_sizes.lock().expect("batch sizes"),
         vec![20, 20, 11]
     );
+}
+
+#[test]
+fn profile_concurrency_starts_multiple_short_text_batches_in_parallel() {
+    let root = tempdir().expect("concurrent AI job data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.concurrent",
+                "Concurrent",
+                AiProviderProtocol::OpenAiCompatible,
+                "synthetic-model",
+            )
+            .with_base_url("http://synthetic.invalid/v1"),
+        )
+        .expect("save concurrent profile");
+    let profile = profiles
+        .resolve_profile("profile.concurrent")
+        .expect("resolve concurrent profile");
+    assert_eq!(profile.max_concurrency(), 2);
+
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let provider = Arc::new(DelayedSyntheticProvider {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_provider(AiProviderProtocol::OpenAiCompatible, provider);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            12,
+            "en-US",
+            "zh-CN",
+            (1..=100).map(|index| {
+                TranslationItem::untranslated(format!("item-{index}"), format!("Text {index:03}"))
+            }),
+        ))
+        .expect("plan short-text job");
+    let job_id = translation
+        .start_translation(plan.token(), profile, TranslationBatchPolicy::default())
+        .expect("start concurrent job");
+
+    entered_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("first provider request starts");
+    entered_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("profile concurrency starts a second provider request before the first finishes");
+
+    for _ in 0..2 {
+        release_tx.send(()).expect("release provider request");
+    }
+    let completed = wait_for_terminal_job(&translation, &job_id);
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.completed_count(), 100);
+    assert_eq!(completed.finished_batches(), 2);
 }

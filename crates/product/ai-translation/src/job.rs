@@ -3,32 +3,24 @@ use crate::{
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 100;
-pub const DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST: usize = 16_000;
-const REQUEST_TOKEN_RESERVE: usize = 384;
-const ITEM_TOKEN_RESERVE: usize = 12;
+pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 50;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TranslationBatchPolicy {
     max_items_per_request: u16,
-    max_input_tokens_per_request: usize,
 }
 
 impl TranslationBatchPolicy {
     #[must_use]
-    pub const fn new(
-        max_items_per_request: u16,
-        max_input_tokens_per_request: usize,
-    ) -> Option<Self> {
-        if max_items_per_request == 0 || max_input_tokens_per_request == 0 {
+    pub const fn new(max_items_per_request: u16) -> Option<Self> {
+        if max_items_per_request == 0 {
             None
         } else {
             Some(Self {
                 max_items_per_request,
-                max_input_tokens_per_request,
             })
         }
     }
@@ -37,18 +29,12 @@ impl TranslationBatchPolicy {
     pub const fn max_items_per_request(self) -> u16 {
         self.max_items_per_request
     }
-
-    #[must_use]
-    pub const fn max_input_tokens_per_request(self) -> usize {
-        self.max_input_tokens_per_request
-    }
 }
 
 impl Default for TranslationBatchPolicy {
     fn default() -> Self {
         Self {
             max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
-            max_input_tokens_per_request: DEFAULT_MAX_INPUT_TOKENS_PER_REQUEST,
         }
     }
 }
@@ -229,8 +215,13 @@ pub struct CancellationToken {
 }
 
 impl CancellationToken {
-    fn new(cancelled: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(cancelled: Arc<AtomicBool>) -> Self {
         Self { cancelled }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
     }
 
     #[must_use]
@@ -304,6 +295,9 @@ pub struct TranslationJobSnapshot {
     total_count: usize,
     completed_count: usize,
     failed_count: usize,
+    batch_size: u16,
+    max_concurrency: u16,
+    max_retries: u16,
     total_batches: usize,
     finished_batches: usize,
     failed_batches: usize,
@@ -335,6 +329,21 @@ impl TranslationJobSnapshot {
     #[must_use]
     pub const fn failed_count(&self) -> usize {
         self.failed_count
+    }
+
+    #[must_use]
+    pub const fn batch_size(&self) -> u16 {
+        self.batch_size
+    }
+
+    #[must_use]
+    pub const fn max_concurrency(&self) -> u16 {
+        self.max_concurrency
+    }
+
+    #[must_use]
+    pub const fn max_retries(&self) -> u16 {
+        self.max_retries
     }
 
     #[must_use]
@@ -438,6 +447,9 @@ impl AiTranslation {
                 total_count: plan.candidates.len(),
                 completed_count: 0,
                 failed_count: 0,
+                batch_size: batch_policy.max_items_per_request(),
+                max_concurrency: profile.max_concurrency(),
+                max_retries: profile.max_retries(),
                 total_batches,
                 finished_batches: 0,
                 failed_batches: 0,
@@ -481,7 +493,7 @@ impl AiTranslation {
             return Ok(CancellationOutcome::AlreadyFinished);
         }
         cell.cancelled.store(true, Ordering::Release);
-        state.status = TranslationJobStatus::Cancelling;
+        state.status = TranslationJobStatus::Cancelled;
         Ok(CancellationOutcome::Requested)
     }
 }
@@ -494,81 +506,129 @@ fn run_job(
     plan: TranslationPlan,
 ) {
     if let Ok(mut state) = cell.state.lock() {
+        if cell.cancelled.load(Ordering::Acquire) || state.status.is_terminal() {
+            state.status = TranslationJobStatus::Cancelled;
+            return;
+        }
         state.status = TranslationJobStatus::Running;
     } else {
         return;
     }
     let token = CancellationToken::new(cell.cancelled.clone());
-    for candidates in batches(&plan.candidates, batch_policy) {
-        if token.is_cancelled() {
-            finish_cancelled(&cell);
-            return;
-        }
-        let request = ProviderRequest {
-            profile: &profile,
-            source_locale: &plan.source_locale,
-            target_locale: &plan.target_locale,
-            items: candidates
-                .iter()
-                .map(|candidate| ProviderItem {
-                    item_id: candidate.item_id.clone(),
-                    source: candidate.source.clone(),
-                    protected_tokens: candidate.protected_tokens.clone(),
-                })
-                .collect(),
-        };
-        let mut attempt = 0_u32;
-        let response = loop {
-            let response = provider.translate(&request, &token);
-            match &response {
-                Err(error) if error.retryable() && attempt < 2 && !token.is_cancelled() => {
-                    let exponential = 250_u64.saturating_mul(1_u64 << attempt);
-                    let delay_ms = error.retry_after_ms().unwrap_or(exponential).min(5_000);
-                    attempt += 1;
-                    if wait_for_retry(delay_ms, &token) {
-                        break Err(ProviderError::new(
-                            ProviderErrorCategory::Cancelled,
-                            false,
-                            "provider request was cancelled",
-                        ));
+    let job_batches = batches(&plan.candidates, batch_policy);
+    let worker_count = usize::from(profile.max_concurrency())
+        .min(job_batches.len())
+        .max(1);
+    let next_batch = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let cell = &cell;
+            let provider = provider.clone();
+            let profile = &profile;
+            let plan = &plan;
+            let token = &token;
+            let job_batches = &job_batches;
+            let next_batch = &next_batch;
+            scope.spawn(move || loop {
+                if token.is_cancelled() {
+                    return;
+                }
+                let batch_index = next_batch.fetch_add(1, Ordering::AcqRel);
+                let Some(candidates) = job_batches.get(batch_index) else {
+                    return;
+                };
+                let response = translate_batch(provider.as_ref(), profile, plan, candidates, token);
+                if token.is_cancelled() {
+                    return;
+                }
+                let Ok(mut state) = cell.state.lock() else {
+                    return;
+                };
+                match response {
+                    Ok(results) => {
+                        state.completed_count += results.len();
+                        state.finished_batches += 1;
+                        state.results.extend(results);
+                    }
+                    Err(error) => {
+                        state.failed_count += candidates.len();
+                        state.finished_batches += 1;
+                        state.failed_batches += 1;
+                        state.errors.push(error);
                     }
                 }
-                _ => break response,
-            }
-        };
-        if token.is_cancelled() {
-            finish_cancelled(&cell);
-            return;
+            });
         }
-        match response.and_then(|response| validate_response(&candidates, response)) {
-            Ok(results) => {
-                if let Ok(mut state) = cell.state.lock() {
-                    state.completed_count += results.len();
-                    state.finished_batches += 1;
-                    state.results.extend(results);
-                } else {
-                    return;
-                }
-            }
-            Err(error) => {
-                if let Ok(mut state) = cell.state.lock() {
-                    state.failed_count += candidates.len();
-                    state.finished_batches += 1;
-                    state.failed_batches += 1;
-                    state.errors.push(error);
-                } else {
-                    return;
-                }
-            }
-        }
+    });
+    if token.is_cancelled() {
+        finish_cancelled(&cell);
+        return;
     }
     if let Ok(mut state) = cell.state.lock() {
+        let result_order = plan
+            .candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| (candidate.item_id.as_ref(), index))
+            .collect::<BTreeMap<_, _>>();
+        state.results.sort_by_key(|result| {
+            result_order
+                .get(result.item_id())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         state.status = if state.failed_count == 0 {
             TranslationJobStatus::Completed
         } else {
             TranslationJobStatus::CompletedWithFailures
         };
     }
+}
+
+fn translate_batch(
+    provider: &dyn TranslationProvider,
+    profile: &ResolvedAiProfile,
+    plan: &TranslationPlan,
+    candidates: &[TranslationCandidate],
+    token: &CancellationToken,
+) -> Result<Vec<ValidatedTranslation>, ProviderError> {
+    let request = ProviderRequest {
+        profile,
+        source_locale: &plan.source_locale,
+        target_locale: &plan.target_locale,
+        items: candidates
+            .iter()
+            .map(|candidate| ProviderItem {
+                item_id: candidate.item_id.clone(),
+                source: candidate.source.clone(),
+                protected_tokens: candidate.protected_tokens.clone(),
+            })
+            .collect(),
+    };
+    let mut attempt = 0_u32;
+    let response = loop {
+        let response = provider.translate(&request, token);
+        match &response {
+            Err(error)
+                if error.retryable()
+                    && attempt < u32::from(profile.max_retries())
+                    && !token.is_cancelled() =>
+            {
+                let exponential = 250_u64.saturating_mul(1_u64 << attempt);
+                let delay_ms = error.retry_after_ms().unwrap_or(exponential).min(5_000);
+                attempt += 1;
+                if wait_for_retry(delay_ms, token) {
+                    break Err(ProviderError::new(
+                        ProviderErrorCategory::Cancelled,
+                        false,
+                        "provider request was cancelled",
+                    ));
+                }
+            }
+            _ => break response,
+        }
+    };
+    response.and_then(|response| validate_response(candidates, response))
 }
 
 fn finish_cancelled(cell: &JobCell) {
@@ -581,43 +641,10 @@ fn batches(
     candidates: &[TranslationCandidate],
     policy: TranslationBatchPolicy,
 ) -> Vec<Vec<TranslationCandidate>> {
-    let mut batches = Vec::new();
-    let mut current = Vec::new();
-    let mut estimated_tokens = REQUEST_TOKEN_RESERVE;
-    for candidate in candidates {
-        let candidate_tokens = estimated_candidate_tokens(candidate);
-        if !current.is_empty()
-            && (current.len() >= usize::from(policy.max_items_per_request())
-                || estimated_tokens.saturating_add(candidate_tokens)
-                    > policy.max_input_tokens_per_request())
-        {
-            batches.push(std::mem::take(&mut current));
-            estimated_tokens = REQUEST_TOKEN_RESERVE;
-        }
-        estimated_tokens = estimated_tokens.saturating_add(candidate_tokens);
-        current.push(candidate.clone());
-    }
-    if !current.is_empty() {
-        batches.push(current);
-    }
-    batches
-}
-
-fn estimated_candidate_tokens(candidate: &TranslationCandidate) -> usize {
-    ITEM_TOKEN_RESERVE
-        .saturating_add(estimated_text_tokens(&candidate.item_id))
-        .saturating_add(estimated_text_tokens(&candidate.source))
-}
-
-fn estimated_text_tokens(value: &str) -> usize {
-    let (ascii, non_ascii) = value.chars().fold((0_usize, 0_usize), |counts, character| {
-        if character.is_ascii() {
-            (counts.0.saturating_add(1), counts.1)
-        } else {
-            (counts.0, counts.1.saturating_add(1))
-        }
-    });
-    non_ascii.saturating_add(ascii.saturating_add(3) / 4)
+    candidates
+        .chunks(usize::from(policy.max_items_per_request()))
+        .map(<[TranslationCandidate]>::to_vec)
+        .collect()
 }
 
 fn validate_response(

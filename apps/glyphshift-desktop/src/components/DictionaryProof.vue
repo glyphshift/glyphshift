@@ -7,6 +7,7 @@ import { useAppSettings } from '../appSettings'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
+import AiTranslationPreflight from './AiTranslationPreflight.vue'
 
 interface DictionaryTableRow {
   entry: DictionaryEntry
@@ -43,11 +44,15 @@ const pendingRemoval = ref<number[]>([])
 const selected = ref(new Set<number>())
 const selectedProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
+const aiPreflightOpen = ref(false)
 const aiPlan = ref<AiTranslationPlan | null>(null)
 const aiNotice = ref('')
 const aiNoticeTone = ref<'success' | 'warning'>('success')
+const aiNoticeCancelled = ref(false)
 const aiRetryAvailable = ref(false)
-const aiNoticeTitle = computed(() => aiNoticeTone.value === 'warning'
+const aiNoticeTitle = computed(() => aiNoticeCancelled.value
+  ? t('ai.translationCancelled')
+  : aiNoticeTone.value === 'warning'
   ? t('ai.partialCompletion')
   : t('ai.translationCompleted'))
 
@@ -196,6 +201,7 @@ function saveDraft() {
 
 async function prepareAiPlan() {
   aiNotice.value = ''
+  aiNoticeCancelled.value = false
   aiRetryAvailable.value = false
   if (!selectedProfile.value) {
     emit('configure-ai')
@@ -217,7 +223,7 @@ async function previewAiTranslation() {
   if (plan) aiPreviewOpen.value = true
 }
 
-async function runAiTranslation(plan?: AiTranslationPlan | null) {
+async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirmed = false) {
   const nextPlan = plan ?? await prepareAiPlan()
   if (!nextPlan || !selectedProfile.value) return
   if (!nextPlan.candidates.length) {
@@ -225,6 +231,17 @@ async function runAiTranslation(plan?: AiTranslationPlan | null) {
     return
   }
   aiPreviewOpen.value = false
+  if (appSettings.confirmAiTranslation.value && !alreadyConfirmed) {
+    aiPreflightOpen.value = true
+    return
+  }
+  await executeAiTranslation()
+}
+
+async function executeAiTranslation() {
+  const nextPlan = aiPlan.value
+  if (!nextPlan || !selectedProfile.value) return
+  aiPreflightOpen.value = false
   try {
     const job = await ai.runPlan(nextPlan, selectedProfile.value.id)
     let applied = 0
@@ -237,19 +254,33 @@ async function runAiTranslation(plan?: AiTranslationPlan | null) {
       applied += 1
     }
     if (job.status === 'completed') {
+      aiNoticeCancelled.value = false
       aiNoticeTone.value = 'success'
       aiNotice.value = t('ai.dictionaryCompleted', {
         count: applied,
         batches: job.totalBatches,
+        elapsed: ai.elapsed.value,
+      })
+    }
+    else if (job.status === 'cancelled') {
+      aiNoticeCancelled.value = true
+      aiNoticeTone.value = 'warning'
+      aiRetryAvailable.value = job.completedCount < job.totalCount
+      aiNotice.value = t('ai.translationCancelledNotice', {
+        completed: job.completedCount,
+        total: job.totalCount,
+        elapsed: ai.elapsed.value,
       })
     }
     else {
+      aiNoticeCancelled.value = false
       aiNoticeTone.value = 'warning'
       aiRetryAvailable.value = job.completedCount < job.totalCount
       aiNotice.value = t('ai.dictionaryPartial', {
         completed: job.completedCount,
         total: job.totalCount,
         failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
+        elapsed: ai.elapsed.value,
       })
     }
     aiPlan.value = null
@@ -301,12 +332,12 @@ usePageEscape(() => true, () => emit('back'))
       <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
     </UAlert>
     <UAlert
-      v-if="ai.busy.value && ai.currentJob.value"
+      v-if="ai.busy.value && ai.currentJob.value && !['completed', 'completed_with_failures', 'cancelled'].includes(ai.currentJob.value.status)"
       role="status"
       color="primary"
       variant="soft"
       :title="t('ai.translating')"
-      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches })"
+      :description="t('ai.progress', { completed: ai.currentJob.value.completedCount, total: ai.currentJob.value.totalCount, finishedBatches: ai.currentJob.value.finishedBatches, totalBatches: ai.currentJob.value.totalBatches, batchSize: ai.currentJob.value.batchSize, concurrency: ai.currentJob.value.maxConcurrency, elapsed: ai.elapsed.value })"
       class="mb-3"
     >
       <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="ai.cancelCurrentJob" /></template>
@@ -435,10 +466,10 @@ usePageEscape(() => true, () => emit('back'))
       :busy="ai.busy.value"
       width="md"
       @update:open="aiPreviewOpen = $event"
-      @confirm="runAiTranslation(aiPlan)"
+      @confirm="runAiTranslation(aiPlan, true)"
     >
       <p v-if="aiPlan?.candidates.length && selectedProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
-        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, tokens: appSettings.aiTranslationBatch.value.maxInputTokensPerRequest }) }}
+        {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: appSettings.aiTranslationBatch.value.maxItemsPerRequest, batches: Math.ceil(aiPlan.candidates.length / appSettings.aiTranslationBatch.value.maxItemsPerRequest), concurrency: selectedProfile.maxConcurrency }) }}
       </p>
       <div v-if="aiPlan?.candidates.length" class="space-y-1">
         <div v-for="candidate in aiPlan.candidates.slice(0, 20)" :key="candidate.itemId" class="flex items-center gap-2 border-b border-[var(--border)] py-2 last:border-b-0">
@@ -449,6 +480,14 @@ usePageEscape(() => true, () => emit('back'))
       <UEmpty v-else icon="i-tabler-check" :title="t('ai.nothingToTranslate')" :description="t('ai.nothingToTranslateHint')" />
       <p v-if="aiPlan?.skipped.length" class="type-metadata mb-0 mt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
+
+    <AiTranslationPreflight
+      v-model:open="aiPreflightOpen"
+      :plan="aiPlan"
+      :profile="selectedProfile"
+      :max-items-per-request="appSettings.aiTranslationBatch.value.maxItemsPerRequest"
+      @proceed="executeAiTranslation"
+    />
 
     <ConfirmDialog
       :open="Boolean(pendingRemoval.length)"

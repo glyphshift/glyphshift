@@ -284,6 +284,7 @@ fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
                 AiProviderProtocol::OpenAiChatCompletions,
                 "synthetic-model",
             )
+            .with_max_retries(1)
             .with_credential(CredentialUpdate::replace("synthetic-provider-secret")),
         )
         .expect("save retry profile");

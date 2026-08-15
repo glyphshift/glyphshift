@@ -19,8 +19,9 @@ interface ProfileForm {
   protocol: AiProviderProtocol
   baseUrl: string
   modelId: string
-  timeoutMs: number
+  timeoutSeconds: number
   maxConcurrency: number
+  maxRetries: number
   filterPolicy: AiFilterPolicy
   secret: string
   clearCredential: boolean
@@ -51,8 +52,9 @@ function newProfileForm(): ProfileForm {
     protocol,
     baseUrl: providerDefaults[protocol].baseUrl,
     modelId: '',
-    timeoutMs: 60_000,
+    timeoutSeconds: 300,
     maxConcurrency: providerDefaults[protocol].concurrency,
+    maxRetries: 2,
     filterPolicy: defaultAiFilterPolicy(),
     secret: '',
     clearCredential: false,
@@ -67,8 +69,15 @@ const formValid = computed(() => Boolean(
   form.value.name.trim()
   && form.value.baseUrl.trim()
   && form.value.modelId.trim()
-  && form.value.timeoutMs >= 1_000
-  && form.value.maxConcurrency > 0
+  && Number.isInteger(form.value.timeoutSeconds)
+  && form.value.timeoutSeconds >= 1
+  && form.value.timeoutSeconds <= 600
+  && Number.isInteger(form.value.maxConcurrency)
+  && form.value.maxConcurrency >= 1
+  && form.value.maxConcurrency <= 16
+  && Number.isInteger(form.value.maxRetries)
+  && form.value.maxRetries >= 0
+  && form.value.maxRetries <= 10
   && (!credentialRequired.value
     || form.value.secret.trim()
     || editingProfile.value?.hasCredential),
@@ -105,8 +114,9 @@ function openEdit(profile: AiProfile) {
     protocol: profile.protocol,
     baseUrl: profile.baseUrl,
     modelId: profile.modelId,
-    timeoutMs: profile.timeoutMs,
+    timeoutSeconds: profile.timeoutMs / 1_000,
     maxConcurrency: profile.maxConcurrency,
+    maxRetries: profile.maxRetries,
     filterPolicy: JSON.parse(JSON.stringify(profile.filterPolicy)),
     secret: '',
     clearCredential: false,
@@ -129,8 +139,9 @@ async function save() {
     protocol: value.protocol,
     baseUrl: value.baseUrl.trim(),
     modelId: value.modelId.trim(),
-    timeoutMs: Number(value.timeoutMs),
+    timeoutMs: Number(value.timeoutSeconds) * 1_000,
     maxConcurrency: Number(value.maxConcurrency),
+    maxRetries: Number(value.maxRetries),
     filterPolicy: {
       ...value.filterPolicy,
       maxSourceChars: Number(value.filterPolicy.maxSourceChars) > 0
@@ -180,6 +191,9 @@ onMounted(() => void ai.connect())
           </div>
           <p class="type-metadata m-0 mt-1 truncate leading-4 text-[var(--text-muted)]">
             {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }} · {{ profile.baseUrl }}
+          </p>
+          <p class="type-metadata m-0 mt-0.5 truncate leading-4 text-[var(--text-muted)]">
+            {{ t('ai.profileRequestPolicy', { timeout: profile.timeoutMs / 1_000, concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
           </p>
           <div v-if="ai.connectionReports.value[profile.id]" class="type-metadata mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 leading-4">
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
@@ -255,7 +269,13 @@ onMounted(() => void ai.connect())
         <UInput v-model="form.secret" type="password" :aria-label="t('ai.apiKey')" :placeholder="editingProfile?.hasCredential ? t('ai.keepCredentialPlaceholder') : ''" autocomplete="new-password" class="w-full" />
       </UFormField>
       <UFormField :label="t('ai.timeout')">
-        <UInput v-model.number="form.timeoutMs" type="number" min="1000" max="600000" :aria-label="t('ai.timeout')" class="w-full" />
+        <UInput v-model.number="form.timeoutSeconds" type="number" min="1" max="600" step="1" :aria-label="t('ai.timeout')" class="w-full" />
+      </UFormField>
+      <UFormField :label="t('ai.concurrency')">
+        <UInput v-model.number="form.maxConcurrency" type="number" min="1" max="16" step="1" :aria-label="t('ai.concurrency')" class="w-full" />
+      </UFormField>
+      <UFormField :label="t('ai.maxRetries')" :hint="t('ai.maxRetriesHint')">
+        <UInput v-model.number="form.maxRetries" type="number" min="0" max="10" step="1" :aria-label="t('ai.maxRetries')" class="w-full" />
       </UFormField>
     </div>
 
