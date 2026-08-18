@@ -3,10 +3,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiTranslationBatchStatus, AiTranslationJob } from '../useAiTranslation'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   job: AiTranslationJob
   elapsed: string
-}>()
+  showDismiss?: boolean
+}>(), { showDismiss: true })
 
 const emit = defineEmits<{
   cancel: []
@@ -15,7 +16,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const batches = computed(() => props.job.batches ?? [])
-const active = computed(() => !['completed', 'completed_with_failures', 'cancelled'].includes(props.job.status))
+const active = computed(() => !['completed', 'completed_with_failures', 'cancelled', 'interrupted'].includes(props.job.status))
 const orderedBatches = computed(() => {
   const priority: Record<AiTranslationBatchStatus, number> = {
     retrying: 0,
@@ -89,7 +90,7 @@ function statusTone(status: AiTranslationBatchStatus) {
         </p>
       </div>
       <UButton v-if="active" color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="emit('cancel')" />
-      <UButton v-else color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('ai.dismissBatchReport')" @click="emit('dismiss')" />
+      <UButton v-else-if="showDismiss !== false" color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('ai.dismissBatchReport')" @click="emit('dismiss')" />
     </header>
 
     <dl class="m-0 grid grid-cols-2 border-y border-[var(--border)] bg-[var(--surface-subtle)] sm:grid-cols-4">
@@ -128,6 +129,9 @@ function statusTone(status: AiTranslationBatchStatus) {
         <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
         <p v-if="batch.lastError && (batch.attemptCount > 1 || ['retrying', 'failed'].includes(batch.status))" class="type-metadata col-start-2 col-end-5 m-0 truncate pb-1 text-[var(--text-muted)]" :title="batch.lastError.safeMessage">
           {{ batch.lastError.safeMessage }}
+        </p>
+        <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate pb-1 tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() })">
+          {{ t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() }) }}
         </p>
       </li>
     </ol>

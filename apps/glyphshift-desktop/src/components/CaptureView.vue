@@ -50,6 +50,7 @@ const emit = defineEmits<{
   'open-dictionary': [id: string]
   'workspace-changed': []
   'configure-ai': []
+  'open-ai-tasks': []
 }>()
 
 const { t, locale } = useI18n()
@@ -529,56 +530,9 @@ async function executeAiTranslation() {
   if (!run || !nextPlan || !selectedAiProfile.value) return
   aiPreflightOpen.value = false
   try {
-    const job = await ai.runPlan(nextPlan, selectedAiProfile.value.id)
-    const result = await ai.applyProbeResults(run.id, job)
-    if ('__TAURI_INTERNALS__' in window) {
-      await probe.refreshSummary(run.id)
-      emit('workspace-changed')
-      await loadPage()
-    }
-    else {
-      for (const translated of job.results) {
-        const row = entryPage.value.rows.find(candidate => (
-          candidate.source === translated.source && !candidate.translation.trim()
-        ))
-        if (!row) continue
-        row.translation = translated.translation
-        translationValues.value[row.source] = translated.translation
-      }
-    }
-    if (job.status === 'completed') {
-      aiNoticeCancelled.value = false
-      aiNoticeTone.value = 'success'
-      aiNotice.value = t('ai.probeCompleted', {
-        applied: result.appliedCount,
-        skipped: result.skippedCount,
-        batches: job.totalBatches,
-        elapsed: ai.elapsed.value,
-      })
-    }
-    else if (job.status === 'cancelled') {
-      aiNoticeCancelled.value = true
-      aiNoticeTone.value = 'warning'
-      aiRetryAvailable.value = job.completedCount < job.totalCount
-      aiNotice.value = t('ai.translationCancelledNotice', {
-        completed: job.completedCount,
-        total: job.totalCount,
-        elapsed: ai.elapsed.value,
-      })
-    }
-    else {
-      aiNoticeCancelled.value = false
-      aiNoticeTone.value = 'warning'
-      aiRetryAvailable.value = job.completedCount < job.totalCount
-      aiNotice.value = t('ai.probePartial', {
-        completed: job.completedCount,
-        total: job.totalCount,
-        applied: result.appliedCount,
-        failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
-        elapsed: ai.elapsed.value,
-      })
-    }
+    await ai.startBackgroundPlan(nextPlan, selectedAiProfile.value.id)
     aiPlan.value = null
+    emit('open-ai-tasks')
   }
   catch {
     // The composable exposes the localized error near the probe header.

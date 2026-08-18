@@ -1,6 +1,7 @@
 use crate::{
     AiProviderProtocol, AiTranslation, CancellationToken, ProviderBatchResult, ProviderError,
-    ProviderErrorCategory, ProviderRequest, ProviderTranslation, TranslationProvider,
+    ProviderErrorCategory, ProviderRequest, ProviderTranslation, ProviderUsage,
+    TranslationProvider,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -259,12 +260,17 @@ fn build_request(
     let user_text = serde_json::to_string(&input)
         .map_err(|_| invalid_request("could not encode translation input"))?;
     let system_text = format!(
-        "Translate each UI text from {} to {}. Return only the JSON object required by the schema. The translations array MUST contain exactly {} strings in exactly the same order as input.items. For every index i, translations[i] must be only the translation of input.items[i]. Never reorder, merge, split, omit, duplicate, or add items. If an item should remain unchanged, return it unchanged at the same index. Preserve placeholders, format specifiers, escape sequences, keyboard shortcuts, and other protected tokens exactly. Return translation text only, with no source text, numbering, labels, notes, or explanations.",
+        "Translate every string in input.items from {} to {}. Return only JSON matching the schema: translations[i] must translate input.items[i], in the same order and with the same item count of {}. Preserve placeholders, format specifiers, escape sequences, shortcuts, and other code-like tokens exactly. Copy an item unchanged when it should not be translated. Do not add notes or labels.",
         request.source_locale(),
         request.target_locale(),
         request.items().len()
     );
-    let (endpoint, body) = match protocol {
+    let (endpoint, mut body) = match protocol {
+        AiProviderProtocol::CodexSubscription => {
+            return Err(invalid_request(
+                "Codex subscription is not an HTTP provider",
+            ));
+        }
         AiProviderProtocol::OpenAiResponses => (
             "responses".to_owned(),
             json!({
@@ -323,12 +329,18 @@ fn build_request(
             }),
         ),
     };
+    apply_reasoning_policy(protocol, profile, &mut body);
     let url = format!("{}/{}", profile.base_url().trim_end_matches('/'), endpoint);
     let mut headers = vec![(
         Box::<str>::from("content-type"),
         Box::<str>::from("application/json"),
     )];
     match protocol {
+        AiProviderProtocol::CodexSubscription => {
+            return Err(invalid_request(
+                "Codex subscription is not an HTTP provider",
+            ));
+        }
         AiProviderProtocol::AnthropicMessages => {
             let credential = profile
                 .credential()
@@ -371,6 +383,50 @@ fn build_request(
     })
 }
 
+fn apply_reasoning_policy(
+    protocol: AiProviderProtocol,
+    profile: &crate::ResolvedAiProfile,
+    body: &mut Value,
+) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    match protocol {
+        AiProviderProtocol::OpenAiResponses => {
+            if let Some(effort) = profile.reasoning_effort().responses_value() {
+                object.insert("reasoning".to_owned(), json!({"effort": effort}));
+            }
+        }
+        AiProviderProtocol::OpenAiChatCompletions | AiProviderProtocol::OpenAiCompatible => {
+            let reasoning = profile.reasoning_effort();
+            if profile.model_id().starts_with("deepseek-") {
+                match reasoning {
+                    crate::AiReasoningEffort::Disabled => {
+                        object.insert("thinking".to_owned(), json!({"type": "disabled"}));
+                    }
+                    crate::AiReasoningEffort::Automatic => {}
+                    crate::AiReasoningEffort::Maximum => {
+                        object.insert("thinking".to_owned(), json!({"type": "enabled"}));
+                        object.insert("reasoning_effort".to_owned(), json!("max"));
+                    }
+                    crate::AiReasoningEffort::Low
+                    | crate::AiReasoningEffort::Medium
+                    | crate::AiReasoningEffort::High => {
+                        object.insert("thinking".to_owned(), json!({"type": "enabled"}));
+                        object.insert("reasoning_effort".to_owned(), json!("high"));
+                    }
+                }
+            } else if let Some(effort) = reasoning.chat_value() {
+                object.insert("reasoning_effort".to_owned(), json!(effort));
+            }
+        }
+        AiProviderProtocol::CodexSubscription
+        | AiProviderProtocol::AnthropicMessages
+        | AiProviderProtocol::GeminiGenerateContent
+        | AiProviderProtocol::OllamaChat => {}
+    }
+}
+
 fn translation_schema(item_count: usize) -> Value {
     json!({
         "type": "object",
@@ -397,7 +453,13 @@ fn decode_response(
     }
     let value: Value = serde_json::from_slice(&response.body)
         .map_err(|_| malformed_response("provider returned invalid JSON"))?;
+    let usage = decode_usage(protocol, &value);
     let text = match protocol {
+        AiProviderProtocol::CodexSubscription => {
+            return Err(malformed_response(
+                "Codex subscription is not an HTTP provider",
+            ));
+        }
         AiProviderProtocol::OpenAiResponses => value
             .get("output")
             .and_then(Value::as_array)
@@ -437,12 +499,82 @@ fn decode_response(
             "provider returned a mismatched translation count",
         ));
     }
-    Ok(ProviderBatchResult::new(
+    let result = ProviderBatchResult::new(
         request
             .items()
             .iter()
             .zip(structured.translations)
             .map(|(item, text)| ProviderTranslation::new(item.item_id(), text)),
+    );
+    Ok(usage.map_or(result.clone(), |usage| result.with_usage(usage)))
+}
+
+fn decode_usage(protocol: AiProviderProtocol, value: &Value) -> Option<ProviderUsage> {
+    let number = |pointers: &[&str]| {
+        pointers
+            .iter()
+            .find_map(|pointer| value.pointer(pointer).and_then(Value::as_u64))
+            .unwrap_or(0)
+    };
+    let (input, output, reasoning, cached, explicit_total) = match protocol {
+        AiProviderProtocol::CodexSubscription => return None,
+        AiProviderProtocol::OpenAiResponses => (
+            number(&["/usage/input_tokens", "/usage/prompt_tokens"]),
+            number(&["/usage/output_tokens", "/usage/completion_tokens"]),
+            number(&[
+                "/usage/output_tokens_details/reasoning_tokens",
+                "/usage/completion_tokens_details/reasoning_tokens",
+            ]),
+            number(&[
+                "/usage/input_tokens_details/cached_tokens",
+                "/usage/prompt_cache_hit_tokens",
+            ]),
+            number(&["/usage/total_tokens"]),
+        ),
+        AiProviderProtocol::OpenAiChatCompletions | AiProviderProtocol::OpenAiCompatible => (
+            number(&["/usage/prompt_tokens", "/usage/input_tokens"]),
+            number(&["/usage/completion_tokens", "/usage/output_tokens"]),
+            number(&[
+                "/usage/completion_tokens_details/reasoning_tokens",
+                "/usage/output_tokens_details/reasoning_tokens",
+            ]),
+            number(&[
+                "/usage/prompt_cache_hit_tokens",
+                "/usage/prompt_tokens_details/cached_tokens",
+            ]),
+            number(&["/usage/total_tokens"]),
+        ),
+        AiProviderProtocol::AnthropicMessages => (
+            number(&["/usage/input_tokens"]),
+            number(&["/usage/output_tokens"]),
+            0,
+            number(&["/usage/cache_read_input_tokens"]),
+            0,
+        ),
+        AiProviderProtocol::GeminiGenerateContent => (
+            number(&["/usageMetadata/promptTokenCount"]),
+            number(&["/usageMetadata/candidatesTokenCount"]),
+            number(&["/usageMetadata/thoughtsTokenCount"]),
+            number(&["/usageMetadata/cachedContentTokenCount"]),
+            number(&["/usageMetadata/totalTokenCount"]),
+        ),
+        AiProviderProtocol::OllamaChat => (
+            number(&["/prompt_eval_count"]),
+            number(&["/eval_count"]),
+            0,
+            0,
+            0,
+        ),
+    };
+    if input == 0 && output == 0 && reasoning == 0 && cached == 0 && explicit_total == 0 {
+        return None;
+    }
+    Some(ProviderUsage::new(
+        input,
+        output,
+        reasoning,
+        cached,
+        explicit_total.max(input.saturating_add(output)),
     ))
 }
 

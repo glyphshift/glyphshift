@@ -1,8 +1,8 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiTranslation, CancellationToken,
     CredentialVault, CredentialVaultError, ProviderBatchResult, ProviderError, ProviderRequest,
-    ProviderTranslation, TranslationBatchPolicy, TranslationItem, TranslationJobStatus,
-    TranslationPlanRequest, TranslationProvider,
+    ProviderTranslation, TranslationBatchPolicy, TranslationItem, TranslationJobError,
+    TranslationJobStatus, TranslationPlanRequest, TranslationProvider,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -29,6 +29,80 @@ impl CredentialVault for EmptyCredentialVault {
     fn expose(&self, _credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
         Err(CredentialVaultError::Missing)
     }
+}
+
+#[test]
+fn only_one_non_terminal_translation_job_can_run() {
+    let root = tempdir().expect("single task data root");
+    let mut profiles =
+        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    profiles
+        .save_profile(AiProfileDraft::new(
+            "profile.local",
+            "Local",
+            AiProviderProtocol::OllamaChat,
+            "synthetic-model",
+        ))
+        .expect("save profile");
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let mut translation = AiTranslation::new();
+    translation.register_provider(
+        AiProviderProtocol::OllamaChat,
+        Arc::new(DelayedSyntheticProvider {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+        }),
+    );
+    let first = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary:first",
+            1,
+            "en-US",
+            "zh-CN",
+            [TranslationItem::untranslated("first", "First")],
+        ))
+        .expect("plan first task");
+    let first_id = translation
+        .start_translation(
+            first.token(),
+            profiles
+                .resolve_profile("profile.local")
+                .expect("resolve profile"),
+        )
+        .expect("start first task");
+    entered_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("first task enters provider");
+    let second = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary:second",
+            1,
+            "en-US",
+            "zh-CN",
+            [TranslationItem::untranslated("second", "Second")],
+        ))
+        .expect("plan second task");
+
+    assert_eq!(
+        translation.start_translation(
+            second.token(),
+            profiles
+                .resolve_profile("profile.local")
+                .expect("resolve profile"),
+        ),
+        Err(TranslationJobError::ActiveJob(first_id.as_str().into()))
+    );
+    assert_eq!(
+        translation
+            .active_translation_job()
+            .expect("query active job")
+            .expect("active job")
+            .job_id(),
+        first_id.as_str()
+    );
+    release_tx.send(()).expect("release first task");
+    let _ = wait_for_terminal_job(&translation, &first_id);
 }
 
 struct ReorderedSyntheticProvider;
@@ -291,6 +365,11 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     assert_eq!(value["jobId"], job_id.as_str());
     assert_eq!(value["planToken"], plan.token());
     assert_eq!(value["snapshotRevision"], 7);
+    assert_eq!(value["profileName"], "Local");
+    assert_eq!(value["protocol"], "ollama_chat");
+    assert_eq!(value["modelId"], "synthetic-model");
+    assert!(value["startedAtMs"].is_number());
+    assert!(value["finishedAtMs"].is_number());
     assert_eq!(value["status"], "completed");
     assert_eq!(value["totalBatches"], 1);
     assert_eq!(value["batchSize"], 50);
@@ -304,10 +383,13 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     assert_eq!(value["batches"][0]["status"], "completed");
     assert_eq!(value["batches"][0]["attemptCount"], 1);
     assert!(value["batches"][0]["elapsedMs"].is_number());
+    assert!(value["batches"][0]["usage"].is_null());
+    assert!(value["usage"].is_null());
     assert_eq!(value["results"][0]["itemId"], "save");
     assert_eq!(value["results"][0]["translation"], "保存");
     assert!(value.get("rawResponse").is_none());
     assert!(value.get("credential").is_none());
+    assert!(value.get("baseUrl").is_none());
 }
 
 #[test]

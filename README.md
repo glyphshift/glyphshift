@@ -32,8 +32,8 @@ Glyphshift 是一款面向 Windows 桌面软件的运行时界面翻译工具。
 - **可恢复探针**：收集界面原文、出现次数和技术来源，支持暂停、继续、筛选和绑定词典。
 - **可复用词典**：独立维护语言、版本、元数据和原文到译文的映射，可在多个工作流间复用。
 - **工作流组合**：每个软件目标独立选择 Adapter、多个有序词典和可选字体替换策略。
-- **AI 补全**：支持 OpenAI、Anthropic、Gemini、OpenAI-compatible 与 Ollama 协议；自动分批、并发、
-  重试，并保留已经完成和人工填写的译文。
+- **后台 AI 补全**：支持 OpenAI、Anthropic、Gemini、OpenAI-compatible、Ollama 与本机 Codex 订阅；
+  同时只运行一个任务，切换页面不停止，并记录批次、耗时和供应商实报 Token。
 - **多种界面绘制路径**：内置 Adapter 覆盖多类 Windows 原生与框架绘制路径；实际覆盖以探针结果为准。
 - **中英文界面**：Glyphshift 自身支持简体中文与 English，并提供深色、浅色和跟随系统主题。
 
@@ -52,8 +52,12 @@ Glyphshift 是一款面向 Windows 桌面软件的运行时界面翻译工具。
 
 ## AI 翻译与隐私
 
-AI Profile 保存供应商协议、服务地址、模型、分批、并发、超时、重试和本机过滤规则。API Key 只写入
-Windows Credential Manager，不以明文进入 Profile、词典或日志。
+AI Profile 保存供应商协议、服务地址、模型、推理强度、分批、并发、超时、重试和本机过滤规则。
+翻译默认关闭推理，避免普通界面文本消耗大量推理 Token；需要时可以为单个 Profile 改为自动或更高
+强度。API Key 只写入 Windows Credential Manager，不以明文进入 Profile、词典或日志。
+
+Codex 订阅 Profile 复用本机 Codex CLI 已登录的 ChatGPT 账户，不读取、复制或保存账户令牌。任务运行
+期间只有目标词典保持只读，其他功能可以继续使用；真正退出会中断任务，但不会自动重发请求。
 
 只有当前计划选中的候选原文会发送给你选择的 AI 服务；已翻译内容以及命中过滤规则的数字、路径、URL、
 快捷键等内容会在本机跳过。使用云端模型前，请自行确认供应商的数据处理和计费政策。

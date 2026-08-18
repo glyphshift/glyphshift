@@ -286,3 +286,41 @@ fn dictionary_crud_reconciles_every_enabled_workflow_that_uses_the_dictionary() 
         vec!["dictionary.product"]
     );
 }
+
+#[test]
+fn active_ai_task_locks_only_its_target_dictionary_for_writes() {
+    let (mut application, _calls, _software_id, _data_root) = workflow_application();
+    application.ai_locked_dictionary_id = Some("dictionary.product".into());
+
+    let update_error = application
+        .update_dictionary(
+            DictionaryEdit::new("dictionary.product", "Locked", "en-US", "zh-CN", 1)
+                .with_entries([DictionaryEntryCreate::new("Open", "开启")]),
+        )
+        .expect_err("AI target dictionary stays read-only");
+    assert_eq!(
+        serde_json::to_value(update_error).expect("serialize lock error")["code"],
+        "dictionary.ai_translation_locked"
+    );
+    let delete_error = application
+        .delete_dictionaries(&[Box::<str>::from("dictionary.product")])
+        .expect_err("AI target dictionary cannot be deleted");
+    assert_eq!(
+        serde_json::to_value(delete_error).expect("serialize delete lock error")["code"],
+        "dictionary.ai_translation_locked"
+    );
+
+    let created = application
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.other",
+            "Other",
+            "en-US",
+            "zh-CN",
+        ))
+        .expect("another dictionary remains writable");
+    assert!(created
+        .configuration
+        .dictionaries()
+        .iter()
+        .any(|dictionary| dictionary.id() == "dictionary.other"));
+}

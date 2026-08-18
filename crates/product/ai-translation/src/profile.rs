@@ -7,7 +7,10 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
-const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/2";
+const PROFILE_SCHEMA_V2: &str = "glyphshift.ai-profiles/2";
+const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/3";
+pub const DEFAULT_TIMEOUT_MS: u64 = 1_800_000;
+pub const MAX_TIMEOUT_MS: u64 = 3_600_000;
 pub const DEFAULT_MAX_RETRIES: u16 = 2;
 pub const MAX_MAX_RETRIES: u16 = 10;
 
@@ -23,6 +26,7 @@ const PROFILE_FILE_NAME: &str = "ai-profiles.json";
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum AiProviderProtocol {
+    CodexSubscription,
     OpenAiResponses,
     OpenAiChatCompletions,
     OpenAiCompatible,
@@ -35,6 +39,7 @@ impl AiProviderProtocol {
     #[must_use]
     pub const fn default_base_url(self) -> &'static str {
         match self {
+            Self::CodexSubscription => "codex://local",
             Self::OpenAiResponses | Self::OpenAiChatCompletions => "https://api.openai.com/v1",
             Self::OpenAiCompatible => "",
             Self::AnthropicMessages => "https://api.anthropic.com",
@@ -46,14 +51,85 @@ impl AiProviderProtocol {
     #[must_use]
     pub const fn default_concurrency(self) -> u16 {
         match self {
-            Self::OllamaChat => 1,
+            Self::CodexSubscription | Self::OllamaChat => 1,
             _ => 2,
         }
     }
 
     #[must_use]
     pub const fn credential_required(self) -> bool {
-        !matches!(self, Self::OllamaChat | Self::OpenAiCompatible)
+        !matches!(
+            self,
+            Self::CodexSubscription | Self::OllamaChat | Self::OpenAiCompatible
+        )
+    }
+
+    #[must_use]
+    pub const fn supports_reasoning_control(self) -> bool {
+        matches!(
+            self,
+            Self::CodexSubscription
+                | Self::OpenAiResponses
+                | Self::OpenAiChatCompletions
+                | Self::OpenAiCompatible
+        )
+    }
+
+    #[must_use]
+    pub const fn default_reasoning_effort(self) -> AiReasoningEffort {
+        if self.supports_reasoning_control() {
+            AiReasoningEffort::Disabled
+        } else {
+            AiReasoningEffort::Automatic
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiReasoningEffort {
+    Disabled,
+    Automatic,
+    Low,
+    Medium,
+    High,
+    Maximum,
+}
+
+impl Default for AiReasoningEffort {
+    fn default() -> Self {
+        Self::Disabled
+    }
+}
+
+impl AiReasoningEffort {
+    #[must_use]
+    pub const fn responses_value(self) -> Option<&'static str> {
+        match self {
+            Self::Disabled => Some("none"),
+            Self::Automatic => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::Maximum => Some("max"),
+        }
+    }
+
+    #[must_use]
+    pub const fn chat_value(self) -> Option<&'static str> {
+        self.responses_value()
+    }
+
+    #[must_use]
+    pub const fn codex_value(self) -> Option<&'static str> {
+        match self {
+            Self::Disabled => Some("none"),
+            Self::Automatic => None,
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::Maximum => Some("xhigh"),
+        }
     }
 }
 
@@ -100,6 +176,8 @@ pub struct AiProfileDraft {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    #[serde(default)]
+    reasoning_effort: AiReasoningEffort,
     timeout_ms: u64,
     #[serde(default = "default_max_items_per_request")]
     max_items_per_request: u16,
@@ -125,7 +203,8 @@ impl AiProfileDraft {
             protocol,
             base_url: protocol.default_base_url().into(),
             model_id: model_id.into(),
-            timeout_ms: 300_000,
+            reasoning_effort: protocol.default_reasoning_effort(),
+            timeout_ms: DEFAULT_TIMEOUT_MS,
             max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
             max_concurrency: protocol.default_concurrency(),
             max_retries: DEFAULT_MAX_RETRIES,
@@ -153,6 +232,12 @@ impl AiProfileDraft {
     }
 
     #[must_use]
+    pub const fn with_reasoning_effort(mut self, reasoning_effort: AiReasoningEffort) -> Self {
+        self.reasoning_effort = reasoning_effort;
+        self
+    }
+
+    #[must_use]
     pub const fn with_max_retries(mut self, max_retries: u16) -> Self {
         self.max_retries = max_retries;
         self
@@ -169,6 +254,12 @@ impl AiProfileDraft {
         self.max_concurrency = max_concurrency;
         self
     }
+
+    #[must_use]
+    pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -179,6 +270,8 @@ struct StoredAiProfile {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    #[serde(default)]
+    reasoning_effort: AiReasoningEffort,
     credential_ref: Box<str>,
     timeout_ms: u64,
     #[serde(default = "default_max_items_per_request")]
@@ -215,6 +308,7 @@ pub struct AiProfileView {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    reasoning_effort: AiReasoningEffort,
     timeout_ms: u64,
     max_items_per_request: u16,
     max_concurrency: u16,
@@ -226,9 +320,11 @@ pub struct AiProfileView {
 
 pub struct ResolvedAiProfile {
     id: Box<str>,
+    name: Box<str>,
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    reasoning_effort: AiReasoningEffort,
     credential: Option<Box<str>>,
     timeout_ms: u64,
     max_items_per_request: u16,
@@ -240,6 +336,11 @@ impl ResolvedAiProfile {
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     #[must_use]
@@ -255,6 +356,11 @@ impl ResolvedAiProfile {
     #[must_use]
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    #[must_use]
+    pub const fn reasoning_effort(&self) -> AiReasoningEffort {
+        self.reasoning_effort
     }
 
     #[must_use]
@@ -310,6 +416,11 @@ impl AiProfileView {
     }
 
     #[must_use]
+    pub const fn reasoning_effort(&self) -> AiReasoningEffort {
+        self.reasoning_effort
+    }
+
+    #[must_use]
     pub const fn has_credential(&self) -> bool {
         self.has_credential
     }
@@ -346,20 +457,33 @@ impl AiProfileCatalog {
         vault: Box<dyn CredentialVault>,
     ) -> Result<Self, AiProfileError> {
         let path = data_root.as_ref().join(PROFILE_FILE_NAME);
-        let artifact = if path.exists() {
+        let mut artifact = if path.exists() {
             let reader = BufReader::new(File::open(&path).map_err(|_| AiProfileError::Storage)?);
             let artifact = serde_json::from_reader::<_, ProfileArtifact>(reader)
                 .map_err(|_| AiProfileError::InvalidArtifact)?;
-            validate_artifact(&artifact)?;
             artifact
         } else {
             ProfileArtifact::default()
         };
-        Ok(Self {
+        let migrated = artifact.schema.as_ref() == PROFILE_SCHEMA_V2;
+        if migrated {
+            artifact.schema = PROFILE_SCHEMA.into();
+            for profile in &mut artifact.profiles {
+                if !profile.protocol.supports_reasoning_control() {
+                    profile.reasoning_effort = AiReasoningEffort::Automatic;
+                }
+            }
+        }
+        validate_artifact(&artifact)?;
+        let catalog = Self {
             path,
             artifact,
             vault,
-        })
+        };
+        if migrated {
+            catalog.persist()?;
+        }
+        Ok(catalog)
     }
 
     #[must_use]
@@ -405,9 +529,11 @@ impl AiProfileCatalog {
             .map_err(AiProfileError::Credential)?;
         Ok(ResolvedAiProfile {
             id: profile.id.clone(),
+            name: profile.name.clone(),
             protocol: profile.protocol,
             base_url: profile.base_url.clone(),
             model_id: profile.model_id.clone(),
+            reasoning_effort: profile.reasoning_effort,
             credential,
             timeout_ms: profile.timeout_ms,
             max_items_per_request: profile.max_items_per_request,
@@ -522,6 +648,7 @@ fn stored_profile(
         protocol,
         base_url,
         model_id,
+        reasoning_effort,
         timeout_ms,
         max_items_per_request,
         max_concurrency,
@@ -541,11 +668,16 @@ fn stored_profile(
     if model_id.is_empty() || model_id.chars().count() > 256 {
         return Err(AiProfileError::InvalidProfile("model"));
     }
-    if base_url.is_empty() || !(base_url.starts_with("https://") || base_url.starts_with("http://"))
-    {
+    let valid_base_url = if protocol == AiProviderProtocol::CodexSubscription {
+        base_url == protocol.default_base_url()
+    } else {
+        !base_url.is_empty()
+            && (base_url.starts_with("https://") || base_url.starts_with("http://"))
+    };
+    if !valid_base_url {
         return Err(AiProfileError::InvalidProfile("base-url"));
     }
-    if !(1_000..=600_000).contains(&timeout_ms)
+    if !(1_000..=MAX_TIMEOUT_MS).contains(&timeout_ms)
         || !(1..=1_000).contains(&max_items_per_request)
         || max_concurrency == 0
         || max_retries > MAX_MAX_RETRIES
@@ -560,6 +692,7 @@ fn stored_profile(
             protocol,
             base_url: base_url.into(),
             model_id: model_id.into(),
+            reasoning_effort,
             credential_ref,
             timeout_ms,
             max_items_per_request,
@@ -584,6 +717,7 @@ fn profile_view(
         protocol: profile.protocol,
         base_url: profile.base_url.clone(),
         model_id: profile.model_id.clone(),
+        reasoning_effort: profile.reasoning_effort,
         timeout_ms: profile.timeout_ms,
         max_items_per_request: profile.max_items_per_request,
         max_concurrency: profile.max_concurrency,
@@ -611,7 +745,10 @@ fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
                 || profile.name.trim().is_empty()
                 || profile.model_id.trim().is_empty()
                 || profile.base_url.trim().is_empty()
-                || profile.timeout_ms == 0
+                || (profile.protocol == AiProviderProtocol::CodexSubscription
+                    && profile.base_url.as_ref()
+                        != AiProviderProtocol::CodexSubscription.default_base_url())
+                || !(1_000..=MAX_TIMEOUT_MS).contains(&profile.timeout_ms)
                 || profile.max_concurrency == 0
                 || !(1..=1_000).contains(&profile.max_items_per_request)
                 || profile.max_retries > MAX_MAX_RETRIES

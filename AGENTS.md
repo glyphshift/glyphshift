@@ -16,10 +16,13 @@
 - Use `local-test/machine.ps1` (or another file below the same directory) for local executable
   paths and environment variables such as `GLYPHSHIFT_AE_EXE`, `GLYPHSHIFT_PREMIERE_EXE`,
   `GLYPHSHIFT_QQ_EXE`, attached PIDs, and temporary data roots.
-- Put screenshots, videos, raw logs, runtime descriptors, process/module dumps, captured text,
-  temporary catalogs/packages, copied dictionaries/plugins, WebView profiles, and real AE/PR/QQ
-  smoke-test results under `local-test/evidence/`; do not put them in Flightdeck or any other
-  tracked directory.
+- Put machine-specific screenshots, videos, raw logs, runtime descriptors, process/module dumps,
+  captured text, temporary catalogs/packages, copied dictionaries/plugins, WebView profiles, and
+  real AE/PR/QQ smoke-test results under `local-test/evidence/`; do not put them in Flightdeck or
+  any other tracked directory.
+- User-approved release screenshots may live under `preview/` and be referenced by README files only
+  after a privacy review confirms they contain no local paths, usernames, PIDs, window titles, or
+  other machine-specific evidence. All other screenshots remain local-only.
 - Tracked test code may contain deterministic harnesses and synthetic fixtures only. Real software
   locations and live-process values must be supplied through environment variables; do not add a
   developer-machine fallback path. Path-parsing unit tests may use clearly synthetic paths that

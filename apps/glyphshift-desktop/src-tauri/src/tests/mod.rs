@@ -398,6 +398,7 @@ fn test_desktop_application(
             .expect("quick probe session store"),
         active_probe_run_id: None,
         active_probe_capability: None,
+        ai_locked_dictionary_id: None,
     }
 }
 

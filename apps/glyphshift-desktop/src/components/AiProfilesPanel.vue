@@ -3,11 +3,13 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   defaultAiFilterPolicy,
+  defaultAiReasoningEffort,
   providerDefaults,
   useAiTranslation,
   type AiFilterPolicy,
   type AiProfile,
   type AiProviderProtocol,
+  type AiReasoningEffort,
 } from '../useAiTranslation'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
@@ -18,7 +20,8 @@ interface ProfileForm {
   protocol: AiProviderProtocol
   baseUrl: string
   modelId: string
-  timeoutSeconds: number
+  reasoningEffort: AiReasoningEffort
+  timeoutMinutes: number
   maxItemsPerRequest: number
   maxConcurrency: number
   maxRetries: number
@@ -36,6 +39,7 @@ const pendingDelete = ref<AiProfile | null>(null)
 const excludedPatternsText = ref('')
 
 const providerItems = computed(() => ([
+  { value: 'codex_subscription' as const, label: t('ai.protocol.codexSubscription') },
   { value: 'open_ai_responses' as const, label: t('ai.protocol.openAiResponses') },
   { value: 'open_ai_chat_completions' as const, label: t('ai.protocol.openAiChat') },
   { value: 'open_ai_compatible' as const, label: t('ai.protocol.openAiCompatible') },
@@ -52,7 +56,8 @@ function newProfileForm(): ProfileForm {
     protocol,
     baseUrl: providerDefaults[protocol].baseUrl,
     modelId: '',
-    timeoutSeconds: 300,
+    reasoningEffort: defaultAiReasoningEffort(protocol),
+    timeoutMinutes: 30,
     maxItemsPerRequest: 50,
     maxConcurrency: providerDefaults[protocol].concurrency,
     maxRetries: 2,
@@ -64,15 +69,51 @@ function newProfileForm(): ProfileForm {
 }
 
 const form = ref<ProfileForm>(newProfileForm())
-const showsCredential = computed(() => form.value.protocol !== 'ollama_chat')
+const usesCodexSubscription = computed(() => form.value.protocol === 'codex_subscription')
+const showsCredential = computed(() => !['ollama_chat', 'codex_subscription'].includes(form.value.protocol))
 const credentialRequired = computed(() => providerDefaults[form.value.protocol].credentialRequired)
+const reasoningConfigurable = computed(() => [
+  'codex_subscription',
+  'open_ai_responses',
+  'open_ai_chat_completions',
+  'open_ai_compatible',
+].includes(form.value.protocol))
+const usesDeepSeek = computed(() => (
+  form.value.modelId.trim().toLocaleLowerCase().startsWith('deepseek-')
+  || form.value.baseUrl.toLocaleLowerCase().includes('deepseek.com')
+))
+const reasoningItems = computed(() => {
+  const items: Array<{ value: AiReasoningEffort; label: string }> = [
+    {
+      value: 'disabled' as const,
+      label: t('ai.reasoningOption.disabled'),
+    },
+    { value: 'automatic' as const, label: t('ai.reasoningOption.automatic') },
+  ]
+  if (!usesDeepSeek.value) {
+    items.push(
+      { value: 'low' as const, label: t('ai.reasoningOption.low') },
+      { value: 'medium' as const, label: t('ai.reasoningOption.medium') },
+    )
+  }
+  items.push(
+    { value: 'high' as const, label: t('ai.reasoningOption.high') },
+    { value: 'maximum' as const, label: t('ai.reasoningOption.maximum') },
+  )
+  return items
+})
+const reasoningHint = computed(() => {
+  if (usesDeepSeek.value) return t('ai.reasoningHintDeepSeek')
+  if (usesCodexSubscription.value) return t('ai.reasoningHintCodex')
+  return t('ai.reasoningHint')
+})
 const formValid = computed(() => Boolean(
   form.value.name.trim()
   && form.value.baseUrl.trim()
   && form.value.modelId.trim()
-  && Number.isInteger(form.value.timeoutSeconds)
-  && form.value.timeoutSeconds >= 1
-  && form.value.timeoutSeconds <= 600
+  && Number.isInteger(form.value.timeoutMinutes)
+  && form.value.timeoutMinutes >= 1
+  && form.value.timeoutMinutes <= 60
   && Number.isInteger(form.value.maxItemsPerRequest)
   && form.value.maxItemsPerRequest >= 1
   && form.value.maxItemsPerRequest <= 1_000
@@ -93,7 +134,8 @@ watch(() => form.value.protocol, (protocol, previous) => {
     form.value.baseUrl = providerDefaults[protocol].baseUrl
   }
   form.value.maxConcurrency = providerDefaults[protocol].concurrency
-  if (protocol === 'ollama_chat') {
+  form.value.reasoningEffort = defaultAiReasoningEffort(protocol)
+  if (protocol === 'ollama_chat' || protocol === 'codex_subscription') {
     form.value.secret = ''
     form.value.clearCredential = false
   }
@@ -101,6 +143,10 @@ watch(() => form.value.protocol, (protocol, previous) => {
 
 function protocolLabel(protocol: AiProviderProtocol) {
   return providerItems.value.find(item => item.value === protocol)?.label ?? protocol
+}
+
+function reasoningLabel(profile: AiProfile) {
+  return t(`ai.reasoningOption.${profile.reasoningEffort}`)
 }
 
 function openCreate() {
@@ -118,7 +164,8 @@ function openEdit(profile: AiProfile) {
     protocol: profile.protocol,
     baseUrl: profile.baseUrl,
     modelId: profile.modelId,
-    timeoutSeconds: profile.timeoutMs / 1_000,
+    reasoningEffort: profile.reasoningEffort,
+    timeoutMinutes: Math.ceil(profile.timeoutMs / 60_000),
     maxItemsPerRequest: profile.maxItemsPerRequest,
     maxConcurrency: profile.maxConcurrency,
     maxRetries: profile.maxRetries,
@@ -144,7 +191,8 @@ async function save() {
     protocol: value.protocol,
     baseUrl: value.baseUrl.trim(),
     modelId: value.modelId.trim(),
-    timeoutMs: Number(value.timeoutSeconds) * 1_000,
+    reasoningEffort: value.reasoningEffort,
+    timeoutMs: Number(value.timeoutMinutes) * 60_000,
     maxItemsPerRequest: Number(value.maxItemsPerRequest),
     maxConcurrency: Number(value.maxConcurrency),
     maxRetries: Number(value.maxRetries),
@@ -196,7 +244,7 @@ onMounted(() => void ai.connect())
     <div v-if="ai.profiles.value.length" class="mt-3 divide-y divide-[var(--border)]">
       <div v-for="profile in ai.profiles.value" :key="profile.id" class="flex min-h-[76px] items-center gap-4 py-3">
         <div class="grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-          <UIcon :name="profile.protocol === 'ollama_chat' ? 'i-tabler-server-2' : 'i-tabler-sparkles'" class="size-5" aria-hidden="true" />
+          <UIcon :name="profile.protocol === 'ollama_chat' ? 'i-tabler-server-2' : profile.protocol === 'codex_subscription' ? 'i-tabler-brand-openai' : 'i-tabler-sparkles'" class="size-5" aria-hidden="true" />
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-2">
@@ -204,10 +252,10 @@ onMounted(() => void ai.connect())
             <UBadge v-if="ai.catalog.value.defaultProfileId === profile.id" color="primary" variant="soft" size="sm" :label="t('ai.defaultProfile')" />
           </div>
           <p class="type-metadata m-0 mt-1 truncate leading-4 text-[var(--text-muted)]">
-            {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }} · {{ profile.baseUrl }}
+            {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }}<template v-if="profile.protocol !== 'codex_subscription'"> · {{ profile.baseUrl }}</template>
           </p>
           <p class="type-metadata m-0 mt-0.5 truncate leading-4 text-[var(--text-muted)]">
-            {{ t('ai.profileRequestPolicy', { batchSize: profile.maxItemsPerRequest, timeout: profile.timeoutMs / 1_000, concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
+            {{ t('ai.profileRequestPolicy', { reasoning: reasoningLabel(profile), batchSize: profile.maxItemsPerRequest, timeout: Math.ceil(profile.timeoutMs / 60_000), concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
           </p>
           <div v-if="ai.connectionReports.value[profile.id]" class="type-metadata mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 leading-4">
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
@@ -221,7 +269,7 @@ onMounted(() => void ai.connect())
           :color="profile.credentialRequired && !profile.hasCredential ? 'warning' : 'neutral'"
           variant="soft"
           size="sm"
-          :label="profile.protocol === 'ollama_chat' ? t('ai.localProvider') : profile.hasCredential ? t('ai.credentialStored') : t('ai.credentialMissing')"
+          :label="profile.protocol === 'codex_subscription' ? t('ai.codexSubscription') : profile.protocol === 'ollama_chat' ? t('ai.localProvider') : profile.hasCredential ? t('ai.credentialStored') : t('ai.credentialMissing')"
         />
         <div class="flex shrink-0 items-center gap-1">
           <UButton
@@ -233,7 +281,7 @@ onMounted(() => void ai.connect())
             :aria-label="t('ai.testConnectionNamed', { name: profile.name })"
             :title="t('ai.testConnectionCostHint')"
             :loading="ai.busy.value && ai.currentJob.value?.scopeId === `connection:${profile.id}`"
-            :disabled="ai.busy.value || (profile.credentialRequired && !profile.hasCredential)"
+            :disabled="ai.busy.value || ai.taskRunning.value || (profile.credentialRequired && !profile.hasCredential)"
             @click="ai.testProfile(profile.id)"
           />
           <UButton v-if="ai.catalog.value.defaultProfileId !== profile.id" color="neutral" variant="ghost" size="xs" :label="t('ai.makeDefault')" :disabled="ai.busy.value" @click="ai.setDefaultProfile(profile.id)" />
@@ -248,6 +296,7 @@ onMounted(() => void ai.connect())
     </div>
 
     <p class="type-metadata m-0 border-t border-[var(--border)] pt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
+
   </section>
 
   <ManagementFormModal
@@ -268,17 +317,25 @@ onMounted(() => void ai.connect())
       <UFormField :label="t('ai.protocolLabel')" required>
         <USelect v-model="form.protocol" :items="providerItems" value-key="value" label-key="label" :aria-label="t('ai.protocolLabel')" class="w-full" />
       </UFormField>
-      <UFormField :label="t('ai.baseUrl')" required class="col-span-2 @max-[560px]:col-span-1">
+      <div v-if="usesCodexSubscription" class="col-span-2 flex items-start gap-2.5 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5 @max-[560px]:col-span-1">
+        <UIcon name="i-tabler-brand-openai" class="mt-0.5 size-4 shrink-0 text-[var(--accent-strong)]" aria-hidden="true" />
+        <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('ai.codexProfileHint') }}</p>
+      </div>
+      <UFormField v-else :label="t('ai.baseUrl')" required class="col-span-2 @max-[560px]:col-span-1">
         <UInput v-model="form.baseUrl" :aria-label="t('ai.baseUrl')" spellcheck="false" class="w-full" />
       </UFormField>
       <UFormField :label="t('ai.modelId')" required>
         <UInput v-model="form.modelId" :aria-label="t('ai.modelId')" spellcheck="false" class="w-full" />
       </UFormField>
+      <UFormField v-if="reasoningConfigurable" :label="t('ai.reasoningEffort')">
+        <USelect v-model="form.reasoningEffort" :items="reasoningItems" value-key="value" label-key="label" :aria-label="t('ai.reasoningEffort')" class="w-full" />
+        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ reasoningHint }}</p>
+      </UFormField>
       <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :required="credentialRequired && !editingProfile?.hasCredential">
         <UInput v-model="form.secret" type="password" :aria-label="t('ai.apiKey')" :placeholder="editingProfile?.hasCredential ? t('ai.keepCredentialPlaceholder') : ''" autocomplete="new-password" class="w-full" />
       </UFormField>
       <UFormField :label="t('ai.timeout')">
-        <UInput v-model.number="form.timeoutSeconds" type="number" min="1" max="600" step="1" :aria-label="t('ai.timeout')" class="w-full" />
+        <UInput v-model.number="form.timeoutMinutes" type="number" min="1" max="60" step="1" :aria-label="t('ai.timeout')" class="w-full" />
       </UFormField>
       <UFormField :label="t('ai.maxItemsPerRequest')">
         <UInput v-model.number="form.maxItemsPerRequest" type="number" min="1" max="1000" step="1" :aria-label="t('ai.maxItemsPerRequest')" class="w-full" />

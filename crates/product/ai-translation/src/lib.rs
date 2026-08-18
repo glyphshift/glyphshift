@@ -1,5 +1,7 @@
 //! AI-assisted translation planning and execution.
 
+mod codex;
+mod history;
 mod http;
 mod job;
 mod profile;
@@ -8,6 +10,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use codex::*;
+pub use history::*;
 pub use http::*;
 pub use job::*;
 pub use profile::*;

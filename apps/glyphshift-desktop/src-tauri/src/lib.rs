@@ -342,6 +342,7 @@ struct DesktopApplication {
     quick_probe_sessions: QuickProbeSessionStore,
     active_probe_run_id: Option<Box<str>>,
     active_probe_capability: Option<ProbeRuntimeCapability>,
+    ai_locked_dictionary_id: Option<Box<str>>,
 }
 
 impl DesktopApplication {
@@ -430,6 +431,7 @@ impl DesktopApplication {
             quick_probe_sessions,
             active_probe_run_id: None,
             active_probe_capability: None,
+            ai_locked_dictionary_id: None,
         };
         application
             .recover_quick_probe_sessions()
@@ -709,6 +711,7 @@ pub fn run() {
             ai::desktop_apply_probe_ai_results,
             ai::desktop_start_ai_translation,
             ai::desktop_ai_translation_job,
+            ai::desktop_ai_translation_tasks,
             ai::desktop_cancel_ai_translation,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,

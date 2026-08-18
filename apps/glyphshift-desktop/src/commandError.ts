@@ -30,6 +30,7 @@ const messageKeys: Record<string, string> = {
   'dictionary.not_found': 'errors.dictionary.notFound',
   'dictionary.invalid_create': 'errors.dictionary.invalidCreate',
   'dictionary.invalid_update': 'errors.dictionary.invalidUpdate',
+  'dictionary.ai_translation_locked': 'errors.ai.taskAlreadyActive',
   'dictionary.referenced': 'errors.dictionary.referenced',
   'dictionary.import_duplicate': 'errors.dictionary.importDuplicate',
   'dictionary.import_invalid': 'errors.dictionary.importInvalid',
@@ -141,12 +142,16 @@ const messageKeys: Record<string, string> = {
   'ai.filter_pattern_invalid': 'errors.ai.filterPatternInvalid',
   'ai.plan_not_found': 'errors.ai.planNotFound',
   'ai.provider_unavailable': 'errors.ai.providerUnavailable',
+  'ai.task_already_active': 'errors.ai.taskAlreadyActive',
+  'ai.task_scope_invalid': 'errors.ai.taskScopeInvalid',
+  'ai.plan_stale': 'errors.ai.planStale',
   'ai.job_not_found': 'errors.ai.jobNotFound',
   'ai.job_state_unavailable': 'errors.ai.jobStateUnavailable',
   'ai.state_unavailable': 'errors.ai.stateUnavailable',
   'ai.writeback_revision_invalid': 'errors.ai.writebackRevisionInvalid',
   'ai.writeback_invalid': 'errors.ai.writebackInvalid',
   'ai.writeback_conflict': 'errors.ai.writebackConflict',
+  'ai.writeback_failed': 'errors.ai.writebackFailed',
 }
 
 export function isCommandError(value: unknown): value is CommandError {

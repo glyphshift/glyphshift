@@ -374,6 +374,7 @@ impl DesktopApplication {
         run_id: &str,
     ) -> Result<ProbeRunView, CommandError> {
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
         let is_active = self.active_probe_run_id.as_deref() == Some(run_id);
         if summary.status() == ProbeRunStatus::Running
             || (is_active && summary.status() != ProbeRunStatus::Paused)
@@ -643,6 +644,7 @@ impl DesktopApplication {
             .probe_runs
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
+        self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
         let dictionary = self
             .backend
             .dictionary(summary.dictionary_id())
@@ -697,6 +699,7 @@ impl DesktopApplication {
             .probe_runs
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
+        self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
         let dictionary = self
             .backend
             .dictionary(summary.dictionary_id())
@@ -746,6 +749,7 @@ impl DesktopApplication {
                     .probe_runs
                     .summary(&request.run_id)
                     .map_err(probe_run_error)?;
+                self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
                 let dictionary = self
                     .backend
                     .dictionary(summary.dictionary_id())

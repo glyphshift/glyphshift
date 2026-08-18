@@ -1,207 +1,289 @@
 ---
 name: Glyphshift Desktop
-description: A compact workflow, software, dictionary, and probe manager for runtime translation.
+description: A compact Windows translation workbench for workflows, software, dictionaries, and probes.
 colors:
-  accent: "Glyphshift cobalt (#315ff4 light / #6c8cff dark)"
-  surface: "#151a22 dark / #fafbfc light"
-  surface-subtle: "#10141b dark / #e7ebf1 light"
-  canvas: "#0c0f14 dark / #eef1f5 light"
-  border: "#29313f dark / #d8dde6 light"
+  primary-dark: "#6c8cff"
+  primary-light: "#315ff4"
+  canvas-dark: "#0c0f14"
+  frame-dark: "#10141b"
+  surface-dark: "#151a22"
+  field-dark: "#191f29"
+  border-dark: "#29313f"
+  text-dark: "#f1f4f8"
+  text-muted-dark: "#8f98a8"
+  canvas-light: "#eef1f5"
+  frame-light: "#e7ebf1"
+  surface-light: "#fafbfc"
+  field-light: "#ffffff"
+  border-light: "#d8dde6"
+  text-light: "#171b24"
+  text-muted-light: "#6f7888"
+  success-dark: "#6ed2a7"
+  warning-dark: "#f0bd69"
+  danger-dark: "#ff8c91"
+  success-light: "#157a54"
+  warning-light: "#9a5b00"
+  danger-light: "#c43942"
 typography:
-  family: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
-  caption: "10px; non-critical counts and compact badges only"
-  label: "11px"
-  metadata: "11px"
-  body: "12px"
-  section-title: "13px"
-  page-title: "20px"
-geometry:
-  integrated-title-navigation: "48px"
-  control-radius: "5–8px"
-  table-row: "52–54px"
-  page-padding: "16px"
+  page-title:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "20px"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "-0.02em"
+  section-title:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "13px"
+    fontWeight: 600
+    lineHeight: 1.35
+    letterSpacing: "-0.01em"
+  body:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
+  label:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "11px"
+    fontWeight: 600
+    lineHeight: 1.4
+    letterSpacing: "normal"
+  metadata:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "11px"
+    fontWeight: 400
+    lineHeight: 1.45
+    letterSpacing: "normal"
+  caption:
+    fontFamily: "Segoe UI Variable, Noto Sans SC, Microsoft YaHei, system-ui, sans-serif"
+    fontSize: "10px"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: "normal"
+rounded:
+  menu-item: "4px"
+  control: "6px"
+  modal: "8px"
+  surface: "8px"
+  section: "10px"
+spacing:
+  control-gap: "8px"
+  page: "16px"
+  utility-content: "20px"
+  form-horizontal-gap: "32px"
+components:
+  button-primary-dark:
+    backgroundColor: "#263866"
+    textColor: "#ffffff"
+    rounded: "{rounded.control}"
+  button-primary-light:
+    backgroundColor: "{colors.primary-light}"
+    textColor: "#ffffff"
+    rounded: "{rounded.control}"
+  field-dark:
+    backgroundColor: "{colors.field-dark}"
+    textColor: "{colors.text-dark}"
+    rounded: "{rounded.control}"
+  field-light:
+    backgroundColor: "{colors.field-light}"
+    textColor: "{colors.text-light}"
+    rounded: "{rounded.control}"
+  management-surface-dark:
+    backgroundColor: "{colors.surface-dark}"
+    textColor: "{colors.text-dark}"
+    rounded: "{rounded.surface}"
+  management-surface-light:
+    backgroundColor: "{colors.surface-light}"
+    textColor: "{colors.text-light}"
+    rounded: "{rounded.surface}"
 ---
 
-# Glyphshift 设计系统
+# Design System: Glyphshift Desktop
 
-## 产品方向
+## Overview
 
-Glyphshift 是高密度 Windows 桌面管理工具。主要任务分为工作流、软件、词典和探针：工作流表达
-持续运行期望并拥有目标字体策略，软件只管理身份与程序绑定，词典是可复用语言资产。
-启用工作流就是持续期望，没有第二个“开始翻译”动作。
+**Creative North Star: “Windows Translation Workbench”**
 
-界面采用成熟数据管理器语法：单层标题/导航栏、图标标题与说明、搜索和批量工具栏、满宽表格、
-分页与行级操作。不使用首页卡片、软件主从详情、营销式仪表盘或大面积强调色。
+Glyphshift 使用成熟 Windows 管理工具的视觉语法：紧凑、连续、精确，所有界面都服务于“找到目标、
+验证文字、维护词典、启用工作流”这条操作链。品牌感来自一致的钴蓝焦点、明确的层级和小尺寸下仍然
+可靠的交互，而不是大面积装饰。
 
-## 信息架构
+这是一个 **Operate** 模式的桌面应用。列表页强调扫描和批量管理；详情页强调上下文、草稿保护和
+当前动作；帮助与 README 属于 **Read** 模式，用连续内容解释首次使用和恢复路径。两种模式共享同一
+字体系、颜色角色和内容轴。
 
-- **工作流：** 默认页。展示名称、说明、软件和词典摘要、期望/实际状态、启用、编辑、复制和
-  删除；支持搜索、筛选、显示列、多选、分页与批量操作。
-- **软件：** 管理名称、用途说明和完整程序路径；页头只保留一个“新建软件”入口，同一 Modal 支持
-  运行中可见软件下拉、两段式全局按键捕获和手动路径，新增前统一显示基础接入预检，但不展示或
-  配置文字/字体能力。
-- **词典：** 同一页面以紧凑模式切换本地 Library 与在线 Catalog，不新增一级导航。本地表展示
-  名称、说明、语言、版本、规则数及 verified/modified/unmanaged 来源状态；新建与设置复用同一
-  metadata 表单，名称、说明、标签和语言常显，版本、作者、许可证与主页进入“更多”；词条表本身
-  支持直接编辑，末行常驻空白新增入口。Catalog 表展示本地化
-  presentation、语言、版本、发布者与标签，并使用后端
-  cursor 分页；现有 metadata tags 同时作为可点击的精确筛选条件，不另建重复的分类模型。本地与
-  Catalog 当前模式使用明确的主色选中态。标准 Dictionary `/2` JSON 通过本地页头导入、逐行导出，
-  不增加发布中心或向导。
-  详情页主表只展示原文和译文，不出现字体、Hook、Adapter 或内部匹配键。
-- **探针：** 管理可恢复的观察任务。每个任务绑定一个软件、一个词典和一组具备写回能力的 Adapter。
-  详情用一张联合表展示原文、译文、状态与技术证据，译文编辑直接修改绑定词典。列表页只保留“新建探针任务”
-  一个入口：目标来源可选软件资料库或运行中软件；运行中软件既可从具有可见窗口的列表选择，也可
-  用全局快捷键捕获当前前台程序。词典来源可选已有词典或系统命名的临时词典；Desktop 在一次提交
-  中解析来源、兼容 Adapter Plan、Probe 与临时资产 ownership。空资料库仍可进入并显示解释，不用
-  禁用 Tab 伪装成权限问题；任务名称和临时词典目标语言是普通字段，不折叠为高级选项。
-- **Adapter：** 在 Workflow Target 中按 Platform/Technology 分组展示并多选，名称只显示具体
-  Adapter；普通界面不展示内部 ID、DLL、hash 或签名。
-- **帮助：** 由标题栏图标进入，先按“软件未启动”“权限不匹配”“没有捕获到文字”等用户问题提供
-  恢复步骤和直接页面入口，再解释软件、词典、工作流与探针的边界。当前 Runtime Bundle 的 Adapter
-  使用连续列表展示名称说明、适用平台/技术与能力；版本、配置要求和官方技术文档按行渐进展开，
-  不展示内部 ID、DLL target 或原始 URL。Help 与 Settings 共享独立工具页壳层、标题基线和 980px
-  最大内容宽度，但保留阅读型连续内容，不改造成设置表单卡。
-- **设置：** 只在标题栏提供图标入口，不占主导航文字位置。设置页不提供在线翻译器；应用级区域只维护
-  翻译前询问偏好，并管理可复用的 AI Profile。Profile 编辑器集中配置供应商服务地址、单批条目数、
-  单批超时、并发批数与失败重试次数，这些请求策略随 Profile 一起切换。设置还展示真实生效的界面语言、主题、软件快速捕获快捷键、开机启动、
-  关闭行为与当前权限；各项立即应用并持久化。快捷键通过单击控件后捕获真实按键组合来修改，不提供文本输入；系统占用时留在录制态并
-  保留旧值。管理员
-  启动使用默认关闭的持久开关；开启后立即请求 UAC 重启，之后每次启动继续请求，关闭后从下一次
-  启动恢复普通权限。当前权限是运行时事实，不能用开关状态代替。
-- **AI 提交预检：** Dictionary 与 Probe 的 AI 翻译入口默认共用显式确认框，明确展示预计输入 Token、
-  待翻译条目数、批次数、单批条目数、并发、超时与重试；设置关闭“翻译前询问”后直接执行。
-  估算值是执行前提示，不承担限制或校验职责。
+**Key Characteristics:**
 
-完整软件或词典集合不用普通下拉框承载。Workflow 独立编辑页使用可搜索、多选的管理列表，并为
-每个目标维护 Adapter Plan、有序词典集合和至多一个内联 Font Policy；字体策略直接选择本机字体
-候选优先级，并用紧凑的“应用范围”选择器切换“仅词典命中”或“Hook 捕获的全部文字”。字体
-目录显示缓存数量，重新扫描系统字体只能由相邻的显式刷新动作触发。
-Workflow 的四个配置分区使用窄左侧单层导航，右侧只显示当前分区内容；左栏只负责导航和问题
-提示，不承载软件列表或第二套业务表单。当前项使用低强度 selection 色，不再叠加另一块内容表面。
-详情头横向占满模块，保留返回、标题、未保存状态和主要保存动作；其下直接进入应用主背景画布。
+- 48px 单层标题栏同时承载品牌、一级导航、工具入口与窗口控制。
+- 高密度表格和表单使用薄边界、连续表面与克制的 4–10px 圆角。
+- 钴蓝只表示当前选择、主要动作和显式焦点；成功、警告和危险色具有严格语义。
+- 深色与浅色主题使用相同的层级关系，不通过反转或高饱和制造第二套视觉世界。
+- 不使用营销式仪表盘、玻璃、渐变、发光、嵌套卡片或无意义的大留白。
 
-Software 只有一组资料，不创建单条目的伪侧栏。详情表单按“标签 / 控件”左右对齐，紧凑宽度下
-保持足够的控件宽度。Settings 占满页面剩余空间，内部使用单列设置列表与受限阅读宽度；界面、
-快捷键、应用行为与权限状态继续立即生效，不增加确认动作。快捷键行使用内联键帽和状态文案，单击
-进入录制，Esc 取消，不打开 Modal。Settings 与 Help 作为标题栏进入的独立工具页，复用详情标题带
-但不显示无意义的返回按钮；两页共享背景、底边界、高度、标题基线、980px 内容轴、20px 首屏间距与
-唯一页面滚动区。
+## Colors
 
-Settings 外观、AI 翻译确认偏好、Workflow 基础配置与 Software 编辑属于同一类轻量配置表面，共享分组标题、说明与
-字段行语法：配置面板在工作表面内以 980px 最大宽度水平居中，并用一层完整边界承载分组；独立工具页
-壳层让详情标题内层、提示与页面主体使用同一内容轴，标题带之后只保留一次 20px 内容间距；字段
-使用 184px 标签轨与弹性控件轨。枚举选择器使用 compact 宽度并贴齐控件轨右侧，名称、描述和
-路径使用 fill 宽度；字段容器不足 620px 时按自身宽度折为上下布局，不依赖整个窗口的断点。各页
-仍保留真实的导航差异：Workflow 有四个任务分区，Software 没有伪侧栏，Settings 没有保存动作。
+Glyphshift 的色彩由一个钴蓝主色和一组冷中性色构成。深色主题以近黑画布逐层升亮，浅色主题以冷灰
+框架包围纯白或近白内容面；交互 hover/selection 不复用静态层级色。
 
-## 布局与密度
+### Primary
 
-- 标题、品牌、主导航、主题切换、帮助、设置与窗口控件位于同一条 48px 顶栏；不显示常驻桌面服务
-  连接状态。主题按钮具有随语言变化的可访问名称。
-- 页面外边距 16px；页面标题 20px；分区标题 13px；正文 12px；表格、控件标签和功能性元数据 11px。
-  10px caption 只用于非关键计数与紧凑徽标，不承载操作说明、错误恢复或对象上下文。
-- 搜索、筛选、显示列和批量动作共用表格工具栏；选中行时批量动作清楚出现。
-- 表格自己滚动，页面和 `body` 不滚动；960×640 与 1440×900 使用同一结构。
-- 横向可滚动的管理表固定最左选择列、对象身份列与最右操作列；没有选择列的 Catalog 固定第一身份列。
-  滚动区域可聚焦且有可访问名称。高频行操作直接显示，低频操作进入以对象命名的更多菜单，不改成卡片。
-- 管理表的中间内容区使用连续表面色；空态铺满表头与底部分页之间的空间，最后一行保留底边界。
-- 列表页使用“页头 + 满宽数据表面”；详情页使用“全宽详情头 + 应用主背景画布”，不再用一张
-  满高空 Card 包裹所有详情内容。复杂详情可在画布上加入带右侧分隔线的分区栏，简单详情只保留
-  水平居中的配置面板；空白属于页面画布，不用额外表面或伪导航填补。
-- 程序路径出现在软件资料管理与探针详情的目标身份区域，不进入工作流、词典或 Runtime 状态。
+- **Glyphshift Cobalt** (`#6c8cff` dark / `#315ff4` light)：当前导航、主要动作、选中页码、开关和
+  键盘焦点。
+- **Contained Cobalt** (`#263866` dark)：深色主题主要实心按钮，避免直接使用高亮钴蓝造成刺眼面积。
 
-## 交互合同
+### Neutral
 
-- 工作流启用状态表示持久期望；Runtime actual state 与错误单独展示。
-- 工作流实际状态直接命名“软件未启动”“权限不匹配”“组件加载失败”等原因，不显示笼统的
-  “需要处理”。错误状态可点击展开逐软件的完整解释与恢复动作；软件未启动使用可恢复警告色，
-  确定的激活失败使用错误色。
-- Workflow 创建/编辑、Software 编辑、Dictionary 详情和 Probe Run 详情使用同一种独立详情页：
-  左侧返回与标题，右侧保存或运行期动作，主体占满模块内容区。简单创建和低频设置仍可使用 Nuxt UI
-  Modal；Modal 和 Select 浮层必须高于 sticky 表头。
-- 独立详情页按 Esc 返回上一级；打开 Modal、下拉菜单或选择器时由最内层浮层先处理 Esc。Workflow、
-  Software 和 Dictionary 存在未保存修改时，返回、顶部导航与关闭窗口均必须先请求确认。
-- 窗口关闭行为可选择“最小化到任务栏”或“彻底退出”；前者不丢弃编辑草稿，后者继续遵守未保存
-  保护。开机启动只写入当前 Windows 用户，不要求管理员权限。“始终以管理员身份启动”开启时
-  必须立即请求一次 UAC，后续启动继续遵循该偏好；关闭开关不谎称当前高权限进程已原地降权，只
-  从下一次启动恢复普通权限。
-- Dictionary 低频 metadata 使用单列设置 Modal；应用设置只更新同一份编辑草稿，并立即显示
-  “未保存”。词条不再使用编辑 Modal，现有行直接编辑，末行在每次成功添加后自动恢复为空白行。
-- Dictionary 设置、行内修改、新增和删除共享一份草稿与校验；保存成功才更新基线。返回列表、
-  顶部导航和关闭窗口都必须在有未保存更改时请求确认。
-- Dictionary entry 只有非空原文与非空译文，同一 Dictionary 内原文唯一；Location、Context、
-  keep 和逐词条字体都不属于 Dictionary。未来区域限制由 Workflow 的 Region Binding 组合。
-- 删除资产必须确认；删除软件只删除 Glyphshift 记录，不删除原程序。仍被 Workflow 或 Probe Run
-  引用的软件必须保留，并在软件表内显示具体引用数量和解除方法；失败项保持选中以便处理后重试。
-- Workflow、Software、Dictionary 和 Probe Run 本地管理表保留明确的行级操作，同时允许双击行内
-  非交互区域进入编辑或详情；复选框、开关、链接和操作按钮不得触发双击捷径。在线目录条目不提供
-  编辑双击。
-- 新增软件必须先通过基础接入检查；运行中软件选择、按键捕获和浏览程序都会进入同一检查，也可
-  手动重试。检查只确认正在运行、
-  目标架构、重复绑定及本地 Runtime/Adapter 就绪等确定事实，并明确提示仍需 Probe 验证真实拦截
-  覆盖，不把预检通过表述为“已支持”。
-- 软件按键捕获使用设备设置中的组合键（默认 `Ctrl+Shift+F8`）两段式状态：在“新建软件”Modal
-  第一次进入等待，第二次读取前台进程并回填同一 Modal；捕获结果不自动保存。等待状态必须可取消，
-  失败后保留等待并给出可恢复原因。
-- 修改软件快速捕获快捷键时只接受一次真实 `keydown`，组合必须包含 Ctrl、Alt 或 Win 之一；候选先
-  做不改变当前注册的可用性探测。保存时先注册候选再释放旧键，持久化失败则回绑旧键；系统占用、
-  无效输入和进行中的捕获请求都显示内联可恢复状态，旧快捷键继续有效。
-- Dictionary 创建和编辑不出现 Hook、Adapter 或字体字段；两处复用同一元数据组件，标签使用
-  `UInputTags`，发布版本使用三个数字输入生成标准版本字符串。
-- Catalog 未配置时在 Catalog 模式内显示明确离线空态，本地 Library 继续可用；覆盖 modified 或
-  unmanaged Dictionary 必须二次确认。普通界面不展示 digest、signature bytes、key ID 或路径。
-- Workflow 的每个 Target 独立组合 Adapter、Dictionary 和 Font Policy；不同 Target 不共享
-  隐式选择状态。Font Policy 不成为独立资产，不出现 Location、`main-ui`、全部位置或指定位置。
-- 本机字体目录是应用级机器缓存，不属于 Workflow Target 或 AppSettings；普通启动读取缓存，用户
-  点击刷新后才重新扫描并替换缓存，刷新失败时保留当前可用目录。
-- Probe Run 必须且只绑定一个 Dictionary；观测次数、Adapter 和时间属于内部 Observation Index，
-  不进入 Dictionary。详情页在联合表上方常显绑定词典、语言、词条数与打开入口；释放连接后可在设置
-  中切换绑定，但不复制或删除任何词典内容。暂停不结束任务，重启后可恢复，释放连接后任务和证据
-  仍保留。
-- Probe 详情页的暂停/继续与释放连接属于运行期主操作，必须直接显示在详情头；设置、导出和临时
-  资产管理等低频操作才进入任务菜单。紧凑宽度可把运行软件和任务菜单收成保留可访问名称的图标，
-  但不得隐藏释放连接。
-- 含临时资产的 Probe 详情以“保留”和“结束并清理”替代普通设置/删除动作；列表和恢复后的详情都
-  显示临时标记。清理确认必须说明 ownership 边界，并在结束后明确反馈复用或被引用而保留的资产。
-- Probe 详情不分“技术目录”和“字典草稿”；联合表支持后端搜索分页、行内翻译、把单条或多选非空
-  译文保存到绑定词典、从词典移除译文、批量忽略/恢复、清空及导出。没有译文的观测不能制造伪词条；
-  从词典移除不删除观测。5000 条基准下 Vue 只渲染当前页，不叠加虚拟滚动。
-- 原文和译文各占一行并使用轻量边界标明编辑区；下拉、分页和滚动条复用统一组件样式。
-- 图标按钮必须有可访问名称；状态不能只依赖颜色。
-- 标题栏之前提供首个 Tab 可发现的“跳到主要内容”入口，并支持 `Alt+M` 聚焦主内容；共享页头与列表、
-  批量工具栏具有可区分的可访问名称。独立详情与工具页的可见 heading 保持 `h1 → h2 → h3`，菜单
-  和其他浮层由 Esc 关闭后把焦点还给触发器。
-- 顶部主题按钮在深色时切到浅色、在浅色时切到深色；若原偏好为跟随系统，点击后落为相反的
-  固定主题，避免系统设置立即覆盖用户动作。
-- 真实 Tauri 桌面组件不可用时显示阻断错误；浏览器测试预览不伪装成连接状态，帮助页仍可打开。
+- **Graphite Canvas** (`#0c0f14`) 与 **Cold Gray Canvas** (`#eef1f5`)：应用主画布。
+- **Frame** (`#10141b` dark / `#e7ebf1` light)：标题栏与框架层。
+- **Surface** (`#151a22` dark / `#fafbfc` light)：表格、设置分区、Modal 与内容表面。
+- **Field** (`#191f29` dark / `#ffffff` light)：输入、选择器和可编辑区域。
+- **Border** (`#29313f` dark / `#d8dde6` light)：表面、行、分区与控件边界。
+- **Primary Text** (`#f1f4f8` dark / `#171b24` light)：标题、对象身份和关键值。
+- **Muted Text** (`#8f98a8` dark / `#6f7888` light)：说明、元数据和次级上下文。
 
-## 视觉语言
+### Status
 
-- 默认使用近黑石墨表面，并提供完整浅色 token；两种主题共享薄灰边界和钴蓝强调色。首次启动为
-  深色，跟随系统只在用户显式选择后生效。
-- 应用框架、页面画布、工作表面和 Field/Inset 使用固定语义角色。深色主题逐层轻微变亮；浅色
-  使用冷灰页面框架和纯白 Table 内容面；边界、表头与分页保留浅灰层级。交互 hover/selection
-  不复用静态层级色。
-- 深色 primary solid 按钮使用比导航选中态稍亮的低亮度蓝色 contained surface 和白字，不使用
-  刺目的高饱和实心蓝。
-- `--accent` 只用于当前导航、启用状态、选中页码和主要动作。
-- `--success` 只表示目标 Runtime 已确认；`--warning` 表示可恢复问题；`--danger` 只用于删除
-  与明确失败。
-- 不使用渐变、玻璃、发光、大卡片、大面积圆角或营销式留白。
+- **Success** (`#6ed2a7` dark / `#157a54` light)：只表示 Runtime 已确认或操作完成。
+- **Warning** (`#f0bd69` dark / `#9a5b00` light)：可恢复问题、权限提示和需要用户继续处理的状态。
+- **Danger** (`#ff8c91` dark / `#c43942` light)：删除、确定失败和不可接受的输入。
 
-## 实现规则
+**The Semantic Color Rule.** 状态不能只靠颜色表达；标签、图标或可读文案必须同时说明含义。
 
-- Vue 使用 Nuxt UI 组件与 Tailwind CSS；重复的列表页头、详情页头、工作表面、配置分组、字段行、
-  表格框架、表单 Modal 和确认 Modal 必须通过共享 Module 复用。
-- 核心产品文案使用 Vue I18n 语义 key；`zh-CN` 是 master schema，`en-US` 必须保持结构完整。
-  软件名、词典内容与 Adapter presentation 属于动态数据，不作为核心 UI 文案翻译。
-- `main.css` 只保留 Tailwind/Nuxt UI 引入、语义 token 和根级浏览器规则。
-- 图标统一来自 Tabler；普通界面不得显示 Driver、Profile、Domain ID、进程标识或 DLL。
-- 本地截图、真实软件样本、进程信息和测试词典只能写入 `local-test/`，不得提交。
+**The Accent Budget Rule.** 钴蓝只用于当前选择和主要动作。静态说明、普通图标和容器边界保持中性。
 
-## 禁止项
+## Typography
 
-- 不恢复单软件“选择实例 → 开始翻译”任务链路。
-- 不恢复 per-Software 文字/字体开关、固定软件品牌布局或旧数据迁移入口。
-- 不把 Adapter 已加载、进程已发现或 Observe 成功表述为翻译已经生效。
+**Display and Body Font:** Segoe UI Variable，回退到 Noto Sans SC、Microsoft YaHei 与 system-ui。
+
+字体系服务 Windows 桌面密度：对象身份明确，说明紧凑但不挤压，数字与计数保持稳定。普通界面不为
+“技术感”使用等宽字体；仅键帽、程序化值或真实代码需要 monospace。
+
+### Hierarchy
+
+- **Page Title**（600，20px，`-0.02em`）：页面和独立详情唯一 `h1`。
+- **Section Title**（600，13px，`-0.01em`）：设置分区、帮助章节和表单小节。
+- **Body**（400，12px）：主要说明、对象内容和普通阅读文本。
+- **Label**（600，11px）：表头、字段标签、按钮和紧凑功能文字。
+- **Metadata**（400，11px）：状态解释、路径辅助信息、时间和次级事实。
+- **Caption**（400，10px）：非关键计数与徽标；不能承载错误恢复、对象上下文或必读说明。
+
+**The Functional Copy Floor.** 可操作文案不得小于 11px；错误和恢复说明优先使用 11–12px 并允许换行。
+
+## Layout
+
+应用占满桌面窗口，`body` 不滚动。每个页面自己管理唯一主滚动区；表格正文、详情画布或工具页内容
+分别承担滚动，避免嵌套页面滚动。
+
+- **Title bar:** 固定 48px，高度内整合品牌、四个主导航、主题、帮助、设置和窗口控制。
+- **Page inset:** 16px。列表页使用“页头 + 满宽表格”；详情页使用“全宽详情头 + 主画布”。
+- **Utility axis:** Settings 与 Help 共享 980px 内容轴、20px 内边距和标题后 20px 首屏节奏。
+- **Form grid:** 184px 标签轨 + 弹性控件轨，水平间距 32px；容器不足 620px 时折为单列。
+- **Management tables:** 工具栏、表头、正文与 56px 分页脚形成连续表面。横向表格固定身份列与操作列。
+- **Workflow editor:** 左侧单层分区栏切换基础、软件、词典和字体四个任务面；右侧只显示当前任务。
+- **Reference viewports:** 960×640 与 1440×900 保持相同信息结构；紧凑宽度收缩标签或换行，不隐藏
+  核心运行操作。
+
+列表空态占据表头与分页之间的正文区域，不额外制造卡片。复杂详情允许一个明确分区栏；简单详情只
+使用居中的配置面，不创建伪侧栏填充空白。
+
+## Elevation & Depth
+
+Glyphshift 以色阶和 1px 边界表达绝大多数深度，默认不依赖阴影。画布、框架、内容面、内嵌表面和
+字段按照固定语义逐层变化；同一层级不重复套壳。
+
+主要 contained 按钮是例外：它使用轻微内描边、顶部高光和有垂直偏移的柔和阴影，表达可按压性。
+hover 阴影从 `0 2px 5px` 增加到 `0 3px 8px`，active 收回到 `0 1px 2px`。Modal 依靠 overlay 和
+内容层级建立焦点，不叠加装饰性 glow。
+
+**The Flat-by-Default Rule.** 先用语义色阶和边界解决层级；只有需要表达按压或受保护焦点时才使用阴影。
+
+## Shapes
+
+Glyphshift 使用小半径、近矩形的 Windows 工具形态：
+
+- 菜单项 4px。
+- 输入、选择器、紧凑按钮与键帽 5–6px。
+- 表格、工作表面和 Modal 8px。
+- 设置分区等独立配置容器 10px。
+- 胶囊只用于小型状态徽标、开关或滚动条 thumb，不作为普通按钮和卡片轮廓。
+
+所有大表面使用薄边界；不在同一容器同时堆叠重边框和宽阴影。表格行依靠分隔线与 hover 色变化，
+不把每一行改造成独立圆角卡片。
+
+## Components
+
+### Navigation
+
+标题栏是唯一一级导航。工作流、软件、词典和探针使用文字 + Tabler 图标；当前项使用底部钴蓝线和
+高亮文字。翻译任务、帮助与设置只作为标题栏工具入口出现，不占用主导航文字位置；活动翻译任务在
+入口旁显示完成批次，不把进度扩展成新的主导航标签。
+
+### Page headers
+
+列表页使用 40px 图标、20px 标题、单行说明和右侧主要动作。独立详情使用 64px 或 80px 高的横向
+标题带，保留返回、对象标题、未保存状态和直接动作。对象身份与操作不得被重复包进第二张卡。
+
+### Management tables
+
+表格工具栏统一承载搜索、筛选、显示列和页面动作；选中行后在同一位置出现批量工具栏。身份列、状态
+列和操作列使用固定语义，行级高频操作直接显示，低频动作进入命名菜单。分页完整提供首尾页、前后页、
+页码和每页数量。
+
+### Forms and settings
+
+表单使用共享的字段行、分区和 Modal。Settings 只有四个大分区：外观、AI 翻译、快捷键、应用与权限。
+AI 翻译在同一分区管理翻译前确认以及连接与模型，不把单个开关拆成独立卡片。立即生效的设置不增加
+保存按钮；草稿型编辑必须显式保存并保护未保存状态。Profile 的推理强度只占一个选择器，默认明确
+标记“关闭（翻译推荐）”；供应商不支持的虚假档位不出现在选项中。
+
+### Probe and dictionary surfaces
+
+探针详情直接显示暂停/继续、释放连接和 AI 操作；设置、导出及临时资产管理进入次级菜单。观测与词典
+译文在同一联合表中展示，但视觉上仍区分证据和内容。词典编辑使用原文/译文双列与常驻新增行，不为
+每条规则打开 Modal。
+
+### Translation tasks
+
+翻译任务沿用 Utility 内容轴，并按使用频率分为“当前任务 / 统计 / 任务列表”三个横向 Tab。默认 Tab
+只突出当前目标、整体进度、耗时、写入和停止；批次是可折叠诊断信息，重试或失败时自动展开。统计只做
+模型对比，历史通过筛选列表和单条展开披露低频细节。Token 使用等宽数字但不使用仪表盘大数字；状态
+同时使用文字与语义色。目标词典锁定必须在词典详情中显示可恢复说明和“查看任务”，不能只依赖禁用
+控件。标题栏入口使用任务清单语义图标，不使用语言图标。
+
+### Help and recovery
+
+Help 使用连续阅读布局，顺序固定为“从这里开始 → 解决常见问题 → 当前 Adapter”。首次路径提供直接
+页面入口；故障恢复按用户看到的现象命名；Adapter 只在底部渐进披露版本、配置和官方文档。
+
+### Overlays and menus
+
+Modal 用于需要保护焦点的创建、确认和复杂编辑。菜单、Popover、Select 与 Modal 使用统一层级，
+Modal 必须高于 sticky 表头和其他临时浮层。关闭后焦点返回触发器；Esc 由最内层浮层优先处理。
+
+### Accessibility and language
+
+核心文案使用 Vue I18n 语义 key，简体中文与 English 结构一致。图标按钮提供可访问名称，表格滚动区、
+工具栏与详情标题具有明确 landmark。标题栏之前提供“跳到主要内容”入口，并支持 `Alt+M` 聚焦主内容。
+系统减少动态效果时，所有 transition 降到近乎即时。
+
+## Do's and Don'ts
+
+### Do
+
+- 用一条主要任务链组织页面，让下一步在数秒内可找到。
+- 复用共享页头、表格框架、详情头、工作表面、表单分区和确认 Modal。
+- 用具体原因描述错误，例如“软件未启动”或“权限不匹配”，并提供对应恢复入口。
+- 在紧凑窗口中保留可访问名称、运行期主操作和完整数据语义。
+- 用探针证据确认兼容性；把目标实际状态与用户期望分开显示。
+- 让中英文、深浅主题和键盘路径获得同等验收。
+
+### Don't
+
+- 不使用首页卡片矩阵、营销式 hero、统计仪表盘、玻璃、渐变、发光或装饰纹理。
+- 不把列表行、设置字段或帮助步骤分别包装成嵌套卡片。
+- 不用大面积钴蓝、无语义状态色或仅靠颜色表达状态。
+- 不把软件页变成功能配置页，也不创建独立字体资产导航。
+- 不在普通界面暴露进程标识、内部 Adapter ID、本地模块路径、哈希或签名字节。
+- 不把捕获文字、Adapter 已加载或替换决策生成表述成最终翻译已经可见。
+- 不让技术目录压过首次使用与故障恢复内容。

@@ -1,6 +1,6 @@
 use glyphshift_ai_translation::{
-    AiProfileCatalog, AiProfileDraft, AiProviderProtocol, CredentialUpdate, CredentialVault,
-    CredentialVaultError,
+    AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiReasoningEffort, CredentialUpdate,
+    CredentialVault, CredentialVaultError,
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -9,6 +9,34 @@ use tempfile::tempdir;
 #[derive(Clone, Default)]
 struct MemoryCredentialVault {
     secrets: Arc<Mutex<BTreeMap<Box<str>, Box<str>>>>,
+}
+
+#[test]
+fn codex_subscription_profile_uses_local_login_without_a_credential() {
+    let root = tempdir().expect("Codex profile root");
+    let mut catalog =
+        AiProfileCatalog::open(root.path(), Box::new(MemoryCredentialVault::default()))
+            .expect("open profile catalog");
+    let profile = catalog
+        .save_profile(AiProfileDraft::new(
+            "profile.codex",
+            "Codex subscription",
+            AiProviderProtocol::CodexSubscription,
+            "gpt-5.6-luna",
+        ))
+        .expect("save Codex profile");
+
+    assert_eq!(profile.base_url(), "codex://local");
+    assert!(!profile.credential_required());
+    assert!(!profile.has_credential());
+    let resolved = catalog
+        .resolve_profile("profile.codex")
+        .expect("resolve Codex profile without credential");
+    assert_eq!(resolved.base_url(), "codex://local");
+    assert_eq!(resolved.max_concurrency(), 1);
+    assert!(resolved.credential().is_none());
+    assert_eq!(resolved.reasoning_effort(), AiReasoningEffort::Disabled);
+    assert_eq!(resolved.reasoning_effort().codex_value(), Some("none"));
 }
 
 impl CredentialVault for MemoryCredentialVault {
@@ -81,7 +109,7 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
     assert_eq!(openai.base_url(), "https://api.openai.com/v1");
     assert_eq!(
         serde_json::to_value(&openai).expect("serialize OpenAI profile")["timeoutMs"],
-        300_000
+        1_800_000
     );
     assert_eq!(
         serde_json::to_value(&openai).expect("serialize OpenAI profile")["maxRetries"],
@@ -93,7 +121,8 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
     );
     let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
         .expect("read persisted profiles");
-    assert!(persisted.contains("glyphshift.ai-profiles/2"));
+    assert!(persisted.contains("glyphshift.ai-profiles/3"));
+    assert!(persisted.contains(r#""reasoningEffort": "disabled""#));
     assert!(persisted.contains("credentialRef"));
     assert!(persisted.contains("maxItemsPerRequest"));
     assert!(!persisted.contains("maxInputCharsPerRequest"));
@@ -110,6 +139,22 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
         .find(|profile| profile.id() == "profile.openai")
         .expect("OpenAI profile")
         .has_credential());
+    assert_eq!(
+        profiles
+            .iter()
+            .find(|profile| profile.id() == "profile.openai")
+            .expect("OpenAI profile")
+            .reasoning_effort(),
+        AiReasoningEffort::Disabled
+    );
+    assert_eq!(
+        profiles
+            .iter()
+            .find(|profile| profile.id() == "profile.ollama")
+            .expect("Ollama profile")
+            .reasoning_effort(),
+        AiReasoningEffort::Automatic
+    );
     assert_eq!(
         shared_secrets
             .lock()
@@ -158,4 +203,14 @@ fn existing_profiles_without_a_batch_size_gain_the_fifty_item_default() {
         serde_json::to_value(profile).expect("serialize migrated profile")["maxItemsPerRequest"],
         50
     );
+    let profile = catalog
+        .profiles()
+        .expect("list migrated profiles")
+        .into_iter()
+        .next()
+        .expect("migrated profile");
+    assert_eq!(profile.reasoning_effort(), AiReasoningEffort::Automatic);
+    let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
+        .expect("read migrated profile artifact");
+    assert!(persisted.contains("glyphshift.ai-profiles/3"));
 }

@@ -250,6 +250,11 @@ pub struct DictionaryEdit {
 
 impl DictionaryEdit {
     #[must_use]
+    pub fn id(&self) -> &str {
+        self.metadata.id()
+    }
+
+    #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
         name: impl Into<Box<str>>,

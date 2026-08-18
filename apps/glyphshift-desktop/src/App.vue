@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -12,13 +12,15 @@ import HelpView from './components/HelpView.vue'
 import SettingsView from './components/SettingsView.vue'
 import SoftwareTable from './components/SoftwareTable.vue'
 import TitleBar from './components/TitleBar.vue'
+import TranslationTasksView from './components/TranslationTasksView.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
 import { useAppSettings } from './appSettings'
+import { useAiTranslation } from './useAiTranslation'
 import type { SoftwareQuickCaptureEvent, WorkflowDetail, WorkflowTarget } from './model'
 import { useProbeRuns } from './useProbeRuns'
 import { useWorkspace } from './useWorkspace'
 
-type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
+type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
 const desktopApiVersion = 30
 
@@ -26,15 +28,21 @@ const { t } = useI18n()
 const appSettings = useAppSettings()
 const workspace = useWorkspace()
 const probe = useProbeRuns()
+const ai = useAiTranslation()
 const view = ref<View>('workflows')
 const editorDirty = ref(false)
 const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
+const closingActiveTask = computed(() => pendingExit.value === 'close' && ai.taskRunning.value)
 const shellCompatibilityErrorKey = ref('')
 const quickProbeCaptureActive = ref(false)
 const mainContent = ref<HTMLElement | null>(null)
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
+const translationTaskProgress = computed(() => {
+  const task = ai.currentJob.value
+  return task && ai.taskRunning.value ? `${task.finishedBatches}/${task.totalBatches}` : ''
+})
 let unlistenSoftwareCapture: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
 
@@ -82,7 +90,7 @@ function requestWindowClose() {
     void minimizeWindow()
     return
   }
-  if (editorDirty.value) {
+  if (editorDirty.value || ai.taskRunning.value) {
     pendingExit.value = 'close'
     return
   }
@@ -93,7 +101,7 @@ async function connectWindowCloseBehavior() {
   if (!('__TAURI_INTERNALS__' in window)) return
   try {
     unlistenWindowClose = await getCurrentWindow().onCloseRequested(event => {
-      if (appSettings.closeBehavior.value === 'quit' && !editorDirty.value) return
+      if (appSettings.closeBehavior.value === 'quit' && !editorDirty.value && !ai.taskRunning.value) return
       event.preventDefault()
       requestWindowClose()
     })
@@ -211,6 +219,16 @@ onMounted(() => {
   void connectDesktopShell()
   void connectSoftwareQuickCaptureEvents()
   void connectWindowCloseBehavior()
+  void ai.connectTaskMonitor().catch(() => undefined)
+})
+
+watch(() => ai.currentJob.value?.appliedCount, async (value, previous) => {
+  if (!value || value === previous || !('__TAURI_INTERNALS__' in window)) return
+  await workspace.connectDesktopBackend()
+  const dictionaryId = ai.currentJob.value?.targetDictionaryId
+  if (dictionaryId && workspace.dictionaryDetail.value?.metadata.id === dictionaryId) {
+    await workspace.loadDictionary(dictionaryId)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -238,6 +256,8 @@ onBeforeUnmount(() => {
       <TitleBar
         :current="view"
         :probe-activity-status="probe.activityStatus.value"
+        :translation-task-active="ai.taskRunning.value"
+        :translation-task-progress="translationTaskProgress"
         @navigate="requestNavigation"
         @close="requestWindowClose"
       />
@@ -323,6 +343,7 @@ onBeforeUnmount(() => {
         @back="requestNavigation('dictionaries')"
         @save="workspace.saveDictionary"
         @configure-ai="requestNavigation('settings')"
+        @open-ai-tasks="requestNavigation('translation-tasks')"
         @dirty-change="editorDirty = $event"
       />
       <CaptureView
@@ -339,16 +360,18 @@ onBeforeUnmount(() => {
         @open-dictionary="openDictionary"
         @workspace-changed="refreshWorkspaceAfterQuickProbe"
         @configure-ai="requestNavigation('settings')"
+        @open-ai-tasks="requestNavigation('translation-tasks')"
       />
+      <TranslationTasksView v-else-if="view === 'translation-tasks'" />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="requestNavigation" />
       <SettingsView v-else @navigate="view = $event" />
       </main>
       <ConfirmDialog
         :open="discardOpen"
-        :title="t('common.discardTitle')"
-        :description="t('common.discardDescription')"
+        :title="closingActiveTask ? t('ai.tasks.quitTitle') : t('common.discardTitle')"
+        :description="closingActiveTask ? t('ai.tasks.quitDescription') : t('common.discardDescription')"
         :cancel-label="t('common.continueEditing')"
-        :confirm-label="t('common.discardChanges')"
+        :confirm-label="closingActiveTask ? t('ai.tasks.quitConfirm') : t('common.discardChanges')"
         confirm-color="warning"
         @update:open="$event || cancelDiscard()"
         @confirm="confirmDiscard"

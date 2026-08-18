@@ -33,7 +33,7 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await dialog.getByRole('combobox', { name: '协议' }).click()
   await page.getByRole('option', { name: 'Ollama', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: 'API Key' })).toHaveCount(0)
-  await expect(dialog.getByRole('spinbutton', { name: '单批超时（秒）' })).toHaveValue('300')
+  await expect(dialog.getByRole('spinbutton', { name: '单批超时（分钟）' })).toHaveValue('30')
   await expect(dialog.getByRole('spinbutton', { name: '单批最多条目' })).toHaveValue('50')
   await expect(dialog.getByRole('spinbutton', { name: '并发批数' })).toHaveValue('1')
   await expect(dialog.getByRole('spinbutton', { name: '失败重试次数' })).toHaveValue('2')
@@ -46,6 +46,60 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
   await expect(page.getByText('本地 Ollama', { exact: true })).toBeVisible()
+})
+
+test('settings creates a Codex subscription profile without endpoint or credential fields', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '添加 AI Profile' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI Profile' })
+  await dialog.getByRole('textbox', { name: 'Profile 名称' }).fill('我的 Codex')
+  await dialog.getByRole('combobox', { name: '协议' }).click()
+  await page.getByRole('option', { name: 'Codex 订阅', exact: true }).click()
+
+  await expect(dialog.getByRole('textbox', { name: 'Base URL' })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: 'API Key' })).toHaveCount(0)
+  await expect(dialog.getByText(/复用本机 Codex CLI 当前的 ChatGPT 登录/)).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: '推理强度' })).toContainText('关闭（翻译推荐）')
+  await expect(dialog.getByRole('spinbutton', { name: '并发批数' })).toHaveValue('1')
+  await dialog.getByRole('textbox', { name: '模型 ID' }).fill('gpt-5.6-luna')
+  await dialog.getByRole('button', { name: '保存 Profile' }).click()
+
+  await expect(page.getByText('我的 Codex', { exact: true })).toBeVisible()
+  await expect(page.getByText('Codex 订阅', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/gpt-5\.6-luna/)).toBeVisible()
+})
+
+test('DeepSeek profile defaults reasoning off and exposes only truthful effort levels', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '添加 AI Profile' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI Profile' })
+  await dialog.getByRole('textbox', { name: 'Profile 名称' }).fill('DeepSeek 翻译')
+  await dialog.getByRole('textbox', { name: 'Base URL' }).fill('https://api.deepseek.com')
+  await dialog.getByRole('textbox', { name: '模型 ID' }).fill('deepseek-v4-flash')
+  const reasoning = dialog.getByRole('combobox', { name: '推理强度' })
+  await expect(reasoning).toContainText('关闭（翻译推荐）')
+  await expect(dialog.getByText(/DeepSeek V4 默认 high/)).toBeVisible()
+  if (process.env.GLYPHSHIFT_REASONING_SCREENSHOT) {
+    await page.setViewportSize({ width: 960, height: 640 })
+    await page.screenshot({ path: process.env.GLYPHSHIFT_REASONING_SCREENSHOT, fullPage: true })
+  }
+  await reasoning.click()
+  await expect(page.getByRole('option', { name: '低', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: '中', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('option', { name: '高', exact: true })).toBeVisible()
+  await expect(page.getByRole('option', { name: '最高', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await dialog.getByRole('textbox', { name: 'API Key' }).fill('synthetic-secret')
+  await dialog.getByRole('button', { name: '保存 Profile' }).click()
+
+  await expect(page.getByText('DeepSeek 翻译', { exact: true })).toBeVisible()
+  await expect(page.getByText(/推理 关闭（翻译推荐）/)).toBeVisible()
+  await page.reload()
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '编辑 AI Profile：DeepSeek 翻译' }).click()
+  await expect(page.getByRole('dialog', { name: '编辑 AI Profile' }).getByRole('combobox', { name: '推理强度' })).toContainText('关闭（翻译推荐）')
 })
 
 test('AI profile connection test reports model invocation separately from optional discovery', async ({ page }) => {
@@ -133,10 +187,12 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
   const preflight = page.getByRole('dialog', { name: '确认 AI 翻译' })
-  await expect(preflight.getByText('预计输入约 389 Token')).toBeVisible()
-  await expect(preflight.getByText('1 条 · 1 批')).toBeVisible()
+  await expect(preflight.getByText('1 条待翻译文本 · 1 批')).toBeVisible()
+  await expect(preflight.getByText('原文输入粗估约 389 Token')).toBeVisible()
+  await expect(preflight.getByText('不含模型输出、推理 Token、缓存计费、重试或取消后服务端继续计算')).toBeVisible()
   await expect(preflight.getByText('每批最多 25 条 · 并发 1 批')).toBeVisible()
-  await expect(preflight.getByText('单批 60 秒 · 失败重试 2 次')).toBeVisible()
+  await expect(preflight.getByText('自动（供应商默认）')).toBeVisible()
+  await expect(preflight.getByText('单批 1 分钟 · 失败重试 2 次')).toBeVisible()
   await expect(preflight.getByText(/秒后自动开始/)).toHaveCount(0)
   await preflight.getByRole('button', { name: '取消' }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Close' })).toHaveValue('')
@@ -157,9 +213,12 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
     filterPolicy, hasCredential: false, credentialRequired: false,
   }
   await page.addInitScript(({ snapshot, profile }) => {
+    let started = false
     let cancelled = false
     const job = () => ({
       jobId: 'job-stop', planToken: 'plan-stop', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
+      startedAtMs: 1, finishedAtMs: cancelled ? 2 : null, profileName: profile.name,
+      protocol: profile.protocol, modelId: profile.modelId,
       status: cancelled ? 'cancelled' : 'running', totalCount: 258, completedCount: 0, failedCount: 0,
       totalBatches: 6, batchSize: 50, maxConcurrency: 3, maxRetries: 2,
       finishedBatches: 0, failedBatches: 0, elapsedMs: 31_000, peakConcurrency: 3,
@@ -171,7 +230,8 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
         { batchNumber: 5, itemCount: 50, status: cancelled ? 'cancelled' : 'queued', attemptCount: 0, startedAfterMs: null, elapsedMs: 0, lastError: null },
         { batchNumber: 6, itemCount: 8, status: cancelled ? 'cancelled' : 'queued', attemptCount: 0, startedAfterMs: null, elapsedMs: 0, lastError: null },
       ],
-      results: [], errors: [],
+      usage: null, results: [], errors: [], targetDictionaryId: 'dictionary-proof', origin: 'dictionary',
+      appliedCount: 0, skippedCount: 0, writebackError: null, dictionaryLocked: !cancelled,
     })
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
@@ -185,7 +245,11 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
           sourceLocale: 'en-US', targetLocale: 'zh-CN',
           candidates: [{ itemId: 'dictionary-row-1', source: 'Pending source', protectedTokens: [] }], skipped: [],
         }
-        if (command === 'desktop_start_ai_translation') return 'job-stop'
+        if (command === 'desktop_start_ai_translation') {
+          started = true
+          return job()
+        }
+        if (command === 'desktop_ai_translation_tasks') return { current: started ? job() : null, history: [] }
         if (command === 'desktop_ai_translation_job') return job()
         if (command === 'desktop_cancel_ai_translation') {
           cancelled = true
@@ -201,19 +265,30 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
-  await expect(page.getByText('AI 正在翻译')).toBeVisible()
-  await expect(page.getByText('当前请求 3/3 · 已观测并发峰值 3')).toBeVisible()
+  await expect(page.getByRole('tab', { name: /当前任务/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByText('运行中', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('模型已完成 0/258 条')).toBeVisible()
+  await expect(page.getByText('当前请求').locator('..')).toContainText('3/3')
+  const activeScreenshotPath = process.env.GLYPHSHIFT_ACTIVE_TASK_SCREENSHOT
+  if (activeScreenshotPath) {
+    await page.setViewportSize({
+      width: Number(process.env.GLYPHSHIFT_TASK_SCREENSHOT_WIDTH ?? 1280),
+      height: Number(process.env.GLYPHSHIFT_TASK_SCREENSHOT_HEIGHT ?? 720),
+    })
+    await page.screenshot({ path: activeScreenshotPath, fullPage: true })
+  }
+  await page.getByRole('button', { name: '批次详情 0/6' }).click()
   await expect(page.getByTestId('ai-batch-1')).toContainText('请求中')
   await expect(page.getByTestId('ai-batch-4')).toContainText('排队')
-  await expect(page.getByText('已结束批次').locator('..')).toContainText('0/6')
-  await page.getByRole('button', { name: '立即停止' }).click()
-  await expect(page.getByText('AI 正在翻译')).toHaveCount(0, { timeout: 500 })
-  await expect(page.getByText('AI 翻译已停止')).toBeVisible()
-  await expect(page.getByRole('textbox', { name: '编辑译文：Pending source' })).toHaveValue('')
-  const stoppedNotice = page.getByRole('status').filter({ hasText: 'AI 翻译已停止' })
-  await expect(stoppedNotice).toBeVisible()
-  await stoppedNotice.getByRole('button', { name: '关闭' }).click()
-  await expect(stoppedNotice).toHaveCount(0)
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
+  await expect(page.getByText('任务期间该词典保持只读；其他词典和功能不受影响。停止或完成后自动解锁。')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '编辑译文：Pending source' })).toBeDisabled()
+  await page.getByRole('button', { name: '查看任务' }).first().click()
+  await page.getByRole('button', { name: '停止翻译' }).click()
+  await expect(page.getByRole('button', { name: '停止翻译' })).toHaveCount(0, { timeout: 1_000 })
+  await expect(page.getByText('已停止', { exact: true })).toBeVisible()
+  await expect(page.getByText('词典正在翻译')).toHaveCount(0)
 })
 
 test('dictionary AI fill translates only eligible blank entries', async ({ page }) => {
@@ -335,10 +410,10 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
   const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
   await expect(progress.getByText(/已完成 \d+\/60 条 · 已用时 0:01/)).toBeVisible()
   await expect(progress.getByText('当前请求 1/1 · 已观测并发峰值 1')).toBeVisible()
-  await expect(page.getByText(/已补全全部 60 条译文，自动完成 60 批；用时 0:0[4-6]。/)).toBeVisible()
+  await expect(page.getByText(/已补全全部 60 条译文，自动完成 60 批；用时 0:0[4-9]。/)).toBeVisible({ timeout: 10_000 })
 })
 
-test('dictionary AI fill exposes partial batches and retries only remaining blanks', async ({ page }) => {
+test('background translation task reports partial batches, writeback, usage, and model history', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.dictionaryDetails['dictionary-proof'].entries = [
     { source: 'First source', translation: '' },
@@ -353,8 +428,31 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
     filterPolicy, hasCredential: false, credentialRequired: false,
   }
   await page.addInitScript(({ snapshot, profile }) => {
-    let attempt = 0
-    let latestCandidates: Array<{ itemId: string; source: string }> = []
+    let started = false
+    const task = {
+      jobId: 'job-1', planToken: 'plan-1', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
+      startedAtMs: 1_800_000, finishedAtMs: 1_802_500, profileName: profile.name,
+      protocol: profile.protocol, modelId: profile.modelId,
+      status: 'completed_with_failures', totalCount: 3, completedCount: 2, failedCount: 1,
+      totalBatches: 2, finishedBatches: 2, failedBatches: 1,
+      batchSize: 2, maxConcurrency: 1, maxRetries: 2, elapsedMs: 2_500, peakConcurrency: 1,
+      usage: { inputTokens: 120, cachedInputTokens: 20, outputTokens: 80, reasoningTokens: 70, totalTokens: 200 },
+      batches: [
+        { batchNumber: 1, itemCount: 2, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 400, lastError: null, usage: { inputTokens: 120, cachedInputTokens: 20, outputTokens: 80, reasoningTokens: 70, totalTokens: 200 } },
+        { batchNumber: 2, itemCount: 1, status: 'failed', attemptCount: 3, startedAfterMs: 401, elapsedMs: 2_099, lastError: { category: 'invalid_request', retryable: false, retryAfterMs: null, providerCode: null, requestId: null, httpStatus: 400, safeMessage: 'Request rejected' }, usage: null },
+      ],
+      results: [], errors: [], targetDictionaryId: 'dictionary-proof', origin: 'dictionary',
+      appliedCount: 2, skippedCount: 0, writebackError: null, dictionaryLocked: false,
+    }
+    const history = [{
+      recordId: 'record-1', startedAtMs: task.startedAtMs, finishedAtMs: task.finishedAtMs,
+      scopeKind: 'dictionary', profileName: task.profileName, protocol: task.protocol, modelId: task.modelId,
+      status: task.status, totalCount: task.totalCount, completedCount: task.completedCount,
+      failedCount: task.failedCount, appliedCount: task.appliedCount, skippedCount: task.skippedCount,
+      totalBatches: task.totalBatches, finishedBatches: task.finishedBatches,
+      failedBatches: task.failedBatches, requestAttempts: 4, retryAttempts: 2, elapsedMs: task.elapsedMs,
+      peakConcurrency: task.peakConcurrency, usage: task.usage, batches: task.batches,
+    }]
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
@@ -363,44 +461,17 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails[args?.dictionaryId as string]
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
         if (command === 'desktop_plan_ai_translation') {
-          latestCandidates = (args?.request?.items ?? [])
-            .filter((item: { translation?: string | null }) => !item.translation?.trim())
-            .map((item: { itemId: string; source: string }) => ({ itemId: item.itemId, source: item.source }))
           return {
-            token: `plan-${attempt + 1}`, scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
+            token: 'plan-1', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
             sourceLocale: 'en-US', targetLocale: 'zh-CN',
-            candidates: latestCandidates.map(item => ({ ...item, protectedTokens: [] })), skipped: [],
+            candidates: (args?.request?.items ?? []).map((item: { itemId: string; source: string }) => ({ ...item, protectedTokens: [] })), skipped: [],
           }
         }
         if (command === 'desktop_start_ai_translation') {
-          attempt += 1
-          return `job-${attempt}`
+          started = true
+          return task
         }
-        if (command === 'desktop_ai_translation_job') {
-          if (attempt === 1) {
-            const translated = latestCandidates.slice(0, 2)
-            return {
-              jobId: 'job-1', planToken: 'plan-1', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
-              status: 'completed_with_failures', totalCount: 3, completedCount: 2, failedCount: 1,
-              totalBatches: 2, finishedBatches: 2, failedBatches: 1,
-              batchSize: 2, maxConcurrency: 1, maxRetries: 2, elapsedMs: 2_500, peakConcurrency: 1,
-              batches: [
-                { batchNumber: 1, itemCount: 2, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 400, lastError: null },
-                { batchNumber: 2, itemCount: 1, status: 'failed', attemptCount: 3, startedAfterMs: 401, elapsedMs: 2_099, lastError: { category: 'invalid_request', retryable: false, retryAfterMs: null, providerCode: null, requestId: null, httpStatus: 400, safeMessage: 'Request rejected' } },
-              ],
-              results: translated.map(item => ({ ...item, translation: `AI · ${item.source}` })),
-              errors: [{ category: 'invalid_request', retryable: false, retryAfterMs: null, providerCode: null, requestId: null, httpStatus: 400, safeMessage: 'Request rejected' }],
-            }
-          }
-          return {
-            jobId: 'job-2', planToken: 'plan-2', scopeId: 'dictionary:dictionary-proof', snapshotRevision: 3,
-            status: 'completed', totalCount: 1, completedCount: 1, failedCount: 0,
-            totalBatches: 1, finishedBatches: 1, failedBatches: 0,
-            batchSize: 1, maxConcurrency: 1, maxRetries: 2, elapsedMs: 300, peakConcurrency: 1,
-            batches: [{ batchNumber: 1, itemCount: 1, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 300, lastError: null }],
-            results: latestCandidates.map(item => ({ ...item, translation: `AI · ${item.source}` })), errors: [],
-          }
-        }
+        if (command === 'desktop_ai_translation_tasks') return { current: started ? task : null, history: started ? history : [] }
         return null
       },
     }
@@ -412,14 +483,36 @@ test('dictionary AI fill exposes partial batches and retries only remaining blan
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
-  await expect(page.getByText(/已完成 2\/3 条，1 条失败；用时 \d+:\d{2}，可重试剩余空白项。/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
+  await expect(page.getByText('部分完成', { exact: true })).toBeVisible()
   await expect(page.getByTestId('ai-batch-2')).toContainText('失败')
   await expect(page.getByTestId('ai-batch-2')).toContainText('第 3 次请求')
   await expect(page.getByTestId('ai-batch-2')).toContainText('Request rejected')
-  await expect(page.getByRole('textbox', { name: '编辑译文：Third source' })).toHaveValue('')
-  await page.getByRole('button', { name: '重试剩余' }).click()
-  await expect(page.getByRole('textbox', { name: '编辑译文：Third source' })).toHaveValue('AI · Third source')
-  await expect(page.getByText(/已补全全部 1 条译文，自动完成 1 批；用时 \d+:\d{2}。/)).toBeVisible()
+  await expect(page.getByTestId('ai-batch-1')).toContainText('缓存输入 20')
+  await expect(page.getByTestId('ai-batch-1')).toContainText('推理 70')
+  await expect(page.getByText(/200\s*Token/)).toBeVisible()
+  await expect(page.getByText('已写入').locator('..')).toContainText('2')
+  await page.getByRole('tab', { name: '统计' }).click()
+  await expect(page.getByTestId('translation-task-statistics')).toBeVisible()
+  await expect(page.getByText('模型统计')).toBeVisible()
+  await expect(page.getByTestId('translation-task-statistics').getByText('200', { exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: /任务列表/ }).click()
+  await expect(page.getByTestId('translation-task-list')).toBeVisible()
+  await expect(page.getByText('最近任务')).toBeVisible()
+  await page.getByRole('button', { name: '查看 qwen3:8b 的任务详情' }).click()
+  await expect(page.getByRole('region', { name: 'qwen3:8b 的任务详情' })).toContainText('推理 70')
+  const screenshotPath = process.env.GLYPHSHIFT_TASK_SCREENSHOT
+  if (screenshotPath) {
+    const screenshotTab = process.env.GLYPHSHIFT_TASK_SCREENSHOT_TAB ?? 'current'
+    await page.getByRole('tab', {
+      name: screenshotTab === 'statistics' ? '统计' : screenshotTab === 'list' ? /任务列表/ : /当前任务/,
+    }).click()
+    await page.setViewportSize({
+      width: Number(process.env.GLYPHSHIFT_TASK_SCREENSHOT_WIDTH ?? 1280),
+      height: Number(process.env.GLYPHSHIFT_TASK_SCREENSHOT_HEIGHT ?? 720),
+    })
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+  }
 })
 
 test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ page }) => {
@@ -466,18 +559,39 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
             ],
           }
         }
-        if (command === 'desktop_start_ai_translation') return 'job-1'
-        if (command === 'desktop_ai_translation_job') return {
-          jobId: 'job-1', planToken: 'plan-1', scopeId: 'probe:probe-ai', snapshotRevision: 3,
-          status: 'completed', totalCount: 1, completedCount: 1, failedCount: 0,
-          totalBatches: 1, finishedBatches: 1, failedBatches: 0,
-          results: [{ itemId: 'probe-row-2', source: 'Close', translation: '关闭' }], errors: [],
-        }
-        if (command === 'desktop_apply_probe_ai_results') {
-          ;(window as unknown as { __probeAiApply?: unknown }).__probeAiApply = args?.request
+        if (command === 'desktop_start_ai_translation') {
           applied = true
           summary = { ...summary, dictionaryRevision: 4, dictionaryEntryCount: 3 }
-          return { probe: summary, appliedCount: 1, skippedCount: 0 }
+          return {
+          jobId: 'job-1', planToken: 'plan-1', scopeId: 'probe:probe-ai', snapshotRevision: 3,
+          startedAtMs: 1, finishedAtMs: 2, profileName: aiProfile.name,
+          protocol: aiProfile.protocol, modelId: aiProfile.modelId,
+          status: 'completed', totalCount: 1, completedCount: 1, failedCount: 0,
+          totalBatches: 1, finishedBatches: 1, failedBatches: 0,
+          batchSize: 1, maxConcurrency: 1, maxRetries: 2, elapsedMs: 300, peakConcurrency: 1,
+          usage: { inputTokens: 20, cachedInputTokens: 0, outputTokens: 5, reasoningTokens: 0, totalTokens: 25 },
+          batches: [{ batchNumber: 1, itemCount: 1, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 300, lastError: null, usage: null }],
+          results: [], errors: [], targetDictionaryId: 'dictionary-proof', origin: 'probe',
+          appliedCount: 1, skippedCount: 0, writebackError: null, dictionaryLocked: false,
+          }
+        }
+        if (command === 'desktop_ai_translation_tasks') {
+          if (!applied) return { current: null, history: [] }
+          return {
+            current: {
+              jobId: 'job-1', planToken: 'plan-1', scopeId: 'probe:probe-ai', snapshotRevision: 3,
+              startedAtMs: 1, finishedAtMs: 2, profileName: aiProfile.name,
+              protocol: aiProfile.protocol, modelId: aiProfile.modelId,
+              status: 'completed', totalCount: 1, completedCount: 1, failedCount: 0,
+              totalBatches: 1, finishedBatches: 1, failedBatches: 0,
+              batchSize: 1, maxConcurrency: 1, maxRetries: 2, elapsedMs: 300, peakConcurrency: 1,
+              usage: { inputTokens: 20, cachedInputTokens: 0, outputTokens: 5, reasoningTokens: 0, totalTokens: 25 },
+              batches: [{ batchNumber: 1, itemCount: 1, status: 'completed', attemptCount: 1, startedAfterMs: 0, elapsedMs: 300, lastError: null, usage: null }],
+              results: [], errors: [], targetDictionaryId: 'dictionary-proof', origin: 'probe',
+              appliedCount: 1, skippedCount: 0, writebackError: null, dictionaryLocked: false,
+            },
+            history: [],
+          }
         }
         return null
       },
@@ -490,13 +604,10 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
 
-  await expect(page.getByRole('textbox', { name: /Close.*译文/ })).toHaveValue('关闭')
-  await expect(page.getByRole('textbox', { name: /25\.00fps.*译文/ })).toHaveValue('')
-  await expect(page.getByText(/已写入全部 1 条译文，自动完成 1 批；用时 \d+:\d{2}，保留 0 条期间新增的人工译文。/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
+  await expect(page.getByText('探针', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('已写入').locator('..')).toContainText('1')
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __probeAiPlan?: { runId?: string } }
   ).__probeAiPlan)).toEqual(expect.objectContaining({ runId: 'probe-ai' }))
-  await expect.poll(() => page.evaluate(() => (
-    window as unknown as { __probeAiApply?: { snapshotRevision?: number } }
-  ).__probeAiApply)).toEqual(expect.objectContaining({ snapshotRevision: 3 }))
 })

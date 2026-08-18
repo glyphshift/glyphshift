@@ -231,6 +231,7 @@ impl DesktopApplication {
         &mut self,
         request: DictionaryCatalogInstallRequest,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        self.ensure_ai_dictionary_writable(&request.dictionary_id)?;
         let release = DictionaryReleaseKey::new(
             request.catalog_id,
             request.dictionary_id,
@@ -261,6 +262,9 @@ impl DesktopApplication {
         &mut self,
         input_path: PathBuf,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        if self.ai_locked_dictionary_id.is_some() {
+            return Err(CommandError::new("dictionary.ai_translation_locked"));
+        }
         self.backend
             .import_dictionary_file(input_path)
             .map_err(dictionary_import_error)?;
@@ -281,6 +285,7 @@ impl DesktopApplication {
         &mut self,
         edit: DictionaryEdit,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        self.ensure_ai_dictionary_writable(edit.id())?;
         self.backend
             .update_dictionary(edit)
             .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
@@ -292,6 +297,9 @@ impl DesktopApplication {
         &mut self,
         dictionary_ids: &[Box<str>],
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        for dictionary_id in dictionary_ids {
+            self.ensure_ai_dictionary_writable(dictionary_id)?;
+        }
         let workflow_names = self
             .backend
             .snapshot()

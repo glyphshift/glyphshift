@@ -1,11 +1,12 @@
 use crate::{
-    AiProviderProtocol, AiTranslation, ResolvedAiProfile, TranslationCandidate, TranslationPlan,
+    AiProviderProtocol, AiReasoningEffort, AiTranslation, ResolvedAiProfile, TranslationCandidate,
+    TranslationPlan,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 50;
 
@@ -40,7 +41,7 @@ impl Default for TranslationBatchPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderErrorCategory {
     Network,
@@ -58,7 +59,7 @@ pub enum ProviderErrorCategory {
     ProviderInternal,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderError {
     category: ProviderErrorCategory,
@@ -68,6 +69,70 @@ pub struct ProviderError {
     request_id: Option<Box<str>>,
     http_status: Option<u16>,
     safe_message: Box<str>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    reasoning_tokens: u64,
+    cached_input_tokens: u64,
+    total_tokens: u64,
+}
+
+impl ProviderUsage {
+    #[must_use]
+    pub const fn new(
+        input_tokens: u64,
+        output_tokens: u64,
+        reasoning_tokens: u64,
+        cached_input_tokens: u64,
+        total_tokens: u64,
+    ) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            reasoning_tokens,
+            cached_input_tokens,
+            total_tokens,
+        }
+    }
+
+    #[must_use]
+    pub const fn input_tokens(self) -> u64 {
+        self.input_tokens
+    }
+
+    #[must_use]
+    pub const fn output_tokens(self) -> u64 {
+        self.output_tokens
+    }
+
+    #[must_use]
+    pub const fn reasoning_tokens(self) -> u64 {
+        self.reasoning_tokens
+    }
+
+    #[must_use]
+    pub const fn cached_input_tokens(self) -> u64 {
+        self.cached_input_tokens
+    }
+
+    #[must_use]
+    pub const fn total_tokens(self) -> u64 {
+        self.total_tokens
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+        self.cached_input_tokens = self
+            .cached_input_tokens
+            .saturating_add(other.cached_input_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+    }
 }
 
 impl ProviderError {
@@ -199,6 +264,7 @@ impl ProviderTranslation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderBatchResult {
     translations: Vec<ProviderTranslation>,
+    usage: Option<ProviderUsage>,
 }
 
 impl ProviderBatchResult {
@@ -206,7 +272,14 @@ impl ProviderBatchResult {
     pub fn new(translations: impl IntoIterator<Item = ProviderTranslation>) -> Self {
         Self {
             translations: translations.into_iter().collect(),
+            usage: None,
         }
+    }
+
+    #[must_use]
+    pub const fn with_usage(mut self, usage: ProviderUsage) -> Self {
+        self.usage = Some(usage);
+        self
     }
 }
 
@@ -264,7 +337,7 @@ impl ValidatedTranslation {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslationJobStatus {
     Queued,
@@ -273,6 +346,7 @@ pub enum TranslationJobStatus {
     CompletedWithFailures,
     Cancelling,
     Cancelled,
+    Interrupted,
 }
 
 impl TranslationJobStatus {
@@ -280,12 +354,12 @@ impl TranslationJobStatus {
     pub const fn is_terminal(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::CompletedWithFailures | Self::Cancelled
+            Self::Completed | Self::CompletedWithFailures | Self::Cancelled | Self::Interrupted
         )
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslationBatchStatus {
     Queued,
@@ -313,6 +387,7 @@ pub struct TranslationBatchSnapshot {
     started_after_ms: Option<u64>,
     elapsed_ms: u64,
     last_error: Option<ProviderError>,
+    usage: Option<ProviderUsage>,
 }
 
 impl TranslationBatchSnapshot {
@@ -327,8 +402,28 @@ impl TranslationBatchSnapshot {
     }
 
     #[must_use]
+    pub const fn item_count(&self) -> usize {
+        self.item_count
+    }
+
+    #[must_use]
     pub const fn attempt_count(&self) -> u16 {
         self.attempt_count
+    }
+
+    #[must_use]
+    pub const fn usage(&self) -> Option<ProviderUsage> {
+        self.usage
+    }
+
+    #[must_use]
+    pub const fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms
+    }
+
+    #[must_use]
+    pub const fn last_error(&self) -> Option<&ProviderError> {
+        self.last_error.as_ref()
     }
 }
 
@@ -339,6 +434,12 @@ pub struct TranslationJobSnapshot {
     plan_token: Box<str>,
     scope_id: Box<str>,
     snapshot_revision: u64,
+    started_at_ms: u64,
+    finished_at_ms: Option<u64>,
+    profile_name: Box<str>,
+    protocol: AiProviderProtocol,
+    model_id: Box<str>,
+    reasoning_effort: AiReasoningEffort,
     status: TranslationJobStatus,
     total_count: usize,
     completed_count: usize,
@@ -351,6 +452,7 @@ pub struct TranslationJobSnapshot {
     failed_batches: usize,
     elapsed_ms: u64,
     peak_concurrency: usize,
+    usage: Option<ProviderUsage>,
     batches: Vec<TranslationBatchSnapshot>,
     results: Vec<ValidatedTranslation>,
     errors: Vec<ProviderError>,
@@ -360,6 +462,46 @@ impl TranslationJobSnapshot {
     #[must_use]
     pub fn job_id(&self) -> &str {
         &self.job_id
+    }
+
+    #[must_use]
+    pub fn scope_id(&self) -> &str {
+        &self.scope_id
+    }
+
+    #[must_use]
+    pub const fn snapshot_revision(&self) -> u64 {
+        self.snapshot_revision
+    }
+
+    #[must_use]
+    pub const fn started_at_ms(&self) -> u64 {
+        self.started_at_ms
+    }
+
+    #[must_use]
+    pub const fn finished_at_ms(&self) -> Option<u64> {
+        self.finished_at_ms
+    }
+
+    #[must_use]
+    pub fn profile_name(&self) -> &str {
+        &self.profile_name
+    }
+
+    #[must_use]
+    pub const fn protocol(&self) -> AiProviderProtocol {
+        self.protocol
+    }
+
+    #[must_use]
+    pub fn model_id(&self) -> &str {
+        &self.model_id
+    }
+
+    #[must_use]
+    pub const fn reasoning_effort(&self) -> AiReasoningEffort {
+        self.reasoning_effort
     }
 
     #[must_use]
@@ -415,6 +557,16 @@ impl TranslationJobSnapshot {
     #[must_use]
     pub const fn peak_concurrency(&self) -> usize {
         self.peak_concurrency
+    }
+
+    #[must_use]
+    pub const fn elapsed_ms(&self) -> u64 {
+        self.elapsed_ms
+    }
+
+    #[must_use]
+    pub const fn usage(&self) -> Option<ProviderUsage> {
+        self.usage
     }
 
     #[must_use]
@@ -487,6 +639,7 @@ impl TranslationJobId {
 pub enum TranslationJobError {
     UnknownPlan(Box<str>),
     MissingProvider(AiProviderProtocol),
+    ActiveJob(Box<str>),
     UnknownJob(Box<str>),
     StateUnavailable,
 }
@@ -512,6 +665,9 @@ impl AiTranslation {
         plan_token: &str,
         profile: ResolvedAiProfile,
     ) -> Result<TranslationJobId, TranslationJobError> {
+        if let Some(active_job_id) = self.active_job_id()? {
+            return Err(TranslationJobError::ActiveJob(active_job_id.into()));
+        }
         let plan = self
             .plans
             .get(plan_token)
@@ -540,8 +696,10 @@ impl AiTranslation {
                 started_after_ms: None,
                 elapsed_ms: 0,
                 last_error: None,
+                usage: None,
             })
             .collect();
+        let started_at_ms = unix_time_ms();
         let cell = Arc::new(JobCell {
             state: Mutex::new(JobState {
                 snapshot: TranslationJobSnapshot {
@@ -549,6 +707,12 @@ impl AiTranslation {
                     plan_token: plan.token.clone(),
                     scope_id: plan.scope_id.clone(),
                     snapshot_revision: plan.snapshot_revision,
+                    started_at_ms,
+                    finished_at_ms: None,
+                    profile_name: profile.name().into(),
+                    protocol: profile.protocol(),
+                    model_id: profile.model_id().into(),
+                    reasoning_effort: profile.reasoning_effort(),
                     status: TranslationJobStatus::Queued,
                     total_count: plan.candidates.len(),
                     completed_count: 0,
@@ -561,6 +725,7 @@ impl AiTranslation {
                     failed_batches: 0,
                     elapsed_ms: 0,
                     peak_concurrency: 0,
+                    usage: None,
                     batches: batch_snapshots,
                     results: Vec::new(),
                     errors: Vec::new(),
@@ -572,6 +737,29 @@ impl AiTranslation {
         self.jobs.insert(job_id.clone(), cell.clone());
         std::thread::spawn(move || run_job(cell, provider, profile, batch_policy, plan));
         Ok(TranslationJobId(job_id))
+    }
+
+    pub fn active_translation_job(
+        &self,
+    ) -> Result<Option<TranslationJobSnapshot>, TranslationJobError> {
+        let Some(job_id) = self.active_job_id()? else {
+            return Ok(None);
+        };
+        self.translation_job(&TranslationJobId::new(job_id))
+            .map(Some)
+    }
+
+    fn active_job_id(&self) -> Result<Option<&str>, TranslationJobError> {
+        for (job_id, cell) in &self.jobs {
+            let state = cell
+                .state
+                .lock()
+                .map_err(|_| TranslationJobError::StateUnavailable)?;
+            if !state.snapshot.status.is_terminal() {
+                return Ok(Some(job_id));
+            }
+        }
+        Ok(None)
     }
 
     pub fn translation_job(
@@ -675,9 +863,17 @@ fn run_job(
                 match response {
                     Ok(results) => {
                         batch.status = TranslationBatchStatus::Completed;
-                        state.snapshot.completed_count += results.len();
+                        batch.usage = results.usage;
+                        state.snapshot.completed_count += results.translations.len();
                         state.snapshot.finished_batches += 1;
-                        state.snapshot.results.extend(results);
+                        if let Some(usage) = results.usage {
+                            state
+                                .snapshot
+                                .usage
+                                .get_or_insert_with(ProviderUsage::default)
+                                .merge(usage);
+                        }
+                        state.snapshot.results.extend(results.translations);
                     }
                     Err(error) => {
                         batch.status = TranslationBatchStatus::Failed;
@@ -714,6 +910,7 @@ fn run_job(
         } else {
             TranslationJobStatus::CompletedWithFailures
         };
+        state.snapshot.finished_at_ms = Some(unix_time_ms());
     }
 }
 
@@ -724,7 +921,7 @@ fn translate_batch(
     candidates: &[TranslationCandidate],
     token: &CancellationToken,
     mut on_attempt: impl FnMut(TranslationBatchStatus, u16, Option<&ProviderError>),
-) -> Result<Vec<ValidatedTranslation>, ProviderError> {
+) -> Result<ValidatedBatchResult, ProviderError> {
     let request = ProviderRequest {
         profile,
         source_locale: &plan.source_locale,
@@ -832,6 +1029,10 @@ fn mark_cancelled(state: &mut JobState) {
     let elapsed_ms = state.elapsed_ms();
     state.snapshot.status = TranslationJobStatus::Cancelled;
     state.snapshot.elapsed_ms = elapsed_ms;
+    state
+        .snapshot
+        .finished_at_ms
+        .get_or_insert_with(unix_time_ms);
     for batch in &mut state.snapshot.batches {
         if !batch.status.is_terminal() {
             batch.status = TranslationBatchStatus::Cancelled;
@@ -855,7 +1056,7 @@ fn batches(
 fn validate_response(
     candidates: &[TranslationCandidate],
     response: ProviderBatchResult,
-) -> Result<Vec<ValidatedTranslation>, ProviderError> {
+) -> Result<ValidatedBatchResult, ProviderError> {
     let expected = candidates
         .iter()
         .map(|candidate| candidate.item_id.as_ref())
@@ -876,7 +1077,7 @@ fn validate_response(
         .into_iter()
         .map(|translation| (translation.item_id.clone(), translation))
         .collect::<BTreeMap<_, _>>();
-    candidates
+    let translations = candidates
         .iter()
         .map(|candidate| {
             let output = &by_id[&candidate.item_id];
@@ -896,7 +1097,24 @@ fn validate_response(
                 translation: text.into(),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ValidatedBatchResult {
+        translations,
+        usage: response.usage,
+    })
+}
+
+struct ValidatedBatchResult {
+    translations: Vec<ValidatedTranslation>,
+    usage: Option<ProviderUsage>,
+}
+
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn malformed_output(message: &'static str) -> ProviderError {

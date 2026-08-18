@@ -64,6 +64,14 @@ const recoveryItems = computed(() => ([
     action: t('help.recovery.noObservedText.action'),
     view: 'capture' as const,
   },
+  {
+    id: 'ai-unavailable',
+    icon: 'i-tabler-language-off',
+    title: t('help.recovery.aiUnavailable.title'),
+    description: t('help.recovery.aiUnavailable.description'),
+    action: t('help.recovery.aiUnavailable.action'),
+    view: 'settings' as const,
+  },
 ]))
 
 function platformLabel(value: string) {

@@ -42,8 +42,9 @@ active from now on?”
   multiple workflows.
 - **Composable workflows** where every application target selects its own adapters, ordered dictionaries, and optional
   font substitution policy.
-- **AI-assisted filling** through OpenAI, Anthropic, Gemini, OpenAI-compatible, and Ollama protocols, with bounded
-  batching, concurrency, retries, and preservation of completed or manually entered translations.
+- **Background AI filling** through OpenAI, Anthropic, Gemini, OpenAI-compatible, Ollama, and a local Codex
+  subscription. Only one task runs at a time; page changes do not stop it, and reported tokens, batches, and duration
+  remain visible.
 - **Multiple rendering paths** through built-in adapters for several native Windows and framework UI technologies.
   Actual coverage must be confirmed with a probe.
 - **Chinese and English UI**, with dark, light, and system themes.
@@ -64,9 +65,14 @@ page includes recovery paths for an application that is not running, privilege m
 
 ## AI translation and privacy
 
-An AI profile stores the provider protocol, service URL, model, batching, concurrency, timeout, retries, and local
-filtering rules. API keys are stored only in Windows Credential Manager and are not written in plaintext to profiles,
-dictionaries, or logs.
+An AI profile stores the provider protocol, service URL, model, reasoning effort, batching, concurrency, timeout,
+retries, and local filtering rules. Reasoning is off by default so routine interface translation does not spend large
+reasoning-token budgets; each profile can opt back into automatic or higher effort. API keys are stored only in Windows
+Credential Manager and are not written in plaintext to profiles, dictionaries, or logs.
+
+A Codex subscription profile reuses the ChatGPT account already signed in through the local Codex CLI. Glyphshift does
+not read, copy, or store its account token. Only the target dictionary is read-only while a task runs; the rest of the
+app remains available. Quitting interrupts the task and never resends it automatically.
 
 Only candidate source text selected by the current plan is sent to the AI service you choose. Existing translations and
 locally filtered numbers, paths, URLs, shortcuts, and similar content are skipped before the request. Review the

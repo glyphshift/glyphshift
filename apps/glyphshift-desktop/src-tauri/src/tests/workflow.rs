@@ -515,6 +515,7 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
             .expect("quick probe session store"),
         active_probe_run_id: None,
         active_probe_capability: None,
+        ai_locked_dictionary_id: None,
     };
 
     reopened

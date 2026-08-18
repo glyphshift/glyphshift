@@ -8,11 +8,13 @@ import { useAppSettings } from '../appSettings'
 import type { ProbeActivityStatus } from '../useProbeRuns'
 
 const props = defineProps<{
-  current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'help' | 'settings'
+  current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
   probeActivityStatus: ProbeActivityStatus
+  translationTaskActive: boolean
+  translationTaskProgress: string
 }>()
 const emit = defineEmits<{
-  navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'help' | 'settings']
+  navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'translation-tasks' | 'help' | 'settings']
   close: []
 }>()
 
@@ -103,6 +105,18 @@ async function native(action: 'minimize' | 'maximize') {
       </UButton>
     </nav>
     <div class="ml-auto flex items-stretch" data-tauri-drag-region>
+      <UButton
+        color="neutral"
+        variant="ghost"
+        icon="i-tabler-list-check"
+        :class="['h-full min-w-10 rounded-none px-2', current === 'translation-tasks' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : '']"
+        :aria-label="t('titleBar.translationTasks')"
+        :aria-current="current === 'translation-tasks' ? 'page' : undefined"
+        :title="t('titleBar.translationTasks')"
+        @click="emit('navigate', 'translation-tasks')"
+      >
+        <span v-if="translationTaskActive" class="type-caption font-semibold tabular-nums text-[var(--accent-strong)]">{{ translationTaskProgress }}</span>
+      </UButton>
       <UButton
         color="neutral"
         variant="ghost"

@@ -1,16 +1,20 @@
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
-import { translateCommandError } from './commandError'
+import { isCommandError, translateCommandError } from './commandError'
 import type { DictionaryDetail, ProbeRunSummary } from './model'
 import { hasDesktopRuntime } from './workspace/state'
 
 export type AiProviderProtocol
-  = 'open_ai_responses'
+  = 'codex_subscription'
+    | 'open_ai_responses'
     | 'open_ai_chat_completions'
     | 'open_ai_compatible'
     | 'anthropic_messages'
     | 'gemini_generate_content'
     | 'ollama_chat'
+
+export type AiReasoningEffort
+  = 'disabled' | 'automatic' | 'low' | 'medium' | 'high' | 'maximum'
 
 export interface AiFilterPolicy {
   skipPureNumbersOrSymbols: boolean
@@ -31,6 +35,7 @@ export interface AiProfile {
   protocol: AiProviderProtocol
   baseUrl: string
   modelId: string
+  reasoningEffort: AiReasoningEffort
   timeoutMs: number
   maxItemsPerRequest: number
   maxConcurrency: number
@@ -108,6 +113,14 @@ export interface AiProviderError {
   safeMessage: string
 }
 
+export interface AiProviderUsage {
+  inputTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  cachedInputTokens: number
+  totalTokens: number
+}
+
 export type AiTranslationBatchStatus
   = 'queued' | 'running' | 'retrying' | 'completed' | 'failed' | 'cancelled'
 
@@ -119,6 +132,7 @@ export interface AiTranslationBatch {
   startedAfterMs: number | null
   elapsedMs: number
   lastError: AiProviderError | null
+  usage: AiProviderUsage | null
 }
 
 export interface AiTranslationJob {
@@ -126,7 +140,13 @@ export interface AiTranslationJob {
   planToken: string
   scopeId: string
   snapshotRevision: number
-  status: 'queued' | 'running' | 'completed' | 'completed_with_failures' | 'cancelling' | 'cancelled'
+  startedAtMs: number
+  finishedAtMs: number | null
+  profileName: string
+  protocol: AiProviderProtocol
+  modelId: string
+  reasoningEffort: AiReasoningEffort
+  status: 'queued' | 'running' | 'completed' | 'completed_with_failures' | 'cancelling' | 'cancelled' | 'interrupted'
   totalCount: number
   completedCount: number
   failedCount: number
@@ -138,9 +158,50 @@ export interface AiTranslationJob {
   failedBatches: number
   elapsedMs: number
   peakConcurrency: number
+  usage: AiProviderUsage | null
   batches: AiTranslationBatch[]
   results: AiValidatedTranslation[]
   errors: AiProviderError[]
+}
+
+export interface AiTranslationTask extends AiTranslationJob {
+  targetDictionaryId: string
+  origin: 'dictionary' | 'probe' | 'connection'
+  appliedCount: number
+  skippedCount: number
+  writebackError: string | null
+  dictionaryLocked: boolean
+}
+
+export interface AiTranslationRunRecord {
+  recordId: string
+  startedAtMs: number
+  finishedAtMs: number
+  scopeKind: string
+  profileName: string
+  protocol: AiProviderProtocol
+  modelId: string
+  reasoningEffort: AiReasoningEffort
+  status: AiTranslationJob['status']
+  totalCount: number
+  completedCount: number
+  failedCount: number
+  appliedCount: number
+  skippedCount: number
+  totalBatches: number
+  finishedBatches: number
+  failedBatches: number
+  requestAttempts: number
+  retryAttempts: number
+  elapsedMs: number
+  peakConcurrency: number
+  usage: AiProviderUsage | null
+  batches: AiTranslationBatch[]
+}
+
+export interface AiTranslationTaskCenter {
+  current: AiTranslationTask | null
+  history: AiTranslationRunRecord[]
 }
 
 export interface AiTranslationItemInput {
@@ -181,12 +242,19 @@ export const defaultAiFilterPolicy = (): AiFilterPolicy => ({
 })
 
 export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; concurrency: number; credentialRequired: boolean }> = {
+  codex_subscription: { baseUrl: 'codex://local', concurrency: 1, credentialRequired: false },
   open_ai_responses: { baseUrl: 'https://api.openai.com/v1', concurrency: 2, credentialRequired: true },
   open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', concurrency: 2, credentialRequired: true },
   open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', concurrency: 2, credentialRequired: false },
   anthropic_messages: { baseUrl: 'https://api.anthropic.com', concurrency: 2, credentialRequired: true },
   gemini_generate_content: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', concurrency: 2, credentialRequired: true },
   ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', concurrency: 1, credentialRequired: false },
+}
+
+export function defaultAiReasoningEffort(protocol: AiProviderProtocol): AiReasoningEffort {
+  return ['codex_subscription', 'open_ai_responses', 'open_ai_chat_completions', 'open_ai_compatible'].includes(protocol)
+    ? 'disabled'
+    : 'automatic'
 }
 
 const REQUEST_TOKEN_RESERVE = 384
@@ -220,16 +288,18 @@ const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v2'
 const catalog = ref<AiProfilesView>({ defaultProfileId: null, profiles: [] })
 const busy = ref(false)
 const error = ref('')
-const currentJob = ref<AiTranslationJob | null>(null)
+const currentJob = ref<AiTranslationTask | null>(null)
+const taskCenter = ref<AiTranslationTaskCenter>({ current: null, history: [] })
 const elapsedMs = ref(0)
 const connectionReports = ref<Record<string, AiConnectionReport>>({})
 const browserPlans = new Map<string, AiTranslationPlan>()
-const browserJobs = new Map<string, AiTranslationJob>()
+const browserJobs = new Map<string, AiTranslationTask>()
 const browserJobStartedAt = new Map<string, number>()
 let browserPlanSequence = 0
 let browserJobSequence = 0
 let connected = false
 let elapsedTimer: number | undefined
+let taskMonitor: number | undefined
 
 function formatElapsedDuration(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
@@ -254,6 +324,12 @@ function persistBrowserCatalog() {
 function normalizeProfile(profile: AiProfile): AiProfile {
   return {
     ...profile,
+    reasoningEffort: profile.reasoningEffort ?? defaultAiReasoningEffort(profile.protocol),
+    timeoutMs: Number.isInteger(profile.timeoutMs)
+      && profile.timeoutMs >= 1_000
+      && profile.timeoutMs <= 3_600_000
+      ? profile.timeoutMs
+      : 1_800_000,
     maxItemsPerRequest: Number.isInteger(profile.maxItemsPerRequest)
       && profile.maxItemsPerRequest >= 1
       && profile.maxItemsPerRequest <= 1_000
@@ -506,9 +582,12 @@ function browserBatches(plan: AiTranslationPlan, profileId?: string | null) {
 
 async function startTranslation(planToken: string, profileId?: string | null) {
   if (hasDesktopRuntime()) {
-    return invoke<string>('desktop_start_ai_translation', {
+    const task = await invoke<AiTranslationTask>('desktop_start_ai_translation', {
       request: { planToken, profileId: profileId ?? null },
     })
+    currentJob.value = task
+    taskCenter.value = { ...taskCenter.value, current: task }
+    return task
   }
   const plan = browserPlans.get(planToken)
   if (!plan) throw new Error('Unknown browser AI plan')
@@ -519,11 +598,18 @@ async function startTranslation(planToken: string, profileId?: string | null) {
   const batches = browserBatches(plan, profileId)
   const batchSize = profile.maxItemsPerRequest
   const jobId = `browser-job-${++browserJobSequence}`
-  const job: AiTranslationJob = {
+  const startedAtMs = Date.now()
+  const job: AiTranslationTask = {
     jobId,
     planToken,
     scopeId: plan.scopeId,
     snapshotRevision: plan.snapshotRevision,
+    startedAtMs,
+    finishedAtMs: null,
+    profileName: profile.name,
+    protocol: profile.protocol,
+    modelId: profile.modelId,
+    reasoningEffort: profile.reasoningEffort,
     status: 'running',
     totalCount: plan.candidates.length,
     completedCount: 0,
@@ -536,6 +622,7 @@ async function startTranslation(planToken: string, profileId?: string | null) {
     failedBatches: 0,
     elapsedMs: 0,
     peakConcurrency: 0,
+    usage: null,
     batches: batches.map((batch, index) => ({
       batchNumber: index + 1,
       itemCount: batch.length,
@@ -544,12 +631,18 @@ async function startTranslation(planToken: string, profileId?: string | null) {
       startedAfterMs: null,
       elapsedMs: 0,
       lastError: null,
+      usage: null,
     })),
     results: [],
     errors: [],
+    targetDictionaryId: plan.scopeId.startsWith('dictionary:') ? plan.scopeId.slice('dictionary:'.length) : '',
+    origin: plan.scopeId.startsWith('probe:') ? 'probe' : plan.scopeId.startsWith('connection:') ? 'connection' : 'dictionary',
+    appliedCount: 0,
+    skippedCount: 0,
+    writebackError: null,
+    dictionaryLocked: !plan.scopeId.startsWith('connection:'),
   }
   browserJobs.set(jobId, job)
-  const startedAtMs = Date.now()
   browserJobStartedAt.set(jobId, startedAtMs)
   let nextBatchIndex = 0
   let activeBatches = 0
@@ -582,22 +675,31 @@ async function startTranslation(planToken: string, profileId?: string | null) {
         job.finishedBatches += 1
         job.elapsedMs = completedAtMs
         activeBatches -= 1
-        if (job.finishedBatches === batches.length) job.status = 'completed'
+        if (job.finishedBatches === batches.length) {
+          job.status = 'completed'
+          job.finishedAtMs = Date.now()
+        }
         else startAvailableBatches()
       }, 80)
     }
   }
   startAvailableBatches()
-  return jobId
+  currentJob.value = clone(job)
+  taskCenter.value = { ...taskCenter.value, current: clone(job) }
+  return clone(job)
 }
 
 async function queryJob(jobId: string) {
-  if (hasDesktopRuntime()) return invoke<AiTranslationJob>('desktop_ai_translation_job', { jobId })
+  if (hasDesktopRuntime()) {
+    const center = await invoke<AiTranslationTaskCenter>('desktop_ai_translation_tasks')
+    if (!center.current || center.current.jobId !== jobId) throw new Error('Unknown desktop AI task')
+    return center.current
+  }
   const job = browserJobs.get(jobId)
   if (!job) throw new Error('Unknown browser AI job')
   const visible = clone(job)
   const startedAtMs = browserJobStartedAt.get(jobId)
-  if (startedAtMs !== undefined && !['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) {
+  if (startedAtMs !== undefined && !taskIsTerminal(job.status)) {
     visible.elapsedMs = Date.now() - startedAtMs
     visible.batches.forEach((batch) => {
       if (['running', 'retrying'].includes(batch.status) && batch.startedAfterMs !== null) {
@@ -606,6 +708,59 @@ async function queryJob(jobId: string) {
     })
   }
   return visible
+}
+
+function taskIsTerminal(status: AiTranslationJob['status']) {
+  return ['completed', 'completed_with_failures', 'cancelled', 'interrupted'].includes(status)
+}
+
+async function refreshTaskCenter() {
+  if (hasDesktopRuntime()) {
+    const next = await invoke<AiTranslationTaskCenter>('desktop_ai_translation_tasks')
+    taskCenter.value = next
+    currentJob.value = next.current
+    if (next.current) elapsedMs.value = next.current.elapsedMs
+    return next
+  }
+  const current = currentJob.value
+  if (current) {
+    const visible = await queryJob(current.jobId)
+    visible.appliedCount = visible.completedCount
+    visible.dictionaryLocked = !taskIsTerminal(visible.status) && visible.origin !== 'connection'
+    currentJob.value = visible
+    taskCenter.value = { ...taskCenter.value, current: visible }
+  }
+  return taskCenter.value
+}
+
+function ensureTaskMonitor() {
+  if (taskMonitor !== undefined || typeof window === 'undefined') return
+  taskMonitor = window.setInterval(() => {
+    void refreshTaskCenter().catch(() => undefined)
+  }, 350)
+}
+
+async function connectTaskMonitor() {
+  ensureTaskMonitor()
+  return refreshTaskCenter()
+}
+
+async function startBackgroundPlan(plan: AiTranslationPlan, profileId?: string | null) {
+  error.value = ''
+  try {
+    const task = await startTranslation(plan.token, profileId)
+    ensureTaskMonitor()
+    return task
+  }
+  catch (reason) {
+    error.value = translateCommandError(reason)
+    await refreshTaskCenter().catch(() => undefined)
+    if (isCommandError(reason) && reason.code === 'ai.task_already_active' && currentJob.value) {
+      error.value = ''
+      return currentJob.value
+    }
+    throw reason
+  }
 }
 
 async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
@@ -619,15 +774,18 @@ async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
     elapsedMs.value = Date.now() - startedAtMs
   }, 250)
   try {
-    const jobId = await startTranslation(plan.token, profileId)
-    const deadline = Date.now() + 10 * 60_000
-    while (Date.now() < deadline) {
-      const job = await queryJob(jobId)
+    const started = await startTranslation(plan.token, profileId)
+    while (true) {
+      const job = hasDesktopRuntime()
+        ? (await refreshTaskCenter()).current
+        : await queryJob(started.jobId)
+      if (!job) throw new Error('AI translation task disappeared')
       currentJob.value = job
-      if (['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) return job
+      if (taskIsTerminal(job.status)) {
+        return job
+      }
       await new Promise(resolve => window.setTimeout(resolve, 120))
     }
-    throw new Error('AI translation timed out locally')
   }
   catch (reason) {
     error.value = translateCommandError(reason)
@@ -695,12 +853,13 @@ async function testProfile(profileId: string) {
 
 async function cancelCurrentJob() {
   const job = currentJob.value
-  if (!job || ['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) return
+  if (!job || taskIsTerminal(job.status)) return
   if (hasDesktopRuntime()) await invoke('desktop_cancel_ai_translation', { jobId: job.jobId })
   else {
     const browserJob = browserJobs.get(job.jobId)
     if (browserJob) {
       browserJob.status = 'cancelled'
+      browserJob.finishedAtMs = Date.now()
       browserJob.batches.forEach((batch) => {
         if (!['completed', 'failed', 'cancelled'].includes(batch.status)) batch.status = 'cancelled'
       })
@@ -715,11 +874,12 @@ async function cancelCurrentJob() {
         : { ...batch, status: 'cancelled' as const }
     )),
   }
+  await refreshTaskCenter().catch(() => undefined)
 }
 
 function dismissCurrentJob() {
   const job = currentJob.value
-  if (!job || !['completed', 'completed_with_failures', 'cancelled'].includes(job.status)) return
+  if (!job || !taskIsTerminal(job.status)) return
   currentJob.value = null
 }
 
@@ -748,6 +908,9 @@ export function useAiTranslation() {
     busy,
     error,
     currentJob,
+    taskCenter,
+    taskRunning: computed(() => Boolean(currentJob.value && !taskIsTerminal(currentJob.value.status))),
+    lockedDictionaryId: computed(() => currentJob.value?.dictionaryLocked ? currentJob.value.targetDictionaryId : null),
     elapsed,
     connectionReports,
     connect,
@@ -756,6 +919,9 @@ export function useAiTranslation() {
     deleteProfile,
     planDictionary,
     planProbe,
+    connectTaskMonitor,
+    refreshTaskCenter,
+    startBackgroundPlan,
     runPlan,
     testProfile,
     cancelCurrentJob,

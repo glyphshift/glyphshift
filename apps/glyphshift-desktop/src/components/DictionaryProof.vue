@@ -7,6 +7,7 @@ import { useAppSettings } from '../appSettings'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
+import { useWorkspace } from '../useWorkspace'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
 import AiTranslationProgress from './AiTranslationProgress.vue'
 
@@ -21,11 +22,13 @@ const emit = defineEmits<{
   back: []
   save: [detail: DictionaryDetail]
   'configure-ai': []
+  'open-ai-tasks': []
   'dirty-change': [dirty: boolean]
 }>()
 const { t } = useI18n()
 const ai = useAiTranslation()
 const appSettings = useAppSettings()
+const workspace = useWorkspace()
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -60,6 +63,7 @@ const displayedAiJob = computed(() => {
   const job = ai.currentJob.value
   return job?.scopeId === `dictionary:${draft.value.metadata.id}` ? job : null
 })
+const dictionaryLocked = computed(() => ai.lockedDictionaryId.value === draft.value.metadata.id)
 
 watch(() => props.detail, (value) => {
   saved.value = clone(value)
@@ -213,6 +217,14 @@ async function prepareAiPlan() {
     return null
   }
   if (!commitNewEntry()) return null
+  if (hasUnsavedChanges.value) {
+    if (!await workspace.saveDictionary(clone(draft.value))) return null
+    const persisted = workspace.dictionaryDetail.value
+    if (!persisted) return null
+    saved.value = clone(persisted)
+    draft.value = clone(persisted)
+    metadataDraft.value = clone(persisted.metadata)
+  }
   try {
     const plan = await ai.planDictionary(draft.value, selectedProfile.value.id)
     aiPlan.value = plan
@@ -255,47 +267,53 @@ async function executeAiTranslation() {
   if (!nextPlan || !selectedProfile.value) return
   aiPreflightOpen.value = false
   try {
-    const job = await ai.runPlan(nextPlan, selectedProfile.value.id)
-    let applied = 0
-    for (const result of job.results) {
-      const entry = draft.value.entries.find(candidate => (
-        candidate.source.trim() === result.source && !candidate.translation.trim()
-      ))
-      if (!entry) continue
-      entry.translation = result.translation
-      applied += 1
+    if (!('__TAURI_INTERNALS__' in window)) {
+      const job = await ai.runPlan(nextPlan, selectedProfile.value.id)
+      let applied = 0
+      for (const result of job.results) {
+        const entry = draft.value.entries.find(candidate => (
+          candidate.source.trim() === result.source && !candidate.translation.trim()
+        ))
+        if (!entry) continue
+        entry.translation = result.translation
+        applied += 1
+      }
+      if (job.status === 'completed') {
+        aiNoticeCancelled.value = false
+        aiNoticeTone.value = 'success'
+        aiNotice.value = t('ai.dictionaryCompleted', {
+          count: applied,
+          batches: job.totalBatches,
+          elapsed: ai.elapsed.value,
+        })
+      }
+      else if (job.status === 'cancelled') {
+        aiNoticeCancelled.value = true
+        aiNoticeTone.value = 'warning'
+        aiRetryAvailable.value = job.completedCount < job.totalCount
+        aiNotice.value = t('ai.translationCancelledNotice', {
+          completed: job.completedCount,
+          total: job.totalCount,
+          elapsed: ai.elapsed.value,
+        })
+      }
+      else {
+        aiNoticeCancelled.value = false
+        aiNoticeTone.value = 'warning'
+        aiRetryAvailable.value = job.completedCount < job.totalCount
+        aiNotice.value = t('ai.dictionaryPartial', {
+          completed: job.completedCount,
+          total: job.totalCount,
+          failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
+          elapsed: ai.elapsed.value,
+        })
+      }
+      aiPlan.value = null
+      return
     }
-    if (job.status === 'completed') {
-      aiNoticeCancelled.value = false
-      aiNoticeTone.value = 'success'
-      aiNotice.value = t('ai.dictionaryCompleted', {
-        count: applied,
-        batches: job.totalBatches,
-        elapsed: ai.elapsed.value,
-      })
-    }
-    else if (job.status === 'cancelled') {
-      aiNoticeCancelled.value = true
-      aiNoticeTone.value = 'warning'
-      aiRetryAvailable.value = job.completedCount < job.totalCount
-      aiNotice.value = t('ai.translationCancelledNotice', {
-        completed: job.completedCount,
-        total: job.totalCount,
-        elapsed: ai.elapsed.value,
-      })
-    }
-    else {
-      aiNoticeCancelled.value = false
-      aiNoticeTone.value = 'warning'
-      aiRetryAvailable.value = job.completedCount < job.totalCount
-      aiNotice.value = t('ai.dictionaryPartial', {
-        completed: job.completedCount,
-        total: job.totalCount,
-        failed: Math.max(job.failedCount, job.totalCount - job.completedCount),
-        elapsed: ai.elapsed.value,
-      })
-    }
+    await ai.startBackgroundPlan(nextPlan, selectedProfile.value.id)
     aiPlan.value = null
+    emit('open-ai-tasks')
   }
   catch {
     // The composable exposes the localized error below the header.
@@ -316,30 +334,38 @@ usePageEscape(() => true, () => emit('back'))
       :back-label="t('dictionaryEditor.back')"
       @back="emit('back')"
     >
-      <template #status><UBadge v-if="hasUnsavedChanges" color="warning" variant="subtle" size="sm" :label="t('dictionaryEditor.unsaved')" /></template>
+      <template #status>
+        <div class="flex items-center gap-1.5">
+          <UBadge v-if="dictionaryLocked" color="warning" variant="subtle" size="sm" icon="i-tabler-lock" :label="t('ai.tasks.dictionaryLocked')" />
+          <UBadge v-if="hasUnsavedChanges" color="warning" variant="subtle" size="sm" :label="t('dictionaryEditor.unsaved')" />
+        </div>
+      </template>
       <template #actions>
-        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" @click="openMetadata" />
+        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" :disabled="dictionaryLocked" @click="openMetadata" />
         <div class="inline-flex">
           <UButton
             color="primary"
             variant="soft"
             size="sm"
             icon="i-tabler-sparkles"
-            :label="selectedProfile ? t('ai.fillUntranslated') : t('ai.configure')"
+            :label="dictionaryLocked ? t('ai.tasks.viewCurrent') : selectedProfile ? t('ai.fillUntranslated') : t('ai.configure')"
             :loading="ai.busy.value"
             :disabled="busy"
             class="rounded-r-none"
-            @click="selectedProfile ? runAiTranslation() : emit('configure-ai')"
+            @click="dictionaryLocked ? emit('open-ai-tasks') : selectedProfile ? runAiTranslation() : emit('configure-ai')"
           />
           <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
-            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="busy || ai.busy.value" />
+            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="dictionaryLocked || busy || ai.busy.value" />
           </UDropdownMenu>
         </div>
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('dictionaryEditor.saveDictionary')" :loading="busy" :disabled="busy || !canSave" @click="saveDraft" />
+        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('dictionaryEditor.saveDictionary')" :loading="busy" :disabled="dictionaryLocked || busy || !canSave" @click="saveDraft" />
       </template>
     </ManagementDetailHeader>
 
-    <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
+    <UAlert v-if="dictionaryLocked" role="status" color="warning" variant="soft" icon="i-tabler-lock" :title="t('ai.tasks.dictionaryLocked')" :description="t('ai.tasks.dictionaryLockedDescription')" class="mb-3">
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.tasks.viewCurrent')" @click="emit('open-ai-tasks')" /></template>
+    </UAlert>
+    <UAlert v-else-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template #actions>
         <div class="flex items-center gap-1.5">
@@ -382,6 +408,7 @@ usePageEscape(() => true, () => emit('back'))
           <UIcon v-if="row.original.kind === 'new'" name="i-tabler-plus" class="mx-auto block size-4 text-[var(--text-muted)]" />
           <UCheckbox
             v-else
+            :disabled="dictionaryLocked"
             :model-value="selected.has(row.original.index)"
             :aria-label="t('dictionaryEditor.selectRule', { source: row.original.entry.source })"
             @update:model-value="selected.has(row.original.index) ? selected.delete(row.original.index) : selected.add(row.original.index); selected = new Set(selected)"
@@ -399,6 +426,7 @@ usePageEscape(() => true, () => emit('back'))
               :placeholder="t('dictionaryEditor.newSourcePlaceholder')"
               :ui="{ base: 'px-0' }"
               class="w-full"
+              :disabled="dictionaryLocked"
             />
             <UInput
               v-else
@@ -410,6 +438,7 @@ usePageEscape(() => true, () => emit('back'))
               :aria-invalid="Boolean(entrySourceError(row.original.index))"
               :ui="{ base: 'px-0' }"
               class="w-full"
+              :disabled="dictionaryLocked"
             />
             <p v-if="row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index)" class="type-metadata m-0 leading-4 text-[var(--danger)]">
               {{ row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index) }}
@@ -428,6 +457,7 @@ usePageEscape(() => true, () => emit('back'))
               :placeholder="t('dictionaryEditor.newTranslationPlaceholder')"
               :ui="{ base: 'px-0' }"
               class="w-full"
+              :disabled="dictionaryLocked"
               @keydown.enter.prevent="commitNewEntry"
             />
             <UInput
@@ -439,6 +469,7 @@ usePageEscape(() => true, () => emit('back'))
               :aria-label="t('dictionaryEditor.entryTranslationLabel', { source: row.original.entry.source || row.original.index + 1 })"
               :ui="{ base: 'px-0' }"
               class="w-full"
+              :disabled="dictionaryLocked"
             />
           </div>
         </template>
@@ -451,6 +482,7 @@ usePageEscape(() => true, () => emit('back'))
             size="xs"
             icon="i-tabler-trash"
             :aria-label="t('common.deleteNamed', { name: row.original.entry.source })"
+            :disabled="dictionaryLocked"
             @click="pendingRemoval = [row.original.index]"
           />
         </template>
