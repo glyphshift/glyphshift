@@ -142,7 +142,8 @@ Workflow Target 或用户猜测的区域配置。软件登记路径与进程报�
 
 **Provider Protocol**：由独立 wire codec 实现的供应商协议。首批包含 OpenAI Responses、OpenAI
 Chat Completions、OpenAI-compatible、Anthropic Messages、Gemini `generateContent` 与 Ollama native；
-共享候选、验证和错误模型，不共享未经验证的请求形状。
+共享候选、验证和错误模型，不共享未经验证的请求形状。内部候选保留稳定 ID，HTTP wire 只发送有序原文
+数组并接收同序译文数组；Adapter 校验数量和内容后按位置恢复内部 ID。
 
 **Compiled Font Policy**：由工作流目标的字体策略编译并与 Translation Snapshot 一起发布的不可变
 字体决策。它在词典命中模式下复用 Translation Snapshot 的最终匹配集合。
@@ -173,6 +174,10 @@ Dictionary、Font、Adapter、Software、Workflow 和 AI Profile 都不能进入
   选择器；UI 标签、窗口猜测和硬编码路由不构成区域事实。
 - 一个 Probe Run 必须绑定且只绑定一个 Dictionary；探针发现的原文只有在存在非空译文后才成为
   Translation Entry，技术来源与忽略状态始终只属于 Observation Index。
+- Probe Run 的暂停是本地用户意图，不以目标 Runtime 确认为前提；本地 Capture Sink 先暂停写入并
+  保留当前会话。继续收集先复用该会话，确认失效后才放弃并执行一次全新目标发现与连接。
+- 目标 Runtime 的 Observation Batch drain 不得持锁或以其他方式阻断 Adapter 热路径入队；批次
+  sequence 只为已进入有界队列的观测按消费顺序分配，生产端丢失由累计 drop 事实独立表达。
 - Probe Run 与 Dictionary 不做转换或双向同步；探针编辑直接修改其绑定 Dictionary，已有
   Dictionary 可以直接继续探针工作。
 - Presentation 不能改变 Registry 使用的 Platform、Architecture、ABI、Feature 或执行入口事实。

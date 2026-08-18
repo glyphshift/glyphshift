@@ -1,4 +1,4 @@
-use crate::observation::MAX_OBSERVATION_BATCH_RECORDS;
+use crate::observation::{validate_observation_fields, MAX_OBSERVATION_BATCH_RECORDS};
 use crate::{
     CaptureError, CaptureIngressStatus, CaptureObservationBatch, CaptureObservationRecord,
     CaptureProducerConfiguration, CaptureProducerId,
@@ -6,23 +6,21 @@ use crate::{
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 const QUEUE_CAPACITY: usize = 8_192;
 
 /// Hot-path input owned by one [`CaptureBatchProducer`].
 ///
-/// The read lock is acquired with `try_read`, so a concurrent drain never
-/// blocks the observed application thread. Contention is reported through the
-/// cumulative producer drop count.
+/// Accepted observations enter a bounded channel without waiting for the
+/// transport consumer. Queue saturation and validation failures are reported
+/// through the cumulative producer drop count.
 #[derive(Clone)]
 pub struct CaptureBatchIngress {
-    sender: SyncSender<CaptureObservationRecord>,
-    sequence: Arc<AtomicU64>,
+    sender: SyncSender<PendingCaptureObservation>,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
     accepting: Arc<AtomicBool>,
-    drain_gate: Arc<RwLock<()>>,
 }
 
 impl CaptureBatchIngress {
@@ -39,20 +37,11 @@ impl CaptureBatchIngress {
         if self.paused.load(Ordering::Relaxed) {
             return CaptureIngressStatus::Paused;
         }
-        let Ok(_permit) = self.drain_gate.try_read() else {
+        let Ok(observation) = PendingCaptureObservation::new(adapter_id, source) else {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return CaptureIngressStatus::Dropped;
         };
-        if !self.accepting.load(Ordering::Acquire) {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-            return CaptureIngressStatus::Dropped;
-        }
-        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
-        let Ok(record) = CaptureObservationRecord::new(sequence, adapter_id, source) else {
-            self.dropped.fetch_add(1, Ordering::Relaxed);
-            return CaptureIngressStatus::Dropped;
-        };
-        match self.sender.try_send(record) {
+        match self.sender.try_send(observation) {
             Ok(()) => CaptureIngressStatus::Accepted,
             Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
@@ -67,16 +56,35 @@ impl CaptureBatchIngress {
     }
 }
 
+struct PendingCaptureObservation {
+    adapter_id: Box<str>,
+    source: Box<str>,
+}
+
+impl PendingCaptureObservation {
+    fn new(
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+    ) -> Result<Self, CaptureError> {
+        let observation = Self {
+            adapter_id: adapter_id.into(),
+            source: source.into(),
+        };
+        validate_observation_fields(&observation.adapter_id, &observation.source)?;
+        Ok(observation)
+    }
+}
+
 /// Bounded observation producer drained by an out-of-process transport.
 pub struct CaptureBatchProducer {
     producer_id: CaptureProducerId,
     generation: u64,
-    receiver: Receiver<CaptureObservationRecord>,
+    receiver: Receiver<PendingCaptureObservation>,
     pending: VecDeque<CaptureObservationRecord>,
+    last_sequence: u64,
     dropped: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
     accepting: Arc<AtomicBool>,
-    drain_gate: Arc<RwLock<()>>,
 }
 
 impl CaptureBatchProducer {
@@ -84,18 +92,14 @@ impl CaptureBatchProducer {
         configuration: CaptureProducerConfiguration,
     ) -> Result<(Self, CaptureBatchIngress), CaptureError> {
         let (sender, receiver) = sync_channel(QUEUE_CAPACITY);
-        let sequence = Arc::new(AtomicU64::new(1));
         let dropped = Arc::new(AtomicU64::new(0));
         let paused = Arc::new(AtomicBool::new(false));
         let accepting = Arc::new(AtomicBool::new(true));
-        let drain_gate = Arc::new(RwLock::new(()));
         let ingress = CaptureBatchIngress {
             sender,
-            sequence,
             dropped: dropped.clone(),
             paused: paused.clone(),
             accepting: accepting.clone(),
-            drain_gate: drain_gate.clone(),
         };
         Ok((
             Self {
@@ -103,23 +107,29 @@ impl CaptureBatchProducer {
                 generation: configuration.generation,
                 receiver,
                 pending: VecDeque::new(),
+                last_sequence: 0,
                 dropped,
                 paused,
                 accepting,
-                drain_gate,
             },
             ingress,
         ))
     }
 
     pub fn drain(&mut self) -> Result<CaptureObservationBatch, CaptureError> {
-        let _permit = self
-            .drain_gate
-            .write()
-            .map_err(|_| CaptureError::WorkerUnavailable)?;
-        let mut received = self.receiver.try_iter().collect::<Vec<_>>();
-        received.sort_by_key(CaptureObservationRecord::sequence);
-        self.pending.extend(received);
+        for observation in self.receiver.try_iter() {
+            let sequence = self
+                .last_sequence
+                .checked_add(1)
+                .ok_or(CaptureError::WorkerUnavailable)?;
+            let record = CaptureObservationRecord::new(
+                sequence,
+                observation.adapter_id,
+                observation.source,
+            )?;
+            self.last_sequence = sequence;
+            self.pending.push_back(record);
+        }
         let records = (0..MAX_OBSERVATION_BATCH_RECORDS)
             .filter_map(|_| self.pending.pop_front())
             .collect::<Vec<_>>();

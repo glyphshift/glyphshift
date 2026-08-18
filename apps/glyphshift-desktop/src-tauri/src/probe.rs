@@ -547,11 +547,27 @@ impl DesktopApplication {
             return Err(CommandError::new("capture.not_active"));
         }
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        self.runtimes
+        let control_result = self
+            .runtimes
             .as_mut()
             .ok_or_else(|| CommandError::new("runtime.unavailable"))?
-            .control_capture(summary.software_id(), paused)
-            .map_err(|error| runtime_command_error(error, false))?;
+            .control_capture(summary.software_id(), paused);
+        if control_result.is_err() {
+            if paused {
+                return self
+                    .probe_runs
+                    .set_status(run_id, ProbeRunStatus::Paused)
+                    .map_err(probe_run_error)
+                    .and_then(|summary| self.probe_run_view(summary));
+            }
+            self.runtimes
+                .as_mut()
+                .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+                .abandon_capture(summary.software_id());
+            self.active_probe_run_id = None;
+            self.active_probe_capability = None;
+            return self.start_probe_run_runtime(run_id, false);
+        }
         let summary = self
             .probe_runs
             .set_status(

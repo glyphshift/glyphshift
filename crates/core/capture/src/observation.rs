@@ -189,24 +189,33 @@ impl CaptureObservationRecord {
     }
 
     fn validate(&self) -> Result<(), CaptureError> {
-        if self.sequence == 0
-            || !safe_identifier(&self.adapter_id)
-            || self.source.trim().is_empty()
-            || self.source.encode_utf16().count() > MAX_SOURCE_UNITS
-        {
+        if self.sequence == 0 {
             return Err(CaptureError::InvalidObservationBatch);
         }
-        Ok(())
+        validate_observation_fields(&self.adapter_id, &self.source)
     }
+}
+
+pub(crate) fn validate_observation_fields(
+    adapter_id: &str,
+    source: &str,
+) -> Result<(), CaptureError> {
+    if !safe_identifier(adapter_id)
+        || source.trim().is_empty()
+        || source.encode_utf16().count() > MAX_SOURCE_UNITS
+    {
+        return Err(CaptureError::InvalidObservationBatch);
+    }
+    Ok(())
 }
 
 /// Versioned, bounded handoff from one supervised observation producer.
 ///
 /// `generation` is assigned by the producer supervisor and changes whenever
 /// the producer restarts. `sequence` is local to that generation and is
-/// allocated before the producer's bounded queue, so consumers can diagnose
-/// gaps. `dropped_total` is the cumulative producer-side drop count for the
-/// generation, not an instruction to mutate a checkpoint directly.
+/// assigned in dequeue order to observations accepted by the producer's
+/// bounded queue. `dropped_total` is the cumulative producer-side drop count
+/// for the generation, not an instruction to mutate a checkpoint directly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CaptureObservationBatch {

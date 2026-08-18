@@ -230,6 +230,8 @@ trait WorkflowRuntimeService: Send {
         paused: bool,
     ) -> Result<(), DesktopRuntimeError>;
 
+    fn abandon_capture(&mut self, software_id: &str);
+
     fn control_runtime_diagnostics(
         &mut self,
         software_id: &str,
@@ -296,6 +298,10 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
         paused: bool,
     ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntimePool::control_capture(self, software_id, paused)
+    }
+
+    fn abandon_capture(&mut self, software_id: &str) {
+        DesktopRuntimePool::abandon_capture(self, software_id);
     }
 
     fn control_runtime_diagnostics(

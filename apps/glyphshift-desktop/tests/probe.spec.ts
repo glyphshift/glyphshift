@@ -166,7 +166,7 @@ test('empty libraries stay actionable and a running application can create a tem
   await activeCaptureTab.click()
   await expect(page.getByRole('heading', { name: 'QuickTarget 探针', exact: true })).toBeVisible()
   await expect(page.getByTestId('probe-software-path')).toContainText('X:\\SyntheticFixtures\\QuickTarget.exe')
-  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(3)
+  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(4)
   await expect(page.getByTestId('probe-ai-actions')).toBeVisible()
   await expect(page.getByTestId('probe-temporary-task-badge')).toHaveText('临时')
   await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('临时词典')
@@ -241,12 +241,14 @@ test('current-app source can end and clean up at compact English layout', async 
   })
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('reuse “Captured Target”')
   await dialog.getByRole('button', { name: 'Create and connect' }).click()
-  await expect(page.getByRole('heading', { name: 'Captured Target probe', exact: true })).toBeVisible()
+  const compactHeading = page.getByRole('heading', { name: 'Captured Target probe', exact: true })
+  await expect(compactHeading).toBeVisible()
+  await expect.poll(() => compactHeading.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   const activeCaptureTab = page.getByRole('button', { name: 'Capture', exact: true })
   await expect(activeCaptureTab).toHaveAccessibleDescription('Running')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-tab-running-compact-en.png' })
-  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(3)
+  await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(4)
   await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('Temporary dictionary')
   await expect(page.getByText('quick-dictionary-captured', { exact: false })).toHaveCount(0)
   await openProbeTaskActions(page)
@@ -739,6 +741,11 @@ test('probe run keeps backend paging while adapter filters and view state recove
           summary = { ...summary, status: args?.paused ? 'paused' : 'running' }
           return summary
         }
+        if (command === 'desktop_disconnect_probe_run') {
+          summary = { ...summary, status: 'ready' }
+          ;(window as unknown as { __probeDisconnected?: boolean }).__probeDisconnected = true
+          return summary
+        }
         if (command === 'desktop_edit_probe_translation') {
           const request = args?.request as { source: string; translation: string }
           ;(window as unknown as { __captureEditRequests?: unknown[] }).__captureEditRequests ??= []
@@ -852,6 +859,11 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toBe('Source 00')
   await page.getByRole('button', { name: '暂停收集' }).click()
   await expect(page.getByRole('button', { name: '继续收集' })).toBeVisible()
+  const disconnect = page.getByRole('button', { name: '释放当前连接', exact: true })
+  await expect(disconnect).toBeVisible()
+  await openProbeTaskActions(page)
+  await expect(page.getByRole('menuitem', { name: '释放当前连接', exact: true })).toHaveCount(0)
+  await page.keyboard.press('Escape')
   const pausedTranslation = page.getByRole('textbox', { name: '“Source 0003”的译文' })
   await pausedTranslation.fill('暂停时译文')
   await pausedTranslation.blur()
@@ -861,6 +873,11 @@ test('probe run keeps backend paging while adapter filters and view state recove
   await openProbeTaskActions(page)
   await expect(page.getByRole('menuitem', { name: '当前联合表 CSV', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
+  await disconnect.click()
+  await expect(page.getByRole('button', { name: '连接并继续' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __probeDisconnected?: boolean }).__probeDisconnected
+  ))).toBe(true)
 
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()

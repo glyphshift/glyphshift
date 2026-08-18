@@ -86,6 +86,10 @@ struct WorkflowRuntimeCalls {
     refreshed: Vec<Box<str>>,
     captures_started: Vec<Box<str>>,
     captures_stopped: Vec<Box<str>>,
+    captures_abandoned: Vec<Box<str>>,
+    capture_start_error: Option<DesktopRuntimeError>,
+    capture_controls: Vec<(Box<str>, bool)>,
+    capture_control_error: Option<DesktopRuntimeError>,
     capture_publications: Vec<(Box<str>, RuntimePublication)>,
     software_removed: Vec<Box<str>>,
 }
@@ -190,12 +194,12 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
         _spec: &glyphshift_desktop_backend::DesktopRuntimeSpec,
         configuration: CaptureConfiguration,
     ) -> Result<ProbeRuntimeCapability, DesktopRuntimeError> {
-        self.calls
-            .lock()
-            .expect("runtime call log")
-            .captures_started
-            .push(software_id.into());
-        if let Some(error) = self.start_capture_error {
+        let dynamic_error = {
+            let mut calls = self.calls.lock().expect("runtime call log");
+            calls.captures_started.push(software_id.into());
+            calls.capture_start_error
+        };
+        if let Some(error) = dynamic_error.or(self.start_capture_error) {
             return Err(error);
         }
         glyphshift_capture::FileCaptureSink::start(configuration)
@@ -215,10 +219,23 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
 
     fn control_capture(
         &mut self,
-        _software_id: &str,
-        _paused: bool,
+        software_id: &str,
+        paused: bool,
     ) -> Result<(), DesktopRuntimeError> {
+        let mut calls = self.calls.lock().expect("runtime call log");
+        calls.capture_controls.push((software_id.into(), paused));
+        if let Some(error) = calls.capture_control_error {
+            return Err(error);
+        }
         Ok(())
+    }
+
+    fn abandon_capture(&mut self, software_id: &str) {
+        self.calls
+            .lock()
+            .expect("runtime call log")
+            .captures_abandoned
+            .push(software_id.into());
     }
 
     fn control_runtime_diagnostics(

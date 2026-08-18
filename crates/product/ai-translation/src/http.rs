@@ -225,7 +225,7 @@ impl TranslationProvider for HttpTranslationProvider {
             .transport
             .send(outgoing, cancellation)
             .map_err(transport_error)?;
-        decode_response(self.protocol, response)
+        decode_response(self.protocol, response, request)
     }
 }
 
@@ -250,22 +250,19 @@ fn build_request(
             "provider credentials require HTTPS or a loopback endpoint",
         ));
     }
-    let schema = translation_schema();
+    let schema = translation_schema(request.items().len());
     let input = json!({
         "source_locale": request.source_locale(),
         "target_locale": request.target_locale(),
-        "items": request.items().iter().map(|item| json!({
-            "item_id": item.item_id(),
-            "source": item.source(),
-            "protected_tokens": item.protected_tokens(),
-        })).collect::<Vec<_>>(),
+        "items": request.items().iter().map(|item| item.source()).collect::<Vec<_>>(),
     });
     let user_text = serde_json::to_string(&input)
         .map_err(|_| invalid_request("could not encode translation input"))?;
     let system_text = format!(
-        "Translate UI text from {} to {}. Return only the requested JSON object. Preserve every item_id and protected token exactly. Do not add or omit items.",
+        "Translate each UI text from {} to {}. Return only the JSON object required by the schema. The translations array MUST contain exactly {} strings in exactly the same order as input.items. For every index i, translations[i] must be only the translation of input.items[i]. Never reorder, merge, split, omit, duplicate, or add items. If an item should remain unchanged, return it unchanged at the same index. Preserve placeholders, format specifiers, escape sequences, keyboard shortcuts, and other protected tokens exactly. Return translation text only, with no source text, numbering, labels, notes, or explanations.",
         request.source_locale(),
-        request.target_locale()
+        request.target_locale(),
+        request.items().len()
     );
     let (endpoint, body) = match protocol {
         AiProviderProtocol::OpenAiResponses => (
@@ -374,7 +371,7 @@ fn build_request(
     })
 }
 
-fn translation_schema() -> Value {
+fn translation_schema(item_count: usize) -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -382,15 +379,9 @@ fn translation_schema() -> Value {
         "properties": {
             "translations": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["item_id", "text"],
-                    "properties": {
-                        "item_id": {"type": "string"},
-                        "text": {"type": "string"},
-                    },
-                },
+                "minItems": item_count,
+                "maxItems": item_count,
+                "items": {"type": "string"},
             },
         },
     })
@@ -399,6 +390,7 @@ fn translation_schema() -> Value {
 fn decode_response(
     protocol: AiProviderProtocol,
     response: HttpResponse,
+    request: &ProviderRequest<'_>,
 ) -> Result<ProviderBatchResult, ProviderError> {
     if !(200..300).contains(&response.status) {
         return Err(http_status_error(&response));
@@ -440,25 +432,24 @@ fn decode_response(
     .ok_or_else(|| malformed_response("provider response did not contain text output"))?;
     let structured: StructuredTranslations = serde_json::from_str(text)
         .map_err(|_| malformed_response("provider text was not a translation result"))?;
+    if structured.translations.len() != request.items().len() {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    }
     Ok(ProviderBatchResult::new(
-        structured
-            .translations
-            .into_iter()
-            .map(|translation| ProviderTranslation::new(translation.item_id, translation.text)),
+        request
+            .items()
+            .iter()
+            .zip(structured.translations)
+            .map(|(item, text)| ProviderTranslation::new(item.item_id(), text)),
     ))
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StructuredTranslations {
-    translations: Vec<StructuredTranslation>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StructuredTranslation {
-    item_id: Box<str>,
-    text: Box<str>,
+    translations: Vec<Box<str>>,
 }
 
 fn transport_error(error: HttpTransportError) -> ProviderError {

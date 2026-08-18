@@ -100,42 +100,42 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
             endpoint_suffix: "/responses",
             request_marker: "text",
             auth_header: "authorization",
-            response: r#"{"output":[{"content":[{"type":"output_text","text":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}]}]}"#,
+            response: r#"{"output":[{"content":[{"type":"output_text","text":"{\"translations\":[\"打开\",\"关闭\"]}"}]}]}"#,
         },
         ProtocolCase {
             protocol: AiProviderProtocol::OpenAiChatCompletions,
             endpoint_suffix: "/chat/completions",
             request_marker: "response_format",
             auth_header: "authorization",
-            response: r#"{"choices":[{"message":{"content":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}}]}"#,
+            response: r#"{"choices":[{"message":{"content":"{\"translations\":[\"打开\",\"关闭\"]}"}}]}"#,
         },
         ProtocolCase {
             protocol: AiProviderProtocol::OpenAiCompatible,
             endpoint_suffix: "/chat/completions",
             request_marker: "response_format",
             auth_header: "authorization",
-            response: r#"{"choices":[{"message":{"content":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}}]}"#,
+            response: r#"{"choices":[{"message":{"content":"{\"translations\":[\"打开\",\"关闭\"]}"}}]}"#,
         },
         ProtocolCase {
             protocol: AiProviderProtocol::AnthropicMessages,
             endpoint_suffix: "/v1/messages",
             request_marker: "output_config",
             auth_header: "x-api-key",
-            response: r#"{"content":[{"type":"text","text":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}]}"#,
+            response: r#"{"content":[{"type":"text","text":"{\"translations\":[\"打开\",\"关闭\"]}"}]}"#,
         },
         ProtocolCase {
             protocol: AiProviderProtocol::GeminiGenerateContent,
             endpoint_suffix: "/models/synthetic-model:generateContent",
             request_marker: "generationConfig",
             auth_header: "x-goog-api-key",
-            response: r#"{"candidates":[{"content":{"parts":[{"text":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}]}}]}"#,
+            response: r#"{"candidates":[{"content":{"parts":[{"text":"{\"translations\":[\"打开\",\"关闭\"]}"}]}}]}"#,
         },
         ProtocolCase {
             protocol: AiProviderProtocol::OllamaChat,
             endpoint_suffix: "/chat",
             request_marker: "format",
             auth_header: "authorization",
-            response: r#"{"message":{"role":"assistant","content":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"},"done":true}"#,
+            response: r#"{"message":{"role":"assistant","content":"{\"translations\":[\"打开\",\"关闭\"]}"},"done":true}"#,
         },
     ];
 
@@ -172,7 +172,10 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
                 1,
                 "en-US",
                 "zh-CN",
-                [TranslationItem::untranslated("save", "Save")],
+                [
+                    TranslationItem::untranslated("open", "Open"),
+                    TranslationItem::untranslated("close", "Close"),
+                ],
             ))
             .expect("plan protocol request");
         let job_id = translation
@@ -191,7 +194,10 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
         };
 
         assert_eq!(completed.status(), TranslationJobStatus::Completed);
-        assert_eq!(completed.results()[0].translation(), "保存");
+        assert_eq!(completed.results()[0].item_id(), "open");
+        assert_eq!(completed.results()[0].translation(), "打开");
+        assert_eq!(completed.results()[1].item_id(), "close");
+        assert_eq!(completed.results()[1].translation(), "关闭");
         let captured = requests.lock().expect("captured request");
         let request = captured.first().expect("one captured request");
         assert!(request.url().ends_with(case.endpoint_suffix));
@@ -209,7 +215,76 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
             body.get(case.request_marker).is_some(),
             "missing protocol marker"
         );
+        let wire_body = String::from_utf8_lossy(request.body());
+        assert!(wire_body.contains(r#"\"items\":[\"Open\",\"Close\"]"#));
+        assert!(!wire_body.contains("item_id"));
+        assert!(!wire_body.contains("protected_tokens"));
+        assert!(wire_body.contains(r#""minItems":2"#));
+        assert!(wire_body.contains(r#""maxItems":2"#));
+        assert!(wire_body.contains("exactly the same order"));
     }
+}
+
+#[test]
+fn positional_wire_response_rejects_a_translation_count_mismatch() {
+    let root = tempdir().expect("provider profile root");
+    let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
+        .expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.positional-count",
+                "Synthetic Provider",
+                AiProviderProtocol::OpenAiChatCompletions,
+                "synthetic-model",
+            )
+            .with_credential(CredentialUpdate::replace("synthetic-provider-secret")),
+        )
+        .expect("save provider profile");
+    let profile = profiles
+        .resolve_profile("profile.positional-count")
+        .expect("resolve provider profile");
+    let transport = Arc::new(RecordingTransport {
+        requests: Arc::new(Mutex::new(Vec::new())),
+        response: HttpResponse::json(
+            200,
+            r#"{"choices":[{"message":{"content":"{\"translations\":[\"打开\"]}"}}]}"#,
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::OpenAiChatCompletions, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.pending",
+            1,
+            "en-US",
+            "zh-CN",
+            [
+                TranslationItem::untranslated("open", "Open"),
+                TranslationItem::untranslated("close", "Close"),
+            ],
+        ))
+        .expect("plan positional request");
+    let job_id = translation
+        .start_translation(plan.token(), profile)
+        .expect("start positional request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let failed = loop {
+        let snapshot = translation
+            .translation_job(&job_id)
+            .expect("query positional job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline, "positional job did not finish");
+        std::thread::yield_now();
+    };
+
+    assert_eq!(failed.status(), TranslationJobStatus::CompletedWithFailures);
+    assert_eq!(
+        failed.errors()[0].category(),
+        glyphshift_ai_translation::ProviderErrorCategory::MalformedOutput
+    );
 }
 
 #[test]
@@ -298,7 +373,7 @@ fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
             HttpResponse::new(429, [("retry-after-ms", "0")], b"{}"),
             HttpResponse::json(
                 200,
-                r#"{"choices":[{"message":{"content":"{\"translations\":[{\"item_id\":\"save\",\"text\":\"保存\"}]}"}}]}"#,
+                r#"{"choices":[{"message":{"content":"{\"translations\":[\"保存\"]}"}}]}"#,
             ),
         ])),
     });

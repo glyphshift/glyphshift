@@ -190,7 +190,7 @@ export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; con
 }
 
 const REQUEST_TOKEN_RESERVE = 384
-const ITEM_TOKEN_RESERVE = 12
+const ITEM_TOKEN_RESERVE = 3
 
 function estimatedTextTokens(value: string) {
   let ascii = 0
@@ -208,7 +208,6 @@ export function estimateAiTranslationInput(plan: AiTranslationPlan, maxItemsPerR
   const itemTokens = plan.candidates.reduce((total, candidate) => (
     total
     + ITEM_TOKEN_RESERVE
-    + estimatedTextTokens(candidate.itemId)
     + estimatedTextTokens(candidate.source)
   ), 0)
   return {

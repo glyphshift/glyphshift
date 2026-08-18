@@ -240,7 +240,7 @@ fn probe_view_reports_actual_collection_only_capability_without_persisting_it() 
 
 #[test]
 fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
-    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let (mut application, calls, software_id, _data_root) = workflow_application();
     let first = application
         .create_probe_run(ProbeRunCreateRequest {
             id: "probe-first".into(),
@@ -277,6 +277,18 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
         .set_probe_run_paused(first.summary.id(), true)
         .expect("pause without ending run");
     assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
+    assert_eq!(
+        application.active_probe_run_id.as_deref(),
+        Some(first.summary.id())
+    );
+    {
+        let calls = calls.lock().expect("runtime call log");
+        assert_eq!(
+            calls.capture_controls.as_slice(),
+            &[(software_id.clone(), true)]
+        );
+        assert!(calls.captures_abandoned.is_empty());
+    }
     let released = application
         .disconnect_probe_run(first.summary.id())
         .expect("release runtime");
@@ -307,6 +319,148 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
             .len(),
         2
     );
+}
+
+#[test]
+fn probe_resume_reconnects_after_the_old_target_stops_confirming_runtime_control() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-target-exited-before-pause".into(),
+            name: "Target exited before pause".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create running probe");
+
+    calls
+        .lock()
+        .expect("runtime call log")
+        .capture_control_error = Some(DesktopRuntimeError::SessionRejected);
+
+    let paused = application
+        .set_probe_run_paused(run.summary.id(), true)
+        .expect("local pause must succeed after the target exits");
+
+    assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
+    assert_eq!(
+        application.active_probe_run_id.as_deref(),
+        Some(run.summary.id())
+    );
+    assert_eq!(
+        application.active_probe_capability,
+        Some(ProbeRuntimeCapability::DirectReplace)
+    );
+    {
+        let calls = calls.lock().expect("runtime call log");
+        assert_eq!(calls.capture_controls.len(), 1);
+        assert_eq!(calls.capture_controls[0].1, true);
+        assert!(calls.captures_abandoned.is_empty());
+    }
+
+    let resumed = application
+        .set_probe_run_paused(run.summary.id(), false)
+        .expect("resume must create a fresh runtime session");
+    assert_eq!(resumed.summary.status(), ProbeRunStatus::Running);
+    let calls = calls.lock().expect("runtime call log");
+    assert_eq!(calls.captures_started.len(), 2);
+    assert_eq!(calls.captures_abandoned.len(), 1);
+}
+
+#[test]
+fn probe_resume_reuses_a_live_runtime_after_pause_confirmation_fails() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-live-after-pause-rejection".into(),
+            name: "Live target after pause rejection".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create running probe");
+    calls
+        .lock()
+        .expect("runtime call log")
+        .capture_control_error = Some(DesktopRuntimeError::SessionRejected);
+
+    application
+        .set_probe_run_paused(run.summary.id(), true)
+        .expect("local pause should not require Runtime confirmation");
+    {
+        let mut calls = calls.lock().expect("runtime call log");
+        calls.capture_control_error = None;
+        calls.capture_start_error = Some(DesktopRuntimeError::ProtocolRejected);
+    }
+
+    let resumed = application
+        .set_probe_run_paused(run.summary.id(), false)
+        .expect("resume should reuse the still-live Runtime instead of reconnecting");
+
+    assert_eq!(resumed.summary.status(), ProbeRunStatus::Running);
+    let calls = calls.lock().expect("runtime call log");
+    assert_eq!(calls.captures_started.len(), 1);
+    assert!(calls.captures_abandoned.is_empty());
+    assert_eq!(
+        calls
+            .capture_controls
+            .iter()
+            .map(|(_, paused)| *paused)
+            .collect::<Vec<_>>(),
+        vec![true, false]
+    );
+}
+
+#[test]
+fn probe_resume_reports_an_offline_target_after_discarding_the_stale_runtime() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            id: "probe-offline-after-pause-rejection".into(),
+            name: "Offline target after pause rejection".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create running probe");
+    calls
+        .lock()
+        .expect("runtime call log")
+        .capture_control_error = Some(DesktopRuntimeError::SessionRejected);
+    application
+        .set_probe_run_paused(run.summary.id(), true)
+        .expect("pause should remain local when target is lost");
+    calls.lock().expect("runtime call log").capture_start_error =
+        Some(DesktopRuntimeError::UnknownTarget);
+
+    let error = application
+        .set_probe_run_paused(run.summary.id(), false)
+        .expect_err("an offline target cannot resume collection");
+
+    let error_json = serde_json::to_value(error).expect("serialize reconnect error");
+    assert_eq!(error_json["code"], "runtime.target_not_found");
+    assert_eq!(
+        application
+            .probe_runs
+            .summary(run.summary.id())
+            .expect("paused probe status")
+            .status(),
+        ProbeRunStatus::Paused
+    );
+    assert!(application.active_probe_run_id.is_none());
+    let calls = calls.lock().expect("runtime call log");
+    assert_eq!(calls.captures_started.len(), 2);
+    assert_eq!(calls.captures_abandoned.len(), 1);
 }
 
 #[test]

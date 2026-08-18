@@ -1,7 +1,9 @@
 use crate::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
 
 #[test]
-fn batch_producer_drains_bounded_sorted_batches_without_blocking_ingress() {
+fn batch_producer_drains_bounded_sequenced_batches_without_blocking_ingress() {
     let (mut producer, ingress) = CaptureBatchProducer::start(
         CaptureProducerConfiguration::new(
             CaptureProducerId::new("target-7").expect("producer id"),
@@ -31,8 +33,62 @@ fn batch_producer_drains_bounded_sorted_batches_without_blocking_ingress() {
     assert!(batch.records()[0].sequence() < batch.records()[1].sequence());
     assert!(producer.drain().expect("empty batch").records().is_empty());
 }
+
 #[test]
-fn batch_producer_preserves_pending_records_gaps_pause_and_owner_lifetime() {
+fn concurrent_drain_does_not_drop_transient_observations() {
+    const OBSERVATION_COUNT: usize = 4_096;
+
+    let (mut producer, ingress) = CaptureBatchProducer::start(
+        CaptureProducerConfiguration::new(
+            CaptureProducerId::new("transient-menu").expect("producer id"),
+            1,
+        )
+        .expect("producer configuration"),
+    )
+    .expect("batch producer");
+    let started = Arc::new(Barrier::new(2));
+    let stopped = Arc::new(AtomicBool::new(false));
+    let worker_started = started.clone();
+    let worker_stopped = stopped.clone();
+    let worker = std::thread::spawn(move || {
+        worker_started.wait();
+        let mut observed = 0;
+        loop {
+            let batch = producer.drain().expect("concurrent drain");
+            observed += batch.records().len();
+            if worker_stopped.load(Ordering::Acquire) && batch.records().is_empty() {
+                return (observed, batch.dropped_total());
+            }
+            std::thread::yield_now();
+        }
+    });
+
+    started.wait();
+    let statuses = (0..OBSERVATION_COUNT)
+        .map(|index| {
+            let status = ingress.try_observe(
+                "windows.user32.draw-text",
+                format!("Transient menu item {index}"),
+            );
+            std::thread::yield_now();
+            status
+        })
+        .collect::<Vec<_>>();
+    stopped.store(true, Ordering::Release);
+
+    let (observed, dropped_total) = worker.join().expect("drain worker");
+    assert!(
+        statuses
+            .iter()
+            .all(|status| *status == CaptureIngressStatus::Accepted),
+        "draining must not make the nonblocking ingress drop observations"
+    );
+    assert_eq!(observed, OBSERVATION_COUNT);
+    assert_eq!(dropped_total, 0);
+}
+
+#[test]
+fn batch_producer_preserves_pending_records_drops_pause_and_owner_lifetime() {
     let (mut producer, ingress) = CaptureBatchProducer::start(
         CaptureProducerConfiguration::new(
             CaptureProducerId::new("worker-4").expect("producer id"),
@@ -68,7 +124,7 @@ fn batch_producer_preserves_pending_records_gaps_pause_and_owner_lifetime() {
     assert!(second
         .records()
         .windows(2)
-        .any(|records| records[1].sequence() > records[0].sequence() + 1));
+        .all(|records| records[1].sequence() == records[0].sequence() + 1));
 
     producer.set_paused(true);
     assert_eq!(

@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useToast } from '@nuxt/ui/composables'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import glyphshiftIconUrl from '../../src-tauri/icons/icon.svg?url'
 import { useAppSettings } from '../appSettings'
 import type { ProbeActivityStatus } from '../useProbeRuns'
 
@@ -58,7 +59,14 @@ async function native(action: 'minimize' | 'maximize') {
 <template>
   <header class="flex h-12 shrink-0 select-none items-stretch border-b border-[var(--border)] bg-[var(--titlebar)] text-[var(--text-secondary)]" data-tauri-drag-region>
     <div class="flex items-center gap-2 border-r border-[var(--border)] px-3" data-tauri-drag-region>
-      <span class="type-caption grid h-6 w-6 place-items-center rounded-[5px] bg-[var(--accent)] font-bold text-[var(--accent-foreground)]">G</span>
+      <img
+        :src="glyphshiftIconUrl"
+        alt=""
+        aria-hidden="true"
+        data-testid="glyphshift-mark"
+        draggable="false"
+        class="pointer-events-none size-6 shrink-0"
+      >
       <strong class="text-[13px] font-semibold tracking-[-0.015em] text-[var(--text)]">Glyphshift</strong>
       <span class="type-caption text-[var(--text-muted)]">v0.2</span>
     </div>

@@ -128,7 +128,7 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
   const preflight = page.getByRole('dialog', { name: '确认 AI 翻译' })
-  await expect(preflight.getByText('预计输入约 402 Token')).toBeVisible()
+  await expect(preflight.getByText('预计输入约 389 Token')).toBeVisible()
   await expect(preflight.getByText('1 条 · 1 批')).toBeVisible()
   await expect(preflight.getByText('每批最多 25 条 · 并发 1 批')).toBeVisible()
   await expect(preflight.getByText('单批 60 秒 · 失败重试 2 次')).toBeVisible()

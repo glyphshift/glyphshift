@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 
 const sourceRoot = join(import.meta.dirname, '..', 'src')
@@ -149,6 +149,31 @@ test('native close requests can destroy the accepted window', () => {
     'core:window:allow-close',
     'core:window:allow-destroy',
   ]))
+})
+
+test('desktop title bar and native bundles share the selected Glyphshift mark', () => {
+  const titleBar = readFileSync(join(sourceRoot, 'components', 'TitleBar.vue'), 'utf8')
+  const buildScript = readFileSync(join(packageRoot, 'src-tauri', 'build.rs'), 'utf8')
+  const tauriConfig = JSON.parse(readFileSync(join(packageRoot, 'src-tauri', 'tauri.conf.json'), 'utf8')) as {
+    bundle?: { icon?: string[] }
+  }
+
+  expect(titleBar).toContain("../../src-tauri/icons/icon.svg?url")
+  expect(titleBar).toContain('data-testid="glyphshift-mark"')
+  expect(titleBar).not.toContain('>G</span>')
+
+  expect(existsSync(join(packageRoot, 'src-tauri', 'icons', 'icon.svg'))).toBe(true)
+  expect(tauriConfig.bundle?.icon).toEqual([
+    'icons/32x32.png',
+    'icons/128x128.png',
+    'icons/128x128@2x.png',
+    'icons/icon.icns',
+    'icons/icon.ico',
+  ])
+  for (const icon of tauriConfig.bundle?.icon ?? []) {
+    expect(existsSync(join(packageRoot, 'src-tauri', icon))).toBe(true)
+  }
+  expect(buildScript).toContain('cargo:rerun-if-changed=icons/icon.ico')
 })
 
 test('adapter documentation opens through a scoped system-browser capability', () => {

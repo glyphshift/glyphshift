@@ -108,6 +108,7 @@ const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const dictionaryNotice = ref('')
 const launchingSoftware = ref(false)
+const disconnectingRunId = ref('')
 const translationValues = ref<Record<string, string>>({})
 const selectedAiProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
@@ -325,19 +326,11 @@ const taskActionItems = computed<DropdownMenuItem[][]>(() => {
     }]]
   }
 
-  const groups: DropdownMenuItem[][] = [[{
+  return [[{
     label: t('capture.settings'),
     icon: 'i-tabler-settings',
     onSelect: () => void openSettings(),
   }], ...exportItems.value]
-  if (['running', 'paused'].includes(run.status)) {
-    groups.push([{
-      label: t('capture.disconnect'),
-      icon: 'i-tabler-plug-off',
-      onSelect: () => void probe.disconnect(run.id),
-    }])
-  }
-  return groups
 })
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
@@ -876,6 +869,18 @@ async function launchSelectedSoftware() {
   }
 }
 
+async function disconnectSelectedRun() {
+  const run = selectedRun.value
+  if (!run || disconnectingRunId.value || !['running', 'paused'].includes(run.status)) return
+  disconnectingRunId.value = run.id
+  try {
+    await probe.disconnect(run.id)
+  }
+  finally {
+    if (disconnectingRunId.value === run.id) disconnectingRunId.value = ''
+  }
+}
+
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
   const next = { ...translationValues.value }
   for (const row of rows) if (!dirtyTranslations.has(row.source)) next[row.source] = row.translation
@@ -1062,14 +1067,18 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             size="sm"
             icon="i-tabler-app-window"
             :label="t('capture.launchSoftware')"
+            :aria-label="t('capture.launchSoftware')"
+            :title="t('capture.launchSoftware')"
             :loading="launchingSoftware"
             :disabled="!selectedSoftware?.executablePath"
+            :ui="{ label: 'hidden min-[1080px]:inline' }"
             @click="launchSelectedSoftware"
           />
-          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value" @click="probe.setPaused(selectedRun.id, true)" />
-          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+          <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="probe.setPaused(selectedRun.id, true)" />
+          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" data-testid="probe-disconnect" color="neutral" variant="outline" size="sm" icon="i-tabler-plug-off" :label="t('capture.disconnect')" :loading="disconnectingRunId === selectedRun.id" :disabled="probe.busy.value && disconnectingRunId !== selectedRun.id" @click="disconnectSelectedRun" />
           <UDropdownMenu :items="taskActionItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-60' }">
-            <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" />
+            <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" :aria-label="taskActionLabel" :title="taskActionLabel" :ui="{ label: 'hidden min-[1080px]:inline' }" />
           </UDropdownMenu>
         </div>
       </template>

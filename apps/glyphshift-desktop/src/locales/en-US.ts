@@ -818,7 +818,7 @@ export default {
     continue: 'Continue collection',
     resume: 'Connect and continue',
     launchSoftware: 'Run software',
-    disconnect: 'Release current connection',
+    disconnect: 'Disconnect',
     taskActions: 'Task actions',
     backToRuns: 'Back to probe management',
     settings: 'Probe settings',

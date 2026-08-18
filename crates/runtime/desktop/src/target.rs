@@ -580,28 +580,17 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         else {
             return Err(DesktopRuntimeError::InvalidState);
         };
-        if !paused {
-            capture_owner
-                .as_ref()
-                .ok_or(DesktopRuntimeError::InvalidState)?
-                .set_paused(false);
-        }
+        let capture_owner = capture_owner
+            .as_ref()
+            .ok_or(DesktopRuntimeError::InvalidState)?;
+        capture_owner.set_paused(paused);
         for session_id in sessions.values().copied() {
             if manager.control_capture(session_id, paused).is_err() {
                 if !paused {
-                    capture_owner
-                        .as_ref()
-                        .ok_or(DesktopRuntimeError::InvalidState)?
-                        .set_paused(true);
+                    capture_owner.set_paused(true);
                 }
                 return Err(DesktopRuntimeError::SessionRejected);
             }
-        }
-        if paused {
-            capture_owner
-                .as_ref()
-                .ok_or(DesktopRuntimeError::InvalidState)?
-                .set_paused(true);
         }
         Ok(())
     }

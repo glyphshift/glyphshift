@@ -507,6 +507,53 @@ fn failed_capture_start_is_discarded_so_connect_and_continue_can_retry() {
 }
 
 #[test]
+fn abandoned_capture_is_discarded_so_resume_can_discover_a_fresh_runtime() {
+    let root = tempdir().expect("abandoned capture Runtime data");
+    let executable = root.path().join("AbandonedCaptureHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    let spec = backend
+        .capture_runtime_spec(&software_id, &[Box::<str>::from(TEST_ADAPTER_ID)])
+        .expect("capture spec");
+    let first_configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-before-abandon")
+            .expect("first session id"),
+        root.path().join("capture-before-abandon.json"),
+        100,
+    )
+    .expect("first capture configuration");
+    let second_configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-after-abandon")
+            .expect("second session id"),
+        root.path().join("capture-after-abandon.json"),
+        100,
+    )
+    .expect("second capture configuration");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(AcquisitionRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+        calls: Arc::new(Mutex::new(Vec::new())),
+    }));
+
+    pool.start_capture(software_id.as_str(), &spec, None, first_configuration)
+        .expect("start capture before target loss");
+    pool.abandon_capture(software_id.as_str());
+
+    assert!(pool.status(&software_id).is_none());
+    let resumed = pool
+        .start_capture(software_id.as_str(), &spec, None, second_configuration)
+        .expect("resume should discover a fresh Runtime");
+    assert!(resumed.is_feature_active(Feature::TextObserve));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn offline_probe_start_is_discarded_so_reopened_target_can_reconnect() {
     let root = tempdir().expect("offline capture Runtime data");
     let executable = root.path().join("ReopenedCaptureHost.exe");

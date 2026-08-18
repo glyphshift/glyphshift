@@ -617,6 +617,11 @@ impl DesktopRuntimePool {
             .control_capture(paused)
     }
 
+    pub fn abandon_capture(&mut self, application_id: &str) {
+        self.capture_targets.remove(application_id);
+        self.discard_session(application_id);
+    }
+
     pub fn control_runtime_diagnostics(
         &mut self,
         application_id: &str,
