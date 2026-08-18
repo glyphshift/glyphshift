@@ -197,6 +197,7 @@ export default {
     probeCompleted: '已写入全部 {applied} 条译文，自动完成 {batches} 批；用时 {elapsed}，保留 {skipped} 条期间新增的人工译文。',
     probePartial: '模型完成 {completed}/{total} 条，已写入 {applied} 条；{failed} 条失败，用时 {elapsed}，可重试剩余空白项。',
     retryRemaining: '重试剩余',
+    dismissOutcome: '关闭',
     partialCompletion: 'AI 翻译部分完成',
     translationCancelled: 'AI 翻译已停止',
     translationCancelledNotice: '已停止；保留已完成 {completed}/{total} 条，用时 {elapsed}。可重试剩余空白项。',

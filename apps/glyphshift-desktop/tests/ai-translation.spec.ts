@@ -205,6 +205,10 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await expect(page.getByText('AI 正在翻译')).toHaveCount(0, { timeout: 500 })
   await expect(page.getByText('AI 翻译已停止')).toBeVisible()
   await expect(page.getByRole('textbox', { name: '编辑译文：Pending source' })).toHaveValue('')
+  const stoppedNotice = page.getByRole('status').filter({ hasText: 'AI 翻译已停止' })
+  await expect(stoppedNotice).toBeVisible()
+  await stoppedNotice.getByRole('button', { name: '关闭' }).click()
+  await expect(stoppedNotice).toHaveCount(0)
 })
 
 test('dictionary AI fill translates only eligible blank entries', async ({ page }) => {

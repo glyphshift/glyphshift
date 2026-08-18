@@ -500,6 +500,13 @@ async function previewAiTranslation() {
   if (plan) aiPreviewOpen.value = true
 }
 
+function dismissAiOutcome() {
+  aiNotice.value = ''
+  aiNoticeCancelled.value = false
+  aiRetryAvailable.value = false
+  ai.dismissCurrentJob()
+}
+
 async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirmed = false) {
   const run = selectedRun.value
   const nextPlan = plan ?? await prepareAiPlan()
@@ -1094,7 +1101,12 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
     <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
-      <template v-if="aiRetryAvailable" #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" /></template>
+      <template #actions>
+        <div class="flex items-center gap-1.5">
+          <UButton v-if="aiRetryAvailable" color="primary" variant="soft" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" />
+          <UButton color="neutral" variant="ghost" size="xs" :label="t('ai.dismissOutcome')" @click="dismissAiOutcome" />
+        </div>
+      </template>
     </UAlert>
     <AiTranslationProgress
       v-if="displayedAiJob"

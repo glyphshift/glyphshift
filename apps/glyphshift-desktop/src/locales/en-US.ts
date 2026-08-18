@@ -203,6 +203,7 @@ export default {
     probeCompleted: 'Wrote all {applied} translations in {batches} automatic batches in {elapsed} and preserved {skipped} translations added while the job was running.',
     probePartial: 'The model completed {completed}/{total}; {applied} were written and {failed} failed in {elapsed}. You can retry the remaining blank items.',
     retryRemaining: 'Retry remaining',
+    dismissOutcome: 'Close',
     partialCompletion: 'AI translation partially complete',
     translationCancelled: 'AI translation stopped',
     translationCancelledNotice: 'Stopped; kept {completed}/{total} completed items after {elapsed}. You can retry the remaining blank items.',
