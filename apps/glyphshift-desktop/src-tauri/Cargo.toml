@@ -10,6 +10,9 @@ description = "Glyphshift desktop shell"
 name = "glyphshift_desktop_shell"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 

@@ -81,6 +81,7 @@ $desktopBuildArguments = @(
     '--manifest-path', (Join-Path $repoRoot 'Cargo.toml'),
     '-p', 'glyphshift-desktop-shell'
 )
+$desktopBuildArguments += @('--features', 'custom-protocol')
 if ($Profile -eq 'Release') {
     $desktopBuildArguments += '--release'
 }

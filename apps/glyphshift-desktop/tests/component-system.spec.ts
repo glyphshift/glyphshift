@@ -151,6 +151,14 @@ test('native close requests can destroy the accepted window', () => {
   ]))
 })
 
+test('desktop review builds load embedded Tauri assets for every Cargo profile', () => {
+  const cargoManifest = readFileSync(join(packageRoot, 'src-tauri', 'Cargo.toml'), 'utf8')
+  const reviewScript = readFileSync(join(packageRoot, '..', '..', 'scripts', 'review-app.ps1'), 'utf8')
+
+  expect(cargoManifest).toMatch(/\[features\][\s\S]*custom-protocol\s*=\s*\["tauri\/custom-protocol"\]/)
+  expect(reviewScript).toContain("'--features', 'custom-protocol'")
+})
+
 test('desktop title bar and native bundles share the selected Glyphshift mark', () => {
   const titleBar = readFileSync(join(sourceRoot, 'components', 'TitleBar.vue'), 'utf8')
   const buildScript = readFileSync(join(packageRoot, 'src-tauri', 'build.rs'), 'utf8')
