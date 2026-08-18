@@ -57,7 +57,7 @@ test('help shares the settings utility-page width, title axis, and first-content
 
   const headerContent = page.getByTestId('management-detail-header-content')
   const helpLayout = page.getByTestId('help-layout')
-  const recoverySection = page.getByTestId('help-section-recovery')
+  const gettingStartedSection = page.getByTestId('help-section-getting-started')
 
   await expect(headerContent).toBeVisible()
   await expect(helpLayout).toBeVisible()
@@ -71,16 +71,16 @@ test('help shares the settings utility-page width, title axis, and first-content
       header: rect('[data-testid="management-detail-header"]'),
       headerContent: rect('[data-testid="management-detail-header-content"]'),
       layout: rect('[data-testid="help-layout"]'),
-      recovery: rect('[data-testid="help-section-recovery"]'),
+      gettingStarted: rect('[data-testid="help-section-getting-started"]'),
     }
   })
   expect(geometry.layout.width).toBeGreaterThanOrEqual(979)
   expect(geometry.layout.width).toBeLessThanOrEqual(981)
   expect(Math.abs(geometry.headerContent.left - geometry.layout.left)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.headerContent.right - geometry.layout.right)).toBeLessThanOrEqual(1)
-  expect(Math.abs(geometry.layout.left - geometry.recovery.left)).toBeLessThanOrEqual(1)
-  expect(geometry.recovery.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
-  expect(geometry.recovery.top - geometry.header.bottom).toBeLessThanOrEqual(21)
+  expect(Math.abs(geometry.layout.left - geometry.gettingStarted.left)).toBeLessThanOrEqual(1)
+  expect(geometry.gettingStarted.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
+  expect(geometry.gettingStarted.top - geometry.header.bottom).toBeLessThanOrEqual(21)
 
   await page.setViewportSize({ width: 960, height: 640 })
   const compactGeometry = await page.evaluate(() => {
@@ -99,21 +99,31 @@ test('help exposes adapter information without internal targets', async ({ page 
   await page.getByRole('button', { name: '帮助' }).click()
 
   await expect(page.getByRole('heading', { name: '帮助' })).toBeVisible()
+  const gettingStartedHeading = page.getByRole('heading', { name: '从这里开始' })
   const recoveryHeading = page.getByRole('heading', { name: '解决常见问题' })
   const adapterHeading = page.getByRole('heading', { name: '当前适配器' })
+  await expect(gettingStartedHeading).toBeVisible()
+  await expect(page.getByRole('heading', { name: '1. 添加要翻译的软件' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '2. 用探针收集界面文字' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '3. 启用持续翻译' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '添加软件' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开探针' }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开工作流' })).toBeVisible()
   await expect(recoveryHeading).toBeVisible()
   await expect(page.getByRole('heading', { name: '软件未启动' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '权限不匹配' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '没有捕获到文字' })).toBeVisible()
   await expect(page.getByRole('button', { name: '打开软件管理' })).toBeVisible()
   await expect(page.getByRole('button', { name: '检查权限设置' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '打开探针' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Glyphshift 如何组织工作' })).toBeVisible()
+  await expect(page.getByTestId('help-section-recovery').getByRole('button', { name: '打开探针' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Glyphshift 如何组织工作' })).toHaveCount(0)
   await expect(adapterHeading).toBeVisible()
   await expect.poll(async () => {
+    const gettingStartedBox = await gettingStartedHeading.boundingBox()
     const recoveryBox = await recoveryHeading.boundingBox()
     const adapterBox = await adapterHeading.boundingBox()
-    return Boolean(recoveryBox && adapterBox && recoveryBox.y < adapterBox.y)
+    return Boolean(gettingStartedBox && recoveryBox && adapterBox
+      && gettingStartedBox.y < recoveryBox.y && recoveryBox.y < adapterBox.y)
   }).toBe(true)
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('TextOutW', { exact: true })).toBeVisible()
@@ -161,7 +171,7 @@ test('help exposes adapter information without internal targets', async ({ page 
   await page.getByRole('button', { name: '检查权限设置' }).click()
   await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '帮助' }).click()
-  await page.getByRole('button', { name: '打开探针' }).click()
+  await page.getByTestId('help-section-recovery').getByRole('button', { name: '打开探针' }).click()
   await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '帮助' }).click()
   await page.getByRole('button', { name: '打开软件管理' }).click()
@@ -202,6 +212,7 @@ test('settings applies and persists the real locale and theme preferences', asyn
 
   await page.getByRole('button', { name: 'Help', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Get started' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Solve a problem' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Available adapters' })).toBeVisible()
   await page.getByRole('button', { name: 'View details for ExtTextOutW' }).click()
@@ -224,12 +235,13 @@ test('settings applies and persists the real locale and theme preferences', asyn
 test('settings persists startup close behavior and the administrator launch preference', async ({ page }) => {
   await page.getByRole('button', { name: '设置' }).click()
 
-  await expect(page.getByRole('heading', { name: '应用行为' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '应用与权限' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '应用行为' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '权限', exact: true })).toHaveCount(0)
   const launchAtStartup = page.getByRole('switch', { name: '开机自动启动' })
   await expect(launchAtStartup).not.toBeChecked()
   await expect(page.getByRole('combobox', { name: '关闭窗口时' })).toContainText('彻底退出')
 
-  await expect(page.getByRole('heading', { name: '权限' })).toBeVisible()
   await expect(page.getByText('普通权限', { exact: true })).toBeVisible()
   const launchElevated = page.getByRole('switch', { name: '始终以管理员身份启动' })
   await expect(launchElevated).not.toBeChecked()

@@ -13,10 +13,36 @@ const { t } = useI18n()
 const openingDocumentationId = ref<string | null>(null)
 const documentationError = ref<string | null>(null)
 const expandedAdapterId = ref<string | null>(null)
+const gettingStartedItems = computed(() => ([
+  {
+    id: 'add-software',
+    icon: 'i-tabler-library',
+    title: t('help.gettingStarted.addSoftware.title'),
+    description: t('help.gettingStarted.addSoftware.description'),
+    action: t('help.gettingStarted.addSoftware.action'),
+    view: 'software' as const,
+  },
+  {
+    id: 'capture-text',
+    icon: 'i-tabler-radar',
+    title: t('help.gettingStarted.captureText.title'),
+    description: t('help.gettingStarted.captureText.description'),
+    action: t('help.gettingStarted.captureText.action'),
+    view: 'capture' as const,
+  },
+  {
+    id: 'enable-workflow',
+    icon: 'i-tabler-git-branch',
+    title: t('help.gettingStarted.enableWorkflow.title'),
+    description: t('help.gettingStarted.enableWorkflow.description'),
+    action: t('help.gettingStarted.enableWorkflow.action'),
+    view: 'workflows' as const,
+  },
+]))
 const recoveryItems = computed(() => ([
   {
     id: 'software-not-running',
-    icon: 'i-tabler-player-play',
+    icon: 'i-tabler-library',
     title: t('help.recovery.softwareNotRunning.title'),
     description: t('help.recovery.softwareNotRunning.description'),
     action: t('help.recovery.softwareNotRunning.action'),
@@ -80,7 +106,24 @@ async function openDocumentation(adapter: AdapterOption) {
       :description="t('help.description')"
       content-test-id="help-layout"
   >
-        <section data-testid="help-section-recovery" class="@container" aria-labelledby="help-recovery-title">
+        <section data-testid="help-section-getting-started" class="@container" aria-labelledby="help-getting-started-title">
+          <h2 id="help-getting-started-title" class="type-section-title m-0 font-semibold">{{ t('help.gettingStartedTitle') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">{{ t('help.gettingStartedDescription') }}</p>
+          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0">
+            <li v-for="item in gettingStartedItems" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
+              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent-strong)]" aria-hidden="true">
+                <UIcon :name="item.icon" class="size-4" />
+              </span>
+              <div class="min-w-0">
+                <h3 class="type-body m-0 font-semibold">{{ item.title }}</h3>
+                <p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p>
+              </div>
+              <UButton color="primary" variant="soft" size="sm" trailing-icon="i-tabler-arrow-right" :label="item.action" class="@max-[680px]:col-start-2 @max-[680px]:justify-self-start" @click="emit('navigate', item.view)" />
+            </li>
+          </ol>
+        </section>
+
+        <section data-testid="help-section-recovery" class="@container mt-6" aria-labelledby="help-recovery-title">
           <h2 id="help-recovery-title" class="type-section-title m-0 font-semibold">{{ t('help.recoveryTitle') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">{{ t('help.recoveryDescription') }}</p>
           <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0" role="list">
@@ -95,17 +138,6 @@ async function openDocumentation(adapter: AdapterOption) {
               <UButton color="neutral" variant="outline" size="sm" trailing-icon="i-tabler-arrow-right" :label="item.action" class="@max-[680px]:col-start-2 @max-[680px]:justify-self-start" @click="emit('navigate', item.view)" />
             </li>
           </ul>
-        </section>
-
-        <section class="mt-6 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-6 border-y border-[var(--border)] py-4" aria-labelledby="help-model-title">
-          <div>
-            <h2 id="help-model-title" class="type-section-title m-0 font-semibold">{{ t('help.modelTitle') }}</h2>
-            <p class="type-metadata mb-0 mt-1 max-w-[75ch] leading-5 text-[var(--text-muted)]">{{ t('help.modelDescription') }}</p>
-          </div>
-          <div class="flex flex-wrap justify-end gap-2">
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-git-branch" :label="t('help.openWorkflows')" @click="emit('navigate', 'workflows')" />
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-book-2" :label="t('help.openDictionaries')" @click="emit('navigate', 'dictionaries')" />
-          </div>
         </section>
 
         <section class="mt-6" aria-labelledby="adapter-help-title">

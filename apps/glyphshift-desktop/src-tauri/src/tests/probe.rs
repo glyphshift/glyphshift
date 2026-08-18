@@ -358,7 +358,7 @@ fn probe_resume_reconnects_after_the_old_target_stops_confirming_runtime_control
     {
         let calls = calls.lock().expect("runtime call log");
         assert_eq!(calls.capture_controls.len(), 1);
-        assert_eq!(calls.capture_controls[0].1, true);
+        assert!(calls.capture_controls[0].1);
         assert!(calls.captures_abandoned.is_empty());
     }
 

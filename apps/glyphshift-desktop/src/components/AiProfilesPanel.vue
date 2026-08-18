@@ -11,7 +11,6 @@ import {
 } from '../useAiTranslation'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
-import ManagementFormSection from './ManagementFormSection.vue'
 
 interface ProfileForm {
   id: string
@@ -175,7 +174,15 @@ onMounted(() => void ai.connect())
 </script>
 
 <template>
-  <ManagementFormSection :title="t('ai.settingsTitle')" :description="t('ai.settingsDescription')">
+  <section data-testid="ai-profile-settings" class="border-t border-[var(--border)] py-4" aria-labelledby="ai-profile-settings-title">
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <h3 id="ai-profile-settings-title" class="type-body m-0 font-semibold text-[var(--text)]">{{ t('ai.profilesTitle') }}</h3>
+        <p class="type-metadata mb-0 mt-1 max-w-[70ch] leading-4 text-[var(--text-muted)]">{{ t('ai.profilesDescription') }}</p>
+      </div>
+      <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" class="shrink-0" @click="openCreate" />
+    </div>
+
     <UAlert
       v-if="ai.error.value"
       role="alert"
@@ -183,10 +190,10 @@ onMounted(() => void ai.connect())
       variant="soft"
       :title="t('ai.errorTitle')"
       :description="ai.error.value"
-      class="my-4"
+      class="mt-4"
     />
 
-    <div v-if="ai.profiles.value.length" class="divide-y divide-[var(--border)]">
+    <div v-if="ai.profiles.value.length" class="mt-3 divide-y divide-[var(--border)]">
       <div v-for="profile in ai.profiles.value" :key="profile.id" class="flex min-h-[76px] items-center gap-4 py-3">
         <div class="grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent-strong)]">
           <UIcon :name="profile.protocol === 'ollama_chat' ? 'i-tabler-server-2' : 'i-tabler-sparkles'" class="size-5" aria-hidden="true" />
@@ -240,13 +247,8 @@ onMounted(() => void ai.connect())
       <p class="type-metadata m-0 max-w-[68ch] leading-4">{{ t('ai.emptyProfiles') }}</p>
     </div>
 
-    <template #after>
-      <div class="flex items-center justify-between gap-4">
-        <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
-        <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" @click="openCreate" />
-      </div>
-    </template>
-  </ManagementFormSection>
+    <p class="type-metadata m-0 border-t border-[var(--border)] pt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
+  </section>
 
   <ManagementFormModal
     :open="editorOpen"

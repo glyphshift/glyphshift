@@ -1,89 +1,70 @@
 # Glyphshift
 
-Glyphshift 是面向 Windows 桌面软件的通用运行时界面翻译工具。它以工作流组合软件和可复用
-词典，通过动态 Runtime Bundle 与 Capability Adapter 实现文字替换和字体替换，不修改目标
-软件安装文件。
+简体中文 · [English](README.en.md)
 
-## 仓库结构
+Glyphshift 是一款面向 Windows 桌面软件的运行时界面翻译工具。它在软件运行时捕获并替换界面文字，
+让没有中文、语言选项不完整或难以本地化的桌面工具变得可读；整个过程不修改目标软件的安装文件。
 
-```text
-apps/glyphshift-desktop/       Tauri 2 + Vue 3 + Nuxt UI 桌面应用
-apps/glyphshift-service/       无 GUI 组合根与端到端验证
-crates/                        Domain、Extension、Decision、Runtime、Workflow 等深 Module
-test-support/                  合成 Adapter、Controller 与 Windows 测试宿主
-architecture-tests/            通用边界和禁止依赖检查
-scripts/dev-app.ps1            本地 Runtime Bundle 验证与桌面启动
-scripts/review-app.ps1         同步构建、校验并启动最新版桌面与 Runtime
-scripts/build-runtime-bundle.ps1  Debug/Release Runtime Bundle 共用构建器
-scripts/build-desktop-release.ps1 本地 unsigned Windows 安装候选构建器
-flightdeck/                    可恢复的当前工作与稳定知识
-archive/dictionary-sources/    尚待产品化导入的历史词典源，仅作数据保全
-```
+## Glyphshift 解决什么问题
 
-## 产品模型
+很多专业工具、旧软件和独立应用没有完整本地化。传统修改资源文件的方案容易被更新覆盖，也很难处理
+自绘菜单、面板和运行时生成的文字。Glyphshift 把这些问题拆成可验证、可复用的三部分：
 
-- **工作流：** 一组可启停的持续运行期望；每个软件目标独立组合 Adapter Plan、有序词典和字体绑定。
-- **软件：** 用户登记的名称、用途说明和程序绑定，不承载运行功能开关。
-- **词典：** 独立、可发布和复用的语言资产，只保存便携元数据与文字规则。
-- **字体策略：** 属于单个工作流目标的有序字体候选，并选择仅作用于词典命中或 Hook 全部文字。
-- **Adapter Catalog：** 独立描述平台、技术分类、具体拦截方式与能力，不进入词典。
+- 用探针确认目标界面实际绘制了哪些文字，以及哪种拦截方式能够覆盖它。
+- 用独立词典保存原文与译文；同一份词典可以继续编辑、导入、导出和复用。
+- 用工作流把软件、词典、拦截方式和可选字体策略组合起来，并持续维持运行期翻译。
 
-## 开发验证
+它适合需要长期使用未本地化桌面软件的用户，也适合维护共享界面词典的译者和工具作者。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-npm --prefix apps/glyphshift-desktop ci
-npm --prefix apps/glyphshift-desktop run build
-npm --prefix apps/glyphshift-desktop test
-```
+## 它如何工作
 
-启动带真实本地 Runtime Bundle 的开发桌面：
+1. **添加软件**：选择正在运行的程序、使用快捷键捕获前台程序，或手动绑定可执行文件。
+2. **用探针验证并收集文字**：打开目标菜单、对话框或面板，确认可用 Adapter，并把捕获到的原文写入
+   绑定词典。译文可以手工填写，也可以用 AI 补全空白项。
+3. **启用工作流**：选择软件、词典、Adapter 和可选字体策略。启用后，Glyphshift 会在目标运行时
+   应用并维持这份翻译期望。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-app.ps1
-```
+探针负责回答“能不能捕获和替换”，工作流负责回答“以后持续使用哪套翻译”。
 
-构建并启动供人工检查的最新版 Release 桌面时，只使用同步评审入口：
+## 核心能力
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/review-app.ps1
-```
+- **运行时文字替换**：不修改目标安装目录，停止工作流即可撤销 Glyphshift 的运行期影响。
+- **可恢复探针**：收集界面原文、出现次数和技术来源，支持暂停、继续、筛选和绑定词典。
+- **可复用词典**：独立维护语言、版本、元数据和原文到译文的映射，可在多个工作流间复用。
+- **工作流组合**：每个软件目标独立选择 Adapter、多个有序词典和可选字体替换策略。
+- **AI 补全**：支持 OpenAI、Anthropic、Gemini、OpenAI-compatible 与 Ollama 协议；自动分批、并发、
+  重试，并保留已经完成和人工填写的译文。
+- **多种界面绘制路径**：内置 Adapter 覆盖多类 Windows 原生与框架绘制路径；实际覆盖以探针结果为准。
+- **中英文界面**：Glyphshift 自身支持简体中文与 English，并提供深色、浅色和跟随系统主题。
 
-该入口让桌面壳、Controller、Target Runtime 和 Adapter 使用同一份源码与 Cargo 产物目录，并在
-启动前调用生产加载器校验 Bundle。不要把独立 `cargo build` 或 `tauri build` 产生的新桌面壳与旧的
-Runtime 目录组合运行。
+## 开始使用
 
-UI Automation、WriteConsole 两个仅观察 Adapter，以及 UIA/OCR 取词 Worker 当前暂停产品使用。
-实现源码和隔离测试保留，但默认 Runtime Bundle、Desktop Release 和产品 Adapter Catalog 均不得注册或
-打包这些能力，默认 `scripts/test.ps1` 也不会构建或执行它们；默认 Bundle 只包含 9 个具备
-`TextReplace` 能力的 Adapter。暂停 Adapter 的专项合同只能从其自身目录显式运行。
+1. 启动 Glyphshift 和要翻译的软件。两者需要处于相同权限级别；管理员目标通常也需要管理员模式的
+   Glyphshift。
+2. 打开“探针”，新建任务。目标可以来自软件资料库或当前正在运行的软件；词典可以复用现有资产，
+   也可以让 Glyphshift 创建临时空词典。
+3. 在目标软件里逐一打开需要翻译的菜单、对话框和面板，观察原文是否进入探针列表。
+4. 手工填写译文，或在设置中配置 AI Profile 后使用“AI 补全”。
+5. 在探针中确认译文可见后，保留临时资产，并创建或启用工作流作为长期配置。
 
-只生成严格分离的 Debug 或 Release Runtime Bundle：
+如果没有捕获到文字，先让目标表面保持可见，再在探针设置中尝试其他兼容 Adapter。帮助页提供软件未
+启动、权限不匹配和无文字捕获等恢复步骤。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-runtime-bundle.ps1 -Profile Release
-```
+## AI 翻译与隐私
 
-Release Bundle 只包含 manifest 声明的 Controller、Target Runtime 和正式写回 Adapter，并使用 `/3`
-清单；测试宿主只在显式 `-IncludeTestTarget` 时加入。所有输出仍只进入 `local-test/`。
+AI Profile 保存供应商协议、服务地址、模型、分批、并发、超时、重试和本机过滤规则。API Key 只写入
+Windows Credential Manager，不以明文进入 Profile、词典或日志。
 
-生成包含 Release Runtime Bundle 的本地 unsigned NSIS candidate：
+只有当前计划选中的候选原文会发送给你选择的 AI 服务；已翻译内容以及命中过滤规则的数字、路径、URL、
+快捷键等内容会在本机跳过。使用云端模型前，请自行确认供应商的数据处理和计费政策。
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-release.ps1
-```
+## 适用范围与边界
 
-脚本使用本地临时 Tauri 配置，不修改基础配置，也不安装 candidate。产物、清单和构建中间文件均
-只进入 `local-test/`；公开发行仍需要独立的代码签名与发布流程。
+- 当前发布面向 Windows 桌面软件。
+- Glyphshift 依赖目标软件实际使用的绘制技术，不保证覆盖所有应用、所有窗口或所有文字。
+- 它不是修改安装包的语言补丁，也不是对整个屏幕进行 OCR 后覆盖一层翻译。
+- 进程发现、文字捕获和替换决策都不等于最终像素一定可见；请用探针和目标界面进行实际确认。
+- 目标软件升级后可能改变绘制路径，需要重新用探针验证。
 
-本机程序位置、Runtime Bundle、截图、日志和实机结果必须放在 `local-test/`，不得提交。
-
-## 架构入口
-
-- [领域语言](CONTEXT.md)
-- [产品契约](PRODUCT.md)
-- [桌面设计系统](DESIGN.md)
-- [实际架构](flightdeck/work/glyphshift/references/architecture.md)
-- [当前工作](flightdeck/work/glyphshift/index.md)
+Glyphshift 当前处于发布候选阶段。正式发布前请保留重要词典的导出副本，并优先在非关键工作环境中
+验证目标软件的兼容性。

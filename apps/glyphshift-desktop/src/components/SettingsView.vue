@@ -287,23 +287,26 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
-        <ManagementFormSection :title="t('settings.aiExecution.title')" :description="t('settings.aiExecution.description')">
+        <ManagementFormSection
+          data-testid="settings-section-ai"
+          :title="t('settings.aiTranslation.title')"
+          :description="t('settings.aiTranslation.description')"
+        >
           <ManagementFormRow
-            :label="t('settings.aiExecution.confirm')"
-            :description="t('settings.aiExecution.confirmDescription')"
+            :label="t('settings.aiTranslation.confirm')"
+            :description="t('settings.aiTranslation.confirmDescription')"
             icon="i-tabler-message-question"
             control-width="compact"
           >
             <USwitch
               :model-value="appSettings.confirmAiTranslation.value"
-              :aria-label="t('settings.aiExecution.confirm')"
+              :aria-label="t('settings.aiTranslation.confirm')"
               :disabled="appSettings.settingsBusy.value"
               @update:model-value="updateAiConfirmation"
             />
           </ManagementFormRow>
+          <AiProfilesPanel />
         </ManagementFormSection>
-
-        <AiProfilesPanel />
 
         <ManagementFormSection :title="t('settings.shortcuts')" :description="t('settings.shortcutsDescription')">
           <ManagementFormRow
@@ -351,7 +354,11 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
-        <ManagementFormSection :title="t('settings.behavior')" :description="t('settings.behaviorDescription')">
+        <ManagementFormSection
+          data-testid="settings-section-application"
+          :title="t('settings.applicationAndPrivilege')"
+          :description="t('settings.applicationAndPrivilegeDescription')"
+        >
           <ManagementFormRow
             :label="t('settings.launchAtStartup')"
             :description="t('settings.launchAtStartupDescription')"
@@ -385,9 +392,6 @@ onBeforeUnmount(() => {
               @update:model-value="updateCloseBehavior"
             />
           </ManagementFormRow>
-        </ManagementFormSection>
-
-        <ManagementFormSection :title="t('settings.privilege')" :description="t('settings.privilegeDescription')">
           <ManagementFormRow
             :label="t('settings.launchElevated')"
             :description="t('settings.launchElevatedDescription')"
