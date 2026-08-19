@@ -91,3 +91,7 @@ AI service's own data-handling and billing terms before using a cloud model.
 
 Glyphshift is currently a release candidate. Export backups of important dictionaries and validate compatibility in a
 non-critical environment before relying on it for production work.
+
+## License
+
+Glyphshift is released under the [MIT License](LICENSE).

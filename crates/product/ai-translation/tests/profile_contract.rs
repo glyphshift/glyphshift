@@ -168,11 +168,11 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
     reopened
         .delete_profile("profile.openai")
         .expect("delete profile and its credential");
-    assert!(shared_secrets
-        .lock()
-        .expect("credential memory")
-        .is_empty());
-    assert_eq!(reopened.profiles().expect("list remaining profiles").len(), 1);
+    assert!(shared_secrets.lock().expect("credential memory").is_empty());
+    assert_eq!(
+        reopened.profiles().expect("list remaining profiles").len(),
+        1
+    );
 }
 
 #[test]

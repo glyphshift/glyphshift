@@ -73,3 +73,7 @@ Codex 订阅使用这台电脑上已经登录的 Codex，翻译会占用订阅�
 
 Glyphshift 当前处于发布候选阶段。正式发布前请保留重要词典的导出副本，并优先在非关键工作环境中
 验证目标软件的兼容性。
+
+## 许可证
+
+Glyphshift 使用 [MIT License](LICENSE) 发布。
