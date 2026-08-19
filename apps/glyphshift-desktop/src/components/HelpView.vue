@@ -4,74 +4,55 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdapterOption } from '../model'
 
+type HelpTab = 'guide' | 'ai' | 'recovery' | 'compatibility'
+type HelpTarget = 'workflows' | 'software' | 'dictionaries' | 'capture' | 'translation-tasks' | 'settings'
+
 defineProps<{ adapters: AdapterOption[] }>()
-const emit = defineEmits<{
-  navigate: [view: 'workflows' | 'software' | 'dictionaries' | 'capture' | 'settings']
-}>()
+const emit = defineEmits<{ navigate: [view: HelpTarget] }>()
 
 const { t } = useI18n()
+const activeTab = ref<HelpTab>('guide')
 const openingDocumentationId = ref<string | null>(null)
 const documentationError = ref<string | null>(null)
 const expandedAdapterId = ref<string | null>(null)
+
+const helpTabs = computed(() => [
+  { value: 'guide' as const, slot: 'guide', label: t('help.tabs.guide'), icon: 'i-tabler-route' },
+  { value: 'ai' as const, slot: 'ai', label: t('help.tabs.ai'), icon: 'i-tabler-sparkles' },
+  { value: 'recovery' as const, slot: 'recovery', label: t('help.tabs.recovery'), icon: 'i-tabler-lifebuoy' },
+  { value: 'compatibility' as const, slot: 'compatibility', label: t('help.tabs.compatibility'), icon: 'i-tabler-plug-connected' },
+])
 const gettingStartedItems = computed(() => ([
-  {
-    id: 'add-software',
-    icon: 'i-tabler-library',
-    title: t('help.gettingStarted.addSoftware.title'),
-    description: t('help.gettingStarted.addSoftware.description'),
-    action: t('help.gettingStarted.addSoftware.action'),
-    view: 'software' as const,
-  },
-  {
-    id: 'capture-text',
-    icon: 'i-tabler-radar',
-    title: t('help.gettingStarted.captureText.title'),
-    description: t('help.gettingStarted.captureText.description'),
-    action: t('help.gettingStarted.captureText.action'),
-    view: 'capture' as const,
-  },
-  {
-    id: 'enable-workflow',
-    icon: 'i-tabler-git-branch',
-    title: t('help.gettingStarted.enableWorkflow.title'),
-    description: t('help.gettingStarted.enableWorkflow.description'),
-    action: t('help.gettingStarted.enableWorkflow.action'),
-    view: 'workflows' as const,
-  },
+  { id: 'add-software', title: t('help.guide.steps.addSoftware.title'), description: t('help.guide.steps.addSoftware.description'), action: t('help.guide.steps.addSoftware.action'), view: 'software' as const },
+  { id: 'create-probe', title: t('help.guide.steps.createProbe.title'), description: t('help.guide.steps.createProbe.description'), action: t('help.guide.steps.createProbe.action'), view: 'capture' as const },
+  { id: 'collect-text', title: t('help.guide.steps.collectText.title'), description: t('help.guide.steps.collectText.description'), action: t('help.guide.steps.collectText.action'), view: 'capture' as const },
+  { id: 'translate', title: t('help.guide.steps.translate.title'), description: t('help.guide.steps.translate.description'), action: t('help.guide.steps.translate.action'), view: 'dictionaries' as const },
+  { id: 'verify', title: t('help.guide.steps.verify.title'), description: t('help.guide.steps.verify.description'), action: t('help.guide.steps.verify.action'), view: 'capture' as const },
+  { id: 'enable-workflow', title: t('help.guide.steps.enableWorkflow.title'), description: t('help.guide.steps.enableWorkflow.description'), action: t('help.guide.steps.enableWorkflow.action'), view: 'workflows' as const },
 ]))
+const maintenanceItems = computed(() => ([
+  { id: 'dictionary', icon: 'i-tabler-language', title: t('help.guide.maintenance.dictionary.title'), description: t('help.guide.maintenance.dictionary.description'), action: t('help.guide.maintenance.dictionary.action'), view: 'dictionaries' as const },
+  { id: 'recheck', icon: 'i-tabler-radar', title: t('help.guide.maintenance.recheck.title'), description: t('help.guide.maintenance.recheck.description'), action: t('help.guide.maintenance.recheck.action'), view: 'capture' as const },
+  { id: 'tasks', icon: 'i-tabler-list-check', title: t('help.guide.maintenance.tasks.title'), description: t('help.guide.maintenance.tasks.description'), action: t('help.guide.maintenance.tasks.action'), view: 'translation-tasks' as const },
+]))
+const aiSteps = computed(() => ([
+  { id: 'profile', title: t('help.aiGuide.steps.profile.title'), description: t('help.aiGuide.steps.profile.description'), action: t('help.aiGuide.steps.profile.action'), view: 'settings' as const },
+  { id: 'prepare', title: t('help.aiGuide.steps.prepare.title'), description: t('help.aiGuide.steps.prepare.description'), action: t('help.aiGuide.steps.prepare.action'), view: 'dictionaries' as const },
+  { id: 'run', title: t('help.aiGuide.steps.run.title'), description: t('help.aiGuide.steps.run.description'), action: t('help.aiGuide.steps.run.action'), view: 'dictionaries' as const },
+  { id: 'review', title: t('help.aiGuide.steps.review.title'), description: t('help.aiGuide.steps.review.description'), action: t('help.aiGuide.steps.review.action'), view: 'translation-tasks' as const },
+]))
+const usageTerms = computed(() => [
+  { id: 'input', term: t('help.aiGuide.usage.input.term'), description: t('help.aiGuide.usage.input.description') },
+  { id: 'cached', term: t('help.aiGuide.usage.cached.term'), description: t('help.aiGuide.usage.cached.description') },
+  { id: 'output', term: t('help.aiGuide.usage.output.term'), description: t('help.aiGuide.usage.output.description') },
+  { id: 'reasoning', term: t('help.aiGuide.usage.reasoning.term'), description: t('help.aiGuide.usage.reasoning.description') },
+  { id: 'total', term: t('help.aiGuide.usage.total.term'), description: t('help.aiGuide.usage.total.description') },
+])
 const recoveryItems = computed(() => ([
-  {
-    id: 'software-not-running',
-    icon: 'i-tabler-library',
-    title: t('help.recovery.softwareNotRunning.title'),
-    description: t('help.recovery.softwareNotRunning.description'),
-    action: t('help.recovery.softwareNotRunning.action'),
-    view: 'software' as const,
-  },
-  {
-    id: 'privilege-mismatch',
-    icon: 'i-tabler-shield-lock',
-    title: t('help.recovery.privilegeMismatch.title'),
-    description: t('help.recovery.privilegeMismatch.description'),
-    action: t('help.recovery.privilegeMismatch.action'),
-    view: 'settings' as const,
-  },
-  {
-    id: 'no-observed-text',
-    icon: 'i-tabler-radar-off',
-    title: t('help.recovery.noObservedText.title'),
-    description: t('help.recovery.noObservedText.description'),
-    action: t('help.recovery.noObservedText.action'),
-    view: 'capture' as const,
-  },
-  {
-    id: 'ai-unavailable',
-    icon: 'i-tabler-language-off',
-    title: t('help.recovery.aiUnavailable.title'),
-    description: t('help.recovery.aiUnavailable.description'),
-    action: t('help.recovery.aiUnavailable.action'),
-    view: 'settings' as const,
-  },
+  { id: 'software-not-running', icon: 'i-tabler-library', title: t('help.recovery.softwareNotRunning.title'), description: t('help.recovery.softwareNotRunning.description'), action: t('help.recovery.softwareNotRunning.action'), view: 'software' as const },
+  { id: 'privilege-mismatch', icon: 'i-tabler-shield-lock', title: t('help.recovery.privilegeMismatch.title'), description: t('help.recovery.privilegeMismatch.description'), action: t('help.recovery.privilegeMismatch.action'), view: 'settings' as const },
+  { id: 'no-observed-text', icon: 'i-tabler-radar-off', title: t('help.recovery.noObservedText.title'), description: t('help.recovery.noObservedText.description'), action: t('help.recovery.noObservedText.action'), view: 'capture' as const },
+  { id: 'ai-unavailable', icon: 'i-tabler-language-off', title: t('help.recovery.aiUnavailable.title'), description: t('help.recovery.aiUnavailable.description'), action: t('help.recovery.aiUnavailable.action'), view: 'settings' as const },
 ]))
 
 function platformLabel(value: string) {
@@ -109,19 +90,35 @@ async function openDocumentation(adapter: AdapterOption) {
 
 <template>
   <UtilityPageShell
-      title-id="help-title"
-      :title="t('help.title')"
-      :description="t('help.description')"
-      content-test-id="help-layout"
+    title-id="help-title"
+    :title="t('help.title')"
+    :description="t('help.description')"
+    content-test-id="help-layout"
   >
+    <UTabs
+      v-model="activeTab"
+      data-testid="help-tabs"
+      :items="helpTabs"
+      color="neutral"
+      variant="link"
+      size="sm"
+      activation-mode="manual"
+      class="w-full"
+      :ui="{
+        list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0',
+        indicator: 'hidden',
+        trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block',
+        leadingIcon: 'size-4 shrink-0',
+        content: 'pt-5 focus:outline-none',
+      }"
+    >
+      <template #guide>
         <section data-testid="help-section-getting-started" class="@container" aria-labelledby="help-getting-started-title">
-          <h2 id="help-getting-started-title" class="type-section-title m-0 font-semibold">{{ t('help.gettingStartedTitle') }}</h2>
-          <p class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">{{ t('help.gettingStartedDescription') }}</p>
+          <h2 id="help-getting-started-title" class="type-section-title m-0 font-semibold">{{ t('help.guide.title') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.guide.description') }}</p>
           <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0">
-            <li v-for="item in gettingStartedItems" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
-              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent-strong)]" aria-hidden="true">
-                <UIcon :name="item.icon" class="size-4" />
-              </span>
+            <li v-for="(item, index) in gettingStartedItems" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
+              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] type-label font-semibold tabular-nums text-[var(--accent-strong)]" aria-hidden="true">{{ index + 1 }}</span>
               <div class="min-w-0">
                 <h3 class="type-body m-0 font-semibold">{{ item.title }}</h3>
                 <p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p>
@@ -131,97 +128,78 @@ async function openDocumentation(adapter: AdapterOption) {
           </ol>
         </section>
 
-        <section data-testid="help-section-recovery" class="@container mt-6" aria-labelledby="help-recovery-title">
-          <h2 id="help-recovery-title" class="type-section-title m-0 font-semibold">{{ t('help.recoveryTitle') }}</h2>
-          <p class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">{{ t('help.recoveryDescription') }}</p>
+        <section class="@container mt-6" aria-labelledby="help-maintenance-title">
+          <h2 id="help-maintenance-title" class="type-section-title m-0 font-semibold">{{ t('help.guide.maintenanceTitle') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.guide.maintenanceDescription') }}</p>
           <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0" role="list">
-            <li v-for="item in recoveryItems" :key="item.id" class="grid min-h-[68px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
-              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--surface-subtle)] text-[var(--text-secondary)]" aria-hidden="true">
-                <UIcon :name="item.icon" class="size-4" />
-              </span>
-              <div class="min-w-0">
-                <h3 class="type-body m-0 font-semibold">{{ item.title }}</h3>
-                <p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p>
-              </div>
+            <li v-for="item in maintenanceItems" :key="item.id" class="grid min-h-[64px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
+              <UIcon :name="item.icon" class="size-4 justify-self-center text-[var(--text-secondary)]" aria-hidden="true" />
+              <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ item.description }}</p></div>
               <UButton color="neutral" variant="outline" size="sm" trailing-icon="i-tabler-arrow-right" :label="item.action" class="@max-[680px]:col-start-2 @max-[680px]:justify-self-start" @click="emit('navigate', item.view)" />
             </li>
           </ul>
         </section>
+      </template>
 
-        <section class="mt-6" aria-labelledby="adapter-help-title">
-          <div class="mb-3 flex items-end justify-between gap-4">
-            <div>
-              <h2 id="adapter-help-title" class="type-section-title m-0 font-semibold">{{ t('help.adaptersTitle') }}</h2>
-              <p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ t('help.adaptersDescription') }}</p>
+      <template #ai>
+        <section data-testid="help-section-ai" class="@container" aria-labelledby="help-ai-title">
+          <h2 id="help-ai-title" class="type-section-title m-0 font-semibold">{{ t('help.aiGuide.title') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.aiGuide.description') }}</p>
+          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0">
+            <li v-for="(item, index) in aiSteps" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
+              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] type-label font-semibold tabular-nums text-[var(--accent-strong)]" aria-hidden="true">{{ index + 1 }}</span>
+              <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p></div>
+              <UButton color="primary" variant="soft" size="sm" trailing-icon="i-tabler-arrow-right" :label="item.action" class="@max-[680px]:col-start-2 @max-[680px]:justify-self-start" @click="emit('navigate', item.view)" />
+            </li>
+          </ol>
+        </section>
+
+        <section class="mt-6" aria-labelledby="help-ai-usage-title">
+          <h2 id="help-ai-usage-title" class="type-section-title m-0 font-semibold">{{ t('help.aiGuide.usageTitle') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.aiGuide.usageDescription') }}</p>
+          <dl class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)]">
+            <div v-for="item in usageTerms" :key="item.id" class="grid grid-cols-[128px_minmax(0,1fr)] gap-4 px-3 py-2.5 max-[560px]:grid-cols-1 max-[560px]:gap-1">
+              <dt class="type-label font-semibold text-[var(--text)]">{{ item.term }}</dt>
+              <dd class="type-metadata m-0 text-[var(--text-muted)]">{{ item.description }}</dd>
             </div>
+          </dl>
+        </section>
+      </template>
+
+      <template #recovery>
+        <section data-testid="help-section-recovery" class="@container" aria-labelledby="help-recovery-title">
+          <h2 id="help-recovery-title" class="type-section-title m-0 font-semibold">{{ t('help.recoveryTitle') }}</h2>
+          <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.recoveryDescription') }}</p>
+          <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0" role="list">
+            <li v-for="item in recoveryItems" :key="item.id" class="grid min-h-[68px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
+              <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--surface-subtle)] text-[var(--text-secondary)]" aria-hidden="true"><UIcon :name="item.icon" class="size-4" /></span>
+              <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p></div>
+              <UButton color="neutral" variant="outline" size="sm" trailing-icon="i-tabler-arrow-right" :label="item.action" class="@max-[680px]:col-start-2 @max-[680px]:justify-self-start" @click="emit('navigate', item.view)" />
+            </li>
+          </ul>
+        </section>
+      </template>
+
+      <template #compatibility>
+        <section data-testid="help-section-compatibility" aria-labelledby="adapter-help-title">
+          <div class="mb-3 flex items-end justify-between gap-4">
+            <div><h2 id="adapter-help-title" class="type-section-title m-0 font-semibold">{{ t('help.adaptersTitle') }}</h2><p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ t('help.adaptersDescription') }}</p></div>
             <span class="type-caption shrink-0 tabular-nums text-[var(--text-muted)]">{{ t('help.availableCount', { count: adapters.length }) }}</span>
           </div>
 
           <p v-if="documentationError" class="type-metadata mb-2 mt-0 text-[var(--danger)]" role="alert">{{ documentationError }}</p>
-
           <div v-if="adapters.length" data-testid="help-adapter-list" class="@container overflow-hidden rounded-[7px] border border-[var(--border)] bg-[var(--surface)]">
             <ul class="m-0 p-0" role="list">
               <li v-for="(adapter, index) in adapters" :key="adapter.id" data-testid="help-adapter-item" class="list-none border-b border-[var(--border)] last:border-b-0">
                 <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,.85fr)_minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 @max-[900px]:grid-cols-[minmax(0,1fr)_auto]">
-                  <div class="min-w-0">
-                    <h3 class="type-body m-0 font-semibold">{{ adapter.name }}</h3>
-                    <p class="type-metadata mb-0 mt-1 max-w-[58ch] leading-4 text-[var(--text-muted)]">{{ adapter.summary }}</p>
-                  </div>
-                  <div class="min-w-0 @max-[900px]:col-start-1">
-                    <div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.appliesTo') }}</div>
-                    <div class="flex flex-wrap gap-1">
-                      <UBadge v-for="platform in adapter.platforms" :key="platform" color="neutral" variant="soft" size="sm" :label="platformLabel(platform)" />
-                      <UBadge v-for="technology in adapter.technologies" :key="technology" color="neutral" variant="outline" size="sm" :label="technology" />
-                    </div>
-                  </div>
-                  <div class="min-w-0 @max-[900px]:col-start-1">
-                    <div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.capabilities') }}</div>
-                    <div class="flex flex-wrap gap-1">
-                      <UBadge v-for="feature in adapter.features" :key="feature" color="neutral" variant="soft" size="sm" :label="featureLabel(feature)" />
-                    </div>
-                  </div>
-                  <UButton
-                    color="neutral"
-                    variant="ghost"
-                    size="xs"
-                    :icon="expandedAdapterId === adapter.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
-                    :label="expandedAdapterId === adapter.id ? t('help.hideDetails') : t('help.showDetails')"
-                    :aria-label="expandedAdapterId === adapter.id ? t('help.hideDetailsFor', { name: adapter.name }) : t('help.showDetailsFor', { name: adapter.name })"
-                    :aria-expanded="expandedAdapterId === adapter.id"
-                    :aria-controls="`help-adapter-details-${index}`"
-                    class="justify-self-end @max-[900px]:col-start-2 @max-[900px]:row-start-1"
-                    @click="toggleAdapterDetails(adapter.id)"
-                  />
+                  <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ adapter.name }}</h3><p class="type-metadata mb-0 mt-1 max-w-[58ch] leading-4 text-[var(--text-muted)]">{{ adapter.summary }}</p></div>
+                  <div class="min-w-0 @max-[900px]:col-start-1"><div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.appliesTo') }}</div><div class="flex flex-wrap gap-1"><UBadge v-for="platform in adapter.platforms" :key="platform" color="neutral" variant="soft" size="sm" :label="platformLabel(platform)" /><UBadge v-for="technology in adapter.technologies" :key="technology" color="neutral" variant="outline" size="sm" :label="technology" /></div></div>
+                  <div class="min-w-0 @max-[900px]:col-start-1"><div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.capabilities') }}</div><div class="flex flex-wrap gap-1"><UBadge v-for="feature in adapter.features" :key="feature" color="neutral" variant="soft" size="sm" :label="featureLabel(feature)" /></div></div>
+                  <UButton color="neutral" variant="ghost" size="xs" :icon="expandedAdapterId === adapter.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" :label="expandedAdapterId === adapter.id ? t('help.hideDetails') : t('help.showDetails')" :aria-label="expandedAdapterId === adapter.id ? t('help.hideDetailsFor', { name: adapter.name }) : t('help.showDetailsFor', { name: adapter.name })" :aria-expanded="expandedAdapterId === adapter.id" :aria-controls="`help-adapter-details-${index}`" class="justify-self-end @max-[900px]:col-start-2 @max-[900px]:row-start-1" @click="toggleAdapterDetails(adapter.id)" />
                 </div>
-
-                <div
-                  v-if="expandedAdapterId === adapter.id"
-                  :id="`help-adapter-details-${index}`"
-                  role="region"
-                  :aria-label="t('help.detailsFor', { name: adapter.name })"
-                  class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-t border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 @max-[640px]:grid-cols-1"
-                >
-                  <dl class="m-0 grid grid-cols-2 gap-6">
-                    <div>
-                      <dt class="type-caption text-[var(--text-muted)]">{{ t('help.columns.version') }}</dt>
-                      <dd class="type-label m-0 mt-1 tabular-nums">v{{ adapter.version }}</dd>
-                    </div>
-                    <div>
-                      <dt class="type-caption text-[var(--text-muted)]">{{ t('help.columns.configuration') }}</dt>
-                      <dd class="type-label m-0 mt-1">{{ adapter.configuration === 'none' ? t('help.noConfiguration') : adapter.configuration }}</dd>
-                    </div>
-                  </dl>
-                  <UButton
-                    v-if="adapter.documentationUrl"
-                    color="neutral"
-                    variant="outline"
-                    size="sm"
-                    icon="i-tabler-external-link"
-                    :label="t('help.openDocumentation')"
-                    :aria-label="t('help.openDocumentationFor', { name: adapter.name })"
-                    :loading="openingDocumentationId === adapter.id"
-                    @click="openDocumentation(adapter)"
-                  />
+                <div v-if="expandedAdapterId === adapter.id" :id="`help-adapter-details-${index}`" role="region" :aria-label="t('help.detailsFor', { name: adapter.name })" class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 border-t border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 @max-[640px]:grid-cols-1">
+                  <dl class="m-0 grid grid-cols-2 gap-6"><div><dt class="type-caption text-[var(--text-muted)]">{{ t('help.columns.version') }}</dt><dd class="type-label m-0 mt-1 tabular-nums">v{{ adapter.version }}</dd></div><div><dt class="type-caption text-[var(--text-muted)]">{{ t('help.columns.configuration') }}</dt><dd class="type-label m-0 mt-1">{{ adapter.configuration === 'none' ? t('help.noConfiguration') : adapter.configuration }}</dd></div></dl>
+                  <UButton v-if="adapter.documentationUrl" color="neutral" variant="outline" size="sm" icon="i-tabler-external-link" :label="t('help.openDocumentation')" :aria-label="t('help.openDocumentationFor', { name: adapter.name })" :loading="openingDocumentationId === adapter.id" @click="openDocumentation(adapter)" />
                   <span v-else class="type-metadata text-[var(--text-muted)]">{{ t('help.documentationUnavailable') }}</span>
                 </div>
               </li>
@@ -229,5 +207,7 @@ async function openDocumentation(adapter: AdapterOption) {
           </div>
           <UEmpty v-else icon="i-tabler-plug-off" :title="t('help.emptyTitle')" :description="t('help.emptyDescription')" />
         </section>
+      </template>
+    </UTabs>
   </UtilityPageShell>
 </template>

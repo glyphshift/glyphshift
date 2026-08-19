@@ -68,7 +68,7 @@ test('root documents separate domain language, product truth, and the implemente
     '## 适用范围与边界',
   ]) expect(product).toContain(heading)
   expect(product).toContain('设置页包含外观、AI 翻译、快捷键、应用与权限四个分区')
-  expect(product).toContain('添加软件 → 用探针收集文字 → 启用持续翻译')
+  expect(product).toContain('收集原文 → 填写译文 → 验证效果 → 启用工作流')
   expect(product).not.toContain('SHA-256')
   expect(product).not.toContain('ownership ledger')
   expect(product).not.toContain('跨 IPC')
@@ -88,6 +88,6 @@ test('root documents separate domain language, product truth, and the implemente
   expect(positions).toEqual([...positions].sort((left, right) => left - right))
   expect(design).toContain('Windows Translation Workbench')
   expect(design).toContain('Settings 只有四个大分区')
-  expect(design).toContain('从这里开始 → 解决常见问题 → 当前 Adapter')
+  expect(design).toContain('使用指南 / AI 翻译 / 故障排查 / 技术与兼容')
   expect(design).not.toContain('AI 翻译执行')
 })

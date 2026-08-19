@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -10,6 +11,8 @@ import {
   type AiTranslationBatchStatus,
   type AiTranslationRunRecord,
 } from '../useAiTranslation'
+import { managementActionsColumnMeta, managementIdentityColumnMeta } from '../tableInteraction'
+import { useTableColumns } from '../useTableColumns'
 import { useWorkspace } from '../useWorkspace'
 
 type TaskTab = 'current' | 'statistics' | 'list'
@@ -19,9 +22,31 @@ const ai = useAiTranslation()
 const workspace = useWorkspace()
 const activeTab = ref<TaskTab>('current')
 const batchDetailsOpen = ref(false)
+const statisticsQuery = ref('')
+const statisticsProtocol = ref('all')
+const statisticsPage = ref(1)
+const statisticsPageSize = ref(20)
 const historyQuery = ref('')
 const historyStatus = ref('all')
-const expandedRecordId = ref<string | null>(null)
+const historyPage = ref(1)
+const historyPageSize = ref(20)
+const expandedHistory = ref<Record<string, boolean>>({})
+const { columns: statisticsVisibleColumns, toggleColumn: toggleStatisticsColumn } = useTableColumns('glyphshift.table-columns.ai-task-statistics', {
+  protocol: true,
+  reasoning: true,
+  tasks: true,
+  texts: true,
+  time: true,
+  tokens: true,
+})
+const { columns: historyVisibleColumns, toggleColumn: toggleHistoryColumn } = useTableColumns('glyphshift.table-columns.ai-task-history', {
+  started: true,
+  source: true,
+  status: true,
+  texts: true,
+  time: true,
+  tokens: true,
+})
 
 const current = computed(() => ai.taskCenter.value.current)
 const history = computed(() => ai.taskCenter.value.history)
@@ -60,6 +85,10 @@ const filteredHistory = computed(() => {
     && (!needle || `${record.profileName} ${record.modelId} ${scopeLabel(record)} ${t(`ai.tasks.status.${record.status}`)}`.toLocaleLowerCase().includes(needle))
   ))
 })
+const historyPageItems = computed(() => filteredHistory.value.slice(
+  (historyPage.value - 1) * historyPageSize.value,
+  historyPage.value * historyPageSize.value,
+))
 const currentDictionaryName = computed(() => {
   const dictionaryId = current.value?.targetDictionaryId
   if (!dictionaryId) return t('ai.tasks.connectionCheck')
@@ -116,6 +145,58 @@ const modelStats = computed(() => {
   }
   return [...groups.values()].sort((left, right) => right.tasks - left.tasks || right.texts - left.texts)
 })
+const statisticsProtocolItems = computed(() => [
+  { value: 'all', label: t('ai.tasks.protocolFilter.all') },
+  ...[...new Set(modelStats.value.map(group => group.protocol))]
+    .sort((left, right) => protocolLabel(left).localeCompare(protocolLabel(right), locale.value))
+    .map(protocol => ({ value: protocol, label: protocolLabel(protocol) })),
+])
+const filteredModelStats = computed(() => {
+  const needle = statisticsQuery.value.trim().toLocaleLowerCase()
+  return modelStats.value.filter(group => (
+    (statisticsProtocol.value === 'all' || group.protocol === statisticsProtocol.value)
+    && (!needle || `${group.profileName} ${group.modelId} ${protocolLabel(group.protocol)} ${reasoningLabel(group.reasoningEffort)}`.toLocaleLowerCase().includes(needle))
+  ))
+})
+const statisticsPageItems = computed(() => filteredModelStats.value.slice(
+  (statisticsPage.value - 1) * statisticsPageSize.value,
+  statisticsPage.value * statisticsPageSize.value,
+))
+const statisticsColumnOptions = computed(() => [
+  { key: 'protocol', label: t('ai.tasks.columns.protocol'), visible: statisticsVisibleColumns.value.protocol },
+  { key: 'reasoning', label: t('ai.tasks.columns.reasoning'), visible: statisticsVisibleColumns.value.reasoning },
+  { key: 'tasks', label: t('ai.tasks.columns.tasks'), visible: statisticsVisibleColumns.value.tasks },
+  { key: 'texts', label: t('ai.tasks.columns.texts'), visible: statisticsVisibleColumns.value.texts },
+  { key: 'time', label: t('ai.tasks.columns.time'), visible: statisticsVisibleColumns.value.time },
+  { key: 'tokens', label: t('ai.tasks.columns.tokens'), visible: statisticsVisibleColumns.value.tokens },
+])
+const historyColumnOptions = computed(() => [
+  { key: 'started', label: t('ai.tasks.columns.started'), visible: historyVisibleColumns.value.started },
+  { key: 'source', label: t('ai.tasks.columns.source'), visible: historyVisibleColumns.value.source },
+  { key: 'status', label: t('ai.tasks.columns.status'), visible: historyVisibleColumns.value.status },
+  { key: 'texts', label: t('ai.tasks.columns.texts'), visible: historyVisibleColumns.value.texts },
+  { key: 'time', label: t('ai.tasks.columns.time'), visible: historyVisibleColumns.value.time },
+  { key: 'tokens', label: t('ai.tasks.columns.tokens'), visible: historyVisibleColumns.value.tokens },
+])
+const statisticsColumns = computed<TableColumn<ModelAggregate>[]>(() => [
+  { id: 'model', header: t('ai.tasks.columns.model'), meta: managementIdentityColumnMeta('w-52', false) },
+  ...(statisticsVisibleColumns.value.protocol ? [{ id: 'protocol', header: t('ai.tasks.columns.protocol'), meta: { class: { th: 'w-36', td: 'w-36' } } } satisfies TableColumn<ModelAggregate>] : []),
+  ...(statisticsVisibleColumns.value.reasoning ? [{ id: 'reasoning', header: t('ai.tasks.columns.reasoning'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ModelAggregate>] : []),
+  ...(statisticsVisibleColumns.value.tasks ? [{ accessorKey: 'tasks', header: t('ai.tasks.columns.tasks'), meta: { class: { th: 'w-20 text-right', td: 'w-20 text-right' } } } satisfies TableColumn<ModelAggregate>] : []),
+  ...(statisticsVisibleColumns.value.texts ? [{ accessorKey: 'texts', header: t('ai.tasks.columns.texts'), meta: { class: { th: 'w-24 text-right', td: 'w-24 text-right' } } } satisfies TableColumn<ModelAggregate>] : []),
+  ...(statisticsVisibleColumns.value.time ? [{ accessorKey: 'elapsedMs', header: t('ai.tasks.columns.time'), meta: { class: { th: 'w-24 text-right', td: 'w-24 text-right' } } } satisfies TableColumn<ModelAggregate>] : []),
+  ...(statisticsVisibleColumns.value.tokens ? [{ id: 'tokens', header: t('ai.tasks.columns.tokens'), meta: { class: { th: 'w-40 text-right', td: 'w-40 text-right' } } } satisfies TableColumn<ModelAggregate>] : []),
+])
+const historyColumns = computed<TableColumn<AiTranslationRunRecord>[]>(() => [
+  { id: 'model', header: t('ai.tasks.columns.model'), meta: managementIdentityColumnMeta('w-52', false) },
+  ...(historyVisibleColumns.value.started ? [{ accessorKey: 'startedAtMs', header: t('ai.tasks.columns.started'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  ...(historyVisibleColumns.value.source ? [{ id: 'source', header: t('ai.tasks.columns.source'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  ...(historyVisibleColumns.value.status ? [{ accessorKey: 'status', header: t('ai.tasks.columns.status'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  ...(historyVisibleColumns.value.texts ? [{ id: 'texts', header: t('ai.tasks.columns.texts'), meta: { class: { th: 'w-24 text-right', td: 'w-24 text-right' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  ...(historyVisibleColumns.value.time ? [{ accessorKey: 'elapsedMs', header: t('ai.tasks.columns.time'), meta: { class: { th: 'w-24 text-right', td: 'w-24 text-right' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  ...(historyVisibleColumns.value.tokens ? [{ id: 'tokens', header: t('ai.tasks.columns.tokens'), meta: { class: { th: 'w-40 text-right', td: 'w-40 text-right' } } } satisfies TableColumn<AiTranslationRunRecord>] : []),
+  { id: 'actions', header: t('ai.tasks.columns.actions'), meta: managementActionsColumnMeta('w-20') },
+])
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat(locale.value).format(value)
@@ -186,8 +267,21 @@ function reasoningLabel(effort: AiReasoningEffort | undefined) {
   return t(`ai.reasoningOption.${value}`)
 }
 
-function toggleRecord(recordId: string) {
-  expandedRecordId.value = expandedRecordId.value === recordId ? null : recordId
+function protocolLabel(protocol: AiProviderProtocol) {
+  const labels: Record<AiProviderProtocol, string> = {
+    codex_subscription: 'codexSubscription',
+    open_ai_responses: 'openAiResponses',
+    open_ai_chat_completions: 'openAiChat',
+    open_ai_compatible: 'openAiCompatible',
+    anthropic_messages: 'anthropic',
+    gemini_generate_content: 'gemini',
+    ollama_chat: 'ollama',
+  }
+  return t(`ai.protocol.${labels[protocol]}`)
+}
+
+function historyRowId(record: AiTranslationRunRecord) {
+  return record.recordId
 }
 
 watch(() => current.value?.jobId, () => {
@@ -196,6 +290,11 @@ watch(() => current.value?.jobId, () => {
 watch(() => current.value?.batches.map(batch => batch.status).join(','), (statuses) => {
   if (statuses?.includes('retrying') || statuses?.includes('failed')) batchDetailsOpen.value = true
 }, { immediate: true })
+watch([statisticsQuery, statisticsProtocol, statisticsPageSize], () => { statisticsPage.value = 1 })
+watch([historyQuery, historyStatus, historyPageSize], () => {
+  historyPage.value = 1
+  expandedHistory.value = {}
+})
 
 onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
 </script>
@@ -313,65 +412,121 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
       </template>
 
       <template #statistics>
-        <section data-testid="translation-task-statistics" :aria-label="t('ai.tasks.tabs.statistics')">
-          <div class="mb-3"><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.modelStatsTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.modelStatsDescription') }}</p></div>
-          <div v-if="modelStats.length" class="overflow-hidden rounded-[var(--radius-surface)] border border-[var(--border)] bg-[var(--surface)]">
-            <div class="grid grid-cols-[minmax(11rem,1fr)_5rem_6rem_6rem_10rem] gap-3 border-b border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2 type-label text-[var(--text-muted)]">
-              <span>{{ t('ai.tasks.model') }}</span><span>{{ t('ai.tasks.tasks') }}</span><span>{{ t('ai.tasks.texts') }}</span><span>{{ t('ai.tasks.time') }}</span><span>{{ t('ai.tasks.totalTokens') }}</span>
-            </div>
-            <div v-for="group in modelStats" :key="group.key" class="grid min-h-12 grid-cols-[minmax(11rem,1fr)_5rem_6rem_6rem_10rem] items-center gap-3 border-b border-[var(--border)] px-3 py-2 last:border-b-0">
-              <div class="min-w-0"><strong class="block truncate text-[11px] text-[var(--text)]">{{ group.modelId }}</strong><span class="type-caption block truncate text-[var(--text-muted)]">{{ group.profileName }} · {{ reasoningLabel(group.reasoningEffort) }}</span></div>
-              <span class="type-metadata tabular-nums text-[var(--text-secondary)]">{{ formatNumber(group.tasks) }}</span>
-              <span class="type-metadata tabular-nums text-[var(--text-secondary)]">{{ formatNumber(group.texts) }}</span>
-              <span class="type-metadata tabular-nums text-[var(--text-secondary)]">{{ formatDuration(group.elapsedMs) }}</span>
-              <span class="type-metadata tabular-nums text-[var(--text-secondary)]"><strong class="block font-semibold text-[var(--text)]">{{ group.usageAvailable ? formatNumber(group.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><small v-if="group.usageAvailable" class="type-caption block truncate text-[var(--text-muted)]">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(group.usage.inputTokens), cached: formatNumber(group.usage.cachedInputTokens), output: formatNumber(group.usage.outputTokens), reasoning: formatNumber(group.usage.reasoningTokens) }) }}</small></span>
-            </div>
-          </div>
-          <p v-else class="type-metadata border-y border-[var(--border)] py-5 text-[var(--text-muted)]">{{ t('ai.tasks.noModelStats') }}</p>
+        <section data-testid="translation-task-statistics" class="flex h-[min(560px,calc(100vh-220px))] min-h-[320px] flex-col" :aria-label="t('ai.tasks.tabs.statistics')">
+          <div class="mb-3 shrink-0"><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.modelStatsTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.modelStatsDescription') }}</p></div>
+          <ManagementTableFrame
+            v-model:query="statisticsQuery"
+            v-model:filter-value="statisticsProtocol"
+            v-model:page="statisticsPage"
+            v-model:page-size="statisticsPageSize"
+            :search-placeholder="t('ai.tasks.searchStatistics')"
+            :search-label="t('ai.tasks.searchStatistics')"
+            :filter-label="statisticsProtocolItems.find(item => item.value === statisticsProtocol)?.label ?? t('ai.tasks.protocolFilter.all')"
+            :filter-aria-label="t('ai.tasks.filterProtocol')"
+            :filter-options="statisticsProtocolItems"
+            :column-options="statisticsColumnOptions"
+            :columns-label="t('table.columns')"
+            :total="filteredModelStats.length"
+            :item-label="t('ai.tasks.statisticsItemLabel')"
+            @toggle-column="toggleStatisticsColumn"
+          >
+            <UTable
+              data-testid="translation-statistics-table"
+              role="region"
+              tabindex="0"
+              aria-labelledby="translation-tasks-title"
+              :data="statisticsPageItems"
+              :columns="statisticsColumns"
+              sticky
+              class="management-table-scroll"
+              :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[760px]' }"
+            >
+              <template #model-cell="{ row }">
+                <div class="min-w-0"><strong class="block truncate text-[var(--text)]">{{ row.original.modelId }}</strong><span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.profileName }}</span></div>
+              </template>
+              <template #protocol-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ protocolLabel(row.original.protocol) }}</span></template>
+              <template #reasoning-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ reasoningLabel(row.original.reasoningEffort) }}</span></template>
+              <template #tasks-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.tasks) }}</span></template>
+              <template #texts-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.texts) }}</span></template>
+              <template #elapsedMs-cell="{ row }"><span class="tabular-nums">{{ formatDuration(row.original.elapsedMs) }}</span></template>
+              <template #tokens-cell="{ row }">
+                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usageAvailable ? formatNumber(row.original.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usageAvailable" class="type-caption block truncate text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) })">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens) }) }}</span></div>
+              </template>
+              <template #empty>
+                <UEmpty icon="i-tabler-chart-bar" :title="modelStats.length ? t('ai.tasks.noStatisticsMatch') : t('ai.tasks.noModelStats')" :description="modelStats.length ? t('ai.tasks.adjustStatisticsFilters') : t('ai.tasks.modelStatsDescription')" />
+              </template>
+            </UTable>
+          </ManagementTableFrame>
         </section>
       </template>
 
       <template #list>
-        <section data-testid="translation-task-list" :aria-label="t('ai.tasks.tabs.list')">
-          <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
-            <div><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.historyTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.historyDescription') }}</p></div>
-            <span class="type-caption tabular-nums text-[var(--text-muted)]">{{ t('ai.tasks.taskCount', { visible: filteredHistory.length, total: history.length }) }}</span>
-          </div>
-          <div class="mb-3 grid grid-cols-[minmax(0,1fr)_160px] gap-2 max-[620px]:grid-cols-1">
-            <UInput v-model="historyQuery" icon="i-tabler-search" size="sm" :placeholder="t('ai.tasks.searchTasks')" :aria-label="t('ai.tasks.searchTasks')" class="w-full" />
-            <USelect v-model="historyStatus" :items="historyStatusItems" value-key="value" label-key="label" :aria-label="t('ai.tasks.filterStatus')" class="w-full" />
-          </div>
-          <div v-if="filteredHistory.length" class="overflow-hidden rounded-[var(--radius-surface)] border border-[var(--border)] bg-[var(--surface)]">
-            <div class="grid grid-cols-[7rem_6rem_minmax(10rem,1fr)_6rem_6rem_10rem_2.5rem] gap-3 border-b border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2 type-label text-[var(--text-muted)]">
-              <span>{{ t('ai.tasks.started') }}</span><span>{{ t('ai.tasks.source') }}</span><span>{{ t('ai.tasks.model') }}</span><span>{{ t('ai.tasks.texts') }}</span><span>{{ t('ai.tasks.time') }}</span><span>{{ t('ai.tasks.totalTokens') }}</span><span></span>
-            </div>
-            <div v-for="record in filteredHistory" :key="record.recordId" class="border-b border-[var(--border)] last:border-b-0">
-              <div class="grid min-h-12 grid-cols-[7rem_6rem_minmax(10rem,1fr)_6rem_6rem_10rem_2.5rem] items-center gap-3 px-3 py-2">
-                <time class="type-caption text-[var(--text-muted)]">{{ formatDate(record.startedAtMs) }}</time>
-                <UBadge :color="statusTone(record.status)" variant="subtle" size="sm" :label="scopeLabel(record)" class="justify-self-start" />
-                <div class="min-w-0"><strong class="block truncate text-[11px] text-[var(--text)]">{{ record.modelId }}</strong><span class="type-caption block truncate text-[var(--text-muted)]">{{ record.profileName }} · {{ reasoningLabel(record.reasoningEffort) }} · {{ t(`ai.tasks.status.${record.status}`) }}</span></div>
-                <span class="type-metadata tabular-nums text-[var(--text-secondary)]">{{ formatNumber(record.appliedCount) }}/{{ formatNumber(record.totalCount) }}</span>
-                <span class="type-metadata tabular-nums text-[var(--text-secondary)]">{{ formatDuration(record.elapsedMs) }}</span>
-                <span class="type-metadata tabular-nums text-[var(--text-secondary)]"><strong class="block font-semibold text-[var(--text)]">{{ record.usage ? formatNumber(record.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><small v-if="record.usage" class="type-caption block truncate text-[var(--text-muted)]">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(record.usage.inputTokens), cached: formatNumber(record.usage.cachedInputTokens), output: formatNumber(record.usage.outputTokens), reasoning: formatNumber(record.usage.reasoningTokens) }) }}</small></span>
-                <UButton color="neutral" variant="ghost" size="xs" :icon="expandedRecordId === record.recordId ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" :aria-label="expandedRecordId === record.recordId ? t('ai.tasks.hideTaskDetails', { model: record.modelId }) : t('ai.tasks.viewTaskDetails', { model: record.modelId })" :aria-expanded="expandedRecordId === record.recordId" @click="toggleRecord(record.recordId)" />
-              </div>
-              <div v-if="expandedRecordId === record.recordId" class="border-t border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3" role="region" :aria-label="t('ai.tasks.taskDetailsFor', { model: record.modelId })">
-                <p class="type-metadata m-0 text-[var(--text-muted)]">{{ t('ai.tasks.requestSummary', { attempts: record.requestAttempts, retries: record.retryAttempts, peak: record.peakConcurrency, written: record.appliedCount, skipped: record.skippedCount }) }}</p>
-                <p v-if="record.usage" class="type-metadata m-0 mt-1 tabular-nums text-[var(--text-muted)]">{{ t('ai.batchUsage', { input: formatNumber(record.usage.inputTokens), cached: formatNumber(record.usage.cachedInputTokens), output: formatNumber(record.usage.outputTokens), reasoning: formatNumber(record.usage.reasoningTokens), total: formatNumber(record.usage.totalTokens) }) }}</p>
-                <p v-else class="type-metadata m-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.usageNotReported') }}</p>
-                <ol class="m-0 mt-3 max-h-48 list-none divide-y divide-[var(--border)] overflow-y-auto border-y border-[var(--border)] p-0 [scrollbar-gutter:stable]">
-                  <li v-for="batch in orderedBatches(record.batches)" :key="batch.batchNumber" class="grid min-h-9 grid-cols-[3.5rem_5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5">
-                    <strong class="type-label tabular-nums text-[var(--text)]">{{ t('ai.batchNumber', { number: batch.batchNumber }) }}</strong>
-                    <UBadge :color="batchTone(batch.status)" variant="subtle" size="sm" :label="t(`ai.batchStatus.${batch.status}`)" class="justify-self-start" />
-                    <span class="type-metadata min-w-0 truncate text-[var(--text-muted)]">{{ t('ai.batchItems', { count: batch.itemCount }) }} · {{ t('ai.batchAttempt', { attempt: batch.attemptCount }) }}</span>
-                    <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
-                    <p v-if="batch.lastError" class="type-metadata col-start-2 col-end-5 m-0 truncate text-[var(--danger)]" :title="batch.lastError.safeMessage">{{ batch.lastError.safeMessage }}</p>
-                  </li>
-                </ol>
-              </div>
-            </div>
-          </div>
-          <p v-else class="type-metadata border-y border-[var(--border)] py-5 text-[var(--text-muted)]">{{ history.length ? t('ai.tasks.noTaskMatch') : t('ai.tasks.noHistory') }}</p>
+        <section data-testid="translation-task-list" class="flex h-[min(560px,calc(100vh-220px))] min-h-[320px] flex-col" :aria-label="t('ai.tasks.tabs.list')">
+          <div class="mb-3 shrink-0"><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.historyTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.historyDescription') }}</p></div>
+          <ManagementTableFrame
+            v-model:query="historyQuery"
+            v-model:filter-value="historyStatus"
+            v-model:page="historyPage"
+            v-model:page-size="historyPageSize"
+            :search-placeholder="t('ai.tasks.searchTasks')"
+            :search-label="t('ai.tasks.searchTasks')"
+            :filter-label="historyStatusItems.find(item => item.value === historyStatus)?.label ?? t('ai.tasks.statusFilter.all')"
+            :filter-aria-label="t('ai.tasks.filterStatus')"
+            :filter-options="historyStatusItems"
+            :column-options="historyColumnOptions"
+            :columns-label="t('table.columns')"
+            :total="filteredHistory.length"
+            :item-label="t('ai.tasks.taskItemLabel')"
+            @toggle-column="toggleHistoryColumn"
+          >
+            <UTable
+              v-model:expanded="expandedHistory"
+              data-testid="translation-history-table"
+              role="region"
+              tabindex="0"
+              aria-labelledby="translation-tasks-title"
+              :data="historyPageItems"
+              :columns="historyColumns"
+              :get-row-id="historyRowId"
+              sticky
+              class="management-table-scroll"
+              :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[900px]' }"
+            >
+              <template #model-cell="{ row }">
+                <div class="min-w-0"><strong class="block truncate text-[var(--text)]">{{ row.original.modelId }}</strong><span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.profileName }} · {{ reasoningLabel(row.original.reasoningEffort) }}</span></div>
+              </template>
+              <template #startedAtMs-cell="{ row }"><time class="type-metadata whitespace-nowrap text-[var(--text-muted)]">{{ formatDate(row.original.startedAtMs) }}</time></template>
+              <template #source-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ scopeLabel(row.original) }}</span></template>
+              <template #status-cell="{ row }"><UBadge :color="statusTone(row.original.status)" variant="subtle" size="sm" :label="t(`ai.tasks.status.${row.original.status}`)" /></template>
+              <template #texts-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.appliedCount) }}/{{ formatNumber(row.original.totalCount) }}</span></template>
+              <template #elapsedMs-cell="{ row }"><span class="tabular-nums">{{ formatDuration(row.original.elapsedMs) }}</span></template>
+              <template #tokens-cell="{ row }">
+                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usage ? formatNumber(row.original.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usage" class="type-caption block truncate text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) })">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens) }) }}</span></div>
+              </template>
+              <template #actions-cell="{ row }">
+                <UButton color="neutral" variant="ghost" size="xs" :icon="row.getIsExpanded() ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" :aria-label="row.getIsExpanded() ? t('ai.tasks.hideTaskDetails', { model: row.original.modelId }) : t('ai.tasks.viewTaskDetails', { model: row.original.modelId })" :aria-expanded="row.getIsExpanded()" @click="row.toggleExpanded()" />
+              </template>
+              <template #expanded="{ row }">
+                <div class="bg-[var(--surface-subtle)] px-4 py-3" role="region" :aria-label="t('ai.tasks.taskDetailsFor', { model: row.original.modelId })">
+                  <p class="type-metadata m-0 text-[var(--text-muted)]">{{ t('ai.tasks.requestSummary', { attempts: row.original.requestAttempts, retries: row.original.retryAttempts, peak: row.original.peakConcurrency, written: row.original.appliedCount, skipped: row.original.skippedCount }) }}</p>
+                  <p v-if="row.original.usage" class="type-metadata m-0 mt-1 tabular-nums text-[var(--text-muted)]">{{ t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) }) }}</p>
+                  <p v-else class="type-metadata m-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.usageNotReported') }}</p>
+                  <ol class="m-0 mt-3 max-h-48 list-none divide-y divide-[var(--border)] overflow-y-auto border-y border-[var(--border)] p-0 [scrollbar-gutter:stable]">
+                    <li v-for="batch in orderedBatches(row.original.batches)" :key="batch.batchNumber" class="grid min-h-9 grid-cols-[3.5rem_5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5">
+                      <strong class="type-label tabular-nums text-[var(--text)]">{{ t('ai.batchNumber', { number: batch.batchNumber }) }}</strong>
+                      <UBadge :color="batchTone(batch.status)" variant="subtle" size="sm" :label="t(`ai.batchStatus.${batch.status}`)" class="justify-self-start" />
+                      <span class="type-metadata min-w-0 truncate text-[var(--text-muted)]">{{ t('ai.batchItems', { count: batch.itemCount }) }} · {{ t('ai.batchAttempt', { attempt: batch.attemptCount }) }}</span>
+                      <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
+                      <p v-if="batch.lastError" class="type-metadata col-start-2 col-end-5 m-0 truncate text-[var(--danger)]" :title="batch.lastError.safeMessage">{{ batch.lastError.safeMessage }}</p>
+                    </li>
+                  </ol>
+                </div>
+              </template>
+              <template #empty>
+                <UEmpty icon="i-tabler-list-details" :title="history.length ? t('ai.tasks.noTaskMatch') : t('ai.tasks.noHistory')" :description="history.length ? t('ai.tasks.adjustTaskFilters') : t('ai.tasks.historyDescription')" />
+              </template>
+            </UTable>
+          </ManagementTableFrame>
         </section>
       </template>
     </UTabs>

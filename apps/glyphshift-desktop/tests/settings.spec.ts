@@ -71,6 +71,7 @@ test('help shares the settings utility-page width, title axis, and first-content
       header: rect('[data-testid="management-detail-header"]'),
       headerContent: rect('[data-testid="management-detail-header-content"]'),
       layout: rect('[data-testid="help-layout"]'),
+      tabs: rect('[data-testid="help-tabs"] [role="tablist"]'),
       gettingStarted: rect('[data-testid="help-section-getting-started"]'),
     }
   })
@@ -79,8 +80,9 @@ test('help shares the settings utility-page width, title axis, and first-content
   expect(Math.abs(geometry.headerContent.left - geometry.layout.left)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.headerContent.right - geometry.layout.right)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.layout.left - geometry.gettingStarted.left)).toBeLessThanOrEqual(1)
-  expect(geometry.gettingStarted.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
-  expect(geometry.gettingStarted.top - geometry.header.bottom).toBeLessThanOrEqual(21)
+  expect(geometry.tabs.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
+  expect(geometry.tabs.top - geometry.header.bottom).toBeLessThanOrEqual(21)
+  expect(geometry.gettingStarted.top).toBeGreaterThan(geometry.tabs.bottom)
 
   await page.setViewportSize({ width: 960, height: 640 })
   const compactGeometry = await page.evaluate(() => {
@@ -94,22 +96,34 @@ test('help shares the settings utility-page width, title axis, and first-content
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-test('help exposes adapter information without internal targets', async ({ page }) => {
+test('help teaches the workflow and progressively exposes AI, recovery, and adapter details', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 640 })
   await page.getByRole('button', { name: '帮助' }).click()
 
   await expect(page.getByRole('heading', { name: '帮助' })).toBeVisible()
-  const gettingStartedHeading = page.getByRole('heading', { name: '从这里开始' })
-  const recoveryHeading = page.getByRole('heading', { name: '解决常见问题' })
-  const adapterHeading = page.getByRole('heading', { name: '当前适配器' })
+  const gettingStartedHeading = page.getByRole('heading', { name: '完成第一次界面翻译' })
   await expect(gettingStartedHeading).toBeVisible()
-  await expect(page.getByRole('heading', { name: '1. 添加要翻译的软件' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '2. 用探针收集界面文字' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '3. 启用持续翻译' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '使用指南' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('heading', { name: '添加目标软件' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '新建探针并选择词典' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '操作目标界面并收集原文' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '填写并校对译文' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '在目标软件中确认效果' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '保存并启用工作流' })).toBeVisible()
   await expect(page.getByRole('button', { name: '添加软件' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '打开探针' }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: '打开工作流' })).toBeVisible()
-  await expect(recoveryHeading).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建探针' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开词典' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '创建工作流' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译生效后怎么维护' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '查看任务' })).toBeVisible()
+
+  await page.getByRole('tab', { name: 'AI 翻译' }).click()
+  await expect(page.getByRole('heading', { name: '用 AI 补全空白译文' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '任务里的 Token 怎么看' })).toBeVisible()
+  await expect(page.getByText('推理 Token', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '查看翻译任务' })).toBeVisible()
+
+  await page.getByRole('tab', { name: '故障排查' }).click()
   await expect(page.getByRole('heading', { name: '软件未启动' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '权限不匹配' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '没有捕获到文字' })).toBeVisible()
@@ -117,14 +131,10 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByRole('button', { name: '检查权限设置' })).toBeVisible()
   await expect(page.getByTestId('help-section-recovery').getByRole('button', { name: '打开探针' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Glyphshift 如何组织工作' })).toHaveCount(0)
+
+  await page.getByRole('tab', { name: '技术与兼容' }).click()
+  const adapterHeading = page.getByRole('heading', { name: '当前适配器' })
   await expect(adapterHeading).toBeVisible()
-  await expect.poll(async () => {
-    const gettingStartedBox = await gettingStartedHeading.boundingBox()
-    const recoveryBox = await recoveryHeading.boundingBox()
-    const adapterBox = await adapterHeading.boundingBox()
-    return Boolean(gettingStartedBox && recoveryBox && adapterBox
-      && gettingStartedBox.y < recoveryBox.y && recoveryBox.y < adapterBox.y)
-  }).toBe(true)
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('TextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText('DrawTextW / DrawTextExW', { exact: true })).toBeVisible()
@@ -168,12 +178,15 @@ test('help exposes adapter information without internal targets', async ({ page 
   await expect(page.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
 
+  await page.getByRole('tab', { name: '故障排查' }).click()
   await page.getByRole('button', { name: '检查权限设置' }).click()
   await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('tab', { name: '故障排查' }).click()
   await page.getByTestId('help-section-recovery').getByRole('button', { name: '打开探针' }).click()
   await expect(page.getByRole('heading', { name: '探针', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('tab', { name: '故障排查' }).click()
   await page.getByRole('button', { name: '打开软件管理' }).click()
   await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
 })
@@ -212,8 +225,11 @@ test('settings applies and persists the real locale and theme preferences', asyn
 
   await page.getByRole('button', { name: 'Help', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Help' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Get started' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Complete your first interface translation' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'AI translation' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Troubleshooting' }).click()
   await expect(page.getByRole('heading', { name: 'Solve a problem' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Technology & compatibility' }).click()
   await expect(page.getByRole('heading', { name: 'Available adapters' })).toBeVisible()
   await page.getByRole('button', { name: 'View details for ExtTextOutW' }).click()
   await expect(page.getByRole('button', { name: 'View technical documentation for ExtTextOutW' })).toBeVisible()
