@@ -1,10 +1,12 @@
 <script setup lang="ts">
-defineProps<{
+withDefaults(defineProps<{
   title: string
-  description: string
+  description?: string
   titleId: string
   contentTestId?: string
-}>()
+}>(), {
+  description: undefined,
+})
 </script>
 
 <template>

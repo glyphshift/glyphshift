@@ -5,6 +5,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
+import { adapterDisplayName, adapterSummary } from '../adapterPresentation'
 import type {
   AdapterOption,
   DictionarySummary,
@@ -174,7 +175,6 @@ const selectedRunMetadata = computed(() => {
     selectedRunDictionaryName.value,
     t('capture.runSummary', { observed: run.observedCount, entries: run.dictionaryEntryCount }),
   ]
-  if (run.livePreviewEnabled) parts.push(t('capture.previewGeneration', { generation: run.previewGeneration }))
   if (run.runtimeCapability) parts.push(runtimeCapabilityDescription(run.runtimeCapability))
   return parts.join(' · ')
 })
@@ -913,7 +913,8 @@ function runDictionaryName(run: ProbeRunSummary) {
 }
 
 function adapterName(id: string) {
-  return props.adapters.find(adapter => adapter.id === id)?.name ?? id
+  const adapter = props.adapters.find(candidate => candidate.id === id)
+  return adapter ? adapterDisplayName(adapter.name, t) : id
 }
 
 function adapterDetails(run: ProbeRunSummary) {
@@ -921,8 +922,8 @@ function adapterDetails(run: ProbeRunSummary) {
     const adapter = props.adapters.find(item => item.id === id)
     return {
       id,
-      name: adapter?.name ?? id,
-      technologies: adapter?.technologies.join(' · ') || t('capture.technologyUnavailable'),
+      name: adapter ? adapterDisplayName(adapter.name, t) : id,
+      technologies: adapter ? adapterSummary(adapter, t) : t('capture.technologyUnavailable'),
     }
   })
 }
@@ -1044,7 +1045,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </template>
     </ManagementDetailHeader>
-    <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')" :description="t('capture.description')">
+    <ManagementPageHeader v-else title-id="capture-title" icon="i-tabler-radar" :title="t('capture.title')">
       <template #actions>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('capture.createRun')" :disabled="!observableAdapters.length || activeRunExists" @click="quickProbeOpen = true" />
       </template>
@@ -1243,7 +1244,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <ManagementFormModal
       :open="settingsOpen"
       :title="t('capture.settingsTitle')"
-      :description="t('capture.settingsDescription')"
       :confirm-label="t('capture.saveSettings')"
       :confirm-disabled="probe.busy.value || !settingsValid || !settingsChanged"
       :busy="probe.busy.value"
@@ -1278,7 +1278,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </div>
     </ManagementFormModal>
 
-    <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
+    <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :confirm-label="t('capture.deleteConfirm')" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
     <ConfirmDialog
       :open="Boolean(pendingQuickCleanup)"
       :title="t('capture.quickProbe.cleanupTitle')"

@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   title: string
-  description: string
+  description?: string
   titleId: string
   backLabel?: string
   contentWidth?: 'full' | 'utility'
   flushAfter?: boolean
-}>()
+}>(), {
+  description: undefined,
+})
 
 const { t } = useI18n()
 
@@ -54,7 +56,7 @@ defineEmits<{ back: [] }>()
               <h1 :id="titleId" class="type-page-title m-0 truncate font-semibold tracking-[-0.02em]">{{ title }}</h1>
               <slot name="status" />
             </div>
-            <p class="type-metadata m-0 mt-0.5 truncate text-[var(--text-muted)]">{{ description }}</p>
+            <p v-if="description" class="type-metadata m-0 mt-0.5 truncate text-[var(--text-muted)]">{{ description }}</p>
             <div v-if="$slots.detail" class="mt-0.5 min-w-0">
               <slot name="detail" />
             </div>

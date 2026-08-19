@@ -231,7 +231,6 @@ onBeforeUnmount(() => {
   <UtilityPageShell
       title-id="settings-title"
       :title="t('settings.title')"
-      :description="t('settings.description')"
       content-test-id="settings-layout"
   >
     <div class="space-y-4">
@@ -248,11 +247,9 @@ onBeforeUnmount(() => {
         <ManagementFormSection
           data-testid="settings-section-appearance"
           :title="t('settings.appearance')"
-          :description="t('settings.appearanceDescription')"
         >
           <ManagementFormRow
             :label="t('settings.language')"
-            :description="t('settings.languageDescription')"
             icon="i-tabler-language"
             control-width="compact"
           >
@@ -270,7 +267,6 @@ onBeforeUnmount(() => {
 
           <ManagementFormRow
             :label="t('settings.theme')"
-            :description="t('settings.themeDescription')"
             icon="i-tabler-sun-moon"
             control-width="compact"
           >
@@ -290,11 +286,9 @@ onBeforeUnmount(() => {
         <ManagementFormSection
           data-testid="settings-section-ai"
           :title="t('settings.aiTranslation.title')"
-          :description="t('settings.aiTranslation.description')"
         >
           <ManagementFormRow
             :label="t('settings.aiTranslation.confirm')"
-            :description="t('settings.aiTranslation.confirmDescription')"
             icon="i-tabler-message-question"
             control-width="compact"
           >
@@ -357,11 +351,9 @@ onBeforeUnmount(() => {
         <ManagementFormSection
           data-testid="settings-section-application"
           :title="t('settings.applicationAndPrivilege')"
-          :description="t('settings.applicationAndPrivilegeDescription')"
         >
           <ManagementFormRow
             :label="t('settings.launchAtStartup')"
-            :description="t('settings.launchAtStartupDescription')"
             icon="i-tabler-rocket"
             control-width="compact"
           >
@@ -377,7 +369,6 @@ onBeforeUnmount(() => {
 
           <ManagementFormRow
             :label="t('settings.closeBehavior')"
-            :description="t('settings.closeBehaviorDescription')"
             icon="i-tabler-door-exit"
             control-width="compact"
           >

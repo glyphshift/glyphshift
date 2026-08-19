@@ -3,6 +3,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdapterOption } from '../model'
+import { adapterSummary } from '../adapterPresentation'
 
 type HelpTab = 'guide' | 'ai' | 'recovery' | 'compatibility'
 type HelpTarget = 'workflows' | 'software' | 'dictionaries' | 'capture' | 'translation-tasks' | 'settings'
@@ -192,7 +193,7 @@ async function openDocumentation(adapter: AdapterOption) {
             <ul class="m-0 p-0" role="list">
               <li v-for="(adapter, index) in adapters" :key="adapter.id" data-testid="help-adapter-item" class="list-none border-b border-[var(--border)] last:border-b-0">
                 <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(0,.85fr)_minmax(0,1fr)_auto] items-start gap-4 px-4 py-3 @max-[900px]:grid-cols-[minmax(0,1fr)_auto]">
-                  <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ adapter.name }}</h3><p class="type-metadata mb-0 mt-1 max-w-[58ch] leading-4 text-[var(--text-muted)]">{{ adapter.summary }}</p></div>
+                  <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ adapter.name }}</h3><p class="type-metadata mb-0 mt-1 max-w-[58ch] leading-4 text-[var(--text-muted)]">{{ adapterSummary(adapter, t) }}</p></div>
                   <div class="min-w-0 @max-[900px]:col-start-1"><div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.appliesTo') }}</div><div class="flex flex-wrap gap-1"><UBadge v-for="platform in adapter.platforms" :key="platform" color="neutral" variant="soft" size="sm" :label="platformLabel(platform)" /><UBadge v-for="technology in adapter.technologies" :key="technology" color="neutral" variant="outline" size="sm" :label="technology" /></div></div>
                   <div class="min-w-0 @max-[900px]:col-start-1"><div class="type-caption mb-1.5 text-[var(--text-muted)]">{{ t('help.capabilities') }}</div><div class="flex flex-wrap gap-1"><UBadge v-for="feature in adapter.features" :key="feature" color="neutral" variant="soft" size="sm" :label="featureLabel(feature)" /></div></div>
                   <UButton color="neutral" variant="ghost" size="xs" :icon="expandedAdapterId === adapter.id ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" :label="expandedAdapterId === adapter.id ? t('help.hideDetails') : t('help.showDetails')" :aria-label="expandedAdapterId === adapter.id ? t('help.hideDetailsFor', { name: adapter.name }) : t('help.showDetailsFor', { name: adapter.name })" :aria-expanded="expandedAdapterId === adapter.id" :aria-controls="`help-adapter-details-${index}`" class="justify-self-end @max-[900px]:col-start-2 @max-[900px]:row-start-1" @click="toggleAdapterDetails(adapter.id)" />

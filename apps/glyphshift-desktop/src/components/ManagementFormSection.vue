@@ -14,7 +14,7 @@ withDefaults(defineProps<{
     class="@container mx-auto w-full max-w-[980px] overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--surface-inset)]"
     :aria-label="title"
   >
-    <header class="border-b border-[var(--border)] px-5 py-4">
+    <header class="border-b border-[var(--border)] px-5" :class="description ? 'py-4' : 'py-3'">
       <component
         :is="`h${headingLevel}`"
         class="type-section-title m-0 font-semibold tracking-[-0.01em] text-[var(--text)]"

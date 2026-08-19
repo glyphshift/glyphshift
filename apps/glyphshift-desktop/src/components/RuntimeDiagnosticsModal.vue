@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
 import { translateCommandError } from '../commandError'
+import { adapterDisplayName } from '../adapterPresentation'
 import type {
   WorkflowRuntimeDiagnostics,
   WorkflowRuntimeTrace,
@@ -37,18 +38,13 @@ const filteredRecords = computed(() => {
   ))
 })
 const columns = computed<TableColumn<WorkflowRuntimeTrace>[]>(() => [
-  { id: 'source', header: t('workflows.diagnostics.columns.source'), meta: { class: { th: 'w-[31%]', td: 'w-[31%]' } } },
-  { id: 'origin', header: t('workflows.diagnostics.columns.origin'), meta: { class: { th: 'w-[24%]', td: 'w-[24%]' } } },
-  { id: 'decision', header: t('workflows.diagnostics.columns.decision'), meta: { class: { th: 'w-[25%]', td: 'w-[25%]' } } },
-  { id: 'publication', header: t('workflows.diagnostics.columns.publication'), meta: { class: { th: 'w-[20%]', td: 'w-[20%]' } } },
+  { id: 'source', header: t('workflows.diagnostics.columns.source'), meta: { class: { th: 'w-[40%]', td: 'w-[40%]' } } },
+  { id: 'origin', header: t('workflows.diagnostics.columns.origin'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
+  { id: 'decision', header: t('workflows.diagnostics.columns.decision'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
 ])
 
 function hasDesktopRuntime() {
   return '__TAURI_INTERNALS__' in window
-}
-
-function shortIdentity(identity: string) {
-  return identity.slice(0, 8)
 }
 
 function statusLabel(record: WorkflowRuntimeTrace) {
@@ -179,13 +175,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="min-h-[260px] flex-1 overflow-auto rounded-[7px] border border-[var(--border)] bg-[var(--surface)] [scrollbar-gutter:stable]">
-        <UTable :data="filteredRecords" :columns="columns" sticky :ui="{ base: 'min-w-[760px]' }">
+        <UTable :data="filteredRecords" :columns="columns" sticky :ui="{ base: 'min-w-[620px]' }">
           <template #source-cell="{ row }">
             <div class="line-clamp-2 break-words font-medium" :title="row.original.sourceText">{{ row.original.sourceText }}</div>
           </template>
           <template #origin-cell="{ row }">
             <div class="truncate font-medium" :title="row.original.softwareName">{{ row.original.softwareName }}</div>
-            <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]" :title="row.original.adapterName">{{ row.original.adapterName }}</div>
+            <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ adapterDisplayName(row.original.adapterName, t) }}</div>
           </template>
           <template #decision-cell="{ row }">
             <div class="flex flex-wrap gap-1">
@@ -193,10 +189,6 @@ onBeforeUnmount(() => {
               <UBadge v-if="row.original.text === 'replaced'" color="primary" variant="outline" size="sm" :label="t('workflows.diagnostics.text.replaced')" />
               <UBadge v-if="row.original.font !== 'unmatched'" :color="row.original.font === 'substituted' ? 'primary' : 'neutral'" variant="outline" size="sm" :label="t(`workflows.diagnostics.font.${row.original.font}`)" />
             </div>
-          </template>
-          <template #publication-cell="{ row }">
-            <div class="font-medium tabular-nums" :title="row.original.publicationIdentity">G{{ row.original.generation }} · {{ shortIdentity(row.original.publicationIdentity) }}</div>
-            <div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('workflows.diagnostics.publicationIdentity') }}</div>
           </template>
           <template #empty>
             <UEmpty icon="i-tabler-activity-heartbeat" :title="query ? t('workflows.diagnostics.noMatch') : t('workflows.diagnostics.waiting')" :description="query ? t('workflows.diagnostics.noMatchDescription') : t('workflows.diagnostics.waitingDescription')" />

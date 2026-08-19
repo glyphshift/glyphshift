@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   title: string
-  description: string
+  description?: string
   icon: string
   titleId: string
-}>()
+}>(), {
+  description: undefined,
+})
 
 const { t } = useI18n()
 </script>
@@ -23,7 +25,7 @@ const { t } = useI18n()
       <h1 :id="titleId" class="type-page-title m-0 truncate font-semibold tracking-[-0.02em]">
         {{ title }}
       </h1>
-      <p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">
+      <p v-if="description" class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">
         {{ description }}
       </p>
     </div>

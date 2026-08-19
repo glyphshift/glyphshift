@@ -34,7 +34,6 @@ function proceed() {
   <UModal
     :open="open"
     :title="t('ai.preflightTitle')"
-    :description="t('ai.preflightDescription')"
     :ui="{
       content: 'max-w-[440px]',
       header: 'min-h-0 px-5 py-4',

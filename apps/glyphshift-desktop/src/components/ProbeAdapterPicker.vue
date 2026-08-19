@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdapterOption } from '../model'
+import { adapterName } from '../adapterPresentation'
 
 const props = withDefaults(defineProps<{
   adapters: AdapterOption[]
@@ -43,9 +44,8 @@ function toggle(adapterId: string, checked: boolean | 'indeterminate') {
         class="flex min-h-10 items-center gap-2 border-t border-[var(--border)] px-3"
         :class="disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-[var(--surface-hover)]'"
       >
-        <UCheckbox :model-value="modelValue.includes(adapter.id)" :disabled="disabled" :aria-label="adapter.name" @update:model-value="toggle(adapter.id, $event)" />
-        <span class="type-label min-w-0 flex-1 truncate font-medium">{{ adapter.name }}</span>
-        <span class="type-metadata max-w-32 truncate text-[var(--text-muted)]">{{ adapter.technologies.join(' · ') }}</span>
+        <UCheckbox :model-value="modelValue.includes(adapter.id)" :disabled="disabled" :aria-label="adapterName(adapter, t)" @update:model-value="toggle(adapter.id, $event)" />
+        <span class="type-label min-w-0 flex-1 truncate font-medium">{{ adapterName(adapter, t) }}</span>
       </label>
     </section>
   </div>

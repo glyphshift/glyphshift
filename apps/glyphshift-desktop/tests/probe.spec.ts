@@ -134,9 +134,9 @@ test('empty libraries stay actionable and a running application can create a tem
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await expect(dialog.getByRole('button', { name: '软件资料库' })).toBeEnabled()
-  await dialog.getByRole('button', { name: '软件资料库' }).click()
-  await expect(dialog.getByText('软件资料库中还没有可用软件。')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '软件列表' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '软件列表' }).click()
+  await expect(dialog.getByText('还没有添加软件。')).toBeVisible()
   await dialog.getByRole('button', { name: '运行中软件' }).click()
   await dialog.getByRole('combobox', { name: '运行中软件' }).click()
   await page.getByRole('option', { name: 'QuickTarget · QuickTarget.exe · x86_64' }).click()
@@ -144,7 +144,7 @@ test('empty libraries stay actionable and a running application can create a tem
 
   await expect(dialog.getByRole('button', { name: '使用已有词典' })).toBeEnabled()
   await dialog.getByRole('button', { name: '使用已有词典' }).click()
-  await expect(dialog.getByText('词典资料库中还没有可用词典。')).toBeVisible()
+  await expect(dialog.getByText('还没有可用词典。')).toBeVisible()
   await dialog.getByRole('button', { name: '使用临时词典' }).click()
   await expect(dialog.getByRole('button', { name: '使用临时词典' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toBeVisible()
@@ -173,7 +173,7 @@ test('empty libraries stay actionable and a running application can create a tem
   await expect(page.getByTestId('probe-temporary-dictionary-badge')).toHaveText('临时')
   await openProbeTaskActions(page)
   await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toBeVisible()
-  await expect(page.getByRole('menuitem', { name: '结束并清理临时资产', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '结束并清理临时内容', exact: true })).toBeVisible()
   await page.getByRole('menuitem', { name: '保留为常规任务', exact: true }).click()
   await expect(page.getByTestId('probe-task-actions')).toHaveText('任务操作')
   await openProbeTaskActions(page)
@@ -252,16 +252,16 @@ test('current-app source can end and clean up at compact English layout', async 
   await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('Temporary dictionary')
   await expect(page.getByText('quick-dictionary-captured', { exact: false })).toHaveCount(0)
   await openProbeTaskActions(page)
-  await page.getByRole('menuitem', { name: 'End and clean up temporary assets', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'End and clean up temporary content', exact: true }).click()
   const confirmation = page.getByRole('dialog', { name: 'End temporary probe' })
-  await expect(confirmation).toContainText('Library assets and assets referenced elsewhere are kept')
+  await expect(confirmation).toContainText('Existing content and anything still used elsewhere are kept')
   await confirmation.getByRole('button', { name: 'End and clean up' }).click()
 
   await expect(confirmation).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Capture', exact: true })).toBeVisible()
   await expect(page.getByText('Running', { exact: true })).toHaveCount(0)
   await expect(page.getByText('No probe runs yet')).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('Reused software or dictionaries are unchanged')
+  await expect(page.getByRole('status')).toContainText('Existing software and dictionaries are unchanged')
   await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned))).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/quick-probe-compact-en.png' })
@@ -365,7 +365,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(page.getByText('还没有探针任务')).toBeVisible()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await expect(dialog.getByRole('button', { name: '软件资料库' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('button', { name: '软件列表' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('button', { name: '运行中软件' })).toHaveAttribute('aria-pressed', 'false')
   await expect(dialog.getByText('使用已有词典', { exact: true })).toBeVisible()
   await expect(dialog.getByText('使用临时词典', { exact: true })).toBeVisible()
@@ -380,7 +380,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Vector Studio 探针', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '返回探针管理' })).toBeVisible()
-  await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toBeVisible()
+  await expect(page.getByPlaceholder('搜索原文、译文或兼容方式')).toBeVisible()
   await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)
   await expect(page.getByText('还没有捕获到文字')).toBeVisible()
   await expect(page.getByText('每页')).toBeVisible()
@@ -430,9 +430,9 @@ test('probe list hides technical detail behind one accessible hover target and u
   await details.hover()
   await expect(page.getByText('程序位置', { exact: true })).toBeVisible()
   await expect(page.getByText('X:\\SyntheticFixtures\\VectorStudio.exe', { exact: true })).toBeVisible()
-  await expect(page.getByText('探针技术', { exact: true })).toBeVisible()
-  await expect(page.getByText('GDI · ExtTextOutW', { exact: true })).toBeVisible()
-  await expect(page.getByText('GDI+ · GdipDrawString', { exact: true })).toBeVisible()
+  await expect(page.getByText('兼容方式', { exact: true })).toBeVisible()
+  await expect(page.getByText(/支持字距、裁剪和部分特殊文字.*传统 Windows 文字（高级）/)).toBeVisible()
+  await expect(page.getByText(/适合传统自绘面板和图形界面.*Windows 自绘图形界面/)).toBeVisible()
 })
 
 test('library sources create a normal probe without temporary ownership', async ({ page }) => {
@@ -610,7 +610,7 @@ test('paused probe can clear its entries without releasing the runtime', async (
   await page.getByRole('menuitem', { name: '探针设置' }).click()
   const clearButton = page.getByTestId('capture-clear-all')
   await expect(clearButton).toBeEnabled()
-  await expect(page.getByText('删除全部观察证据以及绑定词典中的全部词条，保留任务和配置。')).toBeVisible()
+  await expect(page.getByText('删除全部收集记录和当前词典中的全部词条，保留任务设置。')).toBeVisible()
   await expect(page.getByText('先暂停收集，避免采集线程在清空时写入新条目。')).toHaveCount(0)
   await clearButton.click()
   await page.getByRole('dialog', { name: '清空全部探针条目' }).getByRole('button', { name: '确认清空' }).click()
@@ -816,7 +816,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureEditRequests?: Array<{ translation: string }> }).__captureEditRequests?.[0]?.translation
   ))).toBe('即时译文')
-  await expect(page.getByText('预览 G9')).toBeVisible()
+  await expect(page.getByText(/预览 G\d+/)).toHaveCount(0)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/capture-workspace-live-edit-scroll.png' })
   await tableScroller.evaluate(element => { element.scrollTop = 600 })
   await expect.poll(() => page.getByTestId('capture-scrollbar-thumb').evaluate(element => getComputedStyle(element).transform)).not.toBe(initialThumbTransform)
@@ -841,10 +841,10 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toBe('untranslated')
 
   const adapterFilter = page.getByTestId('capture-adapter-filter')
-  await expect(adapterFilter).toContainText('全部技术')
+  await expect(adapterFilter).toContainText('全部兼容方式')
   await adapterFilter.click()
-  await page.getByRole('menuitemcheckbox', { name: 'DrawTextW / DrawTextExW' }).click()
-  await expect(adapterFilter).toContainText('DrawTextW / DrawTextExW')
+  await page.getByRole('menuitemcheckbox', { name: 'Windows 按钮与标签' }).click()
+  await expect(adapterFilter).toContainText('Windows 按钮与标签')
   await expect(page.getByText('显示 1–14，共 14 条目')).toBeVisible()
   await expect(page.locator('tbody tr')).toHaveCount(14)
   await expect.poll(() => page.evaluate(() => (
@@ -852,7 +852,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toEqual(['synthetic.draw-text'])
 
   await page.keyboard.press('Escape')
-  const search = page.getByPlaceholder('搜索原文、译文或探针技术')
+  const search = page.getByPlaceholder('搜索原文、译文或兼容方式')
   await search.fill('Source 00')
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureQueryRequests?: Array<{ search: string }> }).__captureQueryRequests?.at(-1)?.search
@@ -881,9 +881,9 @@ test('probe run keeps backend paging while adapter filters and view state recove
 
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
-  await expect(page.getByPlaceholder('搜索原文、译文或探针技术')).toHaveValue('Source 00')
+  await expect(page.getByPlaceholder('搜索原文、译文或兼容方式')).toHaveValue('Source 00')
   await expect(page.getByRole('button', { name: '按翻译状态筛选' })).toContainText('未翻译')
-  await expect(page.getByTestId('capture-adapter-filter')).toContainText('DrawTextW / DrawTextExW')
+  await expect(page.getByTestId('capture-adapter-filter')).toContainText('Windows 按钮与标签')
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureQueryRequests?: Array<{ adapterIds: string[] }> }).__captureQueryRequests?.at(-1)?.adapterIds
   ))).toEqual(['synthetic.draw-text'])
@@ -928,7 +928,7 @@ test('elevated probe rejection explains the protected target without observer re
 
   await page.getByRole('button', { name: '连接并继续' }).click()
 
-  await expect(page.getByText('Glyphshift 已拥有管理员权限，但目标拒绝探针所需的远程内存访问。目标可能由安全机制保护；继续提权通常无效。可尝试仅采集技术，受保护的软件可能不支持探针写回。')).toBeVisible()
+  await expect(page.getByText('Glyphshift 已有管理员权限，但这个软件仍拒绝连接。请尝试其他兼容方式；受保护的软件可能不支持实时替换。')).toBeVisible()
   await expect(page.getByText(/开启“始终以管理员身份启动”/)).toHaveCount(0)
   await expect(page.getByRole('button', { name: '切换为仅采集并重试' })).toHaveCount(0)
 })
@@ -966,9 +966,9 @@ test('probe reconnect explains a desktop and Runtime Bundle build mismatch', asy
 
   await page.getByRole('button', { name: '连接并继续' }).click()
 
-  await expect(page.getByRole('alert')).toContainText('Glyphshift 与本地 Runtime Bundle 版本不一致')
-  await expect(page.getByRole('alert')).toContainText('重启目标软件无法解决此问题')
-  await expect(page.getByRole('alert')).not.toContainText('选择的探针技术当前不可用')
+  await expect(page.getByRole('alert')).toContainText('Glyphshift 的运行组件版本不一致')
+  await expect(page.getByRole('alert')).toContainText('只重启目标软件无法解决')
+  await expect(page.getByRole('alert')).not.toContainText('选择的兼容方式当前不可用')
 })
 
 test('probe operation error closes when switching to another probe', async ({ page }) => {
@@ -1012,7 +1012,7 @@ test('probe operation error closes when switching to another probe', async ({ pa
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
   await page.getByRole('button', { name: '连接并继续' }).click()
-  await expect(page.getByRole('alert')).toContainText('目标拒绝探针所需的远程内存访问')
+  await expect(page.getByRole('alert')).toContainText('这个软件仍拒绝连接')
 
   await page.getByRole('button', { name: '返回探针管理' }).click()
   await page.getByRole('row').filter({ hasText: '探针 B' }).dblclick()

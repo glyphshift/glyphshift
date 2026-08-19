@@ -23,7 +23,7 @@ const workspace = useWorkspace()
 const activeTab = ref<TaskTab>('current')
 const batchDetailsOpen = ref(false)
 const statisticsQuery = ref('')
-const statisticsProtocol = ref('all')
+const statisticsProfile = ref('all')
 const statisticsPage = ref(1)
 const statisticsPageSize = ref(20)
 const historyQuery = ref('')
@@ -31,8 +31,8 @@ const historyStatus = ref('all')
 const historyPage = ref(1)
 const historyPageSize = ref(20)
 const expandedHistory = ref<Record<string, boolean>>({})
-const { columns: statisticsVisibleColumns, toggleColumn: toggleStatisticsColumn } = useTableColumns('glyphshift.table-columns.ai-task-statistics', {
-  protocol: true,
+const { columns: statisticsVisibleColumns, toggleColumn: toggleStatisticsColumn } = useTableColumns('glyphshift.table-columns.ai-task-statistics.v2', {
+  protocol: false,
   reasoning: true,
   tasks: true,
   texts: true,
@@ -145,17 +145,17 @@ const modelStats = computed(() => {
   }
   return [...groups.values()].sort((left, right) => right.tasks - left.tasks || right.texts - left.texts)
 })
-const statisticsProtocolItems = computed(() => [
-  { value: 'all', label: t('ai.tasks.protocolFilter.all') },
-  ...[...new Set(modelStats.value.map(group => group.protocol))]
-    .sort((left, right) => protocolLabel(left).localeCompare(protocolLabel(right), locale.value))
-    .map(protocol => ({ value: protocol, label: protocolLabel(protocol) })),
+const statisticsProfileItems = computed(() => [
+  { value: 'all', label: t('ai.tasks.profileFilter.all') },
+  ...[...new Set(modelStats.value.map(group => group.profileName))]
+    .sort((left, right) => left.localeCompare(right, locale.value))
+    .map(profileName => ({ value: profileName, label: profileName })),
 ])
 const filteredModelStats = computed(() => {
   const needle = statisticsQuery.value.trim().toLocaleLowerCase()
   return modelStats.value.filter(group => (
-    (statisticsProtocol.value === 'all' || group.protocol === statisticsProtocol.value)
-    && (!needle || `${group.profileName} ${group.modelId} ${protocolLabel(group.protocol)} ${reasoningLabel(group.reasoningEffort)}`.toLocaleLowerCase().includes(needle))
+    (statisticsProfile.value === 'all' || group.profileName === statisticsProfile.value)
+    && (!needle || `${group.profileName} ${group.modelId} ${reasoningLabel(group.reasoningEffort)}`.toLocaleLowerCase().includes(needle))
   ))
 })
 const statisticsPageItems = computed(() => filteredModelStats.value.slice(
@@ -163,7 +163,7 @@ const statisticsPageItems = computed(() => filteredModelStats.value.slice(
   statisticsPage.value * statisticsPageSize.value,
 ))
 const statisticsColumnOptions = computed(() => [
-  { key: 'protocol', label: t('ai.tasks.columns.protocol'), visible: statisticsVisibleColumns.value.protocol },
+  { key: 'protocol', label: t('ai.tasks.columns.protocol'), visible: statisticsVisibleColumns.value.protocol, defaultVisible: false },
   { key: 'reasoning', label: t('ai.tasks.columns.reasoning'), visible: statisticsVisibleColumns.value.reasoning },
   { key: 'tasks', label: t('ai.tasks.columns.tasks'), visible: statisticsVisibleColumns.value.tasks },
   { key: 'texts', label: t('ai.tasks.columns.texts'), visible: statisticsVisibleColumns.value.texts },
@@ -290,7 +290,7 @@ watch(() => current.value?.jobId, () => {
 watch(() => current.value?.batches.map(batch => batch.status).join(','), (statuses) => {
   if (statuses?.includes('retrying') || statuses?.includes('failed')) batchDetailsOpen.value = true
 }, { immediate: true })
-watch([statisticsQuery, statisticsProtocol, statisticsPageSize], () => { statisticsPage.value = 1 })
+watch([statisticsQuery, statisticsProfile, statisticsPageSize], () => { statisticsPage.value = 1 })
 watch([historyQuery, historyStatus, historyPageSize], () => {
   historyPage.value = 1
   expandedHistory.value = {}
@@ -300,12 +300,13 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
 </script>
 
 <template>
-  <UtilityPageShell
-    title-id="translation-tasks-title"
-    :title="t('ai.tasks.title')"
-    :description="t('ai.tasks.description')"
-    content-test-id="translation-tasks-content"
-  >
+  <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" aria-labelledby="translation-tasks-title">
+    <ManagementPageHeader
+      title-id="translation-tasks-title"
+      :title="t('ai.tasks.title')"
+      icon="i-tabler-list-check"
+    />
+    <div data-testid="translation-tasks-content" class="min-h-0 flex-1">
     <UTabs
       v-model="activeTab"
       data-testid="translation-task-tabs"
@@ -314,19 +315,19 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
       variant="link"
       size="sm"
       activation-mode="manual"
-      class="w-full"
+      class="flex h-full min-h-0 w-full flex-col"
       :ui="{
         list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0',
         indicator: 'hidden',
         trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block',
         leadingIcon: 'size-4 shrink-0',
         trailingBadge: 'type-caption ml-1 min-w-4 justify-center px-1',
-        content: 'pt-5 focus:outline-none',
+        content: 'min-h-0 flex-1 pt-3 focus:outline-none',
       }"
     >
       <template #current>
-        <section data-testid="translation-task-current" :aria-label="t('ai.tasks.tabs.current')">
-          <div v-if="current" class="overflow-hidden rounded-[var(--radius-surface)] border border-[var(--border)] bg-[var(--surface)]">
+        <section data-testid="translation-task-current" class="h-full min-h-0 overflow-y-auto [scrollbar-gutter:stable]" :aria-label="t('ai.tasks.tabs.current')">
+          <ManagementWorkspaceSurface v-if="current">
             <header class="flex flex-wrap items-start justify-between gap-4 px-4 py-4">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
@@ -402,28 +403,31 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                 </ol>
               </template>
             </UCollapsible>
-          </div>
+          </ManagementWorkspaceSurface>
 
-          <div v-else class="flex min-h-44 items-center gap-3 border-y border-[var(--border)] py-6 text-[var(--text-muted)]">
-            <UIcon name="i-tabler-list-check" class="size-7 shrink-0" aria-hidden="true" />
-            <div><strong class="type-body text-[var(--text)]">{{ t('ai.tasks.emptyTitle') }}</strong><p class="type-metadata mb-0 mt-1">{{ t('ai.tasks.emptyDescription') }}</p></div>
-          </div>
+          <ManagementWorkspaceSurface v-else>
+            <UEmpty
+              icon="i-tabler-list-check"
+              :title="t('ai.tasks.emptyTitle')"
+              :description="t('ai.tasks.emptyDescription')"
+              class="h-full min-h-80 bg-[var(--surface-inset)]"
+            />
+          </ManagementWorkspaceSurface>
         </section>
       </template>
 
       <template #statistics>
-        <section data-testid="translation-task-statistics" class="flex h-[min(560px,calc(100vh-220px))] min-h-[320px] flex-col" :aria-label="t('ai.tasks.tabs.statistics')">
-          <div class="mb-3 shrink-0"><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.modelStatsTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.modelStatsDescription') }}</p></div>
+        <section data-testid="translation-task-statistics" class="flex h-full min-h-0 flex-col" :aria-label="t('ai.tasks.tabs.statistics')">
           <ManagementTableFrame
             v-model:query="statisticsQuery"
-            v-model:filter-value="statisticsProtocol"
+            v-model:filter-value="statisticsProfile"
             v-model:page="statisticsPage"
             v-model:page-size="statisticsPageSize"
             :search-placeholder="t('ai.tasks.searchStatistics')"
             :search-label="t('ai.tasks.searchStatistics')"
-            :filter-label="statisticsProtocolItems.find(item => item.value === statisticsProtocol)?.label ?? t('ai.tasks.protocolFilter.all')"
-            :filter-aria-label="t('ai.tasks.filterProtocol')"
-            :filter-options="statisticsProtocolItems"
+            :filter-label="statisticsProfileItems.find(item => item.value === statisticsProfile)?.label ?? t('ai.tasks.profileFilter.all')"
+            :filter-aria-label="t('ai.tasks.filterProfile')"
+            :filter-options="statisticsProfileItems"
             :column-options="statisticsColumnOptions"
             :columns-label="t('table.columns')"
             :total="filteredModelStats.length"
@@ -453,7 +457,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                 <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usageAvailable ? formatNumber(row.original.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usageAvailable" class="type-caption block truncate text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) })">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens) }) }}</span></div>
               </template>
               <template #empty>
-                <UEmpty icon="i-tabler-chart-bar" :title="modelStats.length ? t('ai.tasks.noStatisticsMatch') : t('ai.tasks.noModelStats')" :description="modelStats.length ? t('ai.tasks.adjustStatisticsFilters') : t('ai.tasks.modelStatsDescription')" />
+                <UEmpty icon="i-tabler-chart-bar" :title="modelStats.length ? t('ai.tasks.noStatisticsMatch') : t('ai.tasks.noModelStats')" :description="modelStats.length ? t('ai.tasks.adjustStatisticsFilters') : undefined" />
               </template>
             </UTable>
           </ManagementTableFrame>
@@ -461,8 +465,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
       </template>
 
       <template #list>
-        <section data-testid="translation-task-list" class="flex h-[min(560px,calc(100vh-220px))] min-h-[320px] flex-col" :aria-label="t('ai.tasks.tabs.list')">
-          <div class="mb-3 shrink-0"><h2 class="type-section-title m-0 text-[var(--text)]">{{ t('ai.tasks.historyTitle') }}</h2><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.historyDescription') }}</p></div>
+        <section data-testid="translation-task-list" class="flex h-full min-h-0 flex-col" :aria-label="t('ai.tasks.tabs.list')">
           <ManagementTableFrame
             v-model:query="historyQuery"
             v-model:filter-value="historyStatus"
@@ -523,12 +526,13 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                 </div>
               </template>
               <template #empty>
-                <UEmpty icon="i-tabler-list-details" :title="history.length ? t('ai.tasks.noTaskMatch') : t('ai.tasks.noHistory')" :description="history.length ? t('ai.tasks.adjustTaskFilters') : t('ai.tasks.historyDescription')" />
+                <UEmpty icon="i-tabler-list-details" :title="history.length ? t('ai.tasks.noTaskMatch') : t('ai.tasks.noHistory')" :description="history.length ? t('ai.tasks.adjustTaskFilters') : undefined" />
               </template>
             </UTable>
           </ManagementTableFrame>
         </section>
       </template>
     </UTabs>
-  </UtilityPageShell>
+    </div>
+  </section>
 </template>

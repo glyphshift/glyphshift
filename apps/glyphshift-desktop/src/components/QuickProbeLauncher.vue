@@ -232,7 +232,6 @@ async function start() {
   <ManagementFormModal
     :open="open"
     :title="t('capture.createRun')"
-    :description="t('capture.createDescription')"
     :confirm-label="t('capture.createConfirm')"
     :confirm-disabled="!canStart"
     :busy="probe.busy.value"

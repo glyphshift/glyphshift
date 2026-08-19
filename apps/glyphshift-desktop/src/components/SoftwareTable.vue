@@ -344,7 +344,6 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
     <ManagementPageHeader
       title-id="software-title"
       :title="t('software.title')"
-      :description="t('software.description')"
       icon="i-tabler-apps"
     >
       <template #actions>
@@ -418,7 +417,6 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
     <ManagementFormModal
       :open="adding"
       :title="t('software.addTitle')"
-      :description="t('software.addDescription')"
       :confirm-label="t('software.addConfirm')"
       :confirm-disabled="busy || !addName.trim() || !addPath.trim() || !activePreflight?.canAdd"
       :busy="addSubmitting"
@@ -496,7 +494,6 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
       <ManagementDetailHeader
         title-id="software-editor-title"
         :title="editName.trim() || editing.name"
-        :description="t('software.editDescription')"
         :back-label="t('software.backToList')"
         @back="requestCloseEdit"
       >
@@ -507,7 +504,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
       </ManagementDetailHeader>
       <ManagementWorkspaceSurface variant="canvas">
         <div class="h-full overflow-y-auto p-5 [scrollbar-gutter:stable]">
-          <ManagementFormSection :title="t('software.informationHeading')" :description="t('software.informationHint')">
+          <ManagementFormSection :title="t('software.informationHeading')">
             <ManagementFormRow :label="t('software.displayName')" required>
               <UInput v-model="editName" size="sm" class="w-full" :aria-label="t('software.displayName')" />
             </ManagementFormRow>
@@ -526,6 +523,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
       :open="Boolean(pendingRemoval.length)"
       :title="t('software.deleteTitle')"
       :description="t('software.deleteDescription', { count: pendingRemoval.length })"
+      :confirm-label="t('software.deleteConfirm')"
       :busy="busy"
       @update:open="$event || closeRemoval()"
       @confirm="confirmRemoval"

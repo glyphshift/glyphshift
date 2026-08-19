@@ -40,6 +40,73 @@ test('bilingual READMEs lead with user problems and product use instead of repos
   expect(chinese).not.toContain('cargo clippy')
   expect(english).not.toContain('## Repository structure')
   expect(english).not.toContain('## Development validation')
+  expect(chinese).toContain('任意源语言和目标语言')
+  expect(chinese).toContain('不会限制词典可以翻译的语言')
+  expect(chinese).not.toContain('让没有中文')
+  expect(english).toContain('any source and target language pair')
+  expect(english).toContain('do not restrict the languages a dictionary can translate')
+})
+
+test('version tags build the verified Windows installer and publish it to the current repository', () => {
+  const workflow = readFileSync(join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8')
+
+  expect(workflow).toContain("tags:\n      - 'v*'")
+  expect(workflow).toContain('runs-on: windows-latest')
+  expect(workflow).toContain('contents: write')
+  expect(workflow).toContain('./scripts/build-desktop-release.ps1')
+  expect(workflow).toContain('gh release create $tag @assets')
+  expect(workflow).toContain('--verify-tag')
+  expect(workflow).toContain('candidate-manifest.json')
+  expect(workflow).toContain('SHA256SUMS.txt')
+  expect(workflow).not.toMatch(/OWNER\/REPO|repository:\s+[^\n]+|PERSONAL_ACCESS_TOKEN|\bPAT\b/)
+})
+
+test('desktop copy uses novice task language and keeps implementation terms out of routine surfaces', () => {
+  const chinese = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'locales', 'zh-CN.ts'), 'utf8')
+  const english = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'locales', 'en-US.ts'), 'utf8')
+  const aiPanel = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', 'AiProfilesPanel.vue'), 'utf8')
+  const diagnostics = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', 'RuntimeDiagnosticsModal.vue'), 'utf8')
+  const routineSurfaces = [
+    'SettingsView.vue',
+    'SoftwareTable.vue',
+    'DictionaryLibrary.vue',
+    'WorkflowTable.vue',
+    'CaptureView.vue',
+    'TranslationTasksView.vue',
+  ].map(file => readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', file), 'utf8')).join('\n')
+  const chineseValues = [...chinese.matchAll(/:\s*'([^']*)'/g)].map(match => match[1]).join('\n')
+  const englishValues = [...english.matchAll(/:\s*'([^']*)'/g)].map(match => match[1]).join('\n')
+
+  for (const jargon of ['AI Profile', 'Provider', 'Runtime Bundle', 'Profile 文件', '本地修订']) {
+    expect(chineseValues).not.toContain(jargon)
+  }
+  for (const jargon of ['AI profile', 'Provider', 'Runtime Bundle', 'Profile files', 'Local revision']) {
+    expect(englishValues).not.toContain(jargon)
+  }
+  expect(chineseValues.match(/Adapter/g) ?? []).toHaveLength(1)
+  expect(englishValues.match(/\(adapter\)/g) ?? []).toHaveLength(1)
+  expect(chinese).toContain("profilesTitle: 'AI 配置'")
+  expect(english).toContain("profilesTitle: 'AI connections'")
+  for (const redundant of [
+    '这些偏好会立即应用，并保存在当前设备上',
+    '设置翻译前确认，以及翻译时要使用的 AI 服务和模型',
+    '控制 Windows 登录启动、关闭窗口行为',
+    '为每个软件组合兼容方式、有序词典和字体设置',
+  ]) expect(chineseValues).not.toContain(redundant)
+  expect(aiPanel).not.toContain('credentialStorageHint')
+  expect(aiPanel).not.toContain('modelDiscoveryNotTested')
+  expect(diagnostics).not.toContain('publicationIdentity')
+  expect(routineSurfaces).toContain('icon="i-tabler-list-check"')
+  expect(routineSurfaces).not.toContain('<UtilityPageShell\n    title-id="translation-tasks-title"')
+  for (const redundantKey of [
+    "t('settings.description')",
+    "t('settings.appearanceDescription')",
+    "t('software.description')",
+    "t('dictionaries.description')",
+    "t('workflows.description')",
+    "t('capture.description')",
+    "t('ai.tasks.description')",
+  ]) expect(routineSurfaces).not.toContain(redundantKey)
 })
 
 test('root documents separate domain language, product truth, and the implemented design system', () => {

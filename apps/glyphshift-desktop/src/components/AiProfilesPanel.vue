@@ -27,7 +27,6 @@ interface ProfileForm {
   maxRetries: number
   filterPolicy: AiFilterPolicy
   secret: string
-  clearCredential: boolean
   makeDefault: boolean
 }
 
@@ -37,6 +36,7 @@ const editorOpen = ref(false)
 const editingProfile = ref<AiProfile | null>(null)
 const pendingDelete = ref<AiProfile | null>(null)
 const excludedPatternsText = ref('')
+const advancedOpen = ref(false)
 
 const providerItems = computed(() => ([
   { value: 'codex_subscription' as const, label: t('ai.protocol.codexSubscription') },
@@ -63,7 +63,6 @@ function newProfileForm(): ProfileForm {
     maxRetries: 2,
     filterPolicy: defaultAiFilterPolicy(),
     secret: '',
-    clearCredential: false,
     makeDefault: !ai.catalog.value.defaultProfileId,
   }
 }
@@ -137,7 +136,6 @@ watch(() => form.value.protocol, (protocol, previous) => {
   form.value.reasoningEffort = defaultAiReasoningEffort(protocol)
   if (protocol === 'ollama_chat' || protocol === 'codex_subscription') {
     form.value.secret = ''
-    form.value.clearCredential = false
   }
 })
 
@@ -153,6 +151,7 @@ function openCreate() {
   editingProfile.value = null
   form.value = newProfileForm()
   excludedPatternsText.value = ''
+  advancedOpen.value = false
   editorOpen.value = true
 }
 
@@ -171,10 +170,10 @@ function openEdit(profile: AiProfile) {
     maxRetries: profile.maxRetries,
     filterPolicy: JSON.parse(JSON.stringify(profile.filterPolicy)),
     secret: '',
-    clearCredential: false,
     makeDefault: ai.catalog.value.defaultProfileId === profile.id,
   }
   excludedPatternsText.value = profile.filterPolicy.excludedPatterns.join('\n')
+  advancedOpen.value = false
   editorOpen.value = true
 }
 
@@ -203,11 +202,9 @@ async function save() {
         : null,
       excludedPatterns: patterns,
     },
-    credential: value.clearCredential
-      ? { action: 'clear' }
-      : value.secret.trim()
-        ? { action: 'replace', secret: value.secret.trim() }
-        : { action: 'keep' },
+    credential: value.secret.trim()
+      ? { action: 'replace', secret: value.secret.trim() }
+      : { action: 'keep' },
   }, value.makeDefault)
   editorOpen.value = false
 }
@@ -226,7 +223,6 @@ onMounted(() => void ai.connect())
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0">
         <h3 id="ai-profile-settings-title" class="type-body m-0 font-semibold text-[var(--text)]">{{ t('ai.profilesTitle') }}</h3>
-        <p class="type-metadata mb-0 mt-1 max-w-[70ch] leading-4 text-[var(--text-muted)]">{{ t('ai.profilesDescription') }}</p>
       </div>
       <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" class="shrink-0" @click="openCreate" />
     </div>
@@ -261,7 +257,6 @@ onMounted(() => void ai.connect())
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
               {{ ai.connectionReports.value[profile.id]?.status === 'passed' ? t('ai.connectionPassed') : t('ai.connectionFailed') }}
             </span>
-            <span class="text-[var(--text-muted)]">{{ t('ai.modelDiscoveryNotTested') }}</span>
             <span v-if="ai.connectionReports.value[profile.id]?.safeMessage" class="truncate text-[var(--danger)]">{{ ai.connectionReports.value[profile.id]?.safeMessage }}</span>
           </div>
         </div>
@@ -290,19 +285,11 @@ onMounted(() => void ai.connect())
         </div>
       </div>
     </div>
-    <div v-else class="flex min-h-24 items-center gap-3 py-4 text-[var(--text-muted)]">
-      <UIcon name="i-tabler-sparkles-off" class="size-6 shrink-0" aria-hidden="true" />
-      <p class="type-metadata m-0 max-w-[68ch] leading-4">{{ t('ai.emptyProfiles') }}</p>
-    </div>
-
-    <p class="type-metadata m-0 border-t border-[var(--border)] pt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.credentialStorageHint') }}</p>
-
   </section>
 
   <ManagementFormModal
     :open="editorOpen"
     :title="editingProfile ? t('ai.editProfileTitle') : t('ai.addProfile')"
-    :description="t('ai.profileDialogDescription')"
     :confirm-label="t('ai.saveProfile')"
     :confirm-disabled="!formValid"
     :busy="ai.busy.value"
@@ -334,44 +321,60 @@ onMounted(() => void ai.connect())
       <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :required="credentialRequired && !editingProfile?.hasCredential">
         <UInput v-model="form.secret" type="password" :aria-label="t('ai.apiKey')" :placeholder="editingProfile?.hasCredential ? t('ai.keepCredentialPlaceholder') : ''" autocomplete="new-password" class="w-full" />
       </UFormField>
-      <UFormField :label="t('ai.timeout')">
-        <UInput v-model.number="form.timeoutMinutes" type="number" min="1" max="60" step="1" :aria-label="t('ai.timeout')" class="w-full" />
-      </UFormField>
-      <UFormField :label="t('ai.maxItemsPerRequest')">
-        <UInput v-model.number="form.maxItemsPerRequest" type="number" min="1" max="1000" step="1" :aria-label="t('ai.maxItemsPerRequest')" class="w-full" />
-      </UFormField>
-      <UFormField :label="t('ai.concurrency')">
-        <UInput v-model.number="form.maxConcurrency" type="number" min="1" max="16" step="1" :aria-label="t('ai.concurrency')" class="w-full" />
-      </UFormField>
-      <UFormField :label="t('ai.maxRetries')" :hint="t('ai.maxRetriesHint')">
-        <UInput v-model.number="form.maxRetries" type="number" min="0" max="10" step="1" :aria-label="t('ai.maxRetries')" class="w-full" />
-      </UFormField>
     </div>
 
-    <div class="mt-5 border-t border-[var(--border)] pt-4">
-      <h3 class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.filterTitle') }}</h3>
-      <p class="type-metadata mb-3 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.filterDescription') }}</p>
-      <div class="grid grid-cols-2 gap-x-6 gap-y-3 @max-[560px]:grid-cols-1">
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterPureNumbers') }}</span><USwitch v-model="form.filterPolicy.skipPureNumbersOrSymbols" /></label>
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterMeasurements') }}</span><USwitch v-model="form.filterPolicy.skipNumericMeasurements" /></label>
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterSingleCharacter') }}</span><USwitch v-model="form.filterPolicy.skipSingleCharacter" /></label>
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterContainingDigits') }}</span><USwitch v-model="form.filterPolicy.skipTextContainingDigits" /></label>
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterUrls') }}</span><USwitch v-model="form.filterPolicy.skipUrls" /></label>
-        <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterPaths') }}</span><USwitch v-model="form.filterPolicy.skipFilePaths" /></label>
-      </div>
-      <div class="mt-4 grid grid-cols-[140px_minmax(0,1fr)] gap-4 @max-[560px]:grid-cols-1">
-        <UFormField :label="t('ai.maxSourceChars')">
-          <UInput v-model.number="form.filterPolicy.maxSourceChars" type="number" min="1" :aria-label="t('ai.maxSourceChars')" :placeholder="t('ai.unlimited')" class="w-full" />
-        </UFormField>
-        <UFormField :label="t('ai.excludedPatterns')" :hint="t('ai.excludedPatternsHint')">
-          <UTextarea v-model="excludedPatternsText" :aria-label="t('ai.excludedPatterns')" :rows="3" class="w-full" />
-        </UFormField>
-      </div>
-    </div>
+    <UCollapsible v-model:open="advancedOpen" class="mt-4 border-y border-[var(--border)]">
+      <UButton
+        color="neutral"
+        variant="ghost"
+        class="w-full justify-between rounded-none px-0 py-3"
+        :label="t('ai.advancedSettings')"
+        :trailing-icon="advancedOpen ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
+      />
+      <template #content>
+        <div class="pb-4">
+          <p class="type-metadata mb-3 mt-0 leading-4 text-[var(--text-muted)]">{{ t('ai.advancedSettingsDescription') }}</p>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-3 @max-[560px]:grid-cols-1">
+            <UFormField :label="t('ai.timeout')">
+              <UInput v-model.number="form.timeoutMinutes" type="number" min="1" max="60" step="1" :aria-label="t('ai.timeout')" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('ai.maxItemsPerRequest')">
+              <UInput v-model.number="form.maxItemsPerRequest" type="number" min="1" max="1000" step="1" :aria-label="t('ai.maxItemsPerRequest')" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('ai.concurrency')">
+              <UInput v-model.number="form.maxConcurrency" type="number" min="1" max="16" step="1" :aria-label="t('ai.concurrency')" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('ai.maxRetries')" :hint="t('ai.maxRetriesHint')">
+              <UInput v-model.number="form.maxRetries" type="number" min="0" max="10" step="1" :aria-label="t('ai.maxRetries')" class="w-full" />
+            </UFormField>
+          </div>
+
+          <div class="mt-5 border-t border-[var(--border)] pt-4">
+            <h3 class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.filterTitle') }}</h3>
+            <p class="type-metadata mb-3 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.filterDescription') }}</p>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-3 @max-[560px]:grid-cols-1">
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterPureNumbers') }}</span><USwitch v-model="form.filterPolicy.skipPureNumbersOrSymbols" /></label>
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterMeasurements') }}</span><USwitch v-model="form.filterPolicy.skipNumericMeasurements" /></label>
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterSingleCharacter') }}</span><USwitch v-model="form.filterPolicy.skipSingleCharacter" /></label>
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterContainingDigits') }}</span><USwitch v-model="form.filterPolicy.skipTextContainingDigits" /></label>
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterUrls') }}</span><USwitch v-model="form.filterPolicy.skipUrls" /></label>
+              <label class="flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]"><span>{{ t('ai.filterPaths') }}</span><USwitch v-model="form.filterPolicy.skipFilePaths" /></label>
+            </div>
+            <div class="mt-4 grid grid-cols-[140px_minmax(0,1fr)] gap-4 @max-[560px]:grid-cols-1">
+              <UFormField :label="t('ai.maxSourceChars')">
+                <UInput v-model.number="form.filterPolicy.maxSourceChars" type="number" min="1" :aria-label="t('ai.maxSourceChars')" :placeholder="t('ai.unlimited')" class="w-full" />
+              </UFormField>
+              <UFormField :label="t('ai.excludedPatterns')" :hint="t('ai.excludedPatternsHint')">
+                <UTextarea v-model="excludedPatternsText" :aria-label="t('ai.excludedPatterns')" :rows="3" class="w-full" />
+              </UFormField>
+            </div>
+          </div>
+        </div>
+      </template>
+    </UCollapsible>
 
     <div class="mt-4 flex flex-wrap items-center gap-5 border-t border-[var(--border)] pt-4">
       <UCheckbox v-model="form.makeDefault" :label="t('ai.useAsDefault')" />
-      <UCheckbox v-if="showsCredential && editingProfile?.hasCredential" v-model="form.clearCredential" color="warning" :label="t('ai.clearCredential')" />
     </div>
   </ManagementFormModal>
 
@@ -379,6 +382,7 @@ onMounted(() => void ai.connect())
     :open="Boolean(pendingDelete)"
     :title="t('ai.deleteProfileTitle')"
     :description="t('ai.deleteProfileDescription', { name: pendingDelete?.name ?? '' })"
+    :confirm-label="t('ai.deleteProfileConfirm')"
     @update:open="$event || (pendingDelete = null)"
     @confirm="confirmDelete"
   />

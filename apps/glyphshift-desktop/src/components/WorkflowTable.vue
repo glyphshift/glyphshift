@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import { useI18n } from 'vue-i18n'
+import { adapterDisplayName } from '../adapterPresentation'
 import RuntimeDiagnosticsModal from './RuntimeDiagnosticsModal.vue'
 import { translateCommandError } from '../commandError'
 import type {
@@ -274,7 +275,10 @@ function dictionaryNames(item: WorkflowSummary) {
 }
 function adapterNames(item: WorkflowSummary) {
   const ids = [...new Set(item.targets.flatMap(target => target.adapterPlan.adapterIds))]
-  return ids.map(id => props.adapters.find(adapter => adapter.id === id)?.name ?? id).join(locale.value === 'zh-CN' ? '、' : ', ')
+  return ids.map((id) => {
+    const adapter = props.adapters.find(candidate => candidate.id === id)
+    return adapter ? adapterDisplayName(adapter.name, t) : id
+  }).join(locale.value === 'zh-CN' ? '、' : ', ')
 }
 function fontNames(item: WorkflowSummary) {
   const families = [...new Set(item.targets.flatMap(target => target.fontPolicy?.families.slice(0, 1) ?? []))]
@@ -468,7 +472,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
 <template>
   <section :data-testid="formOpen ? 'workflow-editor' : undefined" class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)] p-4" :aria-labelledby="formOpen ? 'workflow-editor-title' : 'workflow-title'">
     <template v-if="!formOpen">
-    <ManagementPageHeader title-id="workflow-title" :title="t('workflows.title')" :description="t('workflows.description')" icon="i-tabler-git-branch">
+    <ManagementPageHeader title-id="workflow-title" :title="t('workflows.title')" icon="i-tabler-git-branch">
       <template #actions>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('workflows.create')" :disabled="busy" @click="startCreate" />
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="refreshing ? t('workflows.refreshing') : t('workflows.refresh')" :loading="refreshing" :disabled="refreshing" @click="emit('refresh')" />
@@ -485,7 +489,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       <UTable data-testid="workflow-management-table" role="region" tabindex="0" aria-labelledby="workflow-title" :data="pageItems" :columns="tableColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1080px]' }" @dblclick="openOnDoubleClick">
         <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('workflows.selectPage')" @update:model-value="togglePageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleSelection(row.original.id)" /></template>
-        <template #workflow-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.description || t('workflows.revision', { revision: row.original.revision }) }}</div></template>
+        <template #workflow-cell="{ row }"><div class="truncate font-semibold">{{ row.original.name }}</div><div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.description || t('common.noDescription') }}</div></template>
         <template #software-cell="{ row }"><div class="truncate" :title="softwareNames(row.original)">{{ softwareNames(row.original) }}</div><div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('workflows.targetCount', { count: row.original.softwareIds.length }) }}</div></template>
         <template #adapters-cell="{ row }"><div class="truncate" :title="adapterNames(row.original)">{{ adapterNames(row.original) || t('workflows.notConfigured') }}</div><div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('workflows.parallel') }}</div></template>
         <template #assets-cell="{ row }"><div class="truncate" :title="dictionaryNames(row.original)">{{ t('workflows.dictionaries', { names: dictionaryNames(row.original) || t('workflows.none') }) }}</div><div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]" :title="fontNames(row.original)">{{ t('workflows.fonts', { names: fontNames(row.original) || t('workflows.none') }) }}</div></template>
@@ -523,7 +527,6 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       <ManagementDetailHeader
         title-id="workflow-editor-title"
         :title="editorTitle"
-        :description="t('workflows.formDescription')"
         :back-label="t('workflows.backToList')"
         @back="requestCloseForm"
       >
@@ -538,7 +541,6 @@ usePageEscape(() => formOpen.value, requestCloseForm)
           <ManagementFormSection
             data-testid="workflow-basic-tab"
             :title="t('workflows.basicHeading')"
-            :description="t('workflows.basicHint')"
             :heading-level="2"
           >
             <ManagementFormRow :label="t('workflows.name')" required>
@@ -555,7 +557,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
 
         <template #software>
           <section data-testid="workflow-software-tab" class="space-y-4" :aria-label="t('workflows.tabs.software')">
-            <div class="flex items-end justify-between gap-3"><div><h2 class="type-body m-0 font-semibold">{{ t('workflows.softwareTargets') }}</h2><p class="type-metadata m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('workflows.softwareInterceptionHint') }}</p></div><span class="type-metadata shrink-0 text-[var(--text-muted)]">{{ t('workflows.targetCount', { count: targets.length }) }}</span></div>
+            <div class="flex items-end justify-between gap-3"><h2 class="type-body m-0 font-semibold">{{ t('workflows.softwareTargets') }}</h2><span class="type-metadata shrink-0 text-[var(--text-muted)]">{{ t('workflows.targetCount', { count: targets.length }) }}</span></div>
             <UInput v-model="softwareQuery" icon="i-tabler-search" size="sm" class="w-full" :placeholder="t('workflows.searchSoftware')" :aria-label="t('workflows.searchSoftware')" />
             <div data-testid="workflow-software-catalog" class="max-h-48 overflow-y-auto rounded-[6px] border border-[var(--border)] [scrollbar-gutter:stable]">
               <div v-for="item in visibleSoftware" :key="item.id" class="flex min-h-12 items-center border-b border-[var(--border)] last:border-b-0" :class="activeSoftwareId === item.id ? 'bg-[var(--selection)]' : ''">
@@ -629,7 +631,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       </ManagementWorkspaceSurface>
     </template>
 
-    <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('workflows.deleteTitle')" :description="removalDescription" :busy="busy" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
+    <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('workflows.deleteTitle')" :description="removalDescription" :confirm-label="t('workflows.deleteConfirm')" :busy="busy" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
     <ConfirmDialog :open="discardFormOpen" :title="t('common.discardTitle')" :description="t('common.discardDescription')" :cancel-label="t('common.continueEditing')" :confirm-label="t('common.discardChanges')" confirm-color="warning" @update:open="$event || (discardFormOpen = false)" @confirm="confirmDiscardForm" />
   </section>
 </template>

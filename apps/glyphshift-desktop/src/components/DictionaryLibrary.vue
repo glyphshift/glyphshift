@@ -341,7 +341,6 @@ async function chooseExport(item: DictionarySummary) {
     <ManagementPageHeader
       title-id="dictionary-library-title"
       :title="t('dictionaries.title')"
-      :description="mode === 'local' ? t('dictionaries.description') : t('dictionaries.catalog.description')"
       icon="i-tabler-language"
     >
       <template #actions>
@@ -417,7 +416,6 @@ async function chooseExport(item: DictionarySummary) {
         </template>
         <template #release-cell="{ row }">
           <div>v{{ row.original.metadata.releaseVersion }}</div>
-          <div class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('dictionaries.localRevision', { revision: row.original.revision }) }}</div>
         </template>
         <template #installation-cell="{ row }">
           <UBadge :color="installationColor(row.original)" variant="soft" size="sm" :label="installationLabel(row.original)" />
@@ -550,6 +548,7 @@ async function chooseExport(item: DictionarySummary) {
       :open="Boolean(pendingRemoval.length)"
       :title="t('dictionaries.deleteTitle')"
       :description="removalDescription"
+      :confirm-label="t('dictionaries.deleteConfirm')"
       :busy="busy"
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"

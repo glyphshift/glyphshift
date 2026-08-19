@@ -129,7 +129,7 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
     assert!(!persisted.contains("synthetic-secret-value"));
     drop(catalog);
 
-    let reopened =
+    let mut reopened =
         AiProfileCatalog::open(root.path(), Box::new(vault)).expect("reopen profile catalog");
     let profiles = reopened.profiles().expect("list reopened profiles");
     assert_eq!(profiles.len(), 2);
@@ -164,6 +164,15 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
             .collect::<Vec<_>>(),
         vec!["synthetic-secret-value"]
     );
+
+    reopened
+        .delete_profile("profile.openai")
+        .expect("delete profile and its credential");
+    assert!(shared_secrets
+        .lock()
+        .expect("credential memory")
+        .is_empty());
+    assert_eq!(reopened.profiles().expect("list remaining profiles").len(), 1);
 }
 
 #[test]

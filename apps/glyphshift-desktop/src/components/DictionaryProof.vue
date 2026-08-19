@@ -330,7 +330,7 @@ usePageEscape(() => true, () => emit('back'))
     <ManagementDetailHeader
       title-id="dictionary-title"
       :title="draft.metadata.name"
-      :description="t('dictionaryEditor.metadataLine', { source: draft.metadata.sourceLocale, target: draft.metadata.targetLocale, version: draft.metadata.releaseVersion, revision: draft.revision, count: draft.entries.length })"
+      :description="t('dictionaryEditor.metadataLine', { source: draft.metadata.sourceLocale, target: draft.metadata.targetLocale, version: draft.metadata.releaseVersion, count: draft.entries.length })"
       :back-label="t('dictionaryEditor.back')"
       @back="emit('back')"
     >
@@ -537,6 +537,7 @@ usePageEscape(() => true, () => emit('back'))
       :open="Boolean(pendingRemoval.length)"
       :title="t('dictionaryEditor.deleteTitle')"
       :description="t('dictionaryEditor.deleteDescription', { count: pendingRemoval.length })"
+      :confirm-label="t('dictionaryEditor.deleteConfirm')"
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"
     />

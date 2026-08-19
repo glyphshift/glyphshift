@@ -91,7 +91,7 @@ test('workflow sections and Help keep a continuous visible heading outline', asy
   await expect(page.getByTestId('workflow-editor')).toBeVisible()
   expectNoHeadingJumps(await visibleHeadingLevels(page))
 
-  for (const tab of ['软件与拦截', '翻译词典', '字体策略']) {
+  for (const tab of ['软件与兼容方式', '翻译词典', '字体策略']) {
     await page.getByRole('tab', { name: tab }).click()
     expectNoHeadingJumps(await visibleHeadingLevels(page))
   }
@@ -122,9 +122,10 @@ test('functional copy follows the semantic desktop type ramp', async ({ page }) 
     pageTitle: '20px',
   })
 
-  const description = page.getByText('按软件目标组合拦截方式、有序词典与字体策略，并持续维持运行期望。')
-  await expect(description).toBeVisible()
-  await expect.poll(() => description.evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
+  await expect(page.getByText('为每个软件组合兼容方式、有序词典和字体设置，并持续应用翻译。')).toHaveCount(0)
+  const metadata = page.getByText('1 个目标', { exact: true }).first()
+  await expect(metadata).toBeVisible()
+  await expect.poll(() => metadata.evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
 })
 
 test('management table body stays continuous for empty and populated states', async ({ page }) => {
@@ -209,9 +210,9 @@ test('management tables share independent persisted column controls', async ({ p
 
   await expect(columnsButton).toBeVisible()
   await columnsButton.click()
-  await page.getByRole('menuitemcheckbox', { name: '拦截方式', exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: '兼容方式', exact: true }).click()
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('columnheader', { name: '拦截方式', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '兼容方式', exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: '软件', exact: true }).click()
   await expect(columnsButton).toBeVisible()
@@ -230,7 +231,7 @@ test('management tables share independent persisted column controls', async ({ p
   await expect(page.getByRole('columnheader', { name: '更新时间', exact: true })).toHaveCount(0)
 
   await page.reload()
-  await expect(page.getByRole('columnheader', { name: '拦截方式', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '兼容方式', exact: true })).toHaveCount(0)
 })
 
 test('software direct and batch delete remove unreferenced records', async ({ page }) => {
@@ -252,12 +253,12 @@ test('software direct and batch delete remove unreferenced records', async ({ pa
   await page.getByRole('button', { name: '软件', exact: true }).click()
 
   await page.getByRole('button', { name: '删除 Disposable One' }).click()
-  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '确认删除' }).click()
+  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '删除软件' }).click()
   await expect(page.getByText('Disposable One', { exact: true })).toBeHidden()
 
   await page.getByRole('checkbox', { name: '选择 Disposable Two' }).click()
   await page.getByRole('button', { name: '批量删除' }).click()
-  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '确认删除' }).click()
+  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '删除软件' }).click()
   await expect(page.getByText('Disposable Two', { exact: true })).toBeHidden()
 })
 
@@ -288,7 +289,7 @@ test('dictionary delete names every workflow and probe that blocks it', async ({
 
   await page.getByRole('button', { name: '词典', exact: true }).click()
   await page.getByRole('button', { name: '删除 界面基础词典' }).click()
-  await page.getByRole('dialog', { name: '删除词典' }).getByRole('button', { name: '确认删除' }).click()
+  await page.getByRole('dialog', { name: '删除词典' }).getByRole('button', { name: '删除词典' }).click()
 
   const alert = page.getByRole('alert')
   await expect(alert).toContainText('默认创作工作流')
@@ -321,7 +322,7 @@ test('software batch delete keeps a rejected record and explains why', async ({ 
   await page.getByRole('checkbox', { name: '选择 Vector Studio' }).click()
   await page.getByRole('button', { name: '批量删除' }).click()
   const confirmation = page.getByRole('dialog', { name: '删除软件' })
-  await confirmation.getByRole('button', { name: '确认删除' }).click()
+  await confirmation.getByRole('button', { name: '删除软件' }).click()
 
   await expect(page.getByText('Vector Studio', { exact: true })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('仍被 1 个工作流使用')
@@ -390,7 +391,7 @@ test('workflow keeps permission failures distinct from a stopped software', asyn
 
 test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '工作流' })).toBeVisible()
-  await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
+  await expect(page.getByText('传统 Windows 文字（高级）', { exact: true })).toBeVisible()
   await expect(page.getByText('桌面服务已连接')).toHaveCount(0)
   await expect(page.getByText('本地预览')).toHaveCount(0)
 

@@ -2,7 +2,7 @@
   {
     "id": "windows.gdi.ext-text-out",
     "name": "ExtTextOutW",
-    "summary": "拦截 GDI 高级文本输出；覆盖字距数组、裁剪选项和部分字形索引绘制",
+    "summary": "适合使用传统 Windows GDI 绘制文字的软件，支持字距、裁剪和部分字形索引",
     "technology": "GDI",
     "technicalTarget": "gdi32.dll!ExtTextOutW",
     "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-exttextoutw"
@@ -10,7 +10,7 @@
   {
     "id": "windows.gdi.text-out",
     "name": "TextOutW",
-    "summary": "拦截基础 GDI 文本输出；常见于传统 Win32 控件和简单自绘界面",
+    "summary": "适合传统 Windows 控件和简单自绘界面",
     "technology": "GDI",
     "technicalTarget": "gdi32.dll!TextOutW",
     "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-textoutw"
@@ -18,7 +18,7 @@
   {
     "id": "windows.user32.draw-text",
     "name": "DrawTextW / DrawTextExW",
-    "summary": "拦截矩形内文本布局绘制；常见于按钮、标签和传统窗口界面",
+    "summary": "适合传统按钮、标签和窗口中的矩形文字布局",
     "technology": "USER32 / GDI",
     "technicalTarget": "user32.dll!DrawTextW + DrawTextExW",
     "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-drawtextw"
@@ -26,7 +26,7 @@
   {
     "id": "windows.gdiplus.draw-string",
     "name": "GdipDrawString",
-    "summary": "拦截 GDI+ 浮点布局文本绘制；常见于自绘面板和图形化桌面界面",
+    "summary": "适合使用 GDI+ 的自绘面板和图形界面",
     "technology": "GDI+",
     "technicalTarget": "gdiplus.dll!GdipDrawString",
     "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/gdiplus/-gdiplus-drawing-text-use"
@@ -34,7 +34,7 @@
   {
     "id": "windows.directwrite.text-layout",
     "name": "DirectWrite TextLayout",
-    "summary": "拦截 DirectWrite 文本布局创建与 Direct2D 布局绘制；支持单一格式文本的字典替换，复杂分段格式安全放行",
+    "summary": "适合 DirectWrite 和 Direct2D 界面；支持单一格式文字，复杂混合格式保持原样",
     "technology": "DirectWrite / Direct2D",
     "technicalTarget": "IDWriteFactory::CreateTextLayout + ID2D1RenderTarget::DrawTextLayout",
     "documentationUrl": "https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwritefactory-createtextlayout"
@@ -42,7 +42,7 @@
   {
     "id": "windows.qt.painter-draw-text",
     "name": "Qt Painter drawText",
-    "summary": "拦截动态链接 Qt 5/6 Widgets 的常见文本绘制并应用字典译文；不适用于静态 Qt 或 QML",
+    "summary": "适合动态链接的 Qt 5/6 Widgets；不适用于静态 Qt 或 QML",
     "technology": "Qt 5 / Qt 6 Widgets",
     "technicalTarget": "QtGui!QPainter::drawText",
     "documentationUrl": "https://doc.qt.io/qt-6/qpainter.html#drawText"
@@ -50,7 +50,7 @@
   {
     "id": "windows.gtk3.pango-render-layout",
     "name": "GTK 3 / Pango 绘制",
-    "summary": "拦截动态链接 GTK 3 的常见文本布局绘制并应用字典译文；局部样式文本安全放行，不适用于 GTK 4",
+    "summary": "适合动态链接的 GTK 3；不适用于 GTK 4",
     "technology": "GTK 3 / Pango",
     "technicalTarget": "GTK 3!gtk_render_layout",
     "documentationUrl": "https://docs.gtk.org/gtk3/func.render_layout.html"
@@ -58,7 +58,7 @@
   {
     "id": "windows.raylib.draw-text-ex",
     "name": "raylib DrawTextEx",
-    "summary": "拦截动态 raylib 5.5 兼容文字绘制并使用已验证的中文 fallback atlas；不适用于静态链接、复制绘制实现或纹理缓存文字",
+    "summary": "适合动态链接的 raylib 5.5；不适用于静态链接或已缓存为纹理的文字",
     "technology": "raylib 5.5",
     "technicalTarget": "raylib.dll!DrawTextEx",
     "documentationUrl": "https://www.raylib.com/cheatsheet/raylib_cheatsheet_v5.5.pdf"
@@ -66,7 +66,7 @@
   {
     "id": "windows.unity.mono.standard-ui",
     "name": "Unity Mono 标准界面",
-    "summary": "翻译 Windows x64 Unity Mono 应用中的 TMP/uGUI 标准 text 属性；不适用于 IL2CPP、UI Toolkit、NGUI、自绘文字或 TMP SetText 快捷入口",
+    "summary": "适合 Windows x64 的 Unity Mono 标准界面；不适用于 IL2CPP、UI Toolkit、NGUI 或自绘文字",
     "technology": "Unity Mono / TextMeshPro / uGUI",
     "technicalTarget": "Mono JIT!TMP_Text.set_text + UnityEngine.UI.Text.set_text",
     "documentationUrl": "https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html"
