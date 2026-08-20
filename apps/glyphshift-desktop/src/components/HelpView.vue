@@ -2,11 +2,13 @@
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { version as appVersion } from '../../package.json'
 import type { AdapterOption } from '../model'
 import { adapterSummary } from '../adapterPresentation'
 
-type HelpTab = 'guide' | 'ai' | 'recovery' | 'compatibility'
+type HelpTab = 'guide' | 'ai' | 'recovery' | 'compatibility' | 'about'
 type HelpTarget = 'workflows' | 'software' | 'dictionaries' | 'capture' | 'translation-tasks' | 'settings'
+type AboutLinkId = 'github' | 'bilibili'
 
 defineProps<{ adapters: AdapterOption[] }>()
 const emit = defineEmits<{ navigate: [view: HelpTarget] }>()
@@ -16,12 +18,19 @@ const activeTab = ref<HelpTab>('guide')
 const openingDocumentationId = ref<string | null>(null)
 const documentationError = ref<string | null>(null)
 const expandedAdapterId = ref<string | null>(null)
+const openingAboutLinkId = ref<AboutLinkId | null>(null)
+const aboutLinkError = ref<string | null>(null)
 
 const helpTabs = computed(() => [
   { value: 'guide' as const, slot: 'guide', label: t('help.tabs.guide'), icon: 'i-tabler-route' },
   { value: 'ai' as const, slot: 'ai', label: t('help.tabs.ai'), icon: 'i-tabler-sparkles' },
   { value: 'recovery' as const, slot: 'recovery', label: t('help.tabs.recovery'), icon: 'i-tabler-lifebuoy' },
   { value: 'compatibility' as const, slot: 'compatibility', label: t('help.tabs.compatibility'), icon: 'i-tabler-plug-connected' },
+  { value: 'about' as const, slot: 'about', label: t('help.tabs.about'), icon: 'i-tabler-info-circle' },
+])
+const aboutLinks = computed(() => [
+  { id: 'github' as const, label: t('help.about.github'), icon: 'i-tabler-brand-github', url: 'https://github.com/Yuelioi/glyphshift' },
+  { id: 'bilibili' as const, label: t('help.about.bilibili'), icon: 'i-tabler-brand-bilibili', url: 'https://space.bilibili.com/4279370' },
 ])
 const gettingStartedItems = computed(() => ([
   { id: 'add-software', title: t('help.guide.steps.addSoftware.title'), description: t('help.guide.steps.addSoftware.description'), action: t('help.guide.steps.addSoftware.action'), view: 'software' as const },
@@ -87,13 +96,29 @@ async function openDocumentation(adapter: AdapterOption) {
     openingDocumentationId.value = null
   }
 }
+
+async function openAboutLink(link: { id: AboutLinkId; url: string }) {
+  if (openingAboutLinkId.value) return
+  aboutLinkError.value = null
+  openingAboutLinkId.value = link.id
+  try {
+    if ('__TAURI_INTERNALS__' in window) await openUrl(link.url)
+    else window.open(link.url, '_blank', 'noopener,noreferrer')
+  }
+  catch {
+    aboutLinkError.value = t('help.about.openFailed')
+  }
+  finally {
+    openingAboutLinkId.value = null
+  }
+}
 </script>
 
 <template>
   <UtilityPageShell
     title-id="help-title"
     :title="t('help.title')"
-    :description="t('help.description')"
+    icon="i-tabler-help-circle"
     content-test-id="help-layout"
   >
     <UTabs
@@ -207,6 +232,32 @@ async function openDocumentation(adapter: AdapterOption) {
             </ul>
           </div>
           <UEmpty v-else icon="i-tabler-plug-off" :title="t('help.emptyTitle')" :description="t('help.emptyDescription')" />
+        </section>
+      </template>
+
+      <template #about>
+        <section data-testid="help-section-about" class="@container" aria-labelledby="help-about-title">
+          <div class="flex items-center gap-3 border-b border-[var(--border)] pb-5">
+            <span class="grid size-10 shrink-0 place-items-center rounded-[7px] border border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--accent-strong)]" aria-hidden="true">
+              <UIcon name="i-tabler-info-circle" class="size-5" />
+            </span>
+            <div class="min-w-0">
+              <h2 id="help-about-title" class="type-section-title m-0 font-semibold">Glyphshift</h2>
+              <p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('help.about.version', { version: appVersion }) }}</p>
+            </div>
+          </div>
+
+          <p v-if="aboutLinkError" class="type-metadata mb-2 mt-4 text-[var(--danger)]" role="alert">{{ aboutLinkError }}</p>
+          <ul class="m-0 divide-y divide-[var(--border)] border-b border-[var(--border)] p-0" role="list">
+            <li v-for="link in aboutLinks" :key="link.id" class="grid min-h-16 list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[640px]:grid-cols-[32px_minmax(0,1fr)]">
+              <UIcon :name="link.icon" class="size-5 justify-self-center text-[var(--text-secondary)]" aria-hidden="true" />
+              <div class="min-w-0">
+                <h3 class="type-body m-0 font-semibold">{{ link.label }}</h3>
+                <p class="type-metadata mb-0 mt-1 truncate text-[var(--text-muted)]" :title="link.url">{{ link.url }}</p>
+              </div>
+              <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-external-link" :label="t('help.about.open')" :aria-label="t('help.about.openNamed', { name: link.label })" :loading="openingAboutLinkId === link.id" class="@max-[640px]:col-start-2 @max-[640px]:justify-self-start" @click="openAboutLink(link)" />
+            </li>
+          </ul>
         </section>
       </template>
     </UTabs>

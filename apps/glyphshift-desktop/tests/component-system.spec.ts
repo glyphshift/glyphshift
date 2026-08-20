@@ -46,10 +46,15 @@ test('Vue surfaces use Nuxt UI for controls, tables, and overlays', () => {
 
 test('management pages share the project management-page modules', () => {
   const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'CaptureView.vue']
+  const pageHeaderPages = [...pages, 'TranslationTasksView.vue']
+
+  for (const page of pageHeaderPages) {
+    const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
+    expect(source, `${basename(page)} must use the shared page header.`).toContain('<ManagementPageHeader')
+  }
 
   for (const page of pages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
-    expect(source, `${basename(page)} must use the shared page header.`).toContain('<ManagementPageHeader')
     expect(source, `${basename(page)} must use the shared table frame.`).toContain('<ManagementTableFrame')
   }
 
@@ -75,13 +80,15 @@ test('management pages share the project management-page modules', () => {
   for (const page of utilityPages) {
     const source = readFileSync(join(sourceRoot, 'components', page), 'utf8')
     expect(source, `${basename(page)} must use the shared utility-page shell.`).toContain('<UtilityPageShell')
+    expect(source, `${basename(page)} must declare its page icon.`).toMatch(/<UtilityPageShell[\s\S]*?icon="i-tabler-[^"]+"/)
   }
 
   const utilityPageShell = readFileSync(join(sourceRoot, 'components', 'UtilityPageShell.vue'), 'utf8')
-  expect(utilityPageShell).toContain('<ManagementDetailHeader')
+  expect(utilityPageShell).toContain('<ManagementPageHeader')
   expect(utilityPageShell).toContain('<ManagementWorkspaceSurface variant="canvas">')
-  expect(utilityPageShell).toContain('--utility-page-content-width: 980px')
-  expect(utilityPageShell).toContain('[scrollbar-gutter:stable_both-edges]')
+  expect(utilityPageShell).not.toContain('max-width')
+  expect(utilityPageShell).not.toContain('padding-inline')
+  expect(utilityPageShell).not.toContain('scrollbar-gutter')
 
   const workspaceSurface = readFileSync(join(sourceRoot, 'components', 'ManagementWorkspaceSurface.vue'), 'utf8')
   const detailHeader = readFileSync(join(sourceRoot, 'components', 'ManagementDetailHeader.vue'), 'utf8')
@@ -92,7 +99,8 @@ test('management pages share the project management-page modules', () => {
 
   const formRow = readFileSync(join(sourceRoot, 'components', 'ManagementFormRow.vue'), 'utf8')
   const formSection = readFileSync(join(sourceRoot, 'components', 'ManagementFormSection.vue'), 'utf8')
-  expect(formSection).toContain('mx-auto w-full max-w-[980px]')
+  expect(formSection).toContain('@container w-full')
+  expect(formSection).not.toContain('max-w-[980px]')
   expect(formSection).toContain('rounded-[10px] border border-[var(--border)]')
   expect(formRow).toContain('grid-cols-[184px_minmax(0,1fr)]')
   expect(formRow).toContain('justify-self-end')
@@ -101,6 +109,16 @@ test('management pages share the project management-page modules', () => {
   const themeSource = readFileSync(join(sourceRoot, 'main.css'), 'utf8')
   expect(themeSource).toContain('--surface-inset:')
   expect(themeSource).toContain('--field-bg:')
+})
+
+test('desktop title bar reads the complete version from package metadata', () => {
+  const titleBar = readFileSync(join(sourceRoot, 'components', 'TitleBar.vue'), 'utf8')
+  const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as { version: string }
+
+  expect(titleBar).toContain("import { version as appVersion } from '../../package.json'")
+  expect(titleBar).toContain('v{{ appVersion }}')
+  expect(titleBar).not.toMatch(/>v\d+\.\d+<\/span>/)
+  expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+$/)
 })
 
 test('management tables share pinned compact context and semantic type roles', () => {
@@ -208,6 +226,8 @@ test('adapter documentation opens through a scoped system-browser capability', (
       { url: 'https://doc.qt.io/*' },
       { url: 'https://docs.gtk.org/*' },
       { url: 'https://www.raylib.com/*' },
+      { url: 'https://github.com/*' },
+      { url: 'https://space.bilibili.com/*' },
     ],
   })
   expect(capability.permissions).not.toContain('opener:default')

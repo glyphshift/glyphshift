@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { model, storageKey } from './fixtures/productModel'
+
+const appVersion = (JSON.parse(readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8')) as { version: string }).version
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
@@ -24,15 +28,18 @@ test('browser settings keep valid fields when other fields are unknown or invali
   await expect(page.getByRole('combobox', { name: 'When closing the window' })).toContainText('Quit completely')
 })
 
-test('settings aligns its title and form surface across wide and compact windows', async ({ page }) => {
+test('settings shares the full-width primary page axis across wide and compact windows', async ({ page }) => {
   await page.setViewportSize({ width: 1520, height: 720 })
+  const workflowHeader = await page.getByTestId('management-page-header').boundingBox()
+  expect(workflowHeader).not.toBeNull()
   await page.getByRole('button', { name: '设置', exact: true }).click()
 
-  const headerContent = page.getByTestId('management-detail-header-content')
+  const pageHeader = page.getByTestId('management-page-header')
   const settingsLayout = page.getByTestId('settings-layout')
   const appearanceSection = page.getByTestId('settings-section-appearance')
 
-  await expect(headerContent).toBeVisible()
+  await expect(pageHeader).toBeVisible()
+  await expect(page.getByTestId('management-page-header-icon')).toBeVisible()
   await expect(settingsLayout).toBeVisible()
 
   const geometry = await page.evaluate(() => {
@@ -42,43 +49,51 @@ test('settings aligns its title and form surface across wide and compact windows
       return { left: rect.left, right: rect.right, width: rect.width }
     }
     return {
-      header: box('[data-testid="management-detail-header-content"]'),
+      header: box('[data-testid="management-page-header"]'),
       layout: box('[data-testid="settings-layout"]'),
       appearance: box('[data-testid="settings-section-appearance"]'),
-      headerBottom: document.querySelector<HTMLElement>('[data-testid="management-detail-header"]')!.getBoundingClientRect().bottom,
+      headerBottom: document.querySelector<HTMLElement>('[data-testid="management-page-header"]')!.getBoundingClientRect().bottom,
       appearanceTop: document.querySelector<HTMLElement>('[data-testid="settings-section-appearance"]')!.getBoundingClientRect().top,
     }
   })
-  expect(geometry.header.width).toBeGreaterThanOrEqual(979)
+  expect(geometry.header.width).toBeGreaterThan(1400)
+  expect(Math.abs(geometry.header.left - workflowHeader!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.right - (workflowHeader!.x + workflowHeader!.width))).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.header.left - geometry.layout.left)).toBeLessThanOrEqual(1)
-  expect(Math.abs(geometry.header.right - geometry.layout.right)).toBeLessThanOrEqual(1)
+  expect(geometry.header.right - geometry.layout.right).toBeGreaterThanOrEqual(0)
+  expect(geometry.header.right - geometry.layout.right).toBeLessThanOrEqual(12)
   expect(Math.abs(geometry.header.left - geometry.appearance.left)).toBeLessThanOrEqual(1)
-  expect(Math.abs(geometry.header.right - geometry.appearance.right)).toBeLessThanOrEqual(1)
-  expect(geometry.appearanceTop - geometry.headerBottom).toBeGreaterThanOrEqual(19)
-  expect(geometry.appearanceTop - geometry.headerBottom).toBeLessThanOrEqual(21)
+  expect(Math.abs(geometry.layout.right - geometry.appearance.right)).toBeLessThanOrEqual(1)
+  expect(geometry.appearanceTop - geometry.headerBottom).toBeGreaterThanOrEqual(15)
+  expect(geometry.appearanceTop - geometry.headerBottom).toBeLessThanOrEqual(17)
 
   await page.setViewportSize({ width: 960, height: 640 })
   const compactGeometry = await page.evaluate(() => {
-    const header = document.querySelector<HTMLElement>('[data-testid="management-detail-header-content"]')!.getBoundingClientRect()
+    const header = document.querySelector<HTMLElement>('[data-testid="management-page-header"]')!.getBoundingClientRect()
     const layout = document.querySelector<HTMLElement>('[data-testid="settings-layout"]')!.getBoundingClientRect()
     return { headerLeft: header.left, headerRight: header.right, layoutLeft: layout.left, layoutRight: layout.right }
   })
   expect(Math.abs(compactGeometry.headerLeft - compactGeometry.layoutLeft)).toBeLessThanOrEqual(1)
-  expect(Math.abs(compactGeometry.headerRight - compactGeometry.layoutRight)).toBeLessThanOrEqual(1)
+  expect(compactGeometry.headerRight - compactGeometry.layoutRight).toBeGreaterThanOrEqual(0)
+  expect(compactGeometry.headerRight - compactGeometry.layoutRight).toBeLessThanOrEqual(12)
   await expect.poll(() => settingsLayout.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
 
-test('help shares the settings utility-page width, title axis, and first-content rhythm', async ({ page }) => {
+test('help shares the full-width primary page axis and first-content rhythm', async ({ page }) => {
   await page.setViewportSize({ width: 1520, height: 720 })
+  const workflowHeader = await page.getByTestId('management-page-header').boundingBox()
+  expect(workflowHeader).not.toBeNull()
   await page.getByRole('button', { name: '帮助', exact: true }).click()
 
-  const headerContent = page.getByTestId('management-detail-header-content')
+  const pageHeader = page.getByTestId('management-page-header')
   const helpLayout = page.getByTestId('help-layout')
   const gettingStartedSection = page.getByTestId('help-section-getting-started')
 
-  await expect(headerContent).toBeVisible()
+  await expect(pageHeader).toBeVisible()
+  await expect(page.getByTestId('management-page-header-icon')).toBeVisible()
   await expect(helpLayout).toBeVisible()
+  await expect(page.getByText('从第一次界面翻译到故障排查，按实际任务找到下一步。Glyphshift 不修改目标软件安装文件。', { exact: true })).toHaveCount(0)
   const geometry = await page.evaluate(() => {
     const rect = (selector: string) => {
       const box = document.querySelector<HTMLElement>(selector)?.getBoundingClientRect()
@@ -86,30 +101,32 @@ test('help shares the settings utility-page width, title axis, and first-content
       return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width }
     }
     return {
-      header: rect('[data-testid="management-detail-header"]'),
-      headerContent: rect('[data-testid="management-detail-header-content"]'),
+      header: rect('[data-testid="management-page-header"]'),
       layout: rect('[data-testid="help-layout"]'),
       tabs: rect('[data-testid="help-tabs"] [role="tablist"]'),
       gettingStarted: rect('[data-testid="help-section-getting-started"]'),
     }
   })
-  expect(geometry.layout.width).toBeGreaterThanOrEqual(979)
-  expect(geometry.layout.width).toBeLessThanOrEqual(981)
-  expect(Math.abs(geometry.headerContent.left - geometry.layout.left)).toBeLessThanOrEqual(1)
-  expect(Math.abs(geometry.headerContent.right - geometry.layout.right)).toBeLessThanOrEqual(1)
+  expect(geometry.layout.width).toBeGreaterThan(1400)
+  expect(Math.abs(geometry.header.left - workflowHeader!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.right - (workflowHeader!.x + workflowHeader!.width))).toBeLessThanOrEqual(1)
+  expect(Math.abs(geometry.header.left - geometry.layout.left)).toBeLessThanOrEqual(1)
+  expect(geometry.header.right - geometry.layout.right).toBeGreaterThanOrEqual(0)
+  expect(geometry.header.right - geometry.layout.right).toBeLessThanOrEqual(12)
   expect(Math.abs(geometry.layout.left - geometry.gettingStarted.left)).toBeLessThanOrEqual(1)
-  expect(geometry.tabs.top - geometry.header.bottom).toBeGreaterThanOrEqual(19)
-  expect(geometry.tabs.top - geometry.header.bottom).toBeLessThanOrEqual(21)
+  expect(geometry.tabs.top - geometry.header.bottom).toBeGreaterThanOrEqual(15)
+  expect(geometry.tabs.top - geometry.header.bottom).toBeLessThanOrEqual(17)
   expect(geometry.gettingStarted.top).toBeGreaterThan(geometry.tabs.bottom)
 
   await page.setViewportSize({ width: 960, height: 640 })
   const compactGeometry = await page.evaluate(() => {
-    const header = document.querySelector<HTMLElement>('[data-testid="management-detail-header-content"]')!.getBoundingClientRect()
+    const header = document.querySelector<HTMLElement>('[data-testid="management-page-header"]')!.getBoundingClientRect()
     const layout = document.querySelector<HTMLElement>('[data-testid="help-layout"]')!.getBoundingClientRect()
     return { headerLeft: header.left, headerRight: header.right, layoutLeft: layout.left, layoutRight: layout.right }
   })
   expect(Math.abs(compactGeometry.headerLeft - compactGeometry.layoutLeft)).toBeLessThanOrEqual(1)
-  expect(Math.abs(compactGeometry.headerRight - compactGeometry.layoutRight)).toBeLessThanOrEqual(1)
+  expect(compactGeometry.headerRight - compactGeometry.layoutRight).toBeGreaterThanOrEqual(0)
+  expect(compactGeometry.headerRight - compactGeometry.layoutRight).toBeLessThanOrEqual(12)
   await expect.poll(() => helpLayout.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
@@ -196,6 +213,28 @@ test('help teaches the workflow and progressively exposes AI, recovery, and adap
   ).__openedAdapterDocumentation)).toBe('https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html')
   await expect(page.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
   await expect(page.getByText('synthetic.ext-text-out')).toHaveCount(0)
+
+  await page.getByRole('tab', { name: '关于' }).click()
+  const about = page.getByTestId('help-section-about')
+  await expect(about.getByRole('heading', { name: 'Glyphshift' })).toBeVisible()
+  await expect(about.getByText(`版本 v${appVersion}`, { exact: true })).toBeVisible()
+  await expect(about.getByText('https://github.com/Yuelioi/glyphshift', { exact: true })).toBeVisible()
+  await expect(about.getByText('https://space.bilibili.com/4279370', { exact: true })).toBeVisible()
+  await page.evaluate(() => {
+    window.open = ((url?: string | URL) => {
+      ;(window as unknown as { __openedAboutUrl?: string }).__openedAboutUrl = String(url)
+      return window
+    }) as typeof window.open
+  })
+  await about.getByRole('button', { name: '打开GitHub 仓库' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __openedAboutUrl?: string }
+  ).__openedAboutUrl)).toBe('https://github.com/Yuelioi/glyphshift')
+  await about.getByRole('button', { name: '打开哔哩哔哩主页' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __openedAboutUrl?: string }
+  ).__openedAboutUrl)).toBe('https://space.bilibili.com/4279370')
+  await expect.poll(() => about.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 
   await page.getByRole('tab', { name: '故障排查' }).click()
   await page.getByRole('button', { name: '检查权限设置' }).click()

@@ -70,7 +70,6 @@ rounded:
 spacing:
   control-gap: "8px"
   page: "16px"
-  utility-content: "20px"
   form-horizontal-gap: "32px"
 components:
   button-primary-dark:
@@ -176,8 +175,8 @@ Glyphshift 的色彩由一个钴蓝主色和一组冷中性色构成。深色主
 分别承担滚动，避免嵌套页面滚动。
 
 - **Title bar:** 固定 48px，高度内整合品牌、四个主导航、主题、帮助、设置和窗口控制。
-- **Page inset:** 16px。列表页使用“页头 + 满宽表格”；详情页使用“全宽详情头 + 主画布”。
-- **Utility axis:** Settings 与 Help 共享 980px 内容轴、20px 内边距和标题后 20px 首屏节奏。
+- **Primary page axis:** 一级页面统一使用 16px 页面 inset、“图标页头 + 满宽内容”；Settings 与 Help
+  不建立独立居中内容轴或额外页面级水平 padding。详情页使用“全宽详情头 + 主画布”。
 - **Form grid:** 184px 标签轨 + 弹性控件轨，水平间距 32px；容器不足 620px 时折为单列。
 - **Management tables:** 工具栏、表头、正文与 56px 分页脚形成连续表面。横向表格固定身份列与操作列。
 - **Workflow editor:** 左侧单层分区栏切换基础、软件、词典和字体四个任务面；右侧只显示当前任务。
@@ -221,7 +220,8 @@ Glyphshift 使用小半径、近矩形的 Windows 工具形态：
 
 ### Page headers
 
-列表页使用 40px 图标、20px 标题和右侧主要动作；只有需要补充非显然范围或后果时才显示单行说明。
+所有一级页面使用同一满宽页头：40px 图标、20px 标题和右侧主要动作；只有需要补充非显然范围或后果
+时才显示单行说明。
 独立详情使用 64px 或 80px 高的横向标题带，保留返回、对象标题、未保存状态和直接动作。对象身份与
 操作不得被重复包进第二张卡。
 
@@ -262,9 +262,10 @@ AI 翻译在同一分区管理连接与模型。立即生效的设置不增加
 
 ### Help and recovery
 
-Help 使用“使用指南 / AI 翻译 / 故障排查 / 技术与兼容”四个横向 Tab，默认以六步完整路径教用户完成
-一次实际界面翻译，并提供直达页面入口。AI Tab 解释后台任务和 Provider 实报 Token；故障恢复按用户
-看到的现象命名；Adapter 版本、配置和官方文档只在技术与兼容 Tab 渐进披露。
+Help 使用“使用指南 / AI 翻译 / 故障排查 / 技术与兼容 / 关于”五个横向 Tab，默认以六步完整路径教
+用户完成一次实际界面翻译，并提供直达页面入口。AI Tab 解释后台任务和 Provider 实报 Token；故障
+恢复按用户看到的现象命名；Adapter 版本、配置和官方文档只在技术与兼容 Tab 渐进披露；About 使用
+连续资源行显示当前版本、项目仓库和作者主页，不创建营销式卡片。
 
 ### Overlays and menus
 

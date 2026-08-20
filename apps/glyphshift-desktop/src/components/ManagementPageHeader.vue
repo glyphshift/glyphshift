@@ -14,8 +14,9 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <header class="mb-4 flex min-h-10 items-center gap-3">
+  <header data-testid="management-page-header" class="mb-4 flex min-h-10 w-full items-center gap-3">
     <span
+      data-testid="management-page-header-icon"
       class="grid h-10 w-10 shrink-0 place-items-center rounded-[7px] border border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--accent-strong)]"
       aria-hidden="true"
     >

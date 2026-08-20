@@ -349,12 +349,20 @@ export default {
   },
   help: {
     title: '帮助',
-    description: '从第一次界面翻译到故障排查，按实际任务找到下一步。Glyphshift 不修改目标软件安装文件。',
     tabs: {
       guide: '使用指南',
       ai: 'AI 翻译',
       recovery: '故障排查',
       compatibility: '技术与兼容',
+      about: '关于',
+    },
+    about: {
+      version: '版本 v{version}',
+      github: 'GitHub 仓库',
+      bilibili: '哔哩哔哩主页',
+      open: '打开',
+      openNamed: '打开{name}',
+      openFailed: '无法打开链接。请检查系统默认浏览器后重试。',
     },
     guide: {
       title: '完成第一次界面翻译',

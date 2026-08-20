@@ -6,7 +6,6 @@ const props = withDefaults(defineProps<{
   description?: string
   titleId: string
   backLabel?: string
-  contentWidth?: 'full' | 'utility'
   flushAfter?: boolean
 }>(), {
   description: undefined,
@@ -23,17 +22,7 @@ defineEmits<{ back: [] }>()
     class="-mx-4 -mt-4 flex shrink-0 border-b border-[var(--border)] bg-[var(--titlebar)] px-4"
     :class="[$slots.detail ? 'min-h-20' : 'min-h-16', props.flushAfter ? 'mb-0' : 'mb-4']"
   >
-    <div
-      :class="props.contentWidth === 'utility'
-        ? 'mx-auto w-full'
-        : 'w-full'"
-      :style="props.contentWidth === 'utility'
-        ? {
-            maxWidth: 'calc(var(--utility-page-content-width) + var(--utility-page-axis-inset) + var(--utility-page-axis-inset))',
-            paddingInline: 'var(--utility-page-axis-inset)',
-          }
-        : undefined"
-    >
+    <div class="w-full">
       <div
         data-testid="management-detail-header-content"
         class="flex w-full items-center justify-between gap-4"

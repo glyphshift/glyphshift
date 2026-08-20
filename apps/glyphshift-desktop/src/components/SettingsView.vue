@@ -227,6 +227,7 @@ onBeforeUnmount(() => {
   <UtilityPageShell
       title-id="settings-title"
       :title="t('settings.title')"
+      icon="i-tabler-settings"
       content-test-id="settings-layout"
   >
     <div class="space-y-4">

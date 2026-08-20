@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useToast } from '@nuxt/ui/composables'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { version as appVersion } from '../../package.json'
 import glyphshiftIconUrl from '../../src-tauri/icons/icon.svg?url'
 import { useAppSettings } from '../appSettings'
 import type { ProbeActivityStatus } from '../useProbeRuns'
@@ -70,7 +71,7 @@ async function native(action: 'minimize' | 'maximize') {
         class="pointer-events-none size-6 shrink-0"
       >
       <strong class="text-[13px] font-semibold tracking-[-0.015em] text-[var(--text)]">Glyphshift</strong>
-      <span class="type-caption text-[var(--text-muted)]">v0.2</span>
+      <span class="type-caption tabular-nums text-[var(--text-muted)]">v{{ appVersion }}</span>
     </div>
     <nav class="flex items-stretch" :aria-label="t('titleBar.navigation')">
       <UButton

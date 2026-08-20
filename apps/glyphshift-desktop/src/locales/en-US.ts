@@ -355,12 +355,20 @@ export default {
   },
   help: {
     title: 'Help',
-    description: 'Find the next step from your first interface translation through troubleshooting. Glyphshift does not modify the target application files.',
     tabs: {
       guide: 'Usage guide',
       ai: 'AI translation',
       recovery: 'Troubleshooting',
       compatibility: 'Technology & compatibility',
+      about: 'About',
+    },
+    about: {
+      version: 'Version v{version}',
+      github: 'GitHub repository',
+      bilibili: 'Bilibili profile',
+      open: 'Open',
+      openNamed: 'Open {name}',
+      openFailed: 'The link could not be opened. Check the system default browser and try again.',
     },
     guide: {
       title: 'Complete your first interface translation',

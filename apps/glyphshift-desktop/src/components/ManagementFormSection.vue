@@ -11,7 +11,7 @@ withDefaults(defineProps<{
 
 <template>
   <section
-    class="@container mx-auto w-full max-w-[980px] overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--surface-inset)]"
+    class="@container w-full overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--surface-inset)]"
     :aria-label="title"
   >
     <header class="border-b border-[var(--border)] px-5" :class="description ? 'py-4' : 'py-3'">
