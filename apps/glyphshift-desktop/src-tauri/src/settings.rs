@@ -12,10 +12,6 @@ fn default_software_capture_shortcut() -> Box<str> {
     DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
 }
 
-const fn default_confirm_ai_translation() -> bool {
-    true
-}
-
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) enum LocalePreference {
     #[default]
@@ -44,17 +40,8 @@ pub(crate) enum CloseBehavior {
     Quit,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LegacyAiTranslationBatchSettings {
-    #[serde(rename = "maxItemsPerRequest")]
-    _max_items_per_request: u16,
-    #[serde(default, rename = "maxInputTokensPerRequest", skip_serializing)]
-    _legacy_removed_token_budget: Option<u32>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AppSettings {
     settings_schema_version: u16,
     locale_preference: LocalePreference,
@@ -65,14 +52,8 @@ pub(crate) struct AppSettings {
     launch_elevated: bool,
     #[serde(default)]
     close_behavior: CloseBehavior,
-    #[serde(default, rename = "interactiveTranslationShortcut", skip_serializing)]
-    _legacy_removed_shortcut: Option<Box<str>>,
     #[serde(default = "default_software_capture_shortcut")]
     software_capture_shortcut: Box<str>,
-    #[serde(default, rename = "aiTranslationBatch", skip_serializing)]
-    _legacy_removed_ai_translation_batch: Option<LegacyAiTranslationBatchSettings>,
-    #[serde(default = "default_confirm_ai_translation")]
-    confirm_ai_translation: bool,
 }
 
 impl Default for AppSettings {
@@ -84,10 +65,7 @@ impl Default for AppSettings {
             launch_at_startup: false,
             launch_elevated: false,
             close_behavior: CloseBehavior::default(),
-            _legacy_removed_shortcut: None,
             software_capture_shortcut: default_software_capture_shortcut(),
-            _legacy_removed_ai_translation_batch: None,
-            confirm_ai_translation: true,
         }
     }
 }
@@ -110,6 +88,59 @@ impl AppSettings {
     }
 }
 
+fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
+    let Some(object) = value.as_object() else {
+        return AppSettings::default();
+    };
+    let locale_preference = match object
+        .get("localePreference")
+        .and_then(|value| value.as_str())
+    {
+        Some("zh-CN") => LocalePreference::ZhCn,
+        Some("en-US") => LocalePreference::EnUs,
+        _ => LocalePreference::System,
+    };
+    let theme_preference = match object
+        .get("themePreference")
+        .and_then(|value| value.as_str())
+    {
+        Some("system") => ThemePreference::System,
+        Some("light") => ThemePreference::Light,
+        _ => ThemePreference::Dark,
+    };
+    let close_behavior = match object.get("closeBehavior").and_then(|value| value.as_str()) {
+        Some("minimize") => CloseBehavior::Minimize,
+        _ => CloseBehavior::Quit,
+    };
+    let software_capture_shortcut = object
+        .get("softwareCaptureShortcut")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map_or_else(default_software_capture_shortcut, Into::into);
+    AppSettings {
+        settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
+        locale_preference,
+        theme_preference,
+        launch_at_startup: object
+            .get("launchAtStartup")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        launch_elevated: object
+            .get("launchElevated")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        close_behavior,
+        software_capture_shortcut,
+    }
+}
+
+fn preserve_invalid_settings(path: &Path) {
+    let backup = path.with_extension("invalid.json");
+    if !backup.exists() {
+        let _ = fs::copy(path, backup);
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSettingsUpdate {
@@ -119,9 +150,6 @@ pub(crate) struct AppSettingsUpdate {
     launch_elevated: bool,
     close_behavior: CloseBehavior,
     software_capture_shortcut: Box<str>,
-    #[serde(default, rename = "aiTranslationBatch")]
-    _legacy_removed_ai_translation_batch: Option<LegacyAiTranslationBatchSettings>,
-    confirm_ai_translation: bool,
 }
 
 impl AppSettingsUpdate {
@@ -147,10 +175,7 @@ impl From<AppSettingsUpdate> for AppSettings {
             launch_at_startup: update.launch_at_startup,
             launch_elevated: update.launch_elevated,
             close_behavior: update.close_behavior,
-            _legacy_removed_shortcut: None,
             software_capture_shortcut: update.software_capture_shortcut,
-            _legacy_removed_ai_translation_batch: None,
-            confirm_ai_translation: update.confirm_ai_translation,
         }
     }
 }
@@ -203,9 +228,12 @@ impl AppSettingsStore {
         let path = data_root.as_ref().join(SETTINGS_FILE_NAME);
         let (current, load_error) = if path.exists() {
             let reader = BufReader::new(File::open(&path).map_err(|_| SettingsError::Storage)?);
-            match serde_json::from_reader::<_, AppSettings>(reader) {
-                Ok(settings) if settings.is_valid() => (settings, None),
-                _ => (AppSettings::default(), Some(SettingsError::InvalidData)),
+            match serde_json::from_reader::<_, serde_json::Value>(reader) {
+                Ok(value) => (normalize_persisted_settings(&value), None),
+                Err(_) => {
+                    preserve_invalid_settings(&path);
+                    (AppSettings::default(), None)
+                }
             }
         } else {
             (AppSettings::default(), None)
@@ -311,8 +339,6 @@ mod tests {
                 launch_elevated: true,
                 close_behavior: CloseBehavior::Minimize,
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
-                _legacy_removed_ai_translation_batch: None,
-                confirm_ai_translation: false,
             })
             .expect("save settings");
         let reopened = AppSettingsStore::open(root.path()).expect("reopen settings store");
@@ -321,12 +347,15 @@ mod tests {
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
-        assert!(!saved.confirm_ai_translation);
+        assert!(serde_json::to_value(&saved)
+            .expect("serialize settings")
+            .get("confirmAiTranslation")
+            .is_none());
         assert_eq!(reopened.current(), Ok(saved));
     }
 
     #[test]
-    fn unknown_schema_and_enum_values_are_rejected() {
+    fn unknown_schema_and_enum_values_fall_back_without_blocking_settings() {
         let root = tempdir().expect("temporary settings root");
         fs::write(
             root.path().join(SETTINGS_FILE_NAME),
@@ -335,7 +364,7 @@ mod tests {
         .expect("write invalid settings");
 
         let mut store = AppSettingsStore::open(root.path()).expect("open with safe defaults");
-        assert_eq!(store.current(), Err(SettingsError::InvalidData));
+        assert_eq!(store.current(), Ok(AppSettings::default()));
 
         let recovered = store
             .update(AppSettingsUpdate {
@@ -345,26 +374,70 @@ mod tests {
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
-                _legacy_removed_ai_translation_batch: None,
-                confirm_ai_translation: true,
             })
             .expect("replace invalid settings");
         assert_eq!(store.current(), Ok(recovered));
     }
 
     #[test]
-    fn legacy_settings_gain_safe_application_behavior_defaults() {
+    fn settings_keep_valid_fields_when_other_fields_are_unknown_or_invalid() {
         let root = tempdir().expect("temporary settings root");
         fs::write(
             root.path().join(SETTINGS_FILE_NAME),
-            r#"{"settingsSchemaVersion":1,"localePreference":"zh-CN","themePreference":"dark","interactiveTranslationShortcut":"Ctrl+Shift+F9","aiTranslationBatch":{"maxItemsPerRequest":75,"maxInputTokensPerRequest":16000}}"#,
+            r#"{
+  "settingsSchemaVersion": 999,
+  "localePreference": "en-US",
+  "themePreference": 42,
+  "launchAtStartup": true,
+  "launchElevated": "invalid",
+  "closeBehavior": "future-option",
+  "softwareCaptureShortcut": "Ctrl+Alt+KeyS",
+  "unknownFutureField": { "enabled": true }
+}"#,
         )
-        .expect("write legacy settings");
+        .expect("write partially invalid settings");
 
         let settings = AppSettingsStore::open(root.path())
-            .expect("open legacy settings")
+            .expect("open settings store")
             .current()
-            .expect("legacy settings remain valid");
+            .expect("salvage valid settings fields");
+
+        assert_eq!(settings.locale_preference, LocalePreference::EnUs);
+        assert_eq!(settings.theme_preference, ThemePreference::Dark);
+        assert!(settings.launch_at_startup);
+        assert!(!settings.launch_elevated);
+        assert_eq!(settings.close_behavior, CloseBehavior::Quit);
+        assert_eq!(settings.software_capture_shortcut(), "Ctrl+Alt+KeyS");
+    }
+
+    #[test]
+    fn malformed_settings_fall_back_without_deleting_the_original_file() {
+        let root = tempdir().expect("temporary settings root");
+        fs::write(root.path().join(SETTINGS_FILE_NAME), b"{").expect("write malformed settings");
+
+        let settings = AppSettingsStore::open(root.path())
+            .expect("open malformed settings safely")
+            .current()
+            .expect("use safe settings defaults");
+
+        assert_eq!(settings, AppSettings::default());
+        assert!(root.path().join("app-settings.json").exists());
+        assert!(root.path().join("app-settings.invalid.json").exists());
+    }
+
+    #[test]
+    fn missing_fields_use_safe_application_behavior_defaults_and_unknown_fields_are_ignored() {
+        let root = tempdir().expect("temporary settings root");
+        fs::write(
+            root.path().join(SETTINGS_FILE_NAME),
+            r#"{"settingsSchemaVersion":1,"localePreference":"zh-CN","themePreference":"dark","unknownShortcut":"Ctrl+Shift+F9","unknownObject":{"count":75},"unknownBoolean":false}"#,
+        )
+        .expect("write partial settings");
+
+        let settings = AppSettingsStore::open(root.path())
+            .expect("open partial settings")
+            .current()
+            .expect("partial settings remain valid");
 
         assert!(!settings.launch_at_startup);
         assert!(!settings.launch_elevated);
@@ -374,37 +447,9 @@ mod tests {
             settings.software_capture_shortcut(),
             DEFAULT_SOFTWARE_CAPTURE_SHORTCUT
         );
-        assert!(settings.confirm_ai_translation);
-        let serialized = serde_json::to_value(settings).expect("serialize migrated settings");
-        assert!(serialized.get("interactiveTranslationShortcut").is_none());
-        assert!(serialized.get("aiTranslationBatch").is_none());
-    }
-
-    #[test]
-    fn removed_global_ai_batch_policy_is_ignored_on_update() {
-        let root = tempdir().expect("temporary settings root");
-        let mut store = AppSettingsStore::open(root.path()).expect("open settings store");
-
-        let saved = store
-            .update(AppSettingsUpdate {
-                locale_preference: LocalePreference::ZhCn,
-                theme_preference: ThemePreference::Dark,
-                launch_at_startup: false,
-                launch_elevated: false,
-                close_behavior: CloseBehavior::Quit,
-                software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
-                _legacy_removed_ai_translation_batch: Some(LegacyAiTranslationBatchSettings {
-                    _max_items_per_request: 75,
-                    _legacy_removed_token_budget: None,
-                }),
-                confirm_ai_translation: true,
-            })
-            .expect("save settings without the removed batch policy");
-
-        assert_eq!(store.current(), Ok(saved.clone()));
-        assert!(serde_json::to_value(saved)
-            .expect("serialize settings")
-            .get("aiTranslationBatch")
-            .is_none());
+        let serialized = serde_json::to_value(settings).expect("serialize normalized settings");
+        assert!(serialized.get("unknownShortcut").is_none());
+        assert!(serialized.get("unknownObject").is_none());
+        assert!(serialized.get("unknownBoolean").is_none());
     }
 }

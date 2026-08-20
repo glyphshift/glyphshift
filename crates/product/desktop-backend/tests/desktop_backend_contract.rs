@@ -533,7 +533,49 @@ fn desktop_keeps_dictionary_text_and_workflow_font_policy_independent_across_res
 }
 
 #[test]
-fn desktop_rejects_the_unreleased_dictionary_v1_shape_instead_of_migrating_it() {
+fn desktop_migrates_dictionary_v2_without_losing_completed_entries() {
+    let root = tempdir().expect("temporary product data");
+    drop(
+        DesktopBackend::open_with_environment(root.path(), environment())
+            .expect("initialize current product data"),
+    );
+    let dictionary_path = root.path().join("dictionaries/dictionary.legacy.json");
+    fs::write(
+        &dictionary_path,
+        r#"{
+  "schema": "glyphshift.dictionary/2",
+  "revision": 7,
+  "metadata": {
+    "id": "dictionary.legacy",
+    "releaseVersion": "1.2.3",
+    "name": "Legacy",
+    "description": "Legacy product data",
+    "sourceLocale": "en-US",
+    "targetLocale": "zh-CN",
+    "authors": ["Fixture"],
+    "license": "MIT",
+    "homepage": null,
+    "tags": ["ui"]
+  },
+  "entries": [{"source": "Open", "translation": "打开"}]
+}"#,
+    )
+    .expect("write synthetic Dictionary /2 fixture");
+
+    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("migrate valid Dictionary /2 product data");
+    let dictionary = reopened
+        .dictionary("dictionary.legacy")
+        .expect("load migrated dictionary");
+    assert_eq!(dictionary.revision(), 7);
+    assert_eq!(dictionary.entries()[0].translation(), "打开");
+    let persisted = fs::read_to_string(dictionary_path).expect("read migrated dictionary");
+    assert!(persisted.contains("glyphshift.dictionary/3"));
+    assert!(!persisted.contains("glyphshift.dictionary/2"));
+}
+
+#[test]
+fn desktop_skips_one_invalid_dictionary_and_reports_it_without_failing_startup() {
     let root = tempdir().expect("temporary product data");
     drop(
         DesktopBackend::open_with_environment(root.path(), environment())
@@ -553,9 +595,110 @@ fn desktop_rejects_the_unreleased_dictionary_v1_shape_instead_of_migrating_it() 
     )
     .expect("write synthetic obsolete dictionary fixture");
 
-    let reopened = DesktopBackend::open_with_environment(root.path(), environment());
-    assert!(matches!(
-        reopened,
-        Err(BackendError::InvalidArtifact("dictionary-json"))
-    ));
+    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("skip one unsupported dictionary without failing startup");
+    assert!(reopened.snapshot().dictionaries().is_empty());
+    let snapshot = serde_json::to_value(reopened.snapshot()).expect("serialize startup warnings");
+    assert_eq!(
+        snapshot["artifactWarnings"][0]["artifactKind"],
+        "dictionary"
+    );
+    assert_eq!(snapshot["artifactWarnings"][0]["artifactId"], "legacy");
+}
+
+#[test]
+fn desktop_keeps_valid_local_software_when_another_record_is_invalid() {
+    let root = tempdir().expect("temporary product data");
+    let executable = root.path().join("SyntheticEditor.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            &executable,
+        ))
+        .expect("add valid software");
+    drop(backend);
+
+    let state_path = root.path().join("desktop-state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read desktop state"))
+            .expect("parse desktop state");
+    state["unknownFutureField"] = serde_json::json!(true);
+    let valid_id = state["selectedSoftwareId"]
+        .as_str()
+        .expect("selected valid software")
+        .to_owned();
+    state["software"][&valid_id]["displayName"] = serde_json::json!(42);
+    state["software"][&valid_id]["description"] = serde_json::json!(42);
+    state["software"][&valid_id]["unknownRecordField"] = serde_json::json!(true);
+    state["software"]["local.invalid"] = serde_json::json!({
+        "displayName": 42,
+        "description": "invalid record",
+        "executablePath": "relative.exe"
+    });
+    fs::write(
+        &state_path,
+        serde_json::to_vec(&state).expect("encode partial desktop state"),
+    )
+    .expect("write partial desktop state");
+
+    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("keep valid local software");
+    assert_eq!(reopened.snapshot().software().len(), 1);
+    assert_eq!(reopened.snapshot().software()[0].name(), valid_id);
+}
+
+#[test]
+fn desktop_skips_one_invalid_workflow_without_hiding_other_workflows() {
+    let root = tempdir().expect("temporary product data");
+    let executable = root.path().join("SyntheticEditor.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("open empty product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            &executable,
+        ))
+        .expect("add valid software")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.valid", "Valid Workflow").with_targets([
+                WorkflowTargetCreate::new(software_id, ["adapter-gdi"], [] as [&str; 0]),
+            ]),
+        )
+        .expect("create valid workflow");
+    drop(backend);
+    let valid_path = root.path().join("workflows/workflow.valid.json");
+    let mut valid: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&valid_path).expect("read valid workflow"))
+            .expect("parse valid workflow");
+    valid["name"] = serde_json::json!(42);
+    valid["description"] = serde_json::json!(42);
+    valid["revision"] = serde_json::json!("invalid");
+    valid["unknownFutureField"] = serde_json::json!(true);
+    valid["targets"]
+        .as_array_mut()
+        .expect("workflow targets")
+        .push(serde_json::json!({ "softwareId": 42 }));
+    fs::write(
+        &valid_path,
+        serde_json::to_vec(&valid).expect("encode partially invalid workflow"),
+    )
+    .expect("write partially invalid workflow");
+    fs::write(
+        root.path().join("workflows/workflow.invalid.json"),
+        r#"{"schema":"glyphshift.workflow/3","id":42,"name":"Invalid"}"#,
+    )
+    .expect("write invalid workflow record");
+
+    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("skip only invalid workflow");
+    assert_eq!(reopened.snapshot().workflows().len(), 1);
+    assert_eq!(reopened.snapshot().workflows()[0].id(), "workflow.valid");
+    assert_eq!(reopened.snapshot().workflows()[0].name(), "workflow.valid");
+    assert_eq!(reopened.snapshot().workflows()[0].revision(), 1);
 }

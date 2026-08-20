@@ -1,15 +1,12 @@
 use super::*;
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProfileError, AiProfileView, AiTranslation,
-    CancellationOutcome, CredentialVault, CredentialVaultError, PlanError, ReqwestHttpTransport,
-    TranslationItem, TranslationJobError, TranslationJobId, TranslationJobSnapshot,
-    TranslationPlan, TranslationPlanRequest, TranslationRunHistory, TranslationRunRecord,
-    ValidatedTranslation,
+    CancellationOutcome, PlanError, ReqwestHttpTransport, TranslationItem, TranslationJobError,
+    TranslationJobId, TranslationJobSnapshot, TranslationPlan, TranslationPlanRequest,
+    TranslationRunHistory, TranslationRunRecord, ValidatedTranslation,
 };
 use std::path::Path;
 use std::sync::Arc;
-
-const AI_CREDENTIAL_SERVICE: &str = "Glyphshift AI Profiles";
 
 pub(super) struct DesktopAiState {
     profiles: AiProfileCatalog,
@@ -41,7 +38,7 @@ struct ActiveTranslationTask {
 
 impl DesktopAiState {
     pub(super) fn open(data_root: &Path) -> Result<Self, String> {
-        let profiles = AiProfileCatalog::open(data_root, system_credential_vault())
+        let profiles = AiProfileCatalog::open(data_root)
             .map_err(|error| format!("AI profile startup: {error:?}"))?;
         let history = TranslationRunHistory::open(data_root)
             .map_err(|error| format!("AI translation history startup: {error:?}"))?;
@@ -680,86 +677,6 @@ fn monitor_translation_task(app: tauri::AppHandle, job_id: TranslationJobId) {
     });
 }
 
-#[cfg(windows)]
-#[derive(Default)]
-struct SystemCredentialVault;
-
-#[cfg(windows)]
-impl SystemCredentialVault {
-    fn entry(credential_ref: &str) -> Result<keyring::Entry, CredentialVaultError> {
-        keyring::Entry::new(AI_CREDENTIAL_SERVICE, credential_ref).map_err(map_keyring_error)
-    }
-}
-
-#[cfg(windows)]
-impl CredentialVault for SystemCredentialVault {
-    fn replace(&self, credential_ref: &str, secret: &str) -> Result<(), CredentialVaultError> {
-        Self::entry(credential_ref)?
-            .set_password(secret)
-            .map_err(map_keyring_error)
-    }
-
-    fn contains(&self, credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        match Self::entry(credential_ref)?.get_password() {
-            Ok(_) => Ok(true),
-            Err(keyring::Error::NoEntry) => Ok(false),
-            Err(error) => Err(map_keyring_error(error)),
-        }
-    }
-
-    fn delete(&self, credential_ref: &str) -> Result<(), CredentialVaultError> {
-        match Self::entry(credential_ref)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(map_keyring_error(error)),
-        }
-    }
-
-    fn expose(&self, credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        Self::entry(credential_ref)?
-            .get_password()
-            .map(Into::into)
-            .map_err(map_keyring_error)
-    }
-}
-
-#[cfg(windows)]
-fn map_keyring_error(error: keyring::Error) -> CredentialVaultError {
-    match error {
-        keyring::Error::NoEntry => CredentialVaultError::Missing,
-        keyring::Error::Invalid(_, _) | keyring::Error::TooLong(_, _) => {
-            CredentialVaultError::Rejected
-        }
-        _ => CredentialVaultError::Unavailable,
-    }
-}
-
-#[cfg(not(windows))]
-#[derive(Default)]
-struct SystemCredentialVault;
-
-#[cfg(not(windows))]
-impl CredentialVault for SystemCredentialVault {
-    fn replace(&self, _credential_ref: &str, _secret: &str) -> Result<(), CredentialVaultError> {
-        Err(CredentialVaultError::Unavailable)
-    }
-
-    fn contains(&self, _credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        Ok(false)
-    }
-
-    fn delete(&self, _credential_ref: &str) -> Result<(), CredentialVaultError> {
-        Ok(())
-    }
-
-    fn expose(&self, _credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        Err(CredentialVaultError::Missing)
-    }
-}
-
-fn system_credential_vault() -> Box<dyn CredentialVault> {
-    Box::new(SystemCredentialVault)
-}
-
 fn ai_profile_error(error: AiProfileError) -> CommandError {
     match error {
         AiProfileError::Storage | AiProfileError::InvalidArtifact => {
@@ -771,15 +688,7 @@ fn ai_profile_error(error: AiProfileError) -> CommandError {
         AiProfileError::UnknownProfile(profile_id) => {
             CommandError::new("ai.profile_not_found").with_arg("profileId", profile_id.to_string())
         }
-        AiProfileError::Credential(CredentialVaultError::Missing) => {
-            CommandError::new("ai.credential_missing")
-        }
-        AiProfileError::Credential(CredentialVaultError::Unavailable) => {
-            CommandError::new("ai.credential_unavailable")
-        }
-        AiProfileError::Credential(CredentialVaultError::Rejected) => {
-            CommandError::new("ai.credential_rejected")
-        }
+        AiProfileError::MissingCredential => CommandError::new("ai.credential_missing"),
     }
 }
 

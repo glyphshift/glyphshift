@@ -41,7 +41,7 @@ pub enum PlanError {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct FilterPolicy {
     skip_pure_numbers_or_symbols: bool,
     skip_numeric_measurements: bool,
@@ -73,6 +73,40 @@ impl Default for FilterPolicy {
 }
 
 impl FilterPolicy {
+    pub(crate) fn from_persisted_value(value: Option<&serde_json::Value>) -> Self {
+        let mut policy = Self::default();
+        let Some(object) = value.and_then(serde_json::Value::as_object) else {
+            return policy;
+        };
+        macro_rules! restore_bool {
+            ($field:ident, $key:literal) => {
+                if let Some(value) = object.get($key).and_then(serde_json::Value::as_bool) {
+                    policy.$field = value;
+                }
+            };
+        }
+        restore_bool!(skip_pure_numbers_or_symbols, "skipPureNumbersOrSymbols");
+        restore_bool!(skip_numeric_measurements, "skipNumericMeasurements");
+        restore_bool!(skip_single_character, "skipSingleCharacter");
+        restore_bool!(skip_text_containing_digits, "skipTextContainingDigits");
+        restore_bool!(skip_urls, "skipUrls");
+        restore_bool!(skip_emails, "skipEmails");
+        restore_bool!(skip_file_paths, "skipFilePaths");
+        restore_bool!(skip_shortcuts, "skipShortcuts");
+        policy.max_source_chars = object
+            .get("maxSourceChars")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok());
+        policy.excluded_patterns = object
+            .get("excludedPatterns")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.as_str().map(Into::into))
+            .collect();
+        policy
+    }
+
     #[must_use]
     pub const fn with_skip_text_containing_digits(mut self, enabled: bool) -> Self {
         self.skip_text_containing_digits = enabled;

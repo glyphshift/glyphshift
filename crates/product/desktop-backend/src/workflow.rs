@@ -880,9 +880,12 @@ fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result
     Ok(())
 }
 
-pub(super) fn read_workflows(
-    root: &Path,
-) -> Result<BTreeMap<Box<str>, WorkflowArtifact>, BackendError> {
+pub(super) struct WorkflowLoad {
+    pub(super) workflows: BTreeMap<Box<str>, WorkflowArtifact>,
+    pub(super) warnings: Vec<ArtifactWarningView>,
+}
+
+pub(super) fn read_workflows(root: &Path) -> Result<WorkflowLoad, BackendError> {
     let directory = root.join("workflows");
     let mut paths = fs::read_dir(&directory)
         .map_err(|_| BackendError::Storage("read-workflow-directory"))?
@@ -892,15 +895,74 @@ pub(super) fn read_workflows(
         .collect::<Vec<_>>();
     paths.sort();
     let mut workflows = BTreeMap::new();
+    let mut warnings = Vec::new();
     for path in paths {
-        let artifact: WorkflowArtifact = read_json(&path, "workflow-json")?;
-        validate_workflow(&artifact, Some(&path))?;
+        let artifact_id = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("unreadable-file-name");
+        let Ok(source) = fs::read_to_string(&path) else {
+            warnings.push(ArtifactWarningView::workflow(artifact_id, "unreadable"));
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&source) else {
+            warnings.push(ArtifactWarningView::workflow(artifact_id, "unreadable"));
+            continue;
+        };
+        let Some(artifact) = workflow_artifact_from_value(&value) else {
+            warnings.push(ArtifactWarningView::workflow(artifact_id, "invalid"));
+            continue;
+        };
+        if validate_workflow(&artifact, Some(&path)).is_err() {
+            warnings.push(ArtifactWarningView::workflow(artifact_id, "invalid"));
+            continue;
+        }
         let workflow_id = artifact.id.clone();
         if workflows.insert(workflow_id.clone(), artifact).is_some() {
-            return Err(BackendError::DuplicateWorkflow(workflow_id));
+            warnings.push(ArtifactWarningView::workflow(
+                workflow_id,
+                "duplicate_identity",
+            ));
         }
     }
-    Ok(workflows)
+    Ok(WorkflowLoad {
+        workflows,
+        warnings,
+    })
+}
+
+fn workflow_artifact_from_value(value: &serde_json::Value) -> Option<WorkflowArtifact> {
+    let object = value.as_object()?;
+    let id = object.get("id")?.as_str()?;
+    let name = object
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(id);
+    let description = object
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let revision = object
+        .get("revision")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|revision| *revision > 0)
+        .unwrap_or(1);
+    let targets = object
+        .get("targets")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|target| serde_json::from_value(target.clone()).ok())
+        .collect();
+    Some(WorkflowArtifact {
+        schema: WORKFLOW_SCHEMA.into(),
+        id: id.into(),
+        name: name.into(),
+        description: description.into(),
+        revision,
+        targets,
+    })
 }
 
 pub(super) fn read_workflow_state(
@@ -911,17 +973,24 @@ pub(super) fn read_workflow_state(
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
-    let state: WorkflowStateArtifact = read_json(&path, "workflow-state-json")?;
-    if state.schema.as_ref() != WORKFLOW_STATE_SCHEMA
-        || state.enabled.iter().any(|(workflow_id, revision)| {
+    let source =
+        fs::read_to_string(&path).map_err(|_| BackendError::Storage("read-workflow-state"))?;
+    let value =
+        serde_json::from_str::<serde_json::Value>(&source).unwrap_or(serde_json::Value::Null);
+    let enabled = value
+        .get("enabled")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(workflow_id, revision)| {
+            let revision = revision.as_u64()?;
             workflows
-                .get(workflow_id)
-                .is_none_or(|workflow| workflow.revision != *revision)
+                .get(workflow_id.as_str())
+                .is_some_and(|workflow| workflow.revision == revision)
+                .then(|| (Box::<str>::from(workflow_id.as_str()), revision))
         })
-    {
-        return Err(BackendError::InvalidArtifact("workflow-state-contract"));
-    }
-    Ok(state.enabled)
+        .collect();
+    Ok(enabled)
 }
 
 fn write_workflow_state(

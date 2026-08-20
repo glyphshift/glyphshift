@@ -28,7 +28,7 @@ fn observation_batch_round_trips_generation_sequence_gap_and_drop_evidence() {
     assert!(!encoded.contains("translation"));
 }
 #[test]
-fn observation_batch_rejects_unknown_unbounded_or_ambiguous_input() {
+fn observation_batch_ignores_unknown_fields_but_rejects_unbounded_or_ambiguous_input() {
     let producer = || CaptureProducerId::new("worker-1").expect("producer id");
     let record = |sequence| {
         CaptureObservationRecord::new(sequence, "windows.uia.observe", "Name").expect("observation")
@@ -65,10 +65,7 @@ fn observation_batch_rejects_unknown_unbounded_or_ambiguous_input() {
         .encode_json()
         .expect("valid json");
     let unknown = valid.replacen("\"records\"", "\"unknown\":true,\"records\"", 1);
-    assert_eq!(
-        CaptureObservationBatch::decode_json(&unknown),
-        Err(CaptureError::InvalidObservationBatch)
-    );
+    assert!(CaptureObservationBatch::decode_json(&unknown).is_ok());
     assert_eq!(
         CaptureObservationBatch::decode_json(&"x".repeat(MAX_OBSERVATION_BATCH_BYTES + 1)),
         Err(CaptureError::InvalidObservationBatch)

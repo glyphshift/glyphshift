@@ -31,10 +31,7 @@ if ($LASTEXITCODE -ne 0) {
 $pausedAdapterPackages = @(
     'glyphshift-adapter-console',
     'glyphshift-adapter-console-native',
-    'glyphshift-adapter-ocr',
-    'glyphshift-adapter-ocr-worker',
-    'glyphshift-adapter-uia',
-    'glyphshift-adapter-uia-worker'
+    'glyphshift-adapter-ocr'
 )
 $testArguments = @('test', '--manifest-path', $manifestPath, '--workspace')
 foreach ($pausedAdapterPackage in $pausedAdapterPackages) {

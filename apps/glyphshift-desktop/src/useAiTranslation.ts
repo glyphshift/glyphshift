@@ -41,6 +41,7 @@ export interface AiProfile {
   maxConcurrency: number
   maxRetries: number
   filterPolicy: AiFilterPolicy
+  credential?: string | null
   hasCredential: boolean
   credentialRequired: boolean
 }
@@ -50,7 +51,7 @@ export type CredentialUpdate
     | { action: 'replace'; secret: string }
     | { action: 'clear' }
 
-export interface AiProfileDraft extends Omit<AiProfile, 'hasCredential' | 'credentialRequired'> {
+export interface AiProfileDraft extends Omit<AiProfile, 'credential' | 'hasCredential' | 'credentialRequired'> {
   credential: CredentialUpdate
 }
 
@@ -241,14 +242,14 @@ export const defaultAiFilterPolicy = (): AiFilterPolicy => ({
   excludedPatterns: [],
 })
 
-export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; concurrency: number; credentialRequired: boolean }> = {
-  codex_subscription: { baseUrl: 'codex://local', concurrency: 1, credentialRequired: false },
-  open_ai_responses: { baseUrl: 'https://api.openai.com/v1', concurrency: 2, credentialRequired: true },
-  open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', concurrency: 2, credentialRequired: true },
-  open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', concurrency: 2, credentialRequired: false },
-  anthropic_messages: { baseUrl: 'https://api.anthropic.com', concurrency: 2, credentialRequired: true },
-  gemini_generate_content: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', concurrency: 2, credentialRequired: true },
-  ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', concurrency: 1, credentialRequired: false },
+export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; modelId: string; concurrency: number; credentialRequired: boolean }> = {
+  codex_subscription: { baseUrl: 'codex://local', modelId: 'gpt-5.6-sol', concurrency: 1, credentialRequired: false },
+  open_ai_responses: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
+  open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
+  open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', modelId: '', concurrency: 2, credentialRequired: false },
+  anthropic_messages: { baseUrl: 'https://api.anthropic.com', modelId: '', concurrency: 2, credentialRequired: true },
+  gemini_generate_content: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelId: '', concurrency: 2, credentialRequired: true },
+  ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', modelId: '', concurrency: 1, credentialRequired: false },
 }
 
 export function defaultAiReasoningEffort(protocol: AiProviderProtocol): AiReasoningEffort {
@@ -322,8 +323,16 @@ function persistBrowserCatalog() {
 }
 
 function normalizeProfile(profile: AiProfile): AiProfile {
+  const credential = typeof profile.credential === 'string' && profile.credential.trim()
+    ? profile.credential
+    : null
   return {
     ...profile,
+    modelId: profile.protocol === 'codex_subscription' && profile.modelId === 'gpt-sol-5.6'
+      ? 'gpt-5.6-sol'
+      : profile.modelId,
+    credential,
+    hasCredential: Boolean(credential),
     reasoningEffort: profile.reasoningEffort ?? defaultAiReasoningEffort(profile.protocol),
     timeoutMs: Number.isInteger(profile.timeoutMs)
       && profile.timeoutMs >= 1_000
@@ -381,15 +390,18 @@ async function saveProfile(profile: AiProfileDraft, makeDefault: boolean) {
     else {
       const previous = catalog.value.profiles.find(item => item.id === profile.id)
       const defaults = providerDefaults[profile.protocol]
+      const credential = profile.credential.action === 'replace'
+        ? profile.credential.secret.trim() || null
+        : profile.credential.action === 'clear'
+          ? null
+          : previous?.credential ?? null
       const next: AiProfile = {
         ...clone(profile),
         filterPolicy: clone(profile.filterPolicy),
-        hasCredential: profile.credential.action === 'replace'
-          ? Boolean(profile.credential.secret.trim())
-          : profile.credential.action === 'clear' ? false : previous?.hasCredential ?? false,
+        credential,
+        hasCredential: Boolean(credential),
         credentialRequired: defaults.credentialRequired,
       }
-      delete (next as Partial<AiProfileDraft>).credential
       catalog.value = {
         defaultProfileId: makeDefault || !catalog.value.defaultProfileId
           ? next.id
@@ -714,11 +726,18 @@ function taskIsTerminal(status: AiTranslationJob['status']) {
   return ['completed', 'completed_with_failures', 'cancelled', 'interrupted'].includes(status)
 }
 
+const dismissedTerminalJobIds = new Set<string>()
+
+function visibleCurrentJob(job: AiTranslationTask | null) {
+  if (!job || (taskIsTerminal(job.status) && dismissedTerminalJobIds.has(job.jobId))) return null
+  return job
+}
+
 async function refreshTaskCenter() {
   if (hasDesktopRuntime()) {
     const next = await invoke<AiTranslationTaskCenter>('desktop_ai_translation_tasks')
     taskCenter.value = next
-    currentJob.value = next.current
+    currentJob.value = visibleCurrentJob(next.current)
     if (next.current) elapsedMs.value = next.current.elapsedMs
     return next
   }
@@ -880,7 +899,16 @@ async function cancelCurrentJob() {
 function dismissCurrentJob() {
   const job = currentJob.value
   if (!job || !taskIsTerminal(job.status)) return
+  dismissedTerminalJobIds.add(job.jobId)
+  if (dismissedTerminalJobIds.size > 32) {
+    const oldestJobId = dismissedTerminalJobIds.values().next().value
+    if (oldestJobId) dismissedTerminalJobIds.delete(oldestJobId)
+  }
   currentJob.value = null
+}
+
+function clearError() {
+  error.value = ''
 }
 
 async function applyProbeResults(runId: string, job: AiTranslationJob): Promise<ProbeAiApplyView> {
@@ -926,6 +954,7 @@ export function useAiTranslation() {
     testProfile,
     cancelCurrentJob,
     dismissCurrentJob,
+    clearError,
     applyProbeResults,
   }
 }

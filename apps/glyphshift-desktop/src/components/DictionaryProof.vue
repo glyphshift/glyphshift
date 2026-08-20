@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
-import { useAppSettings } from '../appSettings'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
@@ -27,7 +26,6 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const ai = useAiTranslation()
-const appSettings = useAppSettings()
 const workspace = useWorkspace()
 
 function clone<T>(value: T): T {
@@ -247,7 +245,7 @@ function dismissAiOutcome() {
   ai.dismissCurrentJob()
 }
 
-async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirmed = false) {
+async function runAiTranslation(plan?: AiTranslationPlan | null) {
   const nextPlan = plan ?? await prepareAiPlan()
   if (!nextPlan || !selectedProfile.value) return
   if (!nextPlan.candidates.length) {
@@ -255,11 +253,7 @@ async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirme
     return
   }
   aiPreviewOpen.value = false
-  if (appSettings.confirmAiTranslation.value && !alreadyConfirmed) {
-    aiPreflightOpen.value = true
-    return
-  }
-  await executeAiTranslation()
+  aiPreflightOpen.value = true
 }
 
 async function executeAiTranslation() {
@@ -365,7 +359,9 @@ usePageEscape(() => true, () => emit('back'))
     <UAlert v-if="dictionaryLocked" role="status" color="warning" variant="soft" icon="i-tabler-lock" :title="t('ai.tasks.dictionaryLocked')" :description="t('ai.tasks.dictionaryLockedDescription')" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.tasks.viewCurrent')" @click="emit('open-ai-tasks')" /></template>
     </UAlert>
-    <UAlert v-else-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
+    <UAlert v-else-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" /></template>
+    </UAlert>
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template #actions>
         <div class="flex items-center gap-1.5">
@@ -511,7 +507,7 @@ usePageEscape(() => true, () => emit('back'))
       :busy="ai.busy.value"
       width="md"
       @update:open="aiPreviewOpen = $event"
-      @confirm="runAiTranslation(aiPlan, true)"
+      @confirm="runAiTranslation(aiPlan)"
     >
       <p v-if="aiPlan?.candidates.length && selectedProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
         {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: selectedProfile.maxItemsPerRequest, batches: Math.ceil(aiPlan.candidates.length / selectedProfile.maxItemsPerRequest), concurrency: selectedProfile.maxConcurrency }) }}

@@ -145,7 +145,7 @@ fn run_codex_translation(
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
     if !status.success() {
-        return Err(codex_failure(&stderr));
+        return Err(codex_failure(&stdout, &stderr));
     }
     let output = std::fs::read(&output_path)
         .map_err(|_| malformed_error("Codex did not return structured translation output"))?;
@@ -252,8 +252,13 @@ fn codex_usage(events: &[u8]) -> Option<ProviderUsage> {
     })
 }
 
-fn codex_failure(stderr: &[u8]) -> ProviderError {
-    let diagnostic = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+fn codex_failure(stdout: &[u8], stderr: &[u8]) -> ProviderError {
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stdout),
+        String::from_utf8_lossy(stderr)
+    )
+    .to_ascii_lowercase();
     if diagnostic.contains("not logged in") || diagnostic.contains("login") {
         ProviderError::new(
             ProviderErrorCategory::Authentication,
@@ -399,6 +404,20 @@ mod tests {
         assert_eq!(
             schema.pointer("/properties/translations/maxItems"),
             Some(&json!(3))
+        );
+    }
+
+    #[test]
+    fn classifies_a_model_error_reported_in_codex_json_events() {
+        let stdout = br#"{"type":"error","message":"The 'gpt-sol-5.6' model is not supported when using Codex with a ChatGPT account."}
+{"type":"turn.failed","error":{"message":"invalid model"}}
+"#;
+        let error = codex_failure(stdout, b"");
+
+        assert_eq!(error.category(), ProviderErrorCategory::ModelNotFound);
+        assert_eq!(
+            error.safe_message(),
+            "The selected model is not available to this Codex subscription"
         );
     }
 }

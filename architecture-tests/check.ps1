@@ -176,16 +176,6 @@ Assert-Dependencies `
     -PackageName 'glyphshift-adapter-ocr' `
     -Expected @('glyphshift-acquisition')
 Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-ocr-worker' `
-    -Expected @(
-        'glyphshift-acquisition',
-        'glyphshift-acquisition-worker-sdk',
-        'glyphshift-adapter-ocr',
-        'glyphshift-worker-process-grant',
-        'windows-capture',
-        'windows-sys'
-    )
-Assert-Dependencies `
     -PackageName 'glyphshift-adapter-qt-painter' `
     -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
 Assert-Dependencies `
@@ -222,22 +212,6 @@ Assert-Dependencies `
         'glyphshift-adapter-unity-il2cpp-standard-ui',
         'glyphshift-adapter-unity-standard-ui',
         'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-uia' `
-    -Expected @('glyphshift-acquisition', 'glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-uia-worker' `
-    -Expected @(
-        'glyphshift-acquisition',
-        'glyphshift-acquisition-worker-sdk',
-        'glyphshift-adapter-uia',
-        'glyphshift-capture',
-        'glyphshift-isolated-worker-sdk',
-        'glyphshift-worker-process-grant',
-        'windows',
-        'windows-core',
-        'windows-sys'
     )
 Assert-Dependencies `
     -PackageName 'glyphshift-worker-process-grant' `
@@ -461,7 +435,6 @@ Assert-Dependencies `
         'glyphshift-desktop-runtime',
         'glyphshift-dictionary-distribution',
         'glyphshift-domain',
-        'keyring',
         'glyphshift-runtime-contract',
         'glyphshift-translation',
         'glyphshift-workflow',
@@ -540,7 +513,6 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-gtk3-pango',
     'glyphshift-adapter-gtk3-pango-native',
     'glyphshift-adapter-ocr',
-    'glyphshift-adapter-ocr-worker',
     'glyphshift-adapter-qt-painter',
     'glyphshift-adapter-qt-painter-native',
     'glyphshift-adapter-raylib',
@@ -549,9 +521,7 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-unity-mono-standard-ui',
     'glyphshift-adapter-unity-mono-standard-ui-native',
     'glyphshift-adapter-unity-il2cpp-standard-ui',
-    'glyphshift-adapter-unity-il2cpp-standard-ui-native',
-    'glyphshift-adapter-uia',
-    'glyphshift-adapter-uia-worker'
+    'glyphshift-adapter-unity-il2cpp-standard-ui-native'
 )
 $testSupportPackages = @(
     'glyphshift-reference-adapters',
@@ -765,9 +735,6 @@ $productionScanPackageNames = @(
     'glyphshift-adapter-native-abi',
     'glyphshift-adapter-native-host',
     'glyphshift-adapter-ocr',
-    'glyphshift-adapter-ocr-worker',
-    'glyphshift-adapter-uia',
-    'glyphshift-adapter-uia-worker',
     'glyphshift-controller-sdk',
     'glyphshift-controller-host',
     'glyphshift-controller-windows',
@@ -903,16 +870,67 @@ foreach ($emptyWorkerCatalog in @('isolated_workers = @()', 'acquisition_workers
 $defaultTestScript = [System.IO.File]::ReadAllText(
     (Join-Path $workspaceRoot 'scripts\test.ps1')
 )
+$workspaceManifest = [System.IO.File]::ReadAllText(
+    (Join-Path $workspaceRoot 'Cargo.toml')
+)
+$archiveOnlyPackages = @(
+    @{ Name = 'glyphshift-adapter-uia'; Path = 'crates/adapters/implementations/accessibility/uia' },
+    @{ Name = 'glyphshift-adapter-uia-worker'; Path = 'crates/adapters/implementations/accessibility/uia-worker' },
+    @{ Name = 'glyphshift-adapter-ocr-worker'; Path = 'crates/adapters/implementations/fallback/ocr-worker' }
+)
+foreach ($archivePackage in $archiveOnlyPackages) {
+    if ($workspacePackagesByName.ContainsKey($archivePackage.Name)) {
+        throw "Archive-only package must not be a workspace member: $($archivePackage.Name)"
+    }
+    if ($workspaceManifest.IndexOf(
+        "`"$($archivePackage.Path)`"",
+        [System.StringComparison]::Ordinal
+    ) -lt 0) {
+        throw "Archive-only path must remain in the workspace exclude list: $($archivePackage.Path)"
+    }
+    if ($defaultTestScript.IndexOf(
+        $archivePackage.Name,
+        [System.StringComparison]::Ordinal
+    ) -ge 0) {
+        throw "Default tests must not schedule archive-only package: $($archivePackage.Name)"
+    }
+}
+$archiveUiaRoot = Join-Path $workspaceRoot 'crates\adapters\implementations\accessibility'
+$archiveUiaTestSources = @(
+    Get-ChildItem -LiteralPath (Join-Path $archiveUiaRoot 'uia') -Recurse -File -Filter '*.rs'
+    Get-ChildItem -LiteralPath (Join-Path $archiveUiaRoot 'uia-worker') -Recurse -File -Filter '*.rs'
+)
+$archiveUiaTestCount = 0
+$archiveUiaGuardedCount = 0
+foreach ($source in $archiveUiaTestSources) {
+    $text = [System.IO.File]::ReadAllText($source.FullName)
+    $archiveUiaTestCount += [regex]::Matches($text, '#\[test\]').Count
+    $archiveUiaGuardedCount += [regex]::Matches(
+        $text,
+        '(?ms)#\[test\]\s*#\[ignore\s*=\s*"archive-only UIA;[^"]*"\]\s*fn\s+archive_uia_[A-Za-z0-9_]+\s*\('
+    ).Count
+}
+if ($archiveUiaTestCount -eq 0 -or $archiveUiaGuardedCount -ne $archiveUiaTestCount) {
+    throw "Every archived UIA test must be ignored and use the archive_uia_ prefix: $archiveUiaGuardedCount/$archiveUiaTestCount"
+}
+$archiveUiaTestScript = [System.IO.File]::ReadAllText(
+    (Join-Path $archiveUiaRoot 'uia-worker\test.ps1')
+)
+foreach ($requiredArchiveToken in @('[switch]$ArchiveUia', 'archive_uia_', '--ignored')) {
+    if ($archiveUiaTestScript.IndexOf(
+        $requiredArchiveToken,
+        [System.StringComparison]::Ordinal
+    ) -lt 0) {
+        throw "UIA archive test entry point is missing '$requiredArchiveToken'."
+    }
+}
 if ($defaultTestScript.IndexOf('--exclude', [System.StringComparison]::Ordinal) -lt 0) {
     throw 'Default repository tests must exclude paused Adapter packages.'
 }
 foreach ($pausedAdapterPackage in @(
     'glyphshift-adapter-console',
     'glyphshift-adapter-console-native',
-    'glyphshift-adapter-ocr',
-    'glyphshift-adapter-ocr-worker',
-    'glyphshift-adapter-uia',
-    'glyphshift-adapter-uia-worker'
+    'glyphshift-adapter-ocr'
 )) {
     $references = [regex]::Matches(
         $defaultTestScript,
@@ -926,10 +944,7 @@ foreach ($pausedAdapterPackage in @(
 $pausedAdapterPackageNames = @(
     'glyphshift-adapter-console',
     'glyphshift-adapter-console-native',
-    'glyphshift-adapter-ocr',
-    'glyphshift-adapter-ocr-worker',
-    'glyphshift-adapter-uia',
-    'glyphshift-adapter-uia-worker'
+    'glyphshift-adapter-ocr'
 )
 foreach ($activeWorkspacePackage in $metadata.packages | Where-Object {
     $metadata.workspace_members -contains $_.id -and
@@ -951,6 +966,12 @@ if ($repositoryInstructions.IndexOf(
     [System.StringComparison]::Ordinal
 ) -lt 0) {
     throw 'Repository instructions must require the synchronized desktop review launcher.'
+}
+if ($repositoryInstructions.IndexOf(
+    'Archive-only UIA boundary',
+    [System.StringComparison]::Ordinal
+) -lt 0) {
+    throw 'Repository instructions must keep UIA archive-only and outside executable validation.'
 }
 
 Write-Output 'Glyphshift architecture checks passed.'

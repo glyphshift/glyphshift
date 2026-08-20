@@ -17,7 +17,7 @@ const INSTALLATION_SCHEMA: &str = "glyphshift.dictionary-installation/1";
 const TRANSACTION_SCHEMA: &str = "glyphshift.dictionary-install-transaction/1";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct StoredSignature {
     scheme: Box<str>,
     key_id: Box<str>,
@@ -25,7 +25,7 @@ struct StoredSignature {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct InstallationRecord {
     schema: Box<str>,
     catalog_id: Box<str>,
@@ -100,7 +100,7 @@ impl InstallationRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct PendingInstallation {
     schema: Box<str>,
     installation: InstallationRecord,
@@ -227,12 +227,18 @@ impl FileDictionaryInstallStore {
         for path in json_files(&self.transaction_directory())? {
             let dictionary_id = file_stem(&path)?;
             let bytes = fs::read(&path).map_err(storage_failure)?;
-            let pending: PendingInstallation =
-                serde_json::from_slice(&bytes).map_err(|_| InstallStoreError::StorageFailure)?;
+            let Ok(pending) = serde_json::from_slice::<PendingInstallation>(&bytes) else {
+                quarantine_invalid_transaction(&path);
+                continue;
+            };
             if pending.schema.as_ref() != TRANSACTION_SCHEMA {
-                return Err(InstallStoreError::StorageFailure);
+                quarantine_invalid_transaction(&path);
+                continue;
             }
-            let source = pending.installation.source(&dictionary_id)?;
+            let Ok(source) = pending.installation.source(&dictionary_id) else {
+                quarantine_invalid_transaction(&path);
+                continue;
+            };
             let active = read_optional(&self.active_path(&dictionary_id))?;
             let artifact = read_optional(&self.artifact_path(source.digest()))?;
             let can_complete =
@@ -263,7 +269,9 @@ impl FileDictionaryInstallStore {
         for path in json_files(&self.active_directory())? {
             let dictionary_id = file_stem(&path)?;
             let payload = fs::read(path).map_err(storage_failure)?;
-            decode_package(&payload, &dictionary_id)?;
+            if decode_package(&payload, &dictionary_id).is_err() {
+                continue;
+            }
             active.insert(dictionary_id.into(), payload);
         }
 
@@ -271,9 +279,13 @@ impl FileDictionaryInstallStore {
         for path in json_files(&self.installation_directory())? {
             let dictionary_id = file_stem(&path)?;
             let bytes = fs::read(path).map_err(storage_failure)?;
-            let record: InstallationRecord =
-                serde_json::from_slice(&bytes).map_err(|_| InstallStoreError::StorageFailure)?;
-            installations.insert(dictionary_id.clone().into(), record.source(&dictionary_id)?);
+            let Ok(record) = serde_json::from_slice::<InstallationRecord>(&bytes) else {
+                continue;
+            };
+            let Ok(source) = record.source(&dictionary_id) else {
+                continue;
+            };
+            installations.insert(dictionary_id.clone().into(), source);
         }
         Ok((active, installations))
     }
@@ -291,6 +303,13 @@ impl FileDictionaryInstallStore {
     #[cfg(test)]
     fn fail_after(&mut self, checkpoint: InstallCheckpoint) {
         self.fail_after = Some(checkpoint);
+    }
+}
+
+fn quarantine_invalid_transaction(path: &Path) {
+    let destination = path.with_extension("invalid");
+    if !destination.exists() {
+        let _ = fs::rename(path, destination);
     }
 }
 
@@ -600,6 +619,31 @@ mod tests {
                 .state(),
             DictionaryInstallationState::Unmanaged
         );
+    }
+
+    #[test]
+    fn invalid_installation_record_does_not_hide_other_installations() {
+        let directory = tempdir().expect("temporary installation root");
+        let mut store =
+            FileDictionaryInstallStore::open(directory.path()).expect("open file store");
+        store
+            .install(
+                verified_artifact("dictionary.valid", "1.0.0"),
+                DictionaryReplacementPolicy::RejectExisting,
+            )
+            .expect("install valid dictionary");
+        fs::write(
+            store.installation_path("dictionary.invalid"),
+            br#"{"schema":"glyphshift.dictionary-installation/1","dictionaryId":42}"#,
+        )
+        .expect("write invalid installation record");
+
+        let views = store
+            .installations()
+            .expect("list remaining valid installations");
+
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].dictionary_id(), "dictionary.valid");
     }
 
     fn verified_artifact(dictionary_id: &str, release_version: &str) -> VerifiedDictionaryArtifact {

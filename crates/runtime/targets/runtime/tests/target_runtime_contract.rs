@@ -404,6 +404,52 @@ fn trh_003_keeps_a_compatible_adapter_active_when_a_peer_is_unavailable() {
 
 #[test]
 #[ignore = "requires Native Adapter DLLs built before the target Runtime contract"]
+fn trh_005_failed_activation_rolls_back_before_a_different_deployment_retries() {
+    let qt_package = qt_painter_native_package();
+    let qt_hash = artifact_hash(&qt_package);
+    let unavailable = TargetRuntimeDeployment::new(
+        scoped_publication(
+            1,
+            "Unavailable Qt translation",
+            glyphshift_adapter_qt_painter::ADAPTER_ID,
+        ),
+        [NativeAdapterDeployment::new(
+            qt_package,
+            qt_painter_binding(qt_hash, [Feature::TextReplace]),
+        )
+        .expect("unavailable Qt deployment")],
+    );
+    assert_eq!(
+        activate_deployment(unavailable),
+        Err(glyphshift_target_runtime::TargetRuntimeError::AdapterActivation)
+    );
+
+    let gdi_package = native_package();
+    let gdi_hash = artifact_hash(&gdi_package);
+    let retry = TargetRuntimeDeployment::new(
+        scoped_publication(
+            2,
+            "Recovered GDI translation",
+            glyphshift_adapter_gdi::ADAPTER_ID,
+        ),
+        [
+            NativeAdapterDeployment::new(gdi_package, binding(gdi_hash, [Feature::TextReplace]))
+                .expect("retry GDI deployment"),
+        ],
+    );
+    activate_deployment(retry).expect("a different deployment retries without target restart");
+    assert_eq!(
+        query_activation()
+            .expect("retry activation report")
+            .active_adapter_ids()
+            .collect::<Vec<_>>(),
+        vec![glyphshift_adapter_gdi::ADAPTER_ID]
+    );
+    deactivate_runtime().expect("deactivate retry deployment");
+}
+
+#[test]
+#[ignore = "requires Native Adapter DLLs built before the target Runtime contract"]
 fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop() {
     let redraw_window = RedrawContractWindow::new();
     let baseline = render_raw_gdi_unicode("Open").expect("baseline render");

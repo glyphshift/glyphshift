@@ -5,6 +5,24 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
 })
+
+test('dictionary library reports skipped artifacts while keeping valid dictionaries usable', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.artifactWarnings = [{
+    artifactKind: 'dictionary',
+    artifactId: 'dictionary.legacy',
+    issue: 'invalid',
+  }]
+  await page.addInitScript(({ key, value }) => {
+    localStorage.setItem(key, JSON.stringify(value))
+  }, { key: storageKey, value: snapshot })
+  await page.goto('/')
+  await page.getByRole('button', { name: '词典', exact: true }).click()
+
+  await expect(page.getByText('部分词典已跳过', { exact: true })).toBeVisible()
+  await expect(page.getByText(/dictionary\.legacy/)).toBeVisible()
+  await expect(page.getByTestId('dictionary-management-table')).toBeVisible()
+})
 test('dictionary library separates local provenance from the offline catalog mode', async ({ page }) => {
   await page.getByRole('button', { name: '词典', exact: true }).click()
 
@@ -51,7 +69,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
         if (command === 'desktop_import_dictionary') {
@@ -99,7 +117,7 @@ test('dictionary export reports when the native save dialog cannot open', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
         return null
@@ -212,7 +230,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogQuery?: unknown }).__catalogQuery = args?.request
@@ -268,7 +286,7 @@ test('catalog requires explicit confirmation before replacing local dictionary c
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') return {
           releases: [{
@@ -312,7 +330,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_query_dictionary_catalog') {
           ;(window as unknown as { __catalogLocale?: string }).__catalogLocale = args?.request?.requestedPresentationLocale

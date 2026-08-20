@@ -4,7 +4,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { save } from '@tauri-apps/plugin-dialog'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
-import { useAppSettings } from '../appSettings'
 import { adapterDisplayName, adapterSummary } from '../adapterPresentation'
 import type {
   AdapterOption,
@@ -27,7 +26,6 @@ import { useProbeRuns, type ProbeTranslationFilter, type QuickProbeCleanupResult
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
-import AiTranslationProgress from './AiTranslationProgress.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ManagementFormModal from './ManagementFormModal.vue'
 import ManagementPageHeader from './ManagementPageHeader.vue'
@@ -57,7 +55,6 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
 const ai = useAiTranslation()
-const appSettings = useAppSettings()
 const query = ref('')
 const adapterFilterIds = ref<string[]>([])
 const translationFilter = ref<ProbeTranslationFilter>('all')
@@ -153,6 +150,12 @@ const selectedRun = computed(() => probe.selectedRun.value)
 const displayedAiJob = computed(() => {
   const job = ai.currentJob.value
   return job && selectedRun.value && job.scopeId === `probe:${selectedRun.value.id}` ? job : null
+})
+const activeDisplayedAiJob = computed(() => {
+  const job = displayedAiJob.value
+  return job && !['completed', 'completed_with_failures', 'cancelled', 'interrupted'].includes(job.status)
+    ? job
+    : null
 })
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
@@ -508,7 +511,7 @@ function dismissAiOutcome() {
   ai.dismissCurrentJob()
 }
 
-async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirmed = false) {
+async function runAiTranslation(plan?: AiTranslationPlan | null) {
   const run = selectedRun.value
   const nextPlan = plan ?? await prepareAiPlan()
   if (!run || !nextPlan || !selectedAiProfile.value) return
@@ -517,11 +520,7 @@ async function runAiTranslation(plan?: AiTranslationPlan | null, alreadyConfirme
     return
   }
   aiPreviewOpen.value = false
-  if (appSettings.confirmAiTranslation.value && !alreadyConfirmed) {
-    aiPreflightOpen.value = true
-    return
-  }
-  await executeAiTranslation()
+  aiPreflightOpen.value = true
 }
 
 async function executeAiTranslation() {
@@ -1051,10 +1050,14 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3" />
+    <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3">
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="probe.clearMessage()" /></template>
+    </UAlert>
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
-    <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3" />
+    <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
+      <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" /></template>
+    </UAlert>
     <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template #actions>
         <div class="flex items-center gap-1.5">
@@ -1063,13 +1066,20 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </div>
       </template>
     </UAlert>
-    <AiTranslationProgress
-      v-if="displayedAiJob"
-      :job="displayedAiJob"
-      :elapsed="ai.elapsed.value"
-      @cancel="ai.cancelCurrentJob"
-      @dismiss="ai.dismissCurrentJob"
-    />
+    <section
+      v-if="activeDisplayedAiJob"
+      data-testid="probe-ai-task-status"
+      role="status"
+      aria-live="polite"
+      class="mb-3 flex min-h-11 items-center gap-2.5 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2"
+    >
+      <UIcon name="i-tabler-sparkles" class="size-4 shrink-0 text-[var(--primary)]" aria-hidden="true" />
+      <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <strong class="type-label text-[var(--text)]">{{ t('ai.translating') }}</strong>
+        <span class="type-metadata tabular-nums text-[var(--text-muted)]">{{ t('ai.progressSummary', { completed: activeDisplayedAiJob.completedCount, total: activeDisplayedAiJob.totalCount, elapsed: ai.elapsed.value }) }}</span>
+      </div>
+      <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-list-check" :label="t('ai.tasks.viewCurrent')" class="shrink-0" @click="emit('open-ai-tasks')" />
+    </section>
 
     <section
       v-if="selectedRun"
@@ -1219,7 +1229,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       :busy="ai.busy.value"
       width="md"
       @update:open="aiPreviewOpen = $event"
-      @confirm="runAiTranslation(aiPlan, true)"
+      @confirm="runAiTranslation(aiPlan)"
     >
       <p v-if="aiPlan?.candidates.length && selectedAiProfile" class="type-metadata mb-3 mt-0 rounded-md bg-[var(--surface-subtle)] px-3 py-2 leading-4 text-[var(--text-muted)]">
         {{ t('ai.previewBatchHint', { previewed: Math.min(aiPlan.candidates.length, 20), total: aiPlan.candidates.length, items: selectedAiProfile.maxItemsPerRequest, batches: Math.ceil(aiPlan.candidates.length / selectedAiProfile.maxItemsPerRequest), concurrency: selectedAiProfile.maxConcurrency }) }}

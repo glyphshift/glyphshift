@@ -1,34 +1,12 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiTranslation, CancellationToken,
-    CredentialVault, CredentialVaultError, ProviderBatchResult, ProviderTranslation, ProviderUsage,
-    TranslationItem, TranslationJobId, TranslationPlanRequest, TranslationProvider,
-    TranslationRunHistory,
+    ProviderBatchResult, ProviderTranslation, ProviderUsage, TranslationItem, TranslationJobId,
+    TranslationPlanRequest, TranslationProvider, TranslationRunHistory,
 };
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-
-#[derive(Default)]
-struct EmptyVault;
-
-impl CredentialVault for EmptyVault {
-    fn replace(&self, _credential_ref: &str, _secret: &str) -> Result<(), CredentialVaultError> {
-        Ok(())
-    }
-
-    fn contains(&self, _credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        Ok(false)
-    }
-
-    fn delete(&self, _credential_ref: &str) -> Result<(), CredentialVaultError> {
-        Ok(())
-    }
-
-    fn expose(&self, _credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        Err(CredentialVaultError::Missing)
-    }
-}
 
 struct UsageProvider;
 
@@ -91,8 +69,7 @@ fn terminal_snapshot(
 #[test]
 fn terminal_run_records_survive_restart_without_copying_translation_content() {
     let root = tempdir().expect("history root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyVault)).expect("profile catalog");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("profile catalog");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -144,6 +121,21 @@ fn terminal_run_records_survive_restart_without_copying_translation_content() {
     assert!(!persisted.contains("baseUrl"));
     assert!(persisted.contains("glyphshift.ai-translation-history/2"));
 
+    let mut artifact: serde_json::Value =
+        serde_json::from_str(&persisted).expect("parse history artifact");
+    artifact["unknownFutureField"] = serde_json::json!(true);
+    let mut invalid_record = artifact["records"][0].clone();
+    invalid_record["recordId"] = serde_json::json!(42);
+    artifact["records"]
+        .as_array_mut()
+        .expect("history records")
+        .push(invalid_record);
+    std::fs::write(
+        root.path().join("ai-translation-history.json"),
+        serde_json::to_vec(&artifact).expect("encode partially invalid history"),
+    )
+    .expect("write partially invalid history");
+
     let mut reopened = TranslationRunHistory::open(root.path()).expect("reopen history");
     assert_eq!(reopened.records(), history.records());
     reopened.clear().expect("clear history");
@@ -153,8 +145,7 @@ fn terminal_run_records_survive_restart_without_copying_translation_content() {
 #[test]
 fn an_active_checkpoint_becomes_an_interrupted_history_record_after_restart() {
     let root = tempdir().expect("interrupted history root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyVault)).expect("profile catalog");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("profile catalog");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -223,8 +214,7 @@ fn an_active_checkpoint_becomes_an_interrupted_history_record_after_restart() {
 #[test]
 fn run_history_keeps_only_the_latest_one_hundred_terminal_jobs() {
     let root = tempdir().expect("bounded history root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyVault)).expect("profile catalog");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("profile catalog");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -268,4 +258,20 @@ fn run_history_keeps_only_the_latest_one_hundred_terminal_jobs() {
             .len(),
         100
     );
+}
+
+#[test]
+fn malformed_history_opens_empty_and_preserves_the_original_file() {
+    let root = tempdir().expect("history recovery root");
+    std::fs::write(root.path().join("ai-translation-history.json"), b"{")
+        .expect("write malformed history");
+
+    let history = TranslationRunHistory::open(root.path()).expect("open malformed history safely");
+
+    assert!(history.records().is_empty());
+    assert!(root.path().join("ai-translation-history.json").exists());
+    assert!(root
+        .path()
+        .join("ai-translation-history.invalid.json")
+        .exists());
 }

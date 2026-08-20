@@ -37,6 +37,7 @@ const editingProfile = ref<AiProfile | null>(null)
 const pendingDelete = ref<AiProfile | null>(null)
 const excludedPatternsText = ref('')
 const advancedOpen = ref(false)
+const secretVisible = ref(false)
 
 const providerItems = computed(() => ([
   { value: 'codex_subscription' as const, label: t('ai.protocol.codexSubscription') },
@@ -55,7 +56,7 @@ function newProfileForm(): ProfileForm {
     name: '',
     protocol,
     baseUrl: providerDefaults[protocol].baseUrl,
-    modelId: '',
+    modelId: providerDefaults[protocol].modelId,
     reasoningEffort: defaultAiReasoningEffort(protocol),
     timeoutMinutes: 30,
     maxItemsPerRequest: 50,
@@ -132,6 +133,9 @@ watch(() => form.value.protocol, (protocol, previous) => {
   if (!editingProfile.value || form.value.baseUrl === providerDefaults[previous].baseUrl) {
     form.value.baseUrl = providerDefaults[protocol].baseUrl
   }
+  if (!editingProfile.value || form.value.modelId === providerDefaults[previous].modelId) {
+    form.value.modelId = providerDefaults[protocol].modelId
+  }
   form.value.maxConcurrency = providerDefaults[protocol].concurrency
   form.value.reasoningEffort = defaultAiReasoningEffort(protocol)
   if (protocol === 'ollama_chat' || protocol === 'codex_subscription') {
@@ -152,6 +156,7 @@ function openCreate() {
   form.value = newProfileForm()
   excludedPatternsText.value = ''
   advancedOpen.value = false
+  secretVisible.value = false
   editorOpen.value = true
 }
 
@@ -169,11 +174,12 @@ function openEdit(profile: AiProfile) {
     maxConcurrency: profile.maxConcurrency,
     maxRetries: profile.maxRetries,
     filterPolicy: JSON.parse(JSON.stringify(profile.filterPolicy)),
-    secret: '',
+    secret: profile.credential ?? '',
     makeDefault: ai.catalog.value.defaultProfileId === profile.id,
   }
   excludedPatternsText.value = profile.filterPolicy.excludedPatterns.join('\n')
   advancedOpen.value = false
+  secretVisible.value = false
   editorOpen.value = true
 }
 
@@ -318,8 +324,27 @@ onMounted(() => void ai.connect())
         <USelect v-model="form.reasoningEffort" :items="reasoningItems" value-key="value" label-key="label" :aria-label="t('ai.reasoningEffort')" class="w-full" />
         <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ reasoningHint }}</p>
       </UFormField>
-      <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :required="credentialRequired && !editingProfile?.hasCredential">
-        <UInput v-model="form.secret" type="password" :aria-label="t('ai.apiKey')" :placeholder="editingProfile?.hasCredential ? t('ai.keepCredentialPlaceholder') : ''" autocomplete="new-password" class="w-full" />
+      <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :hint="t('ai.plainCredentialHint')" :required="credentialRequired && !editingProfile?.hasCredential">
+        <UInput
+          v-model="form.secret"
+          :type="secretVisible ? 'text' : 'password'"
+          :aria-label="t('ai.apiKey')"
+          autocomplete="off"
+          class="w-full"
+        >
+          <template #trailing>
+            <UButton
+              color="neutral"
+              variant="link"
+              size="xs"
+              :icon="secretVisible ? 'i-tabler-eye-off' : 'i-tabler-eye'"
+              :aria-label="secretVisible ? t('ai.hideApiKey') : t('ai.showApiKey')"
+              :title="secretVisible ? t('ai.hideApiKey') : t('ai.showApiKey')"
+              :aria-pressed="secretVisible"
+              @click="secretVisible = !secretVisible"
+            />
+          </template>
+        </UInput>
       </UFormField>
     </div>
 

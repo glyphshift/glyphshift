@@ -22,7 +22,7 @@ test('probe detail can launch its bound software', async ({ page }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [run]
         if (command === 'desktop_probe_run_entries') return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
@@ -70,7 +70,7 @@ test('empty libraries stay actionable and a running application can create a tem
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return currentSnapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -99,6 +99,7 @@ test('empty libraries stay actionable and a running application can create a tem
           }
         }
         if (command === 'desktop_create_probe_from_sources') {
+          ;(window as unknown as { __probeCreateRequest?: unknown }).__probeCreateRequest = args?.request
           const summary = {
             id: 'quick-probe-ui', name: 'QuickTarget 探针', softwareId: 'software.quick-target',
             dictionaryId: 'quick-dictionary-ui', adapterIds: ['synthetic.ext-text-out'], status: 'running',
@@ -148,7 +149,10 @@ test('empty libraries stay actionable and a running application can create a tem
   await dialog.getByRole('button', { name: '使用临时词典' }).click()
   await expect(dialog.getByRole('button', { name: '使用临时词典' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toBeVisible()
-  await expect(dialog.getByRole('textbox', { name: '目标语言' })).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
+  await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
+  await dialog.getByRole('textbox', { name: '源语言' }).fill('ja-JP')
+  await dialog.getByRole('textbox', { name: '目标语言' }).fill('ko-KR')
   await expect(dialog.getByRole('button', { name: '高级选项' })).toHaveCount(0)
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('x86_64')
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
@@ -156,6 +160,13 @@ test('empty libraries stay actionable and a running application can create a tem
   await dialog.getByRole('button', { name: '创建并连接' }).click()
 
   await expect(dialog).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (
+    window as unknown as { __probeCreateRequest?: { dictionary?: unknown } }
+  ).__probeCreateRequest?.dictionary)).toEqual({
+    kind: 'temporary',
+    sourceLocale: 'ja-JP',
+    targetLocale: 'ko-KR',
+  })
   const activeCaptureTab = page.getByRole('button', { name: '探针', exact: true })
   await expect(activeCaptureTab).toHaveAccessibleDescription('运行中')
   await expect(activeCaptureTab.getByText('运行中', { exact: true })).toBeVisible()
@@ -192,7 +203,7 @@ test('current-app source can end and clean up at compact English layout', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'light' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -231,6 +242,9 @@ test('current-app source can end and clean up at compact English layout', async 
   const dialog = page.getByRole('dialog', { name: 'New probe run' })
   await dialog.getByRole('button', { name: 'Running apps' }).click()
   await dialog.getByRole('button', { name: 'Use temporary dictionary' }).click()
+  await expect(dialog.getByRole('textbox', { name: 'Source locale' })).toHaveValue('en-US')
+  await expect(dialog.getByRole('textbox', { name: 'Target locale' })).toHaveValue('zh-CN')
+  await expect(dialog.getByText(/detected automatically/i)).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Capture with shortcut' }).click()
   await expect(dialog.getByText('Waiting to capture the target')).toBeVisible()
   await page.evaluate(() => {
@@ -279,7 +293,7 @@ test('paused probe remains visible on the navigation tab after startup', async (
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [pausedRun]
         return null
@@ -308,7 +322,7 @@ test('current-app source keeps creation recoverable after a target stops during 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_arm_software_capture') return 'Ctrl+Shift+F8'
@@ -410,7 +424,7 @@ test('probe list hides technical detail behind one accessible hover target and u
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         return null
@@ -461,7 +475,7 @@ test('library sources create a normal probe without temporary ownership', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return creationAttempted ? [createdRun] : []
         if (command === 'desktop_probe_run_summary') return createdRun
@@ -516,6 +530,7 @@ test('new probe resets temporary source choices after cancellation', async ({ pa
   await expect(temporaryDictionaryMode).toHaveClass(/text-primary/)
   await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'false')
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('不应保留的任务')
+  await dialog.getByRole('textbox', { name: '源语言' }).fill('ja-JP')
   await dialog.getByRole('textbox', { name: '目标语言' }).fill('ko-KR')
   await dialog.getByRole('button', { name: '取消' }).click()
 
@@ -524,9 +539,9 @@ test('new probe resets temporary source choices after cancellation', async ({ pa
   await expect(dialog.getByRole('button', { name: '使用已有词典' })).toHaveAttribute('aria-pressed', 'true')
   await dialog.getByRole('button', { name: '使用临时词典' }).click()
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toHaveValue('')
+  await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
   await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
   await expect(dialog.getByText('词典名称', { exact: true })).toHaveCount(0)
-  await expect(dialog.getByText('源语言', { exact: true })).toHaveCount(0)
 })
 
 test('new dictionary discards a cancelled metadata draft', async ({ page }) => {
@@ -565,7 +580,7 @@ test('paused probe can clear its entries without releasing the runtime', async (
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -638,7 +653,7 @@ test('probe detail edits settings and clears all joined entries behind confirmat
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -733,7 +748,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -901,7 +916,7 @@ test('elevated probe rejection explains the protected target without observer re
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -945,7 +960,7 @@ test('probe reconnect explains a desktop and Runtime Bundle build mismatch', asy
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -985,7 +1000,7 @@ test('probe operation error closes when switching to another probe', async ({ pa
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return runs
         if (command === 'desktop_probe_run_summary') return runs.find(run => run.id === args?.runId)
@@ -1011,6 +1026,10 @@ test('probe operation error closes when switching to another probe', async ({ pa
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
+  await page.getByRole('button', { name: '连接并继续' }).click()
+  await expect(page.getByRole('alert')).toContainText('这个软件仍拒绝连接')
+  await page.getByRole('alert').getByRole('button', { name: '关闭提示' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
   await page.getByRole('button', { name: '连接并继续' }).click()
   await expect(page.getByRole('alert')).toContainText('这个软件仍拒绝连接')
 
@@ -1043,7 +1062,7 @@ test('probe reconnect explains that an enabled workflow owns the target', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -1066,4 +1085,39 @@ test('probe reconnect explains that an enabled workflow owns the target', async 
 
   await expect(page.getByText('这个软件当前正由已启用的工作流使用；请先停用该工作流，再连接探针。')).toBeVisible()
   await expect(page.getByRole('button', { name: '连接并继续' })).toBeEnabled()
+})
+
+test('probe reconnect gives restart-first recovery when no selected component activates', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const summary = {
+      id: 'probe-component-incompatible', name: '组件恢复诊断', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.ext-text-out'], status: 'ready', livePreviewEnabled: true,
+      observationRevision: 0, observedCount: 0, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 0, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 1,
+      dictionaryEntryCount: 0, runtimeCapability: null,
+    }
+    const internals = {
+      invoke: async (command: string) => {
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_snapshot') return snapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_probe_run_entries') return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+        if (command === 'desktop_resume_probe_run') throw { schemaVersion: 1, code: 'runtime.component_incompatible', args: {} }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', summary.id)
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+
+  await page.getByRole('button', { name: '连接并继续' }).click()
+
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText('请完整退出并重新启动目标软件后重试')
+  await expect(alert).toContainText('当前界面暂不受支持')
+  await expect(alert).not.toContainText('请在探针设置中重新选择')
 })

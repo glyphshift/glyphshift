@@ -10,12 +10,60 @@ fn quick_probe_request(executable: &Path) -> ProbeCreationRequest {
             executable_path: executable.to_string_lossy().into_owned(),
         },
         dictionary: ProbeDictionarySourceRequest::Temporary {
+            source_locale: "en-US".into(),
             target_locale: "zh-CN".into(),
         },
         name: None,
         adapter_ids: Vec::new(),
         live_preview_enabled: false,
     }
+}
+
+#[test]
+fn temporary_probe_persists_the_explicit_language_direction_and_rejects_auto() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let executable = software_executable(&application, &software_id);
+    let mut invalid = quick_probe_request(&executable);
+    invalid.dictionary = ProbeDictionarySourceRequest::Temporary {
+        source_locale: "auto".into(),
+        target_locale: "zh-CN".into(),
+    };
+    let error = application
+        .create_probe_from_sources_for_test(invalid)
+        .err()
+        .expect("reject an unsupported automatic source locale");
+    assert_eq!(
+        serde_json::to_value(error).expect("serialize invalid locale")["code"],
+        "quick_probe.invalid_locale"
+    );
+    let mut invalid_target = quick_probe_request(&executable);
+    invalid_target.dictionary = ProbeDictionarySourceRequest::Temporary {
+        source_locale: "en-US".into(),
+        target_locale: "".into(),
+    };
+    let error = application
+        .create_probe_from_sources_for_test(invalid_target)
+        .err()
+        .expect("reject an empty target locale");
+    assert_eq!(
+        serde_json::to_value(error).expect("serialize invalid target locale")["code"],
+        "quick_probe.invalid_locale"
+    );
+
+    let mut request = quick_probe_request(&executable);
+    request.dictionary = ProbeDictionarySourceRequest::Temporary {
+        source_locale: "ja-JP".into(),
+        target_locale: "ko-KR".into(),
+    };
+    let started = application
+        .create_probe_from_sources_for_test(request)
+        .expect("create temporary probe with explicit language direction");
+    let dictionary = application
+        .backend
+        .dictionary(started.summary.dictionary_id())
+        .expect("temporary dictionary");
+    assert_eq!(dictionary.metadata().source_locale(), "ja-JP");
+    assert_eq!(dictionary.metadata().target_locale(), "ko-KR");
 }
 
 fn library_probe_request(

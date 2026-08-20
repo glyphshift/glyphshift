@@ -209,15 +209,33 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         }
     }
     if !adapters.is_empty() && !active_adapters.iter().any(|active| *active) {
-        for adapter in &adapters {
-            let _ = adapter.deactivate();
-        }
-        let capture = runtime_state()
-            .lock()
-            .ok()
-            .and_then(|mut state| state.as_mut().and_then(|runtime| runtime.capture.take()));
-        if let Some(capture) = capture {
-            let _ = capture.finish();
+        let adapters_deactivated = adapters
+            .iter()
+            .map(|adapter| adapter.deactivate().is_ok())
+            .fold(true, |all_deactivated, deactivated| {
+                all_deactivated & deactivated
+            });
+        let capture = runtime_state().lock().ok().and_then(|mut state| {
+            state
+                .as_mut()
+                .filter(|runtime| same_loaded_adapters(runtime, &adapters))
+                .and_then(|runtime| runtime.capture.take())
+        });
+        let capture_finished = capture.is_none_or(|capture| capture.finish().is_ok());
+        if adapters_deactivated && capture_finished {
+            let rolled_back = runtime_state().lock().is_ok_and(|mut state| {
+                if state.as_ref().is_some_and(|runtime| {
+                    !runtime.active && same_loaded_adapters(runtime, &adapters)
+                }) {
+                    *state = None;
+                    true
+                } else {
+                    false
+                }
+            });
+            if rolled_back {
+                request_current_process_redraw();
+            }
         }
         return Err(TargetRuntimeError::AdapterActivation);
     }
@@ -240,6 +258,15 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
     request_adapter_refreshes(&refresh_adapters);
     request_current_process_redraw();
     Ok(())
+}
+
+fn same_loaded_adapters(runtime: &RuntimeState, adapters: &[Arc<LoadedNativeAdapter>]) -> bool {
+    runtime.adapters.len() == adapters.len()
+        && runtime
+            .adapters
+            .iter()
+            .zip(adapters)
+            .all(|(current, expected)| Arc::ptr_eq(current, expected))
 }
 
 fn same_active_deployment(

@@ -23,6 +23,19 @@ const reasoningLabel = computed(() => {
   const effort = props.profile?.reasoningEffort ?? 'automatic'
   return t(`ai.reasoningOption.${effort}`)
 })
+const profileLabel = computed(() => {
+  if (!props.profile) return '—'
+  const protocolKeys: Record<AiProfile['protocol'], string> = {
+    codex_subscription: 'codexSubscription',
+    open_ai_responses: 'openAiResponses',
+    open_ai_chat_completions: 'openAiChat',
+    open_ai_compatible: 'openAiCompatible',
+    anthropic_messages: 'anthropic',
+    gemini_generate_content: 'gemini',
+    ollama_chat: 'ollama',
+  }
+  return `${props.profile.name} · ${t(`ai.protocol.${protocolKeys[props.profile.protocol]}`)}`
+})
 
 function proceed() {
   emit('update:open', false)
@@ -46,6 +59,14 @@ function proceed() {
   >
     <template #body>
       <dl class="m-0 divide-y divide-[var(--border)] border-y border-[var(--border)]">
+        <div class="flex items-center justify-between gap-4 py-2.5">
+          <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightProfile') }}</dt>
+          <dd class="m-0 min-w-0 truncate text-right text-[12px] font-semibold text-[var(--text)]" :title="profileLabel">{{ profileLabel }}</dd>
+        </div>
+        <div class="flex items-center justify-between gap-4 py-2.5">
+          <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightModel') }}</dt>
+          <dd class="m-0 min-w-0 truncate text-right text-[12px] font-semibold text-[var(--text)]" :title="profile?.modelId ?? '—'">{{ profile?.modelId ?? '—' }}</dd>
+        </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightWorkload') }}</dt>
           <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.preflightWorkloadValue', { items: plan?.candidates.length ?? 0, batches: estimate.totalBatches }) }}</dd>

@@ -1,8 +1,8 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiTranslation, CancellationToken,
-    CredentialVault, CredentialVaultError, ProviderBatchResult, ProviderError, ProviderRequest,
-    ProviderTranslation, TranslationBatchPolicy, TranslationItem, TranslationJobError,
-    TranslationJobStatus, TranslationPlanRequest, TranslationProvider,
+    ProviderBatchResult, ProviderError, ProviderRequest, ProviderTranslation,
+    TranslationBatchPolicy, TranslationItem, TranslationJobError, TranslationJobStatus,
+    TranslationPlanRequest, TranslationProvider,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -11,31 +11,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
-struct EmptyCredentialVault;
-
-impl CredentialVault for EmptyCredentialVault {
-    fn replace(&self, _credential_ref: &str, _secret: &str) -> Result<(), CredentialVaultError> {
-        Ok(())
-    }
-
-    fn contains(&self, _credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        Ok(false)
-    }
-
-    fn delete(&self, _credential_ref: &str) -> Result<(), CredentialVaultError> {
-        Ok(())
-    }
-
-    fn expose(&self, _credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        Err(CredentialVaultError::Missing)
-    }
-}
-
 #[test]
 fn only_one_non_terminal_translation_job_can_run() {
     let root = tempdir().expect("single task data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -265,8 +244,7 @@ fn default_batch_policy_sends_at_most_fifty_items_per_json_request() {
 #[test]
 fn job_validates_provider_output_and_exposes_results_in_plan_order() {
     let root = tempdir().expect("AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -328,8 +306,7 @@ fn job_validates_provider_output_and_exposes_results_in_plan_order() {
 #[test]
 fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
     let root = tempdir().expect("AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -395,8 +372,7 @@ fn completed_job_snapshot_has_a_safe_stable_ipc_shape() {
 #[test]
 fn cancelled_job_discards_a_provider_result_that_arrives_late() {
     let root = tempdir().expect("cancelled AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -470,8 +446,7 @@ fn cancelled_job_discards_a_provider_result_that_arrives_late() {
 #[test]
 fn job_rejects_translation_that_changes_protected_tokens() {
     let root = tempdir().expect("invalid AI output data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(AiProfileDraft::new(
             "profile.local",
@@ -525,8 +500,7 @@ fn job_rejects_translation_that_changes_protected_tokens() {
 #[test]
 fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
     let root = tempdir().expect("batched AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -576,8 +550,7 @@ fn one_click_job_drains_every_candidate_across_bounded_provider_requests() {
 #[test]
 fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
     let root = tempdir().expect("partially failed AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -637,8 +610,7 @@ fn failed_batch_does_not_block_later_batches_and_progress_stays_complete() {
 #[test]
 fn profile_concurrency_starts_multiple_short_text_batches_in_parallel() {
     let root = tempdir().expect("concurrent AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -697,8 +669,7 @@ fn profile_concurrency_starts_multiple_short_text_batches_in_parallel() {
 #[test]
 fn running_job_snapshot_exposes_three_parallel_batches_instead_of_only_completion_count() {
     let root = tempdir().expect("observable concurrent AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -786,8 +757,7 @@ fn running_job_snapshot_exposes_three_parallel_batches_instead_of_only_completio
 #[test]
 fn retry_wait_is_visible_with_the_next_attempt_number_and_safe_error() {
     let root = tempdir().expect("retry telemetry AI job data root");
-    let mut profiles =
-        AiProfileCatalog::open(root.path(), Box::new(EmptyCredentialVault)).expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(

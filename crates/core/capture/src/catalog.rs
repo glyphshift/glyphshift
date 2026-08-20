@@ -16,7 +16,7 @@ const QUEUE_CAPACITY: usize = 8_192;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureCatalogEntry {
     source: Box<str>,
     adapter_id: Box<str>,
@@ -53,7 +53,7 @@ impl CaptureCatalogEntry {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureCatalog {
     schema: Box<str>,
     session_id: CaptureSessionId,

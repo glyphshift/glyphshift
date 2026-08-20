@@ -178,7 +178,7 @@ impl ProbeRunSummary {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct ProbeRunDocument {
     schema: Box<str>,
     storage_revision: u64,
@@ -934,7 +934,8 @@ impl ProbeRunStore {
         self.document_paths(run_id)
             .iter()
             .filter_map(|path| fs::read_to_string(path).ok())
-            .filter_map(|source| serde_json::from_str::<ProbeRunDocument>(&source).ok())
+            .filter_map(|source| serde_json::from_str::<serde_json::Value>(&source).ok())
+            .filter_map(|value| probe_document_from_value(&value))
             .filter(|document| {
                 document.schema.as_ref() == PROBE_RUN_SCHEMA
                     && document.summary.id.as_ref() == run_id
@@ -954,6 +955,78 @@ impl ProbeRunStore {
         }
         fs::rename(pending, destination).map_err(|_| ProbeRunError::Storage)
     }
+}
+
+fn probe_document_from_value(value: &serde_json::Value) -> Option<ProbeRunDocument> {
+    let object = value.as_object()?;
+    let summary = object.get("summary")?.as_object()?;
+    let id = summary.get("id")?.as_str()?;
+    let software_id = summary.get("softwareId")?.as_str()?;
+    let dictionary_id = summary.get("dictionaryId")?.as_str()?;
+    let adapter_ids = summary
+        .get("adapterIds")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|adapter| adapter.as_str().map(Into::into))
+        .collect::<Vec<Box<str>>>();
+    if adapter_ids.is_empty() {
+        return None;
+    }
+    let status = summary
+        .get("status")
+        .and_then(|status| serde_json::from_value(status.clone()).ok())
+        .unwrap_or(ProbeRunStatus::Ready);
+    let number = |key: &str| {
+        summary
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    let created_at_ms = number("createdAtMs");
+    Some(ProbeRunDocument {
+        schema: PROBE_RUN_SCHEMA.into(),
+        storage_revision: object
+            .get("storageRevision")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|revision| *revision > 0)
+            .unwrap_or(1),
+        catalog_revision: object
+            .get("catalogRevision")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        summary: ProbeRunSummary {
+            id: id.into(),
+            name: summary
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(id)
+                .into(),
+            software_id: software_id.into(),
+            dictionary_id: dictionary_id.into(),
+            adapter_ids,
+            status,
+            live_preview_enabled: summary
+                .get("livePreviewEnabled")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            observation_revision: number("observationRevision"),
+            observed_count: usize::try_from(number("observedCount")).unwrap_or(0),
+            ignored_count: usize::try_from(number("ignoredCount")).unwrap_or(0),
+            dropped_observations: number("droppedObservations"),
+            preview_generation: number("previewGeneration"),
+            created_at_ms,
+            updated_at_ms: number("updatedAtMs").max(created_at_ms),
+        },
+        ignored_sources: object
+            .get("ignoredSources")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|source| source.as_str().map(Into::into))
+            .collect(),
+    })
 }
 
 fn paged<T>(rows: Vec<T>, query: &ProbeQuery) -> Vec<T> {

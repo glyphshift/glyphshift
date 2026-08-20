@@ -6,6 +6,24 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
+test('browser settings keep valid fields when other fields are unknown or invalid', async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify({
+    settingsSchemaVersion: 999,
+    localePreference: 'en-US',
+    themePreference: 42,
+    launchAtStartup: true,
+    closeBehavior: 'future-option',
+    unknownFutureField: true,
+  })))
+  await page.reload()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+
+  await expect(page.getByRole('combobox', { name: 'Display language' })).toContainText('English')
+  await expect(page.getByRole('combobox', { name: 'Theme' })).toContainText('Dark')
+  await expect(page.getByRole('switch', { name: 'Launch at startup' })).toBeChecked()
+  await expect(page.getByRole('combobox', { name: 'When closing the window' })).toContainText('Quit completely')
+})
+
 test('settings aligns its title and form surface across wide and compact windows', async ({ page }) => {
   await page.setViewportSize({ width: 1520, height: 720 })
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -289,7 +307,7 @@ test('administrator launch preference persists before elevation and disables wit
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 30 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {

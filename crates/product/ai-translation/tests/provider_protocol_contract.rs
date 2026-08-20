@@ -1,52 +1,12 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiReasoningEffort, AiTranslation,
-    CancellationToken, CredentialUpdate, CredentialVault, CredentialVaultError, HttpRequest,
-    HttpResponse, HttpTransport, HttpTransportError, TranslationItem, TranslationJobStatus,
-    TranslationPlanRequest,
+    CancellationToken, CredentialUpdate, HttpRequest, HttpResponse, HttpTransport,
+    HttpTransportError, TranslationItem, TranslationJobStatus, TranslationPlanRequest,
 };
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-
-#[derive(Clone, Default)]
-struct MemoryVault(Arc<Mutex<BTreeMap<Box<str>, Box<str>>>>);
-
-impl CredentialVault for MemoryVault {
-    fn replace(&self, credential_ref: &str, secret: &str) -> Result<(), CredentialVaultError> {
-        self.0
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .insert(credential_ref.into(), secret.into());
-        Ok(())
-    }
-
-    fn contains(&self, credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        Ok(self
-            .0
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .contains_key(credential_ref))
-    }
-
-    fn delete(&self, credential_ref: &str) -> Result<(), CredentialVaultError> {
-        self.0
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .remove(credential_ref);
-        Ok(())
-    }
-
-    fn expose(&self, credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        self.0
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .get(credential_ref)
-            .cloned()
-            .ok_or(CredentialVaultError::Missing)
-    }
-}
 
 struct RecordingTransport {
     requests: Arc<Mutex<Vec<HttpRequest>>>,
@@ -155,8 +115,7 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
 
     for (index, case) in cases.into_iter().enumerate() {
         let root = tempdir().expect("provider profile root");
-        let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
-            .expect("open profiles");
+        let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
         let profile_id = format!("profile.{index}");
         profiles
             .save_profile(
@@ -280,8 +239,7 @@ fn deepseek_chat_profiles_map_reasoning_without_fake_low_levels() {
     ];
     for (index, (reasoning, thinking_type, expected_effort)) in cases.into_iter().enumerate() {
         let root = tempdir().expect("DeepSeek reasoning profile root");
-        let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
-            .expect("open profiles");
+        let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
         let profile_id = format!("profile.deepseek-{index}");
         profiles
             .save_profile(
@@ -350,8 +308,7 @@ fn deepseek_chat_profiles_map_reasoning_without_fake_low_levels() {
 #[test]
 fn positional_wire_response_rejects_a_translation_count_mismatch() {
     let root = tempdir().expect("provider profile root");
-    let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
-        .expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -412,8 +369,7 @@ fn positional_wire_response_rejects_a_translation_count_mismatch() {
 #[test]
 fn remote_plain_http_endpoint_never_receives_a_profile_credential() {
     let root = tempdir().expect("plain HTTP profile root");
-    let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
-        .expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(
@@ -471,8 +427,7 @@ fn remote_plain_http_endpoint_never_receives_a_profile_credential() {
 #[test]
 fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
     let root = tempdir().expect("retry profile root");
-    let mut profiles = AiProfileCatalog::open(root.path(), Box::new(MemoryVault::default()))
-        .expect("open profiles");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
     profiles
         .save_profile(
             AiProfileDraft::new(

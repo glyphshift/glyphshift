@@ -69,7 +69,8 @@ page includes recovery paths for an application that is not running, privilege m
 
 Each AI connection stores its service URL, model, reasoning mode, batching, simultaneous requests, timeout, retries, and
 local skip rules. Extra reasoning is off by default to avoid unnecessary wait time and cost for routine interface text.
-API keys are stored in Windows Credential Manager.
+API keys are stored as plain text with the local AI connection. Settings masks them by default and can reveal them on
+demand; use this only on a computer you trust.
 
 A Codex subscription uses Codex already signed in on this computer, and translations use its subscription allowance.
 Only the target dictionary is read-only while a task runs; the rest of the app remains available. Quitting interrupts

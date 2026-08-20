@@ -34,7 +34,7 @@ export type ProbeTargetSource
 
 export type ProbeDictionarySource
   = { kind: 'library'; dictionaryId: string }
-    | { kind: 'temporary'; targetLocale: string }
+    | { kind: 'temporary'; sourceLocale: string; targetLocale: string }
 
 export interface ProbeCreationInput {
   target: ProbeTargetSource

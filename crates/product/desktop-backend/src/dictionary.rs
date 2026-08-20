@@ -667,7 +667,9 @@ impl DesktopBackend {
     }
 
     pub fn reload_dictionaries(&mut self) -> Result<(), BackendError> {
-        self.dictionaries = read_dictionaries(&self.root)?;
+        let load = read_dictionaries(&self.root)?;
+        self.dictionaries = load.dictionaries;
+        self.artifact_warnings = load.warnings;
         self.refresh_dictionary_installations()
     }
 
@@ -779,9 +781,13 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
         entries,
     )
 }
-pub(super) fn read_dictionaries(
-    root: &Path,
-) -> Result<BTreeMap<Box<str>, DictionaryView>, BackendError> {
+
+pub(super) struct DictionaryLoad {
+    pub(super) dictionaries: BTreeMap<Box<str>, DictionaryView>,
+    pub(super) warnings: Vec<ArtifactWarningView>,
+}
+
+pub(super) fn read_dictionaries(root: &Path) -> Result<DictionaryLoad, BackendError> {
     let directory = root.join("dictionaries");
     let mut paths = fs::read_dir(&directory)
         .map_err(|_| BackendError::Storage("read-dictionary-directory"))?
@@ -791,25 +797,49 @@ pub(super) fn read_dictionaries(
         .collect::<Vec<_>>();
     paths.sort();
     let mut dictionaries = BTreeMap::new();
+    let mut warnings = Vec::new();
     for path in paths {
-        let source =
-            fs::read_to_string(&path).map_err(|_| BackendError::Storage("dictionary-json"))?;
-        let expected_id = path
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .ok_or(BackendError::InvalidArtifact("dictionary-json"))?;
-        let artifact =
-            dictionary_package::DictionaryPackage::decode_json(&source, Some(expected_id))
-                .map_err(|_| BackendError::InvalidArtifact("dictionary-json"))?;
+        let Some(expected_id) = path.file_stem().and_then(|value| value.to_str()) else {
+            warnings.push(ArtifactWarningView::dictionary(
+                "unreadable-file-name",
+                "invalid_identity",
+            ));
+            continue;
+        };
+        let Ok(source) = fs::read_to_string(&path) else {
+            warnings.push(ArtifactWarningView::dictionary(expected_id, "unreadable"));
+            continue;
+        };
+        let Ok((artifact, migrated)) =
+            dictionary_package::DictionaryPackage::decode_local_json(&source, Some(expected_id))
+        else {
+            warnings.push(ArtifactWarningView::dictionary(expected_id, "invalid"));
+            continue;
+        };
+        if migrated {
+            match artifact.encode_json() {
+                Ok(serialized) if write_atomic(&path, &serialized).is_ok() => {}
+                _ => warnings.push(ArtifactWarningView::dictionary(
+                    expected_id,
+                    "migration_write_failed",
+                )),
+            }
+        }
         let dictionary_id: Box<str> = artifact.id().into();
         if dictionaries
             .insert(dictionary_id.clone(), dictionary_view(&artifact))
             .is_some()
         {
-            return Err(BackendError::DuplicateDictionary(dictionary_id));
+            warnings.push(ArtifactWarningView::dictionary(
+                dictionary_id,
+                "duplicate_identity",
+            ));
         }
     }
-    Ok(dictionaries)
+    Ok(DictionaryLoad {
+        dictionaries,
+        warnings,
+    })
 }
 
 pub(super) fn read_dictionary_installations(

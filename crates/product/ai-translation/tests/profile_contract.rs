@@ -1,22 +1,12 @@
 use glyphshift_ai_translation::{
     AiProfileCatalog, AiProfileDraft, AiProviderProtocol, AiReasoningEffort, CredentialUpdate,
-    CredentialVault, CredentialVaultError,
 };
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
-
-#[derive(Clone, Default)]
-struct MemoryCredentialVault {
-    secrets: Arc<Mutex<BTreeMap<Box<str>, Box<str>>>>,
-}
 
 #[test]
 fn codex_subscription_profile_uses_local_login_without_a_credential() {
     let root = tempdir().expect("Codex profile root");
-    let mut catalog =
-        AiProfileCatalog::open(root.path(), Box::new(MemoryCredentialVault::default()))
-            .expect("open profile catalog");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
     let profile = catalog
         .save_profile(AiProfileDraft::new(
             "profile.codex",
@@ -39,48 +29,10 @@ fn codex_subscription_profile_uses_local_login_without_a_credential() {
     assert_eq!(resolved.reasoning_effort().codex_value(), Some("none"));
 }
 
-impl CredentialVault for MemoryCredentialVault {
-    fn replace(&self, credential_ref: &str, secret: &str) -> Result<(), CredentialVaultError> {
-        self.secrets
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .insert(credential_ref.into(), secret.into());
-        Ok(())
-    }
-
-    fn contains(&self, credential_ref: &str) -> Result<bool, CredentialVaultError> {
-        Ok(self
-            .secrets
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .contains_key(credential_ref))
-    }
-
-    fn delete(&self, credential_ref: &str) -> Result<(), CredentialVaultError> {
-        self.secrets
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .remove(credential_ref);
-        Ok(())
-    }
-
-    fn expose(&self, credential_ref: &str) -> Result<Box<str>, CredentialVaultError> {
-        self.secrets
-            .lock()
-            .map_err(|_| CredentialVaultError::Unavailable)?
-            .get(credential_ref)
-            .cloned()
-            .ok_or(CredentialVaultError::Missing)
-    }
-}
-
 #[test]
-fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_credentials() {
+fn profiles_persist_plaintext_credentials_and_expose_them_for_editing() {
     let root = tempdir().expect("profile data root");
-    let vault = MemoryCredentialVault::default();
-    let shared_secrets = vault.secrets.clone();
-    let mut catalog =
-        AiProfileCatalog::open(root.path(), Box::new(vault.clone())).expect("open profile catalog");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
 
     let openai = catalog
         .save_profile(
@@ -119,18 +71,21 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
         serde_json::to_value(&openai).expect("serialize OpenAI profile")["maxItemsPerRequest"],
         50
     );
+    assert_eq!(
+        serde_json::to_value(&openai).expect("serialize OpenAI profile")["credential"],
+        "synthetic-secret-value"
+    );
     let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
         .expect("read persisted profiles");
-    assert!(persisted.contains("glyphshift.ai-profiles/3"));
+    assert!(persisted.contains("glyphshift.ai-profiles/4"));
     assert!(persisted.contains(r#""reasoningEffort": "disabled""#));
-    assert!(persisted.contains("credentialRef"));
+    assert!(!persisted.contains("credentialRef"));
     assert!(persisted.contains("maxItemsPerRequest"));
     assert!(!persisted.contains("maxInputCharsPerRequest"));
-    assert!(!persisted.contains("synthetic-secret-value"));
+    assert!(persisted.contains("synthetic-secret-value"));
     drop(catalog);
 
-    let mut reopened =
-        AiProfileCatalog::open(root.path(), Box::new(vault)).expect("reopen profile catalog");
+    let mut reopened = AiProfileCatalog::open(root.path()).expect("reopen profile catalog");
     let profiles = reopened.profiles().expect("list reopened profiles");
     assert_eq!(profiles.len(), 2);
     assert_eq!(reopened.default_profile_id(), Some("profile.ollama"));
@@ -139,6 +94,16 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
         .find(|profile| profile.id() == "profile.openai")
         .expect("OpenAI profile")
         .has_credential());
+    assert_eq!(
+        serde_json::to_value(
+            profiles
+                .iter()
+                .find(|profile| profile.id() == "profile.openai")
+                .expect("OpenAI profile")
+        )
+        .expect("serialize reopened profile")["credential"],
+        "synthetic-secret-value"
+    );
     assert_eq!(
         profiles
             .iter()
@@ -155,20 +120,9 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
             .reasoning_effort(),
         AiReasoningEffort::Automatic
     );
-    assert_eq!(
-        shared_secrets
-            .lock()
-            .expect("credential memory")
-            .values()
-            .map(Box::as_ref)
-            .collect::<Vec<_>>(),
-        vec!["synthetic-secret-value"]
-    );
-
     reopened
         .delete_profile("profile.openai")
         .expect("delete profile and its credential");
-    assert!(shared_secrets.lock().expect("credential memory").is_empty());
     assert_eq!(
         reopened.profiles().expect("list remaining profiles").len(),
         1
@@ -176,50 +130,91 @@ fn profiles_and_default_selection_survive_restart_without_persisting_plaintext_c
 }
 
 #[test]
-fn existing_profiles_without_a_batch_size_gain_the_fifty_item_default() {
-    let root = tempdir().expect("profile migration data root");
+fn codex_profile_normalizes_the_reversed_sol_model_id() {
+    let root = tempdir().expect("Codex profile root");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
+    let profile = catalog
+        .save_profile(AiProfileDraft::new(
+            "profile.codex-sol",
+            "Codex Sol",
+            AiProviderProtocol::CodexSubscription,
+            "gpt-sol-5.6",
+        ))
+        .expect("save Codex profile");
+
+    assert_eq!(profile.model_id(), "gpt-5.6-sol");
+}
+
+#[test]
+fn profile_catalog_keeps_valid_profiles_when_other_records_or_fields_are_invalid() {
+    let root = tempdir().expect("profile tolerance root");
     std::fs::write(
         root.path().join("ai-profiles.json"),
         r#"{
-  "schema": "glyphshift.ai-profiles/2",
-  "defaultProfileId": "profile.local",
-  "profiles": [{
-    "id": "profile.local",
-    "name": "Local",
-    "protocol": "ollama_chat",
-    "baseUrl": "http://127.0.0.1:11434/api",
-    "modelId": "synthetic-model",
-    "credentialRef": "glyphshift.ai-profile/profile.local",
-    "timeoutMs": 300000,
-    "maxConcurrency": 1,
-    "maxRetries": 2,
-    "filterPolicy": {}
-  }]
+  "schema": "glyphshift.ai-profiles/4",
+  "defaultProfileId": "profile.valid",
+  "unknownFutureField": true,
+  "profiles": [
+    {
+      "id": "profile.valid",
+      "name": "Valid",
+      "protocol": "ollama_chat",
+      "baseUrl": 42,
+      "modelId": "valid-model",
+      "reasoningEffort": 42,
+      "timeoutMs": "invalid",
+      "maxItemsPerRequest": 50,
+      "maxConcurrency": 1,
+      "maxRetries": "invalid",
+      "filterPolicy": {
+        "skipUrls": "invalid",
+        "skipEmails": false,
+        "unknownFilterField": true
+      },
+      "unknownProfileField": "ignored"
+    },
+    {
+      "id": "profile.invalid",
+      "name": "Invalid",
+      "protocol": "ollama_chat",
+      "baseUrl": "http://127.0.0.1:11434/api",
+      "modelId": 42,
+      "timeoutMs": 300000,
+      "maxItemsPerRequest": 50,
+      "maxConcurrency": 1,
+      "maxRetries": 2,
+      "filterPolicy": {}
+    }
+  ]
 }"#,
     )
-    .expect("write existing profile artifact");
+    .expect("write partially invalid profile artifact");
 
-    let catalog = AiProfileCatalog::open(root.path(), Box::new(MemoryCredentialVault::default()))
-        .expect("open existing profile artifact");
-    let profile = catalog
-        .profiles()
-        .expect("list migrated profiles")
-        .into_iter()
-        .next()
-        .expect("migrated profile");
+    let catalog = AiProfileCatalog::open(root.path()).expect("open remaining valid profiles");
+    let profiles = catalog.profiles().expect("list valid profiles");
 
-    assert_eq!(
-        serde_json::to_value(profile).expect("serialize migrated profile")["maxItemsPerRequest"],
-        50
-    );
-    let profile = catalog
-        .profiles()
-        .expect("list migrated profiles")
-        .into_iter()
-        .next()
-        .expect("migrated profile");
-    assert_eq!(profile.reasoning_effort(), AiReasoningEffort::Automatic);
-    let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
-        .expect("read migrated profile artifact");
-    assert!(persisted.contains("glyphshift.ai-profiles/3"));
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].id(), "profile.valid");
+    assert_eq!(catalog.default_profile_id(), Some("profile.valid"));
+    let profile = serde_json::to_value(&profiles[0]).expect("serialize recovered profile");
+    assert_eq!(profile["baseUrl"], "http://127.0.0.1:11434/api");
+    assert_eq!(profile["reasoningEffort"], "automatic");
+    assert_eq!(profile["timeoutMs"], 1_800_000);
+    assert_eq!(profile["maxRetries"], 2);
+    assert_eq!(profile["filterPolicy"]["skipUrls"], true);
+    assert_eq!(profile["filterPolicy"]["skipEmails"], false);
+}
+
+#[test]
+fn malformed_profile_artifact_opens_empty_and_preserves_the_original_file() {
+    let root = tempdir().expect("profile recovery root");
+    std::fs::write(root.path().join("ai-profiles.json"), b"{")
+        .expect("write malformed profile artifact");
+
+    let catalog =
+        AiProfileCatalog::open(root.path()).expect("open malformed profile artifact safely");
+
+    assert!(catalog.profiles().expect("list profiles").is_empty());
+    assert!(root.path().join("ai-profiles.json").exists());
+    assert!(root.path().join("ai-profiles.invalid.json").exists());
 }

@@ -77,9 +77,13 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 30;
+const DESKTOP_API_VERSION: u16 = 32;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
+
+fn default_workspace_root(roaming_data_root: &Path) -> PathBuf {
+    roaming_data_root.join("Glyphshift").join("workspace")
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct DesktopLaunchContext {
@@ -666,8 +670,8 @@ pub fn run() {
             let data_root = launch_context.data_root.map_or_else(
                 || {
                     app.path()
-                        .app_data_dir()
-                        .map(|path| path.join("workspace"))
+                        .data_dir()
+                        .map(|path| default_workspace_root(&path))
                         .map_err(|error| std::io::Error::other(error.to_string()))
                 },
                 Ok,

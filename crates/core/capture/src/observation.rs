@@ -151,7 +151,7 @@ impl CaptureProducerConfiguration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureObservationRecord {
     sequence: u64,
     adapter_id: Box<str>,
@@ -217,7 +217,7 @@ pub(crate) fn validate_observation_fields(
 /// bounded queue. `dropped_total` is the cumulative producer-side drop count
 /// for the generation, not an instruction to mutate a checkpoint directly.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct CaptureObservationBatch {
     schema: Box<str>,
     producer_id: CaptureProducerId,

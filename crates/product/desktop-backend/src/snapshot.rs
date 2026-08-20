@@ -9,6 +9,7 @@ pub struct DesktopSnapshot {
     dictionaries: Vec<DictionarySummaryView>,
     workflows: Vec<WorkflowSummaryView>,
     activations: Vec<WorkflowActivationSnapshot>,
+    artifact_warnings: Vec<ArtifactWarningView>,
 }
 
 impl DesktopSnapshot {
@@ -35,6 +36,11 @@ impl DesktopSnapshot {
     #[must_use]
     pub fn activations(&self) -> &[WorkflowActivationSnapshot] {
         &self.activations
+    }
+
+    #[must_use]
+    pub fn artifact_warnings(&self) -> &[ArtifactWarningView] {
+        &self.artifact_warnings
     }
 }
 impl DesktopBackend {
@@ -104,6 +110,7 @@ impl DesktopBackend {
                     revision: *revision,
                 })
                 .collect(),
+            artifact_warnings: self.artifact_warnings.clone(),
         }
     }
 }

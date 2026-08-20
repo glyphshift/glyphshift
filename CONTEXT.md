@@ -116,7 +116,8 @@ _Avoid_: 词典版本、工作流 revision
 ## AI 翻译
 
 **AI Profile**：
-可复用的 AI 翻译连接与请求策略，包含供应商协议、服务地址、模型、推理强度、分批、超时、并发、重试和本机过滤规则。
+可复用的 AI 翻译连接与请求策略，包含供应商协议、服务地址、模型、可选明文 API Key、推理强度、分批、
+超时、并发、重试和本机过滤规则。
 _Avoid_: App Settings、一次翻译任务
 
 ### Translation Task（翻译任务）
@@ -174,8 +175,13 @@ _Avoid_: Author、Vendor display name
 ## 应用
 
 **App Settings**：
-当前设备上的 Glyphshift 偏好，包括界面、快捷键、启动、关闭、权限和翻译前确认。用户资产不属于 App Settings。
+当前设备上的 Glyphshift 偏好，包括界面、快捷键、启动、关闭和权限。用户资产不属于 App Settings。
 _Avoid_: AI Profile、Workflow、Software、Dictionary
+
+**工作区数据根（Workspace Data Root）**：
+当前用户本机保存软件、词典、工作流、探针、AI 配置与 App Settings 的品牌目录。读取采用字段、记录、
+文件三级容错；bundle identifier 与隔离测试根不属于产品工作区身份。
+_Avoid_: bundle identifier 目录、测试证据目录、整份配置一次性拒绝
 
 **UI Locale**：
 Glyphshift 自身菜单、按钮和提示使用的语言，与目标软件语言、词典语言和目录展示语言相互独立。

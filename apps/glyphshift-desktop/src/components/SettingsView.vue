@@ -208,10 +208,6 @@ function updateLaunchElevated(value: boolean) {
   void appSettings.setLaunchElevated(value).catch(() => undefined)
 }
 
-function updateAiConfirmation(value: boolean) {
-  void appSettings.setConfirmAiTranslation(value).catch(() => undefined)
-}
-
 onMounted(() => void appSettings.refreshPrivilegeStatus())
 onBeforeUnmount(() => {
   shortcutAttempt += 1
@@ -287,18 +283,6 @@ onBeforeUnmount(() => {
           data-testid="settings-section-ai"
           :title="t('settings.aiTranslation.title')"
         >
-          <ManagementFormRow
-            :label="t('settings.aiTranslation.confirm')"
-            icon="i-tabler-message-question"
-            control-width="compact"
-          >
-            <USwitch
-              :model-value="appSettings.confirmAiTranslation.value"
-              :aria-label="t('settings.aiTranslation.confirm')"
-              :disabled="appSettings.settingsBusy.value"
-              @update:model-value="updateAiConfirmation"
-            />
-          </ManagementFormRow>
           <AiProfilesPanel />
         </ManagementFormSection>
 

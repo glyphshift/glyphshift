@@ -22,7 +22,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 30
+const desktopApiVersion = 32
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -328,6 +328,7 @@ onBeforeUnmount(() => {
         :catalog-busy="workspace.dictionaryCatalogBusy.value"
         :catalog-error="workspace.dictionaryCatalogError.value"
         :presentation-locale="appSettings.effectiveLocale.value"
+        :artifact-warnings="workspace.model.value.artifactWarnings"
         @open="openDictionary"
         @create="workspace.createDictionary"
         @import-dictionary="workspace.importDictionary"

@@ -56,6 +56,38 @@ fn run_joins_observations_with_one_dictionary_without_persisting_translation_con
 }
 
 #[test]
+fn run_document_ignores_unknown_fields_without_hiding_the_probe() {
+    let (root, mut store) = run_store();
+    let summary = create_run(&mut store);
+    let document_path = store
+        .document_paths(summary.id())
+        .into_iter()
+        .find(|path| path.exists())
+        .expect("run document");
+    let mut document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&document_path).expect("read run document"))
+            .expect("parse run document");
+    document["unknownFutureField"] = serde_json::json!({ "enabled": true });
+    document["summary"]["name"] = serde_json::json!(42);
+    document["summary"]["status"] = serde_json::json!("future-status");
+    document["summary"]["observedCount"] = serde_json::json!("invalid");
+    fs::write(
+        &document_path,
+        serde_json::to_vec(&document).expect("encode extended run document"),
+    )
+    .expect("write extended run document");
+    drop(store);
+
+    let mut reopened = ProbeRunStore::open(root.path()).expect("reopen probe store");
+    let recovered = reopened
+        .summary(summary.id())
+        .expect("probe remains visible");
+    assert_eq!(recovered.id(), summary.id());
+    assert_eq!(recovered.name(), summary.id());
+    assert_eq!(recovered.status(), ProbeRunStatus::Ready);
+}
+
+#[test]
 fn run_recovers_disconnected_state_and_ignore_keeps_dictionary_unchanged() {
     let (root, mut store) = run_store();
     let summary = create_run(&mut store);

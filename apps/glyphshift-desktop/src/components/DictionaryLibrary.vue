@@ -10,6 +10,7 @@ import type {
   DictionaryCatalogRelease,
   DictionaryMetadata,
   DictionarySummary,
+  ArtifactWarning,
 } from '../model'
 import {
   editableRowIndex,
@@ -27,6 +28,7 @@ const props = defineProps<{
   catalogBusy: boolean
   catalogError: string
   presentationLocale: string
+  artifactWarnings: ArtifactWarning[]
 }>()
 const emit = defineEmits<{
   open: [id: string]
@@ -38,6 +40,11 @@ const emit = defineEmits<{
   installCatalog: [request: DictionaryCatalogInstallRequest]
 }>()
 const { t } = useI18n()
+const dictionaryWarnings = computed(() => props.artifactWarnings.filter(warning => warning.artifactKind === 'dictionary'))
+const dictionaryWarningDescription = computed(() => t('dictionaries.skippedArtifactsDescription', {
+  count: dictionaryWarnings.value.length,
+  ids: dictionaryWarnings.value.map(warning => warning.artifactId).join('、'),
+}))
 
 const mode = ref<'local' | 'catalog'>('local')
 const query = ref('')
@@ -374,6 +381,16 @@ async function chooseExport(item: DictionarySummary) {
     </ManagementPageHeader>
 
     <UAlert v-if="mode === 'local' && (messages.dictionaries || exportError)" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries || exportError" class="mb-3" />
+    <UAlert
+      v-if="mode === 'local' && dictionaryWarnings.length"
+      role="status"
+      color="warning"
+      variant="soft"
+      icon="i-tabler-file-alert"
+      :title="t('dictionaries.skippedArtifactsTitle')"
+      :description="dictionaryWarningDescription"
+      class="mb-3"
+    />
 
     <ManagementTableFrame
       v-if="mode === 'local'"

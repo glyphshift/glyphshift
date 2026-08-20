@@ -21,7 +21,6 @@ export interface AppSettings {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
-  confirmAiTranslation: boolean
 }
 
 interface AppSettingsUpdate {
@@ -31,7 +30,6 @@ interface AppSettingsUpdate {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
-  confirmAiTranslation: boolean
 }
 
 interface DesktopPrivilegeStatus {
@@ -47,7 +45,6 @@ const fallbackSettings: AppSettings = {
   launchElevated: false,
   closeBehavior: 'quit',
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
-  confirmAiTranslation: true,
 }
 
 const settings = ref<AppSettings>({ ...fallbackSettings })
@@ -66,26 +63,31 @@ function hasDesktopRuntime() {
 function normalizeAppSettings(value: unknown): AppSettings | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<AppSettings>
-  if (candidate.settingsSchemaVersion !== 1
-    || !['system', 'zh-CN', 'en-US'].includes(candidate.localePreference ?? '')
-    || !['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
-    || (candidate.launchAtStartup !== undefined && typeof candidate.launchAtStartup !== 'boolean')
-    || (candidate.launchElevated !== undefined && typeof candidate.launchElevated !== 'boolean')
-    || (candidate.closeBehavior !== undefined && !['minimize', 'quit'].includes(candidate.closeBehavior))
-    || (candidate.softwareCaptureShortcut !== undefined
-      && (typeof candidate.softwareCaptureShortcut !== 'string'
-        || candidate.softwareCaptureShortcut.length === 0))
-    || (candidate.confirmAiTranslation !== undefined
-      && typeof candidate.confirmAiTranslation !== 'boolean')) return null
+  const localePreference = ['system', 'zh-CN', 'en-US'].includes(candidate.localePreference ?? '')
+    ? candidate.localePreference as LocalePreference
+    : fallbackSettings.localePreference
+  const themePreference = ['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
+    ? candidate.themePreference as ThemePreference
+    : fallbackSettings.themePreference
+  const closeBehavior = ['minimize', 'quit'].includes(candidate.closeBehavior ?? '')
+    ? candidate.closeBehavior as CloseBehavior
+    : fallbackSettings.closeBehavior
+  const softwareCaptureShortcut = typeof candidate.softwareCaptureShortcut === 'string'
+    && candidate.softwareCaptureShortcut.length > 0
+    ? candidate.softwareCaptureShortcut
+    : fallbackSettings.softwareCaptureShortcut
   return {
     settingsSchemaVersion: 1,
-    localePreference: candidate.localePreference as LocalePreference,
-    themePreference: candidate.themePreference as ThemePreference,
-    launchAtStartup: candidate.launchAtStartup ?? false,
-    launchElevated: candidate.launchElevated ?? false,
-    closeBehavior: candidate.closeBehavior ?? 'quit',
-    softwareCaptureShortcut: candidate.softwareCaptureShortcut ?? 'Ctrl+Shift+F8',
-    confirmAiTranslation: candidate.confirmAiTranslation ?? true,
+    localePreference,
+    themePreference,
+    launchAtStartup: typeof candidate.launchAtStartup === 'boolean'
+      ? candidate.launchAtStartup
+      : fallbackSettings.launchAtStartup,
+    launchElevated: typeof candidate.launchElevated === 'boolean'
+      ? candidate.launchElevated
+      : fallbackSettings.launchElevated,
+    closeBehavior,
+    softwareCaptureShortcut,
   }
 }
 
@@ -210,7 +212,6 @@ export function useAppSettings() {
       launchElevated: settings.value.launchElevated,
       closeBehavior: settings.value.closeBehavior,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
-      confirmAiTranslation: settings.value.confirmAiTranslation,
       ...patch,
     })
   }
@@ -229,7 +230,6 @@ export function useAppSettings() {
     launchElevated: computed(() => settings.value.launchElevated),
     closeBehavior: computed(() => settings.value.closeBehavior),
     softwareCaptureShortcut: computed(() => settings.value.softwareCaptureShortcut),
-    confirmAiTranslation: computed(() => settings.value.confirmAiTranslation),
     async setLocalePreference(localePreference: LocalePreference) {
       await update({ localePreference })
     },
@@ -257,9 +257,6 @@ export function useAppSettings() {
     },
     async setCloseBehavior(closeBehavior: CloseBehavior) {
       await update({ closeBehavior })
-    },
-    async setConfirmAiTranslation(confirmAiTranslation: boolean) {
-      await update({ confirmAiTranslation })
     },
     async probeSoftwareCaptureShortcut(shortcut: string) {
       return hasDesktopRuntime()

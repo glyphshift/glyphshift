@@ -1,6 +1,6 @@
 //! Portable Dictionary `/3` package codec and validation.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 
 pub const DICTIONARY_SCHEMA: &str = "glyphshift.dictionary/3";
@@ -20,8 +20,66 @@ pub enum DictionaryMutationError {
     EmptySelection,
 }
 
+fn deserialize_string_or_empty<'de, D>(deserializer: D) -> Result<Box<str>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().unwrap_or_default().into())
+}
+
+fn deserialize_release_version<'de, D>(deserializer: D) -> Result<Box<str>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().unwrap_or("0.1.0").into())
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<Box<str>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(Into::into))
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<Box<str>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(Into::into))
+        .collect())
+}
+
+fn deserialize_revision<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_u64().filter(|revision| *revision > 0).unwrap_or(1))
+}
+
+fn deserialize_entries<'de, D>(deserializer: D) -> Result<Vec<DictionaryEntryArtifact>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+        .collect())
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DictionaryEntryCreate {
     source: Box<str>,
     #[serde(default)]
@@ -51,17 +109,26 @@ impl DictionaryEntryCreate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DictionaryMetadata {
     id: Box<str>,
+    #[serde(
+        default = "default_release_version",
+        deserialize_with = "deserialize_release_version"
+    )]
     release_version: Box<str>,
     name: Box<str>,
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
     description: Box<str>,
     source_locale: Box<str>,
     target_locale: Box<str>,
+    #[serde(default, deserialize_with = "deserialize_string_list")]
     authors: Vec<Box<str>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     license: Option<Box<str>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     homepage: Option<Box<str>>,
+    #[serde(default, deserialize_with = "deserialize_string_list")]
     tags: Vec<Box<str>>,
 }
 
@@ -118,7 +185,7 @@ impl DictionaryMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DictionaryCreate {
     metadata: DictionaryMetadata,
     entries: Vec<DictionaryEntryCreate>,
@@ -201,7 +268,7 @@ impl DictionaryCreate {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 pub struct DictionaryEdit {
     metadata: DictionaryMetadata,
     base_revision: u64,
@@ -358,20 +425,37 @@ impl DictionaryView {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct DictionaryArtifact {
     schema: Box<str>,
+    #[serde(
+        default = "default_revision",
+        deserialize_with = "deserialize_revision"
+    )]
     revision: u64,
     metadata: DictionaryMetadata,
+    #[serde(default, deserialize_with = "deserialize_entries")]
     entries: Vec<DictionaryEntryArtifact>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct DictionaryEntryArtifact {
     source: Box<str>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_string",
+        skip_serializing_if = "Option::is_none"
+    )]
     translation: Option<Box<str>>,
+}
+
+fn default_release_version() -> Box<str> {
+    "0.1.0".into()
+}
+
+const fn default_revision() -> u64 {
+    1
 }
 
 #[derive(Clone, Debug)]
@@ -416,6 +500,18 @@ impl DictionaryPackage {
         let artifact = serde_json::from_str(source).map_err(|_| PackageError::InvalidJson)?;
         validate_dictionary(&artifact, expected_id)?;
         Ok(Self { artifact })
+    }
+
+    pub fn decode_local_json(
+        source: &str,
+        expected_id: Option<&str>,
+    ) -> Result<(Self, bool), PackageError> {
+        let mut artifact: DictionaryArtifact =
+            serde_json::from_str(source).map_err(|_| PackageError::InvalidJson)?;
+        let migrated = artifact.schema.as_ref() != DICTIONARY_SCHEMA;
+        artifact.schema = DICTIONARY_SCHEMA.into();
+        validate_dictionary(&artifact, expected_id)?;
+        Ok((Self { artifact }, migrated))
     }
 
     pub fn encode_json(&self) -> Result<String, PackageError> {
@@ -671,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn package_rejects_obsolete_location_context_and_text_behavior_fields() {
+    fn package_ignores_unknown_entry_fields_without_losing_the_dictionary() {
         let obsolete = r#"{
             "schema":"glyphshift.dictionary/3",
             "revision":1,
@@ -679,13 +775,13 @@ mod tests {
                 "id":"dictionary.ui",
                 "releaseVersion":"0.1.0",
                 "name":"UI",
-                "description":"",
+                "description":42,
                 "sourceLocale":"en-US",
                 "targetLocale":"zh-CN",
-                "authors":[],
+                "authors":["Fixture",42],
                 "license":null,
                 "homepage":null,
-                "tags":[]
+                "tags":"invalid"
             },
             "entries":[{
                 "location":"main-ui",
@@ -695,11 +791,17 @@ mod tests {
             }]
         }"#;
 
+        let package = DictionaryPackage::decode_json(obsolete, Some("dictionary.ui"))
+            .expect("unknown entry fields do not invalidate the dictionary");
+        assert_eq!(package.view().entries().len(), 1);
+        assert_eq!(package.view().entries()[0].source(), "Open");
+        assert!(package.view().entries()[0].is_pending());
+        assert_eq!(package.view().metadata().description(), "");
         assert_eq!(
-            DictionaryPackage::decode_json(obsolete, Some("dictionary.ui"))
-                .expect_err("obsolete entry fields must not survive inside Dictionary /3"),
-            PackageError::InvalidJson,
+            package.view().metadata().authors(),
+            &[Box::<str>::from("Fixture")]
         );
+        assert!(package.view().metadata().tags().is_empty());
     }
 
     #[test]

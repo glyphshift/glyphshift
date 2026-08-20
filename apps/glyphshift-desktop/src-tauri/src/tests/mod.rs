@@ -16,6 +16,15 @@ use tempfile::tempdir;
 const TEST_ADAPTER_ID: &str = "test.inline";
 const TEST_DICTIONARY_URL: &str = "https://catalog.example/dictionary.json";
 
+#[test]
+fn default_workspace_root_uses_the_product_name() {
+    let roaming = Path::new("<roaming-app-data>");
+    assert_eq!(
+        default_workspace_root(roaming),
+        roaming.join("Glyphshift").join("workspace")
+    );
+}
+
 fn fixture_dictionary_distribution(data_root: &std::path::Path) -> DictionaryDistribution {
     let payload = glyphshift_dictionary_package::DictionaryPackage::create(
         glyphshift_dictionary_package::DictionaryCreate::new(

@@ -76,6 +76,55 @@ pub enum BackendError {
     InvalidInput(&'static str),
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactWarningView {
+    artifact_kind: &'static str,
+    artifact_id: Box<str>,
+    issue: &'static str,
+}
+
+impl ArtifactWarningView {
+    fn dictionary(artifact_id: impl Into<Box<str>>, issue: &'static str) -> Self {
+        Self {
+            artifact_kind: "dictionary",
+            artifact_id: artifact_id.into(),
+            issue,
+        }
+    }
+
+    fn workflow(artifact_id: impl Into<Box<str>>, issue: &'static str) -> Self {
+        Self {
+            artifact_kind: "workflow",
+            artifact_id: artifact_id.into(),
+            issue,
+        }
+    }
+
+    fn software(artifact_id: impl Into<Box<str>>, issue: &'static str) -> Self {
+        Self {
+            artifact_kind: "software",
+            artifact_id: artifact_id.into(),
+            issue,
+        }
+    }
+
+    #[must_use]
+    pub const fn artifact_kind(&self) -> &str {
+        self.artifact_kind
+    }
+
+    #[must_use]
+    pub fn artifact_id(&self) -> &str {
+        &self.artifact_id
+    }
+
+    #[must_use]
+    pub const fn issue(&self) -> &str {
+        self.issue
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DesktopEnvironment {
     composition: CompositionEnvironment,
@@ -143,6 +192,7 @@ pub struct DesktopBackend {
     local_software: BTreeMap<Box<str>, DesktopSoftwareArtifact>,
     dictionaries: BTreeMap<Box<str>, DictionaryView>,
     dictionary_installations: BTreeMap<Box<str>, DictionaryInstallationSummaryView>,
+    artifact_warnings: Vec<ArtifactWarningView>,
     workflows: BTreeMap<Box<str>, WorkflowArtifact>,
     enabled_workflows: BTreeMap<Box<str>, u64>,
     enabled_workflow_ids: Vec<Box<str>>,
@@ -168,12 +218,17 @@ impl DesktopBackend {
         let selected_software_id = loaded_software.selected_software_id;
         let software = loaded_software.software;
         let local_software = loaded_software.local_software;
-        let dictionaries = read_dictionaries(&root)?;
+        let dictionary_load = read_dictionaries(&root)?;
+        let dictionaries = dictionary_load.dictionaries;
+        let mut artifact_warnings = loaded_software.warnings;
+        artifact_warnings.extend(dictionary_load.warnings);
         let dictionary_installations = read_dictionary_installations(&root)?;
-        let workflows = read_workflows(&root)?;
+        let workflow_load = read_workflows(&root)?;
+        let workflows = workflow_load.workflows;
+        artifact_warnings.extend(workflow_load.warnings);
         let enabled_workflows = read_workflow_state(&root, &workflows)?;
         let enabled_workflow_ids = enabled_workflows.keys().cloned().collect();
-        let backend = Self {
+        let mut backend = Self {
             root,
             environment,
             selected_software_id,
@@ -181,22 +236,32 @@ impl DesktopBackend {
             local_software,
             dictionaries,
             dictionary_installations,
+            artifact_warnings,
             workflows,
             enabled_workflows,
             enabled_workflow_ids,
         };
-        for workflow_id in backend.enabled_workflows.keys() {
-            let artifact = backend
-                .workflows
-                .get(workflow_id)
-                .ok_or(BackendError::InvalidArtifact("workflow-state-contract"))?;
+        let invalid_enabled = backend
+            .enabled_workflows
+            .keys()
+            .filter(|workflow_id| {
+                backend.workflows.get(*workflow_id).is_none_or(|artifact| {
+                    backend.validate_workflow_activation(artifact).is_err()
+                        || backend.activation_conflict(artifact).is_some()
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for workflow_id in invalid_enabled {
+            backend.enabled_workflows.remove(&workflow_id);
             backend
-                .validate_workflow_activation(artifact)
-                .map_err(|_| BackendError::InvalidArtifact("workflow-state-contract"))?;
-            if backend.activation_conflict(artifact).is_some() {
-                return Err(BackendError::InvalidArtifact("workflow-state-contract"));
-            }
+                .artifact_warnings
+                .push(ArtifactWarningView::workflow(
+                    workflow_id,
+                    "disabled_invalid_dependency",
+                ));
         }
+        backend.enabled_workflow_ids = backend.enabled_workflows.keys().cloned().collect();
         Ok(backend)
     }
 

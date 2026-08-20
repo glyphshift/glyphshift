@@ -273,6 +273,12 @@ export interface WorkflowRuntimeDiagnostics {
   dropped: number
 }
 
+export interface ArtifactWarning {
+  artifactKind: 'dictionary' | 'workflow'
+  artifactId: string
+  issue: 'invalid' | 'unreadable' | 'invalid_identity' | 'migration_write_failed' | 'duplicate_identity' | 'disabled_invalid_dependency'
+}
+
 export interface DesktopSnapshot {
   selectedSoftwareId: string | null
   software: SoftwareRecord[]
@@ -282,6 +288,7 @@ export interface DesktopSnapshot {
   workflowRuntimeStatus: Record<string, WorkflowRuntimeStatus>
   adapters: AdapterOption[]
   fontFamilies: string[]
+  artifactWarnings: ArtifactWarning[]
 }
 
 export interface WorkflowCommandResult {
@@ -307,6 +314,7 @@ export function emptyModel(): DesktopModel {
     workflowRuntimeStatus: {},
     adapters: [],
     fontFamilies: [],
+    artifactWarnings: [],
     dictionaryDetails: {},
     workflowDetails: {},
   }

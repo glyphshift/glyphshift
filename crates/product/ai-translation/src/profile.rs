@@ -7,8 +7,7 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
-const PROFILE_SCHEMA_V2: &str = "glyphshift.ai-profiles/2";
-const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/3";
+const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/4";
 pub const DEFAULT_TIMEOUT_MS: u64 = 1_800_000;
 pub const MAX_TIMEOUT_MS: u64 = 3_600_000;
 pub const DEFAULT_MAX_RETRIES: u16 = 2;
@@ -133,20 +132,6 @@ impl AiReasoningEffort {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CredentialVaultError {
-    Missing,
-    Unavailable,
-    Rejected,
-}
-
-pub trait CredentialVault: Send + Sync {
-    fn replace(&self, credential_ref: &str, secret: &str) -> Result<(), CredentialVaultError>;
-    fn contains(&self, credential_ref: &str) -> Result<bool, CredentialVaultError>;
-    fn delete(&self, credential_ref: &str) -> Result<(), CredentialVaultError>;
-    fn expose(&self, credential_ref: &str) -> Result<Box<str>, CredentialVaultError>;
-}
-
 #[derive(Deserialize)]
 #[serde(tag = "action", content = "secret", rename_all = "snake_case")]
 pub enum CredentialUpdate {
@@ -263,7 +248,7 @@ impl AiProfileDraft {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct StoredAiProfile {
     id: Box<str>,
     name: Box<str>,
@@ -272,7 +257,8 @@ struct StoredAiProfile {
     model_id: Box<str>,
     #[serde(default)]
     reasoning_effort: AiReasoningEffort,
-    credential_ref: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    credential: Option<Box<str>>,
     timeout_ms: u64,
     #[serde(default = "default_max_items_per_request")]
     max_items_per_request: u16,
@@ -283,7 +269,7 @@ struct StoredAiProfile {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct ProfileArtifact {
     schema: Box<str>,
     default_profile_id: Option<Box<str>>,
@@ -314,6 +300,7 @@ pub struct AiProfileView {
     max_concurrency: u16,
     max_retries: u16,
     filter_policy: FilterPolicy,
+    credential: Option<Box<str>>,
     has_credential: bool,
     credential_required: bool,
 }
@@ -426,6 +413,11 @@ impl AiProfileView {
     }
 
     #[must_use]
+    pub fn credential(&self) -> Option<&str> {
+        self.credential.as_deref()
+    }
+
+    #[must_use]
     pub const fn credential_required(&self) -> bool {
         self.credential_required
     }
@@ -442,44 +434,41 @@ pub enum AiProfileError {
     InvalidArtifact,
     InvalidProfile(&'static str),
     UnknownProfile(Box<str>),
-    Credential(CredentialVaultError),
+    MissingCredential,
 }
 
 pub struct AiProfileCatalog {
     path: PathBuf,
     artifact: ProfileArtifact,
-    vault: Box<dyn CredentialVault>,
 }
 
 impl AiProfileCatalog {
-    pub fn open(
-        data_root: impl AsRef<Path>,
-        vault: Box<dyn CredentialVault>,
-    ) -> Result<Self, AiProfileError> {
+    pub fn open(data_root: impl AsRef<Path>) -> Result<Self, AiProfileError> {
         let path = data_root.as_ref().join(PROFILE_FILE_NAME);
         let mut artifact = if path.exists() {
             let reader = BufReader::new(File::open(&path).map_err(|_| AiProfileError::Storage)?);
-            let artifact = serde_json::from_reader::<_, ProfileArtifact>(reader)
-                .map_err(|_| AiProfileError::InvalidArtifact)?;
-            artifact
+            let value = match serde_json::from_reader::<_, serde_json::Value>(reader) {
+                Ok(value) => value,
+                Err(_) => {
+                    preserve_invalid_profile_artifact(&path);
+                    serde_json::Value::Null
+                }
+            };
+            profile_artifact_from_value(&value)
         } else {
             ProfileArtifact::default()
         };
-        let migrated = artifact.schema.as_ref() == PROFILE_SCHEMA_V2;
-        if migrated {
-            artifact.schema = PROFILE_SCHEMA.into();
-            for profile in &mut artifact.profiles {
-                if !profile.protocol.supports_reasoning_control() {
-                    profile.reasoning_effort = AiReasoningEffort::Automatic;
-                }
+        let mut migrated = artifact.schema.as_ref() != PROFILE_SCHEMA;
+        for profile in &mut artifact.profiles {
+            let normalized = normalized_model_id(profile.protocol, &profile.model_id);
+            if normalized.as_ref() != profile.model_id.as_ref() {
+                profile.model_id = normalized;
+                migrated = true;
             }
         }
+        normalize_artifact(&mut artifact);
         validate_artifact(&artifact)?;
-        let catalog = Self {
-            path,
-            artifact,
-            vault,
-        };
+        let catalog = Self { path, artifact };
         if migrated {
             catalog.persist()?;
         }
@@ -492,11 +481,7 @@ impl AiProfileCatalog {
     }
 
     pub fn profiles(&self) -> Result<Vec<AiProfileView>, AiProfileError> {
-        self.artifact
-            .profiles
-            .iter()
-            .map(|profile| profile_view(profile, self.vault.as_ref()))
-            .collect()
+        Ok(self.artifact.profiles.iter().map(profile_view).collect())
     }
 
     pub fn profile(&self, profile_id: &str) -> Result<AiProfileView, AiProfileError> {
@@ -506,7 +491,7 @@ impl AiProfileCatalog {
             .iter()
             .find(|profile| profile.id.as_ref() == profile_id)
             .ok_or_else(|| AiProfileError::UnknownProfile(profile_id.into()))?;
-        profile_view(profile, self.vault.as_ref())
+        Ok(profile_view(profile))
     }
 
     pub fn resolve_profile(&self, profile_id: &str) -> Result<ResolvedAiProfile, AiProfileError> {
@@ -516,17 +501,10 @@ impl AiProfileCatalog {
             .iter()
             .find(|profile| profile.id.as_ref() == profile_id)
             .ok_or_else(|| AiProfileError::UnknownProfile(profile_id.into()))?;
-        let has_credential = self
-            .vault
-            .contains(&profile.credential_ref)
-            .map_err(AiProfileError::Credential)?;
+        let has_credential = profile.credential.is_some();
         if profile.protocol.credential_required() && !has_credential {
-            return Err(AiProfileError::Credential(CredentialVaultError::Missing));
+            return Err(AiProfileError::MissingCredential);
         }
-        let credential = has_credential
-            .then(|| self.vault.expose(&profile.credential_ref))
-            .transpose()
-            .map_err(AiProfileError::Credential)?;
         Ok(ResolvedAiProfile {
             id: profile.id.clone(),
             name: profile.name.clone(),
@@ -534,7 +512,7 @@ impl AiProfileCatalog {
             base_url: profile.base_url.clone(),
             model_id: profile.model_id.clone(),
             reasoning_effort: profile.reasoning_effort,
-            credential,
+            credential: profile.credential.clone(),
             timeout_ms: profile.timeout_ms,
             max_items_per_request: profile.max_items_per_request,
             max_concurrency: profile.max_concurrency,
@@ -543,28 +521,27 @@ impl AiProfileCatalog {
     }
 
     pub fn save_profile(&mut self, draft: AiProfileDraft) -> Result<AiProfileView, AiProfileError> {
-        let (profile, credential) = stored_profile(draft)?;
-        let credential_ref = profile.credential_ref.clone();
+        let (mut profile, credential) = stored_profile(draft)?;
         let index = self
             .artifact
             .profiles
             .iter()
             .position(|candidate| candidate.id == profile.id);
-        match credential {
-            CredentialUpdate::Keep => {}
+        profile.credential = match credential {
+            CredentialUpdate::Keep => {
+                index.and_then(|index| self.artifact.profiles[index].credential.clone())
+            }
             CredentialUpdate::Replace(secret) => {
                 let secret = secret.trim();
                 if secret.is_empty() {
                     return Err(AiProfileError::InvalidProfile("credential"));
                 }
-                self.vault
-                    .replace(&credential_ref, secret)
-                    .map_err(AiProfileError::Credential)?;
+                Some(secret.into())
             }
-            CredentialUpdate::Clear => self
-                .vault
-                .delete(&credential_ref)
-                .map_err(AiProfileError::Credential)?,
+            CredentialUpdate::Clear => None,
+        };
+        if profile.protocol.credential_required() && profile.credential.is_none() {
+            return Err(AiProfileError::InvalidProfile("credential"));
         }
         if let Some(index) = index {
             self.artifact.profiles[index] = profile.clone();
@@ -578,7 +555,7 @@ impl AiProfileCatalog {
             self.artifact.default_profile_id = Some(profile.id.clone());
         }
         self.persist()?;
-        profile_view(&profile, self.vault.as_ref())
+        Ok(profile_view(&profile))
     }
 
     pub fn set_default_profile(&mut self, profile_id: &str) -> Result<(), AiProfileError> {
@@ -601,10 +578,7 @@ impl AiProfileCatalog {
             .iter()
             .position(|profile| profile.id.as_ref() == profile_id)
             .ok_or_else(|| AiProfileError::UnknownProfile(profile_id.into()))?;
-        let profile = self.artifact.profiles.remove(index);
-        self.vault
-            .delete(&profile.credential_ref)
-            .map_err(AiProfileError::Credential)?;
+        self.artifact.profiles.remove(index);
         if self.artifact.default_profile_id.as_deref() == Some(profile_id) {
             self.artifact.default_profile_id = self
                 .artifact
@@ -658,7 +632,7 @@ fn stored_profile(
     } = draft;
     let name = name.trim();
     let base_url = base_url.trim().trim_end_matches('/');
-    let model_id = model_id.trim();
+    let model_id = normalized_model_id(protocol, model_id.trim());
     if !safe_identifier(&id) {
         return Err(AiProfileError::InvalidProfile("id"));
     }
@@ -684,16 +658,15 @@ fn stored_profile(
     {
         return Err(AiProfileError::InvalidProfile("request-policy"));
     }
-    let credential_ref: Box<str> = format!("glyphshift.ai-profile/{id}").into();
     Ok((
         StoredAiProfile {
             id,
             name: name.into(),
             protocol,
             base_url: base_url.into(),
-            model_id: model_id.into(),
+            model_id,
             reasoning_effort,
-            credential_ref,
+            credential: None,
             timeout_ms,
             max_items_per_request,
             max_concurrency,
@@ -704,14 +677,8 @@ fn stored_profile(
     ))
 }
 
-fn profile_view(
-    profile: &StoredAiProfile,
-    vault: &dyn CredentialVault,
-) -> Result<AiProfileView, AiProfileError> {
-    let has_credential = vault
-        .contains(&profile.credential_ref)
-        .map_err(AiProfileError::Credential)?;
-    Ok(AiProfileView {
+fn profile_view(profile: &StoredAiProfile) -> AiProfileView {
+    AiProfileView {
         id: profile.id.clone(),
         name: profile.name.clone(),
         protocol: profile.protocol,
@@ -723,9 +690,10 @@ fn profile_view(
         max_concurrency: profile.max_concurrency,
         max_retries: profile.max_retries,
         filter_policy: profile.filter_policy.clone(),
-        has_credential,
+        credential: profile.credential.clone(),
+        has_credential: profile.credential.is_some(),
         credential_required: profile.protocol.credential_required(),
-    })
+    }
 }
 
 fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
@@ -744,6 +712,10 @@ fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
             !safe_identifier(&profile.id)
                 || profile.name.trim().is_empty()
                 || profile.model_id.trim().is_empty()
+                || profile
+                    .credential
+                    .as_deref()
+                    .is_some_and(|credential| credential.trim().is_empty())
                 || profile.base_url.trim().is_empty()
                 || (profile.protocol == AiProviderProtocol::CodexSubscription
                     && profile.base_url.as_ref()
@@ -757,6 +729,144 @@ fn validate_artifact(artifact: &ProfileArtifact) -> Result<(), AiProfileError> {
         return Err(AiProfileError::InvalidArtifact);
     }
     Ok(())
+}
+
+fn profile_artifact_from_value(value: &serde_json::Value) -> ProfileArtifact {
+    let Some(object) = value.as_object() else {
+        return ProfileArtifact::default();
+    };
+    ProfileArtifact {
+        schema: object
+            .get("schema")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(PROFILE_SCHEMA)
+            .into(),
+        default_profile_id: object
+            .get("defaultProfileId")
+            .and_then(serde_json::Value::as_str)
+            .map(Into::into),
+        profiles: object
+            .get("profiles")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(stored_profile_from_value)
+            .collect(),
+    }
+}
+
+fn stored_profile_from_value(value: &serde_json::Value) -> Option<StoredAiProfile> {
+    let object = value.as_object()?;
+    let id = object.get("id")?.as_str()?;
+    let protocol: AiProviderProtocol = object
+        .get("protocol")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())?;
+    let name = object
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(id);
+    let model_id = object.get("modelId")?.as_str()?;
+    let base_url = object
+        .get("baseUrl")
+        .and_then(serde_json::Value::as_str)
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| protocol.default_base_url());
+    let reasoning_effort = object
+        .get("reasoningEffort")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_else(|| protocol.default_reasoning_effort());
+    let timeout_ms = object
+        .get("timeoutMs")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| (1_000..=MAX_TIMEOUT_MS).contains(value))
+        .unwrap_or(DEFAULT_TIMEOUT_MS);
+    let max_items_per_request = object
+        .get("maxItemsPerRequest")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|value| (1..=1_000).contains(value))
+        .unwrap_or(DEFAULT_MAX_ITEMS_PER_REQUEST);
+    let max_concurrency = object
+        .get("maxConcurrency")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| protocol.default_concurrency());
+    let max_retries = object
+        .get("maxRetries")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|value| *value <= MAX_MAX_RETRIES)
+        .unwrap_or(DEFAULT_MAX_RETRIES);
+    Some(StoredAiProfile {
+        id: id.into(),
+        name: name.into(),
+        protocol,
+        base_url: base_url.into(),
+        model_id: model_id.into(),
+        reasoning_effort,
+        credential: object
+            .get("credential")
+            .and_then(serde_json::Value::as_str)
+            .filter(|credential| !credential.trim().is_empty())
+            .map(Into::into),
+        timeout_ms,
+        max_items_per_request,
+        max_concurrency,
+        max_retries,
+        filter_policy: FilterPolicy::from_persisted_value(object.get("filterPolicy")),
+    })
+}
+
+fn preserve_invalid_profile_artifact(path: &Path) {
+    let backup = path.with_extension("invalid.json");
+    if !backup.exists() {
+        let _ = fs::copy(path, backup);
+    }
+}
+
+fn stored_profile_is_valid(profile: &StoredAiProfile) -> bool {
+    safe_identifier(&profile.id)
+        && !profile.name.trim().is_empty()
+        && !profile.model_id.trim().is_empty()
+        && profile
+            .credential
+            .as_deref()
+            .is_none_or(|credential| !credential.trim().is_empty())
+        && !profile.base_url.trim().is_empty()
+        && (profile.protocol != AiProviderProtocol::CodexSubscription
+            || profile.base_url.as_ref()
+                == AiProviderProtocol::CodexSubscription.default_base_url())
+        && (1_000..=MAX_TIMEOUT_MS).contains(&profile.timeout_ms)
+        && profile.max_concurrency > 0
+        && (1..=1_000).contains(&profile.max_items_per_request)
+        && profile.max_retries <= MAX_MAX_RETRIES
+}
+
+fn normalize_artifact(artifact: &mut ProfileArtifact) {
+    artifact.schema = PROFILE_SCHEMA.into();
+    let mut ids = BTreeSet::new();
+    artifact
+        .profiles
+        .retain(|profile| stored_profile_is_valid(profile) && ids.insert(profile.id.clone()));
+    if artifact
+        .default_profile_id
+        .as_ref()
+        .is_some_and(|profile_id| !ids.contains(profile_id))
+    {
+        artifact.default_profile_id = None;
+    }
+}
+
+fn normalized_model_id(protocol: AiProviderProtocol, model_id: &str) -> Box<str> {
+    if protocol == AiProviderProtocol::CodexSubscription
+        && model_id.eq_ignore_ascii_case("gpt-sol-5.6")
+    {
+        "gpt-5.6-sol".into()
+    } else {
+        model_id.into()
+    }
 }
 
 fn safe_identifier(value: &str) -> bool {

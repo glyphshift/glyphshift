@@ -27,12 +27,13 @@ const emit = defineEmits<{
   started: [runId: string]
 }>()
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const probe = useProbeRuns()
 const targetMode = ref<TargetMode>('library')
 const softwareId = ref('')
 const dictionaryMode = ref<DictionaryMode>('library')
 const dictionaryId = ref('')
+const sourceLocale = ref('en-US')
 const targetLocale = ref('zh-CN')
 const runName = ref('')
 const activeTarget = ref<SoftwarePreflight | null>(null)
@@ -74,7 +75,7 @@ const targetReady = computed(() => targetMode.value === 'library'
   : activeTargetReady.value)
 const dictionaryReady = computed(() => dictionaryMode.value === 'library'
   ? Boolean(selectedDictionary.value)
-  : Boolean(targetLocale.value.trim()))
+  : Boolean(sourceLocale.value.trim() && targetLocale.value.trim()))
 const canStart = computed(() => targetReady.value && dictionaryReady.value && !probe.busy.value)
 const activePresentation = computed(() => {
   const result = activeTarget.value
@@ -153,7 +154,8 @@ watch(() => props.open, (open) => {
   softwareId.value = librarySoftware.value[0]?.id ?? ''
   dictionaryMode.value = props.dictionaries.length ? 'library' : 'temporary'
   dictionaryId.value = props.dictionaries[0]?.metadata.id ?? ''
-  targetLocale.value = locale.value === 'zh-CN' ? 'zh-CN' : 'en-US'
+  sourceLocale.value = 'en-US'
+  targetLocale.value = 'zh-CN'
   runName.value = ''
   activeTarget.value = null
   runningTargets.value = []
@@ -213,7 +215,11 @@ async function start() {
       : { kind: 'active_process', executablePath: active!.executablePath },
     dictionary: dictionaryMode.value === 'library'
       ? { kind: 'library', dictionaryId: selectedDictionary.value!.metadata.id }
-      : { kind: 'temporary', targetLocale: targetLocale.value.trim() },
+      : {
+          kind: 'temporary',
+          sourceLocale: sourceLocale.value.trim(),
+          targetLocale: targetLocale.value.trim(),
+        },
     name: runName.value.trim() || undefined,
     adapterIds: [],
     livePreviewEnabled: false,
@@ -292,9 +298,14 @@ async function start() {
         <UAlert v-else color="neutral" variant="soft" icon="i-tabler-wand" :title="t('capture.temporaryDictionaryTitle')" :description="t('capture.temporaryDictionaryHint')" />
       </UFormField>
 
-      <UFormField v-if="dictionaryMode === 'temporary'" :label="t('capture.targetLocale')" :hint="t('capture.quickProbe.targetLocaleHint')">
-        <UInput v-model="targetLocale" class="w-full" maxlength="64" />
-      </UFormField>
+      <div v-if="dictionaryMode === 'temporary'" class="grid grid-cols-2 gap-3 @max-[560px]:grid-cols-1">
+        <UFormField :label="t('capture.sourceLocale')" :hint="t('capture.quickProbe.sourceLocaleHint')" required>
+          <UInput v-model="sourceLocale" :aria-label="t('capture.sourceLocale')" class="w-full" maxlength="64" />
+        </UFormField>
+        <UFormField :label="t('capture.targetLocale')" :hint="t('capture.quickProbe.targetLocaleHint')" required>
+          <UInput v-model="targetLocale" :aria-label="t('capture.targetLocale')" class="w-full" maxlength="64" />
+        </UFormField>
+      </div>
 
       <UAlert v-if="captureError || probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="captureError || probe.message.value" />
     </div>

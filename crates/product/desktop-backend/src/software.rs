@@ -9,6 +9,7 @@ pub(super) struct LoadedSoftware {
     pub(super) local_software: BTreeMap<Box<str>, DesktopSoftwareArtifact>,
     pub(super) selected_software_id: Option<Box<str>>,
     pub(super) requirements: Vec<AdapterRequirement>,
+    pub(super) warnings: Vec<ArtifactWarningView>,
 }
 
 pub(super) fn load(root: &Path) -> Result<LoadedSoftware, BackendError> {
@@ -24,23 +25,34 @@ pub(super) fn load(root: &Path) -> Result<LoadedSoftware, BackendError> {
     extension_paths.sort();
 
     let mut software = BTreeMap::new();
+    let mut warnings = Vec::new();
     for path in extension_paths {
-        let artifact: ExtensionArtifact = read_json(&path, "extension-json")?;
-        validate_extension(&artifact, &path)?;
-        if software
-            .insert(
-                artifact.id.clone(),
-                SoftwareState {
-                    artifact,
-                    locale: DEFAULT_LOCALE.into(),
-                },
-            )
-            .is_some()
-        {
-            return Err(BackendError::DuplicateSoftware(
-                "duplicate-extension".into(),
-            ));
+        let artifact_id = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("unreadable-file-name");
+        let Ok(artifact) = read_json::<ExtensionArtifact>(&path, "extension-json") else {
+            warnings.push(ArtifactWarningView::software(artifact_id, "unreadable"));
+            continue;
+        };
+        if validate_extension(&artifact, &path).is_err() {
+            warnings.push(ArtifactWarningView::software(artifact_id, "invalid"));
+            continue;
         }
+        if software.contains_key(&artifact.id) {
+            warnings.push(ArtifactWarningView::software(
+                artifact_id,
+                "duplicate_identity",
+            ));
+            continue;
+        }
+        software.insert(
+            artifact.id.clone(),
+            SoftwareState {
+                artifact,
+                locale: DEFAULT_LOCALE.into(),
+            },
+        );
     }
     let requirements = software
         .values()
@@ -63,6 +75,7 @@ pub(super) fn load(root: &Path) -> Result<LoadedSoftware, BackendError> {
         local_software,
         selected_software_id,
         requirements,
+        warnings,
     })
 }
 
@@ -784,22 +797,72 @@ pub(super) fn read_desktop_state(root: &Path) -> Result<DesktopStateArtifact, Ba
             software: BTreeMap::new(),
         });
     }
-    let state: DesktopStateArtifact = read_json(&path, "desktop-state-json")?;
-    if state.schema.as_ref() != DESKTOP_STATE_SCHEMA
-        || state
-            .selected_software_id
-            .as_deref()
-            .is_some_and(|value| !safe_identifier(value))
-        || state.software.iter().any(|(extension_id, software)| {
-            !safe_identifier(extension_id)
-                || software.display_name.trim().is_empty()
-                || software.display_name.chars().count() > 128
-                || !Path::new(software.executable_path.as_ref()).is_absolute()
+    let source =
+        fs::read_to_string(&path).map_err(|_| BackendError::Storage("read-desktop-state"))?;
+    let value = match serde_json::from_str::<serde_json::Value>(&source) {
+        Ok(value) => value,
+        Err(_) => {
+            let backup = path.with_extension("invalid.json");
+            if !backup.exists() {
+                let _ = fs::copy(&path, backup);
+            }
+            serde_json::Value::Null
+        }
+    };
+    Ok(desktop_state_from_value(&value))
+}
+
+fn desktop_state_from_value(value: &serde_json::Value) -> DesktopStateArtifact {
+    let Some(object) = value.as_object() else {
+        return DesktopStateArtifact {
+            schema: DESKTOP_STATE_SCHEMA.into(),
+            selected_software_id: None,
+            software: BTreeMap::new(),
+        };
+    };
+    let software = object
+        .get("software")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(extension_id, value)| {
+            if !safe_identifier(extension_id) {
+                return None;
+            }
+            let record = value.as_object()?;
+            let executable_path = record.get("executablePath")?.as_str()?;
+            if !Path::new(executable_path).is_absolute() {
+                return None;
+            }
+            let display_name = record
+                .get("displayName")
+                .and_then(serde_json::Value::as_str)
+                .filter(|name| !name.trim().is_empty() && name.chars().count() <= 128)
+                .unwrap_or(extension_id);
+            let description = record
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            Some((
+                Box::<str>::from(extension_id.as_str()),
+                DesktopSoftwareArtifact {
+                    display_name: display_name.into(),
+                    description: description.into(),
+                    executable_path: executable_path.into(),
+                },
+            ))
         })
-    {
-        return Err(BackendError::InvalidArtifact("desktop-state-contract"));
+        .collect::<BTreeMap<_, _>>();
+    let selected_software_id = object
+        .get("selectedSoftwareId")
+        .and_then(serde_json::Value::as_str)
+        .filter(|selected| software.contains_key(*selected))
+        .map(Into::into);
+    DesktopStateArtifact {
+        schema: DESKTOP_STATE_SCHEMA.into(),
+        selected_software_id,
+        software,
     }
-    Ok(state)
 }
 
 fn write_desktop_state(

@@ -52,7 +52,23 @@ impl QuickProbeSessionStore {
             });
         }
         let (ledger, recovered_from) = if path.exists() {
-            (read_quick_probe_ledger(&path)?, None)
+            match read_quick_probe_ledger(&path) {
+                Ok(ledger) => (ledger, None),
+                Err(_) if backup.exists() => {
+                    preserve_invalid_quick_probe_ledger(&path);
+                    (read_quick_probe_ledger(&backup)?, Some(backup.clone()))
+                }
+                Err(_) => {
+                    preserve_invalid_quick_probe_ledger(&path);
+                    (
+                        QuickProbeLedger {
+                            schema: QUICK_PROBE_SCHEMA.into(),
+                            sessions: Vec::new(),
+                        },
+                        None,
+                    )
+                }
+            }
         } else if pending.exists() {
             match read_quick_probe_ledger(&pending) {
                 Ok(ledger) => (ledger, Some(pending.clone())),
@@ -171,12 +187,56 @@ impl QuickProbeSessionStore {
 fn read_quick_probe_ledger(path: &Path) -> Result<QuickProbeLedger, CommandError> {
     let source =
         fs::read_to_string(path).map_err(|_| CommandError::new("quick_probe.storage_failed"))?;
-    let ledger: QuickProbeLedger = serde_json::from_str(&source)
+    let value: serde_json::Value = serde_json::from_str(&source)
         .map_err(|_| CommandError::new("quick_probe.invalid_ledger"))?;
-    if ledger.schema.as_ref() != QUICK_PROBE_SCHEMA {
+    let Some(object) = value.as_object() else {
         return Err(CommandError::new("quick_probe.invalid_ledger"));
+    };
+    Ok(QuickProbeLedger {
+        schema: QUICK_PROBE_SCHEMA.into(),
+        sessions: object
+            .get("sessions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(quick_probe_record_from_value)
+            .collect(),
+    })
+}
+
+fn quick_probe_record_from_value(value: &serde_json::Value) -> Option<QuickProbeRecord> {
+    let object = value.as_object()?;
+    let run_id = object.get("runId")?.as_str()?;
+    let dictionary_id = object.get("dictionaryId")?.as_str()?;
+    let executable_path = object.get("executablePath")?.as_str()?;
+    Some(QuickProbeRecord {
+        run_id: run_id.into(),
+        software_id: object
+            .get("softwareId")
+            .and_then(serde_json::Value::as_str)
+            .map(Into::into),
+        dictionary_id: dictionary_id.into(),
+        executable_path: executable_path.into(),
+        owns_software: object
+            .get("ownsSoftware")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        owns_dictionary: object
+            .get("ownsDictionary")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        phase: object
+            .get("phase")
+            .and_then(|phase| serde_json::from_value(phase.clone()).ok())
+            .unwrap_or(QuickProbePhase::Preparing),
+    })
+}
+
+fn preserve_invalid_quick_probe_ledger(path: &Path) {
+    let backup = path.with_extension("invalid.json");
+    if !backup.exists() {
+        let _ = fs::copy(path, backup);
     }
-    Ok(ledger)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -197,8 +257,13 @@ pub(super) enum ProbeTargetSourceRequest {
     rename_all_fields = "camelCase"
 )]
 pub(super) enum ProbeDictionarySourceRequest {
-    Library { dictionary_id: Box<str> },
-    Temporary { target_locale: Box<str> },
+    Library {
+        dictionary_id: Box<str>,
+    },
+    Temporary {
+        source_locale: Box<str>,
+        target_locale: Box<str>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -227,6 +292,18 @@ pub(super) enum QuickProbeAssetDisposition {
 pub(super) struct QuickProbeCleanupView {
     pub(super) software: QuickProbeAssetDisposition,
     pub(super) dictionary: QuickProbeAssetDisposition,
+}
+
+fn valid_probe_locale(locale: &str) -> bool {
+    let locale = locale.trim();
+    !locale.is_empty()
+        && locale != "."
+        && locale != ".."
+        && !locale.eq_ignore_ascii_case("auto")
+        && locale.chars().count() <= 64
+        && locale.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+        })
 }
 
 impl DesktopApplication {
@@ -274,9 +351,12 @@ impl DesktopApplication {
         &self,
         request: &ProbeCreationRequest,
     ) -> Result<(), CommandError> {
-        if let ProbeDictionarySourceRequest::Temporary { target_locale } = &request.dictionary {
-            let target_locale = target_locale.trim();
-            if target_locale.is_empty() || target_locale.chars().count() > 64 {
+        if let ProbeDictionarySourceRequest::Temporary {
+            source_locale,
+            target_locale,
+        } = &request.dictionary
+        {
+            if !valid_probe_locale(source_locale) || !valid_probe_locale(target_locale) {
                 return Err(CommandError::new("quick_probe.invalid_locale"));
             }
         }
@@ -438,12 +518,16 @@ impl DesktopApplication {
                 .find(|software| software.id() == software_id.as_ref())
                 .map(|software| Box::<str>::from(software.name()))
                 .ok_or_else(|| CommandError::new("capture.unknown_software"))?;
-            if let ProbeDictionarySourceRequest::Temporary { target_locale } = &request.dictionary {
+            if let ProbeDictionarySourceRequest::Temporary {
+                source_locale,
+                target_locale,
+            } = &request.dictionary
+            {
                 self.backend
                     .create_dictionary(DictionaryCreate::new(
                         dictionary_id.clone(),
                         format!("{software_name} 临时词典"),
-                        "auto",
+                        source_locale.trim(),
                         target_locale.trim(),
                     ))
                     .map_err(|_| CommandError::new("dictionary.invalid_create"))?;
@@ -723,5 +807,61 @@ mod store_tests {
         assert!(recovered.path.exists());
         assert!(!pending.exists());
         assert!(!backup.exists());
+    }
+
+    #[test]
+    fn ledger_keeps_valid_sessions_when_other_records_or_fields_are_invalid() {
+        let root = tempdir().expect("temporary ledger root");
+        let path = root.path().join("quick-probe-sessions.json");
+        fs::write(
+            &path,
+            r#"{
+  "schema": "glyphshift.quick-probe-sessions/1",
+  "unknownFutureField": true,
+  "sessions": [
+    {
+      "runId": "quick-probe-test",
+      "softwareId": 42,
+      "dictionaryId": "dictionary.test",
+      "executablePath": "<authorized-executable>",
+      "ownsSoftware": "invalid",
+      "ownsDictionary": true,
+      "phase": "future-phase",
+      "unknownRecordField": 1
+    },
+    {
+      "runId": 42,
+      "dictionaryId": "dictionary.invalid"
+    }
+  ]
+}"#,
+        )
+        .expect("write partially invalid quick probe ledger");
+
+        let store = QuickProbeSessionStore::open(root.path())
+            .expect("open remaining valid quick probe sessions");
+        assert!(store.contains("quick-probe-test"));
+        assert_eq!(store.records().len(), 1);
+        let recovered = store.record("quick-probe-test").expect("recovered session");
+        assert_eq!(recovered.software_id, None);
+        assert!(!recovered.owns_software);
+        assert_eq!(recovered.phase, QuickProbePhase::Preparing);
+    }
+
+    #[test]
+    fn malformed_ledger_opens_empty_and_preserves_the_original_file() {
+        let root = tempdir().expect("temporary ledger root");
+        fs::write(root.path().join("quick-probe-sessions.json"), b"{")
+            .expect("write malformed quick probe ledger");
+
+        let store = QuickProbeSessionStore::open(root.path())
+            .expect("open malformed quick probe ledger safely");
+
+        assert!(store.is_empty());
+        assert!(root.path().join("quick-probe-sessions.json").exists());
+        assert!(root
+            .path()
+            .join("quick-probe-sessions.invalid.json")
+            .exists());
     }
 }

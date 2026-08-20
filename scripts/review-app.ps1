@@ -17,6 +17,7 @@ $localTestRoot = Join-Path $repoRoot 'local-test'
 $buildId = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmssfff')
 $reviewRoot = Join-Path $localTestRoot "evidence\desktop-review\$buildId"
 $runtimeRoot = Join-Path $reviewRoot 'runtime'
+$webViewProfileRoot = Join-Path $reviewRoot 'webview-profile'
 $cargoTargetDir = Join-Path $localTestRoot 'desktop-review\cargo-target'
 $profileDirectory = $Profile.ToLowerInvariant()
 
@@ -56,6 +57,7 @@ foreach ($process in $repoDesktopProcesses) {
 }
 
 New-Item -ItemType Directory -Path $reviewRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $webViewProfileRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 
@@ -108,6 +110,7 @@ if ($BuildOnly) {
 
 $env:GLYPHSHIFT_DATA_ROOT = $DataRoot
 $env:GLYPHSHIFT_RUNTIME_ROOT = $runtimeRoot
+$env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfileRoot
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9223 --remote-allow-origins=*'
 $process = Start-Process `
     -FilePath $desktopExecutable `

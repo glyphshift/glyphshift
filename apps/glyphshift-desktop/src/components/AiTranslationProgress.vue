@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiTranslationBatchStatus, AiTranslationJob } from '../useAiTranslation'
 
@@ -14,6 +14,7 @@ const emit = defineEmits<{
   dismiss: []
 }>()
 const { t } = useI18n()
+const detailsOpen = ref(false)
 
 const batches = computed(() => props.job.batches ?? [])
 const active = computed(() => !['completed', 'completed_with_failures', 'cancelled', 'interrupted'].includes(props.job.status))
@@ -50,6 +51,14 @@ const peakConcurrency = computed(() => Math.max(
   props.job.peakConcurrency ?? 0,
   statusCounts.value.running,
 ))
+const batchDetailsId = computed(() => `ai-batch-details-${props.job.jobId.replace(/[^a-zA-Z0-9_-]/g, '-')}`)
+
+watch(() => props.job.jobId, () => {
+  detailsOpen.value = false
+})
+watch(() => batches.value.map(batch => batch.status).join(','), (statuses) => {
+  if (statuses.includes('retrying') || statuses.includes('failed')) detailsOpen.value = true
+}, { immediate: true })
 
 function formatDuration(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000))
@@ -89,51 +98,69 @@ function statusTone(status: AiTranslationBatchStatus) {
           {{ t('ai.concurrencyEvidence', { running: statusCounts.running, limit: job.maxConcurrency, peak: peakConcurrency }) }}
         </p>
       </div>
-      <UButton v-if="active" color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="emit('cancel')" />
-      <UButton v-else-if="showDismiss !== false" color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('ai.dismissBatchReport')" @click="emit('dismiss')" />
+      <div class="flex shrink-0 items-center gap-1">
+        <UButton
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          :icon="detailsOpen ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'"
+          :label="t(detailsOpen ? 'ai.collapseBatchDetails' : 'ai.expandBatchDetails')"
+          :aria-expanded="detailsOpen"
+          :aria-controls="batchDetailsId"
+          @click="detailsOpen = !detailsOpen"
+        />
+        <UButton v-if="active" color="neutral" variant="ghost" size="xs" :label="t('ai.cancelJob')" @click="emit('cancel')" />
+        <UButton v-else-if="showDismiss !== false" color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('ai.dismissBatchReport')" @click="emit('dismiss')" />
+      </div>
     </header>
 
-    <dl class="m-0 grid grid-cols-2 border-y border-[var(--border)] bg-[var(--surface-subtle)] sm:grid-cols-4">
-      <div class="px-3 py-2">
-        <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.runningBatches') }}</dt>
-        <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.running }}</dd>
-      </div>
-      <div class="border-l border-[var(--border)] px-3 py-2">
-        <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.retryingBatches') }}</dt>
-        <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.retrying }}</dd>
-      </div>
-      <div class="border-t border-[var(--border)] px-3 py-2 sm:border-l sm:border-t-0">
-        <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.queuedBatches') }}</dt>
-        <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.queued }}</dd>
-      </div>
-      <div class="border-l border-t border-[var(--border)] px-3 py-2 sm:border-t-0">
-        <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.finishedBatches') }}</dt>
-        <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ finishedCount }}/{{ job.totalBatches }}</dd>
-      </div>
-    </dl>
+    <UCollapsible v-model:open="detailsOpen">
+      <template #content>
+        <div :id="batchDetailsId">
+          <dl class="m-0 grid grid-cols-2 border-y border-[var(--border)] bg-[var(--surface-subtle)] sm:grid-cols-4">
+            <div class="px-3 py-2">
+              <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.runningBatches') }}</dt>
+              <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.running }}</dd>
+            </div>
+            <div class="border-l border-[var(--border)] px-3 py-2">
+              <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.retryingBatches') }}</dt>
+              <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.retrying }}</dd>
+            </div>
+            <div class="border-t border-[var(--border)] px-3 py-2 sm:border-l sm:border-t-0">
+              <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.queuedBatches') }}</dt>
+              <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ statusCounts.queued }}</dd>
+            </div>
+            <div class="border-l border-t border-[var(--border)] px-3 py-2 sm:border-t-0">
+              <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.finishedBatches') }}</dt>
+              <dd class="m-0 mt-0.5 text-xs font-semibold tabular-nums text-[var(--text)]">{{ finishedCount }}/{{ job.totalBatches }}</dd>
+            </div>
+          </dl>
 
-    <ol v-if="orderedBatches.length" class="m-0 max-h-56 list-none divide-y divide-[var(--border)] overflow-y-auto p-0" :aria-label="t('ai.batchDetails')">
-      <li
-        v-for="batch in orderedBatches"
-        :key="batch.batchNumber"
-        class="grid min-h-9 grid-cols-[3.5rem_5.5rem_minmax(3rem,1fr)_auto] items-center gap-2 px-3 py-1.5"
-        :data-testid="`ai-batch-${batch.batchNumber}`"
-      >
-        <span class="type-label font-semibold tabular-nums text-[var(--text)]">{{ t('ai.batchNumber', { number: batch.batchNumber }) }}</span>
-        <UBadge :color="statusTone(batch.status)" variant="subtle" size="sm" :label="t(`ai.batchStatus.${batch.status}`)" class="justify-self-start" />
-        <span class="type-metadata min-w-0 truncate text-[var(--text-muted)]">
-          {{ t('ai.batchItems', { count: batch.itemCount }) }}
-          <template v-if="batch.startedAfterMs !== null"> · {{ t('ai.batchStartedAfter', { elapsed: formatDuration(batch.startedAfterMs) }) }}</template>
-          <template v-if="batch.attemptCount > 0"> · {{ t(batch.status === 'retrying' ? 'ai.batchRetryAttempt' : 'ai.batchAttempt', { attempt: batch.attemptCount }) }}</template>
-        </span>
-        <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
-        <p v-if="batch.lastError && (batch.attemptCount > 1 || ['retrying', 'failed'].includes(batch.status))" class="type-metadata col-start-2 col-end-5 m-0 truncate pb-1 text-[var(--text-muted)]" :title="batch.lastError.safeMessage">
-          {{ batch.lastError.safeMessage }}
-        </p>
-        <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate pb-1 tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() })">
-          {{ t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() }) }}
-        </p>
-      </li>
-    </ol>
+          <ol v-if="orderedBatches.length" class="m-0 max-h-56 list-none divide-y divide-[var(--border)] overflow-y-auto p-0" :aria-label="t('ai.batchDetails')">
+            <li
+              v-for="batch in orderedBatches"
+              :key="batch.batchNumber"
+              class="grid min-h-9 grid-cols-[3.5rem_5.5rem_minmax(3rem,1fr)_auto] items-center gap-2 px-3 py-1.5"
+              :data-testid="`ai-batch-${batch.batchNumber}`"
+            >
+              <span class="type-label font-semibold tabular-nums text-[var(--text)]">{{ t('ai.batchNumber', { number: batch.batchNumber }) }}</span>
+              <UBadge :color="statusTone(batch.status)" variant="subtle" size="sm" :label="t(`ai.batchStatus.${batch.status}`)" class="justify-self-start" />
+              <span class="type-metadata min-w-0 truncate text-[var(--text-muted)]">
+                {{ t('ai.batchItems', { count: batch.itemCount }) }}
+                <template v-if="batch.startedAfterMs !== null"> · {{ t('ai.batchStartedAfter', { elapsed: formatDuration(batch.startedAfterMs) }) }}</template>
+                <template v-if="batch.attemptCount > 0"> · {{ t(batch.status === 'retrying' ? 'ai.batchRetryAttempt' : 'ai.batchAttempt', { attempt: batch.attemptCount }) }}</template>
+              </span>
+              <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
+              <p v-if="batch.lastError && (batch.attemptCount > 1 || ['retrying', 'failed'].includes(batch.status))" class="type-metadata col-start-2 col-end-5 m-0 truncate pb-1 text-[var(--text-muted)]" :title="batch.lastError.safeMessage">
+                {{ batch.lastError.safeMessage }}
+              </p>
+              <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate pb-1 tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() })">
+                {{ t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() }) }}
+              </p>
+            </li>
+          </ol>
+        </div>
+      </template>
+    </UCollapsible>
   </section>
 </template>

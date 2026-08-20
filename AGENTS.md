@@ -8,6 +8,20 @@
   with the production loader before launch. Never launch a shell produced by a standalone
   `cargo build`/`tauri build` or pair a newly built shell with a pre-existing Runtime directory.
 
+## Archive-only UIA boundary
+
+- UIA source is repository archive only. Do not build, test, run, launch, package, validate, or
+  otherwise schedule work for `glyphshift-adapter-uia`, `glyphshift-adapter-uia-worker`, or the OCR
+  worker that depends on them unless the current user request explicitly authorizes archive UIA work.
+- Every archived UIA test must use the `archive_uia_` name prefix and Rust's
+  `#[ignore = "archive-only UIA…"]`. The only manual entry point requires an explicit
+  `-ArchiveUia` switch and runs the `archive_uia_ -- --ignored` filter.
+- Never use raw `cargo test --workspace`, `cargo clippy --workspace`, or another workspace-wide Cargo
+  command. Use the repository's explicit active-package validation entry points, which must exclude
+  archive-only packages.
+- UIA cannot change target text and must not be reintroduced into Runtime Bundle, product catalogs,
+  probes, workflows, release gates, or real-software validation.
+
 ## Local testing and privacy
 
 - Put every machine-specific test input and output under `local-test/`. This directory is

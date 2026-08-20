@@ -19,7 +19,6 @@ members = [
     "crates/adapters/implementations/framework/gtk3-pango",
     "crates/adapters/implementations/framework/gtk3-pango-native",
     "crates/adapters/implementations/fallback/ocr",
-    "crates/adapters/implementations/fallback/ocr-worker",
     "crates/adapters/implementations/framework/qt-painter",
     "crates/adapters/implementations/framework/qt-painter-native",
     "crates/adapters/implementations/framework/raylib",
@@ -32,8 +31,6 @@ members = [
     "crates/adapters/platform/native-abi",
     "crates/adapters/platform/native-host",
     "crates/adapters/platform/sdk",
-    "crates/adapters/implementations/accessibility/uia",
-    "crates/adapters/implementations/accessibility/uia-worker",
     "crates/runtime/controller/sdk",
     "crates/runtime/controller/host",
     "crates/runtime/controller/windows",
@@ -68,6 +65,11 @@ members = [
     "test-support/acquisition-worker",
     "test-support/windows-host",
     "test-support/windows-runtime-target",
+]
+exclude = [
+    "crates/adapters/implementations/accessibility/uia",
+    "crates/adapters/implementations/accessibility/uia-worker",
+    "crates/adapters/implementations/fallback/ocr-worker",
 ]
 resolver = "2"
 

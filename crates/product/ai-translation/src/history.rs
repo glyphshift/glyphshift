@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::NamedTempFile;
 
-const HISTORY_SCHEMA_V1: &str = "glyphshift.ai-translation-history/1";
 const HISTORY_SCHEMA: &str = "glyphshift.ai-translation-history/2";
 const HISTORY_FILE_NAME: &str = "ai-translation-history.json";
 const MAX_HISTORY_RECORDS: usize = 100;
@@ -177,7 +176,7 @@ impl TranslationRunRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct HistoryArtifact {
     schema: Box<str>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,28 +211,18 @@ impl TranslationRunHistory {
         let artifact = if path.exists() {
             let reader =
                 BufReader::new(File::open(&path).map_err(|_| TranslationRunHistoryError::Storage)?);
-            let artifact = serde_json::from_reader::<_, HistoryArtifact>(reader)
-                .map_err(|_| TranslationRunHistoryError::InvalidArtifact)?;
-            if !matches!(artifact.schema.as_ref(), HISTORY_SCHEMA | HISTORY_SCHEMA_V1)
-                || artifact.records.len() > MAX_HISTORY_RECORDS
-            {
-                return Err(TranslationRunHistoryError::InvalidArtifact);
-            }
-            artifact
+            let value = match serde_json::from_reader::<_, serde_json::Value>(reader) {
+                Ok(value) => value,
+                Err(_) => {
+                    preserve_invalid_history_artifact(&path);
+                    serde_json::Value::Null
+                }
+            };
+            history_artifact_from_value(&value)
         } else {
             HistoryArtifact::default()
         };
         let mut history = Self { path, artifact };
-        let migrated = history.artifact.schema.as_ref() == HISTORY_SCHEMA_V1;
-        if migrated {
-            history.artifact.schema = HISTORY_SCHEMA.into();
-            for record in &mut history.artifact.records {
-                record.applied_count = record.completed_count;
-            }
-            if let Some(active) = history.artifact.active.as_mut() {
-                active.applied_count = active.completed_count;
-            }
-        }
         if let Some(mut interrupted) = history.artifact.active.take() {
             interrupted.status = TranslationJobStatus::Interrupted;
             interrupted.finished_at_ms = unix_time_ms();
@@ -243,8 +232,6 @@ impl TranslationRunHistory {
                 .retain(|candidate| candidate.record_id != interrupted.record_id);
             history.artifact.records.insert(0, interrupted);
             history.artifact.records.truncate(MAX_HISTORY_RECORDS);
-            history.persist()?;
-        } else if migrated {
             history.persist()?;
         }
         Ok(history)
@@ -327,6 +314,40 @@ impl TranslationRunHistory {
             .persist(&self.path)
             .map_err(|_| TranslationRunHistoryError::Storage)?;
         Ok(())
+    }
+}
+
+fn history_artifact_from_value(value: &serde_json::Value) -> HistoryArtifact {
+    let Some(object) = value.as_object() else {
+        return HistoryArtifact::default();
+    };
+    let schema = object
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        .filter(|schema| *schema == HISTORY_SCHEMA)
+        .unwrap_or(HISTORY_SCHEMA);
+    let active = object
+        .get("active")
+        .and_then(|record| serde_json::from_value(record.clone()).ok());
+    let mut records = object
+        .get("records")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|record| serde_json::from_value(record.clone()).ok())
+        .collect::<Vec<_>>();
+    records.truncate(MAX_HISTORY_RECORDS);
+    HistoryArtifact {
+        schema: schema.into(),
+        active,
+        records,
+    }
+}
+
+fn preserve_invalid_history_artifact(path: &Path) {
+    let backup = path.with_extension("invalid.json");
+    if !backup.exists() {
+        let _ = fs::copy(path, backup);
     }
 }
 
