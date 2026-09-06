@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "glyphshift-desktop-shell"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-ai-translation",
