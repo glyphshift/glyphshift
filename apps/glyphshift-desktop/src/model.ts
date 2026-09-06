@@ -134,6 +134,7 @@ export interface AdapterOption {
   technicalTarget: string
   documentationUrl: string | null
   configuration: 'none'
+  processResidentAfterDeactivate: boolean
 }
 
 export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
@@ -168,6 +169,7 @@ export interface ProbeEntryRow {
   count: number
   firstSeenMs: number
   lastSeenMs: number
+  translationVariants?: { source: string; translation: string }[]
 }
 
 export interface ProbeEntryPage {

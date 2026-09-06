@@ -217,6 +217,7 @@ fn workflow_diagnostics_exposes_public_names_and_bounded_trace_facts() {
         technical_target: "Synthetic".into(),
         documentation_url: None,
         configuration: "none".into(),
+        process_resident_after_deactivate: false,
     });
     application
         .enable_workflow("workflow.product", false)

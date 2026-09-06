@@ -145,6 +145,23 @@ impl CaptureCatalog {
         }
         Ok(())
     }
+
+    /// A read projection for consumers with producer-declared text semantics.
+    /// The persisted raw catalog is untouched, including its provenance.
+    pub(crate) fn map_sources(mut self, normalize: impl Fn(&str, &str) -> String) -> Self {
+        let mut merged = BTreeMap::<(Box<str>, Box<str>), CaptureCatalogEntry>::new();
+        for mut entry in self.entries {
+            entry.source = normalize(&entry.adapter_id, &entry.source).into();
+            let key = (entry.source.clone(), entry.adapter_id.clone());
+            merged.entry(key).and_modify(|previous| {
+                previous.count = previous.count.saturating_add(entry.count);
+                previous.first_seen_ms = previous.first_seen_ms.min(entry.first_seen_ms);
+                previous.last_seen_ms = previous.last_seen_ms.max(entry.last_seen_ms);
+            }).or_insert(entry);
+        }
+        self.entries = merged.into_values().collect();
+        self
+    }
 }
 
 struct CaptureCatalogBuilder {

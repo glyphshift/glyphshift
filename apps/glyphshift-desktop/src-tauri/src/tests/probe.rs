@@ -79,6 +79,7 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
         technical_target: "SyntheticReplace".into(),
         documentation_url: None,
         configuration: "none".into(),
+        process_resident_after_deactivate: false,
     }];
 
     let created = application

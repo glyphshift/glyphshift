@@ -390,6 +390,7 @@ fn test_desktop_application(
             technical_target: "SyntheticTarget".into(),
             documentation_url: None,
             configuration: "none".into(),
+            process_resident_after_deactivate: false,
         }],
         adapter_target_support: BTreeMap::from([(
             TEST_ADAPTER_ID.into(),

@@ -7,7 +7,7 @@ use glyphshift_adapter_native_abi::{
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::AdapterBinding;
 use glyphshift_capture::CaptureObservationBatch;
-use glyphshift_domain::{FontDecision, TextDecision, TextObservation};
+use glyphshift_domain::{FontDecision, SourceTextPolicy, TextDecision, TextObservation};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
@@ -24,7 +24,7 @@ use glyphshift_target_runtime_contract::{
     STATUS_TARGET_RUNTIME_UPDATE_FAILED, STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
 };
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -58,6 +58,7 @@ struct RuntimeState {
     active_adapters: Vec<bool>,
     capture: Option<RuntimeCapture>,
     active: bool,
+    source_aliases: BTreeMap<SourceTextPolicy, BTreeMap<String, String>>,
 }
 
 fn runtime_state() -> &'static Mutex<Option<RuntimeState>> {
@@ -67,11 +68,13 @@ fn runtime_state() -> &'static Mutex<Option<RuntimeState>> {
 
 struct NativeDecisionContext {
     adapter_id: Box<str>,
+    source_policy: SourceTextPolicy,
 }
 
-fn native_host(adapter_id: &str) -> usize {
+fn native_host(adapter_id: &str, source_policy: SourceTextPolicy) -> usize {
     let context = Box::into_raw(Box::new(NativeDecisionContext {
         adapter_id: adapter_id.into(),
+        source_policy,
     }));
     Box::into_raw(Box::new(NativeRuntimeHostV1 {
         struct_size: std::mem::size_of::<NativeRuntimeHostV1>() as u32,
@@ -140,6 +143,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                     .apply_publication(publication.clone())
                     .map_err(|_| TargetRuntimeError::UpdateRejected)?;
                 runtime.publication = publication;
+                runtime.source_aliases = source_aliases(&runtime.publication, &runtime.adapters);
                 let refresh_adapters = active_native_adapters(runtime);
                 drop(state);
                 request_adapter_refreshes(&refresh_adapters);
@@ -153,6 +157,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
             }
             runtime.kernel = kernel;
             runtime.publication = publication;
+            runtime.source_aliases = source_aliases(&runtime.publication, &runtime.adapters);
             runtime.bindings = bindings;
             runtime.capture = capture_configuration
                 .clone()
@@ -175,8 +180,10 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 .collect::<Result<Vec<_>, _>>()?;
             let native_hosts = bindings
                 .iter()
-                .map(|binding| native_host(binding.adapter_id.as_str()))
+                .zip(&adapters)
+                .map(|(binding, adapter)| native_host(binding.adapter_id.as_str(), adapter.source_policy()))
                 .collect::<Vec<_>>();
+            let aliases = source_aliases(&publication, &adapters);
             *state = Some(RuntimeState {
                 kernel,
                 publication,
@@ -187,6 +194,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 active_adapters: vec![false; adapters.len()],
                 capture,
                 active: false,
+                source_aliases: aliases,
             });
             (adapters, native_hosts)
         }
@@ -325,6 +333,7 @@ pub fn update_publication(publication: RuntimePublication) -> Result<(), TargetR
             .apply_publication(publication.clone())
             .map_err(|_| TargetRuntimeError::UpdateRejected)?;
         runtime.publication = publication;
+        runtime.source_aliases = source_aliases(&runtime.publication, &runtime.adapters);
         active_native_adapters(runtime)
     };
     request_adapter_refreshes(&refresh_adapters);
@@ -427,13 +436,15 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
             return Err(TargetRuntimeError::RuntimeUnavailable);
         }
         let refresh_adapters = active_native_adapters(runtime);
-        if runtime
-            .adapters
-            .iter()
-            .zip(&runtime.active_adapters)
-            .filter(|(_, active)| **active)
-            .all(|(adapter, _)| adapter.deactivate().is_ok())
-        {
+        let loaded = runtime.adapters.clone();
+        // An adapter may drain callbacks which need this same Runtime mutex.
+        // Never hold the decision lock while asking an adapter to deactivate.
+        drop(state);
+        let deactivated = refresh_adapters.iter().all(|adapter| adapter.deactivate().is_ok());
+        let mut state = runtime_state().lock().map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        let runtime = state.as_mut().filter(|runtime| same_loaded_adapters(runtime, &loaded))
+            .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        if deactivated {
             runtime.active = false;
             runtime.active_adapters.fill(false);
         } else {
@@ -533,14 +544,24 @@ extern "C" fn decide_utf16(
         return decision_error(STATUS_OUTPUT_TOO_SMALL);
     }
     let context = unsafe { &*context.cast::<NativeDecisionContext>() };
+    let canonical = context.source_policy.normalize(&source);
     if let Some(capture) = &runtime.capture {
-        capture.try_observe(context.adapter_id.clone(), source.clone().into());
+        capture.try_observe(context.adapter_id.clone(), canonical.as_ref().into());
     }
-    let decision = runtime.kernel.decide(&TextObservation::new(
+    let lookup = |text: &str| runtime.kernel.decide(&TextObservation::new(
         context.adapter_id.clone(),
-        source,
+        text,
         "native.surface",
     ));
+    let mut decision = lookup(&canonical);
+    if matches!(decision.text, TextDecision::Keep) && canonical != source {
+        decision = lookup(&source); // Preserve exact legacy wrapped entries.
+    }
+    if matches!(decision.text, TextDecision::Keep) && source.trim() == source {
+        if let Some(alias) = runtime.source_aliases.get(&context.source_policy).and_then(|aliases| aliases.get(canonical.as_ref())) {
+            if alias != &source { decision = lookup(alias); }
+        }
+    }
     let text = match decision.text {
         TextDecision::Keep => None,
         TextDecision::Replace(text) => Some(text.encode_utf16().collect::<Vec<_>>()),
@@ -622,6 +643,23 @@ fn decision_error(status: i32) -> NativeDecisionV1 {
         text_len: 0,
         font_len: 0,
     }
+}
+
+fn source_aliases(publication: &RuntimePublication, adapters: &[Arc<LoadedNativeAdapter>]) -> BTreeMap<SourceTextPolicy, BTreeMap<String, String>> {
+    let policies = adapters.iter().map(|adapter| adapter.source_policy()).filter(|policy| *policy != SourceTextPolicy::Exact).collect::<BTreeSet<_>>();
+    policies.into_iter().map(|policy| {
+        let mut candidates = BTreeMap::<String, Option<(String, String)>>::new();
+        let mut visit = |source: &str, translation: &str| {
+            let canonical = policy.key(source);
+            if canonical == source { return; }
+            candidates.entry(canonical).and_modify(|candidate| {
+                if candidate.as_ref().is_some_and(|(_, previous)| previous != translation) { *candidate = None; }
+            }).or_insert_with(|| Some((source.to_owned(), translation.to_owned())));
+        };
+        publication.snapshot().visit_entries(|_, source, translation| visit(source, translation));
+        publication.snapshot().visit_context_entries(|_, _, _, source, translation| visit(source, translation));
+        (policy, candidates.into_iter().filter_map(|(canonical, candidate)| candidate.map(|(source, _)| (canonical, source))).collect())
+    }).collect()
 }
 
 fn activation_status(error: TargetRuntimeError) -> u32 {

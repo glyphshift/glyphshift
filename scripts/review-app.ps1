@@ -23,6 +23,13 @@ $webViewProfileRoot = Join-Path $reviewRoot 'webview-profile'
 $cargoTargetDir = Join-Path $localTestRoot 'desktop-review\cargo-target'
 $profileDirectory = $Profile.ToLowerInvariant()
 
+if ([string]::IsNullOrWhiteSpace($DataRoot)) {
+    # A normal review launch uses the same user workspace as the installed app,
+    # including saved AI profiles and dictionaries. Pass -DataRoot explicitly
+    # only when an isolated fixture is intended.
+    $UseUserData = $true
+}
+
 if ($UseUserData) {
     if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
         throw 'UseUserData cannot be combined with DataRoot.'
@@ -34,9 +41,6 @@ if ($UseUserData) {
     $webViewProfileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Glyphshift\webview-profile'
 }
 
-if ([string]::IsNullOrWhiteSpace($DataRoot)) {
-    $DataRoot = Join-Path $localTestRoot 'desktop-review-data'
-}
 $DataRoot = [System.IO.Path]::GetFullPath($DataRoot)
 
 function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
@@ -123,6 +127,12 @@ if ($UseUserData) {
     New-Item -ItemType Directory -Path $appBinRoot -Force | Out-Null
     Copy-Item -LiteralPath $desktopExecutable -Destination $appBinRoot
     $desktopExecutable = Join-Path $appBinRoot 'glyphshift-desktop-shell.exe'
+    # Keep a complete, directly launchable application directory. A later
+    # double-click must not depend on this PowerShell session's environment.
+    Copy-Item -LiteralPath $runtimeRoot -Destination (Join-Path $appBinRoot 'runtime') -Recurse
+    $runtimeRoot = Join-Path $appBinRoot 'runtime'
+    & $verifierPath $runtimeRoot
+    if ($LASTEXITCODE -ne 0) { throw 'The packaged Runtime Bundle failed verification.' }
 }
 
 if ($BuildOnly) {
@@ -136,6 +146,7 @@ $env:WEBVIEW2_USER_DATA_FOLDER = $webViewProfileRoot
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9223 --remote-allow-origins=*'
 $process = Start-Process `
     -FilePath $desktopExecutable `
+    -ArgumentList @('--glyphshift-data-root', ('"{0}"' -f $DataRoot), '--glyphshift-runtime-root', ('"{0}"' -f $runtimeRoot)) `
     -WorkingDirectory $repoRoot `
     -RedirectStandardOutput (Join-Path $reviewRoot 'app.stdout.log') `
     -RedirectStandardError (Join-Path $reviewRoot 'app.stderr.log') `

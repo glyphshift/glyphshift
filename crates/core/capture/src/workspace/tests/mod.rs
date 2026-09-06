@@ -27,3 +27,4 @@ fn create_run(store: &mut ProbeRunStore) -> ProbeRunSummary {
 mod join;
 mod query;
 mod settings;
+mod normalization;

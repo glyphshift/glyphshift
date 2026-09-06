@@ -6,7 +6,7 @@ use glyphshift_adapter_native_abi::{
     STATUS_UNSUPPORTED_FEATURE,
 };
 use glyphshift_adapter_sdk::AdapterDescriptor;
-use glyphshift_domain::Feature;
+use glyphshift_domain::{Feature, SourceTextPolicy};
 use libloading::Library;
 use std::path::Path;
 
@@ -21,11 +21,13 @@ pub enum NativeHostError {
     UnsupportedFeature,
     UnauthorizedFeature,
     PackageFailure(i32),
+    InvalidSourcePolicy,
 }
 
 pub struct LoadedNativeAdapter {
     api: NativeAdapterApiV1,
     descriptor: AdapterDescriptor,
+    source_policy: SourceTextPolicy,
     _library: Library,
 }
 
@@ -42,6 +44,12 @@ impl LoadedNativeAdapter {
         Ok(descriptor)
     }
 
+    /// Same trust requirements as `inspect`; policy is optional metadata.
+    pub unsafe fn inspect_with_source_policy(path: &Path) -> Result<(AdapterDescriptor, SourceTextPolicy), NativeHostError> {
+        let (library, _, descriptor) = unsafe { open_package(path) }?;
+        Ok((descriptor, unsafe { read_source_policy(&library) }?))
+    }
+
     /// Loads a native package only after its signer and content hash were verified.
     ///
     /// # Safety
@@ -56,6 +64,7 @@ impl LoadedNativeAdapter {
         Ok(Self {
             api,
             descriptor,
+            source_policy: unsafe { read_source_policy(&library) }?,
             _library: library,
         })
     }
@@ -64,6 +73,8 @@ impl LoadedNativeAdapter {
     pub const fn descriptor(&self) -> &AdapterDescriptor {
         &self.descriptor
     }
+
+    pub const fn source_policy(&self) -> SourceTextPolicy { self.source_policy }
 
     pub fn negotiate(
         &self,
@@ -121,6 +132,13 @@ impl LoadedNativeAdapter {
     pub fn request_refresh(&self) {
         (self.api.request_refresh)();
     }
+}
+
+unsafe fn read_source_policy(library: &Library) -> Result<SourceTextPolicy, NativeHostError> {
+    let Ok(policy) = (unsafe { library.get::<extern "C" fn() -> u32>(b"glyphshift_adapter_source_policy_v1\0") }) else {
+        return Ok(SourceTextPolicy::Exact);
+    };
+    SourceTextPolicy::from_code(policy()).ok_or(NativeHostError::InvalidSourcePolicy)
 }
 
 unsafe fn open_package(

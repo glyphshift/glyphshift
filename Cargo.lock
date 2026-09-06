@@ -1544,6 +1544,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-monogame"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
 name = "glyphshift-adapter-native-abi"
 version = "0.1.0"
 dependencies = [
@@ -1688,6 +1696,7 @@ dependencies = [
 name = "glyphshift-capture"
 version = "0.1.0"
 dependencies = [
+ "glyphshift-domain",
  "serde",
  "serde_json",
  "tempfile",
@@ -1958,6 +1967,7 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
+ "glyphshift-adapter-monogame",
  "glyphshift-adapter-native-abi",
  "glyphshift-adapter-native-host",
  "glyphshift-adapter-qt-painter",

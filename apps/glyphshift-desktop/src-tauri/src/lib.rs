@@ -159,6 +159,7 @@ struct AdapterView {
     technical_target: Box<str>,
     documentation_url: Option<Box<str>>,
     configuration: Box<str>,
+    process_resident_after_deactivate: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -352,7 +353,7 @@ struct DesktopApplication {
 
 impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
-        let probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
+        let mut probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
@@ -360,6 +361,9 @@ impl DesktopApplication {
         let runtime_bundle = RuntimeBundle::open(runtime_root);
         let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
         let runtime_bundle = runtime_bundle.ok();
+        if let Some(bundle) = &runtime_bundle {
+            for adapter in bundle.adapter_options() { probe_runs.set_source_policy(adapter.id(), adapter.source_policy()); }
+        }
         let adapter_target_support = runtime_bundle
             .as_ref()
             .into_iter()
@@ -399,6 +403,7 @@ impl DesktopApplication {
                         technical_target: adapter.technical_target().into(),
                         documentation_url: adapter.documentation_url().map(Into::into),
                         configuration: adapter.configuration().into(),
+                        process_resident_after_deactivate: adapter.process_resident_after_deactivate(),
                     })
                     .collect()
             })

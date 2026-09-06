@@ -18,7 +18,7 @@ crate types, and runtime discovery remain stable across the folder split.
 navigation aid based on how text is acquired; it does not introduce another runtime interface:
 
 - `native/` — Console, Direct2D, DirectWrite, Win32 DrawText/GDI, and GDI+ hooks.
-- `framework/` — GTK3/Pango, Qt Painter, and raylib hooks.
+- `framework/` — GTK3/Pango, Qt Painter, raylib, and MonoGame hooks.
 - `accessibility/` — UI Automation descriptor and isolated Worker.
 - `fallback/` — OCR descriptor and isolated Worker.
 

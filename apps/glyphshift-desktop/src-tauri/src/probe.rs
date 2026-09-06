@@ -674,11 +674,14 @@ impl DesktopApplication {
             .find(|entry| entry.source() == request.source.as_ref());
         let translation = request.translation.trim();
         let changed = if translation.is_empty() {
-            if existing.is_some() {
+            let snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
+            let mut sources = self.probe_runs.dictionary_sources_for_rows(&request.run_id, &[request.source.clone()], &snapshot).map_err(probe_run_error)?;
+            if existing.is_some() && !sources.contains(&request.source) { sources.push(request.source.clone()); }
+            if !sources.is_empty() {
                 self.backend
                     .delete_dictionary_entries(
                         dictionary.id(),
-                        [request.source.clone()],
+                        sources,
                         dictionary.revision(),
                     )
                     .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
@@ -778,12 +781,15 @@ impl DesktopApplication {
                     .iter()
                     .map(|entry| entry.source())
                     .collect::<BTreeSet<_>>();
-                let sources = request
+                let snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
+                let mut sources = self.probe_runs.dictionary_sources_for_rows(&request.run_id, &request.sources, &snapshot).map_err(probe_run_error)?;
+                sources.extend(request
                     .sources
                     .iter()
                     .filter(|source| existing.contains(source.as_ref()))
                     .cloned()
-                    .collect::<Vec<_>>();
+                    .collect::<Vec<_>>());
+                sources.sort(); sources.dedup();
                 if !sources.is_empty() {
                     self.backend
                         .delete_dictionary_entries(dictionary.id(), sources, dictionary.revision())

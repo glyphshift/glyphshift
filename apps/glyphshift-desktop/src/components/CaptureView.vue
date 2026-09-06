@@ -913,7 +913,7 @@ function runDictionaryName(run: ProbeRunSummary) {
 
 function adapterName(id: string) {
   const adapter = props.adapters.find(candidate => candidate.id === id)
-  return adapter ? adapterDisplayName(adapter.name, t) : id
+  return adapter ? adapterDisplayName(adapter.name, t) : t('capture.adapterUnavailable')
 }
 
 function adapterDetails(run: ProbeRunSummary) {
@@ -921,7 +921,7 @@ function adapterDetails(run: ProbeRunSummary) {
     const adapter = props.adapters.find(item => item.id === id)
     return {
       id,
-      name: adapter ? adapterDisplayName(adapter.name, t) : id,
+      name: adapter ? adapterDisplayName(adapter.name, t) : t('capture.adapterUnavailable'),
       technologies: adapter ? adapterSummary(adapter, t) : t('capture.technologyUnavailable'),
     }
   })
@@ -951,6 +951,13 @@ function runtimeCapabilityColor(capability: NonNullable<ProbeRunSummary['runtime
 
 function stateLabel(state: string) {
   return t(`capture.entryState.${state}`)
+}
+
+function translationVariantItems(row: ProbeEntryRow) {
+  return (row.translationVariants ?? []).map(variant => ({
+    label: variant.translation,
+    onSelect: () => { updateTranslation(row.source, variant.translation); void saveTranslation(row.source) },
+  }))
 }
 
 function stateColor(state: string) {
@@ -1138,11 +1145,14 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             <template #source-cell="{ row }"><div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div></template>
             <template #translation-cell="{ row }">
               <div class="flex min-w-0 items-center gap-1">
-                <UInput :model-value="translationValues[row.original.source] ?? row.original.translation" size="sm" class="min-w-0 flex-1" :placeholder="t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" @update:model-value="updateTranslation(row.original.source, $event)" @blur="saveTranslation(row.original.source)" />
+                <UInput :model-value="translationValues[row.original.source] ?? row.original.translation" size="sm" class="min-w-0 flex-1" :placeholder="row.original.translationVariants?.length ? t('capture.resolveTranslation') : t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" @update:model-value="updateTranslation(row.original.source, $event)" @blur="saveTranslation(row.original.source)" />
+                <UDropdownMenu v-if="row.original.translationVariants?.length" :items="translationVariantItems(row.original)" :content="{ align: 'end' }" :ui="{ content: 'max-w-[min(32rem,90vw)]', itemLabel: 'whitespace-pre-wrap break-words' }">
+                  <UButton color="warning" variant="ghost" size="xs" icon="i-tabler-copy-check" :disabled="probe.busy.value" :aria-label="t('capture.chooseExistingTranslation', { count: row.original.translationVariants.length })" :title="t('capture.translationConflictHint')" />
+                </UDropdownMenu>
                 <UButton color="primary" variant="ghost" size="xs" icon="i-tabler-book-upload" :disabled="!(translationValues[row.original.source] ?? row.original.translation).trim() || probe.busy.value" :aria-label="t('capture.saveRowToDictionary', { source: row.original.source })" :title="t('capture.saveRowToDictionary', { source: row.original.source })" @click="syncRowToDictionary(row.original)" />
               </div>
             </template>
-            <template #state-cell="{ row }"><UBadge :color="stateColor(row.original.state)" variant="soft" size="sm" :label="stateLabel(row.original.state)" /></template>
+            <template #state-cell="{ row }"><UBadge :color="row.original.translationVariants?.length ? 'warning' : stateColor(row.original.state)" variant="soft" size="sm" :label="row.original.translationVariants?.length ? t('capture.translationConflict') : stateLabel(row.original.state)" /></template>
             <template #adapters-cell="{ row }">
               <div v-if="row.original.adapterIds.length" class="flex min-w-0 flex-wrap gap-1">
                 <UBadge v-for="adapterId in row.original.adapterIds.slice(0, 2)" :key="adapterId" color="neutral" variant="soft" size="sm" :label="adapterName(adapterId)" />

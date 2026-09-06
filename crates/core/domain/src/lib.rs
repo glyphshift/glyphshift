@@ -1,6 +1,8 @@
 //! Host-independent value types for Glyphshift.
 
 use std::sync::Arc;
+mod source_text;
+pub use source_text::SourceTextPolicy;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AdapterId(Box<str>);

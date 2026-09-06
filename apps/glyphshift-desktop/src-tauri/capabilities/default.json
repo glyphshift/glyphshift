@@ -18,6 +18,7 @@
         { "url": "https://learn.microsoft.com/*" },
         { "url": "https://doc.qt.io/*" },
         { "url": "https://docs.gtk.org/*" },
+        { "url": "https://docs.monogame.net/*" },
         { "url": "https://www.raylib.com/*" },
         { "url": "https://github.com/*" },
         { "url": "https://space.bilibili.com/*" }

@@ -84,6 +84,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $profileDirectory = $Profile.ToLowerInvariant()
+& (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 $stagingRoot = "$OutputRoot.staging"
 Assert-LocalTestPath $stagingRoot 'Runtime Bundle staging output'
 if (Test-Path -LiteralPath $stagingRoot) {
@@ -128,6 +129,8 @@ $raylibBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
 $unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-standard-ui' 'dll'
+$monoGameBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_monogame_native.dll' 'adapter-monogame' 'dll'
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -168,6 +171,7 @@ $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layo
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
+$monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/3'
@@ -183,6 +187,16 @@ $runtimeManifest = [ordered]@{
         sha256 = $runtimeBundle.sha256
     }
     adapters = @(
+        [ordered]@{
+            file = $monoGameBundle.file
+            sha256 = $monoGameBundle.sha256
+            name = $monoGamePresentation.name
+            summary = $monoGamePresentation.summary
+            technology = $monoGamePresentation.technology
+            technicalTarget = $monoGamePresentation.technicalTarget
+            documentationUrl = $monoGamePresentation.documentationUrl
+            process_resident_after_deactivate = $true
+        },
         [ordered]@{
             file = $gdiBundle.file
             sha256 = $gdiBundle.sha256

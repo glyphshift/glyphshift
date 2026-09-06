@@ -187,7 +187,7 @@ struct ProbeRunDocument {
     ignored_sources: Vec<Box<str>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct ProbeDictionaryEntry {
     source: Box<str>,
     translation: Box<str>,
@@ -317,6 +317,8 @@ pub struct ProbeEntryRow {
     count: u64,
     first_seen_ms: u64,
     last_seen_ms: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    translation_variants: Vec<ProbeDictionaryEntry>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -331,6 +333,7 @@ pub struct ProbeEntryPage {
 }
 
 impl ProbeEntryRow {
+    pub fn has_translation_conflict(&self) -> bool { !self.translation_variants.is_empty() }
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
@@ -398,6 +401,24 @@ pub enum ProbeExportFormat {
 
 pub struct ProbeRunStore {
     root: PathBuf,
+    source_policies: BTreeMap<Box<str>, glyphshift_domain::SourceTextPolicy>,
+}
+
+struct ProbeSourceKeys {
+    common: glyphshift_domain::SourceTextPolicy,
+    normalized: BTreeMap<glyphshift_domain::SourceTextPolicy, BTreeSet<String>>,
+    exact: BTreeSet<String>,
+}
+impl ProbeSourceKeys {
+    fn key(&self, source: &str) -> String {
+        use glyphshift_domain::SourceTextPolicy;
+        if self.common != SourceTextPolicy::Exact { return self.common.key(source); }
+        if self.exact.contains(source) { return source.to_owned(); }
+        let candidates = self.normalized.iter().filter_map(|(policy, observed)| {
+            let key = policy.key(source); observed.contains(&key).then_some(key)
+        }).collect::<BTreeSet<_>>();
+        if candidates.len() == 1 { candidates.into_iter().next().unwrap() } else { source.to_owned() }
+    }
 }
 
 impl ProbeRunStore {
@@ -407,9 +428,31 @@ impl ProbeRunStore {
             return Err(ProbeRunError::InvalidInput);
         }
         fs::create_dir_all(&root).map_err(|_| ProbeRunError::Storage)?;
-        let mut store = Self { root };
+        let mut store = Self { root, source_policies: BTreeMap::new() };
         store.recover_disconnected()?;
         Ok(store)
+    }
+
+    pub fn set_source_policy(&mut self, adapter_id: impl Into<Box<str>>, policy: glyphshift_domain::SourceTextPolicy) {
+        self.source_policies.insert(adapter_id.into(), policy);
+    }
+
+    fn run_policy(&self, document: &ProbeRunDocument) -> glyphshift_domain::SourceTextPolicy {
+        let policies = document.summary.adapter_ids.iter().map(|id| self.source_policies.get(id).copied().unwrap_or_default()).collect::<BTreeSet<_>>();
+        if policies.len() == 1 { *policies.first().unwrap() } else { glyphshift_domain::SourceTextPolicy::Exact }
+    }
+
+    fn source_keys(&self, document: &ProbeRunDocument, observations: Option<&CaptureCatalog>) -> ProbeSourceKeys {
+        use glyphshift_domain::SourceTextPolicy;
+        let mut keys = ProbeSourceKeys { common: self.run_policy(document), normalized: BTreeMap::new(), exact: BTreeSet::new() };
+        if let Some(observations) = observations {
+            for entry in observations.entries() {
+                let policy = self.source_policies.get(entry.adapter_id()).copied().unwrap_or_default();
+                if policy == SourceTextPolicy::Exact { keys.exact.insert(entry.source().to_owned()); }
+                else { keys.normalized.entry(policy).or_default().insert(entry.source().to_owned()); }
+            }
+        }
+        keys
     }
 
     pub fn create(&mut self, create: ProbeRunCreate) -> Result<ProbeRunSummary, ProbeRunError> {
@@ -702,6 +745,8 @@ impl ProbeRunStore {
         dictionary: &ProbeDictionarySnapshot,
     ) -> Result<Vec<PreviewEntry>, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
+        let observations = self.read_observations(run_id).ok();
+        let keys = self.source_keys(&document, observations.as_ref());
         let ignored = document
             .ignored_sources
             .into_iter()
@@ -709,12 +754,22 @@ impl ProbeRunStore {
         Ok(dictionary
             .entries
             .iter()
-            .filter(|entry| !ignored.contains(&entry.source))
+            .filter(|entry| !ignored.contains(&Box::<str>::from(keys.key(&entry.source))))
             .map(|entry| PreviewEntry {
                 source: entry.source.clone(),
                 translation: entry.translation.clone(),
             })
             .collect())
+    }
+
+    /// Expands an explicit clear action on a projected row to its saved keys.
+    /// Merely reading or selecting a translation never deletes these variants.
+    pub fn dictionary_sources_for_rows(&self, run_id: &str, sources: &[Box<str>], dictionary: &ProbeDictionarySnapshot) -> Result<Vec<Box<str>>, ProbeRunError> {
+        let document = self.read_document(run_id)?;
+        let observations = self.read_observations(run_id).ok();
+        let keys = self.source_keys(&document, observations.as_ref());
+        let selected = sources.iter().map(AsRef::as_ref).collect::<BTreeSet<&str>>();
+        Ok(dictionary.entries.iter().filter(|entry| selected.contains(keys.key(&entry.source).as_str())).map(|entry| entry.source.clone()).collect())
     }
 
     pub fn export(
@@ -784,7 +839,8 @@ impl ProbeRunStore {
             .map(|entry| (entry.source.as_ref(), entry.translation.as_ref()))
             .collect::<BTreeMap<_, _>>();
         let mut aggregate = BTreeMap::<Box<str>, ProbeEntryRow>::new();
-        if let Ok(observations) = self.read_observations(document.summary.id()) {
+        let observations = self.read_observations(document.summary.id()).ok();
+        if let Some(observations) = &observations {
             for entry in observations.entries() {
                 let row = aggregate
                     .entry(entry.source().into())
@@ -796,6 +852,7 @@ impl ProbeRunStore {
                         count: 0,
                         first_seen_ms: entry.first_seen_ms(),
                         last_seen_ms: entry.last_seen_ms(),
+                        translation_variants: Vec::new(),
                     });
                 row.adapter_ids.push(entry.adapter_id().into());
                 row.count = row.count.saturating_add(entry.count());
@@ -839,9 +896,42 @@ impl ProbeRunStore {
                     count: 0,
                     first_seen_ms: 0,
                     last_seen_ms: 0,
+                    translation_variants: Vec::new(),
                 });
         }
-        Ok(aggregate.into_values().collect())
+        let keys = self.source_keys(document, observations.as_ref());
+        if keys.common == glyphshift_domain::SourceTextPolicy::Exact && keys.normalized.is_empty() { return Ok(aggregate.into_values().collect()); }
+        let mut grouped = BTreeMap::<Box<str>, ProbeEntryRow>::new();
+        for mut row in aggregate.into_values() {
+            row.source = keys.key(&row.source).into();
+            let key = row.source.clone();
+            grouped.entry(key).and_modify(|previous| {
+                if row.count != 0 {
+                    previous.first_seen_ms = if previous.count == 0 { row.first_seen_ms } else { previous.first_seen_ms.min(row.first_seen_ms) };
+                    previous.last_seen_ms = previous.last_seen_ms.max(row.last_seen_ms);
+                    previous.count = previous.count.saturating_add(row.count);
+                    previous.adapter_ids.extend(row.adapter_ids.iter().cloned());
+                    previous.adapter_ids.sort(); previous.adapter_ids.dedup();
+                }
+            }).or_insert(row);
+        }
+        let mut dictionary_groups = BTreeMap::<String, Vec<&ProbeDictionaryEntry>>::new();
+        for entry in &dictionary.entries { dictionary_groups.entry(keys.key(&entry.source)).or_default().push(entry); }
+        let ignored = ignored.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
+        for row in grouped.values_mut() {
+            let candidates = dictionary_groups.get(row.source.as_ref()).cloned().unwrap_or_default();
+            let explicit = candidates.iter().find(|entry| entry.source == row.source);
+            let translations = candidates.iter().map(|entry| entry.translation.as_ref()).collect::<BTreeSet<_>>();
+            row.translation = if let Some(entry) = explicit { entry.translation.clone() }
+                else if translations.len() == 1 { (*translations.first().unwrap()).into() } else { "".into() };
+            row.translation_variants = if explicit.is_none() && translations.len() > 1 {
+                candidates.into_iter().map(|entry| (entry.translation.as_ref(), entry)).collect::<BTreeMap<_, _>>().into_values().cloned().collect()
+            } else { Vec::new() };
+            row.state = if ignored.contains(row.source.as_ref()) { ProbeEntryState::Ignored }
+                else if row.count == 0 { ProbeEntryState::Unobserved }
+                else if row.translation.is_empty() { ProbeEntryState::Pending } else { ProbeEntryState::Translated };
+        }
+        Ok(grouped.into_values().collect())
     }
 
     fn recover_disconnected(&mut self) -> Result<(), ProbeRunError> {
@@ -877,7 +967,10 @@ impl ProbeRunStore {
         let Ok(observations) = self.read_observations(run_id) else {
             return Ok(document);
         };
-        if observations.revision() <= document.catalog_revision {
+        let keys = self.source_keys(&document, Some(&observations));
+        document.ignored_sources = document.ignored_sources.iter().map(|source| keys.key(source).into()).collect::<BTreeSet<Box<str>>>().into_iter().collect();
+        let observed_count = observations.entries().iter().map(|entry| entry.source()).collect::<BTreeSet<_>>().len();
+        if observations.revision() <= document.catalog_revision && observed_count == document.summary.observed_count && document.ignored_sources.len() == document.summary.ignored_count {
             return Ok(document);
         }
         document.catalog_revision = observations.revision();
@@ -924,6 +1017,7 @@ impl ProbeRunStore {
 
     fn read_observations(&self, run_id: &str) -> Result<CaptureCatalog, ProbeRunError> {
         CaptureCatalog::read_current(&self.observation_path(run_id))
+            .map(|catalog| catalog.map_sources(|adapter, source| self.source_policies.get(adapter).copied().unwrap_or_default().key(source)))
             .map_err(|_| ProbeRunError::Observation)
     }
 

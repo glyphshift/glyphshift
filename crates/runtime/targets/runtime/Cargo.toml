@@ -29,6 +29,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+glyphshift-adapter-monogame = { path = "../../../adapters/implementations/framework/monogame" }
 glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
 glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/native/gdiplus" }
 glyphshift-adapter-qt-painter = { path = "../../../adapters/implementations/framework/qt-painter" }

@@ -1,5 +1,13 @@
 [
   {
+    "id": "windows.monogame.sprite-batch-draw-string",
+    "name": "MonoGame 标准文字",
+    "summary": "适合 Windows x64 .NET 6+ 的 MonoGame DrawString 标准文字，支持缺字字体回退；自绘纹理文字不覆盖。停用后恢复原文，组件保留到目标退出。",
+    "technology": "CoreCLR / MonoGame",
+    "technicalTarget": "SpriteBatch.DrawString + SpriteFont.MeasureString",
+    "documentationUrl": "https://docs.monogame.net/api/Microsoft.Xna.Framework.Graphics.SpriteBatch.html"
+  },
+  {
     "id": "windows.gdi.ext-text-out",
     "name": "ExtTextOutW",
     "summary": "适合使用传统 Windows GDI 绘制文字的软件，支持字距、裁剪和部分字形索引",

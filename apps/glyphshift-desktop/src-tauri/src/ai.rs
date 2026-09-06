@@ -448,7 +448,7 @@ impl DesktopApplication {
                     TranslationItem::translated(item_id, row.source(), row.translation())
                 };
                 items.push(
-                    if row.state() == glyphshift_capture::ProbeEntryState::Ignored {
+                    if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() {
                         item.ignored()
                     } else {
                         item
@@ -487,6 +487,7 @@ impl DesktopApplication {
         }
         let dictionary_snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
         let mut observed_sources = BTreeSet::new();
+        let mut protected_sources = BTreeSet::new();
         let mut page_number = 1;
         loop {
             let query = ProbeQuery::new(
@@ -500,6 +501,7 @@ impl DesktopApplication {
                 .query_entries(&request.run_id, &query, &dictionary_snapshot)
                 .map_err(probe::probe_run_error)?;
             for row in page.rows() {
+                if row.has_translation_conflict() || !row.translation().trim().is_empty() { protected_sources.insert(Box::<str>::from(row.source())); }
                 if row.state() != glyphshift_capture::ProbeEntryState::Unobserved {
                     observed_sources.insert(Box::<str>::from(row.source()));
                 }
@@ -532,7 +534,7 @@ impl DesktopApplication {
                 .entries()
                 .iter()
                 .any(|entry| entry.source() == source && !entry.translation().trim().is_empty());
-            if already_completed {
+            if already_completed || protected_sources.contains(source) {
                 skipped_count = skipped_count.saturating_add(1);
             } else {
                 updates.push(DictionaryEntryCreate::new(source, translation));

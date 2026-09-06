@@ -22,6 +22,7 @@ fn target_runtime_drains_observations_only_in_batch_producer_mode() {
 
     let context = Box::into_raw(Box::new(NativeDecisionContext {
         adapter_id: "synthetic.observe".into(),
+        source_policy: SourceTextPolicy::Exact,
     }));
     let observe = |source: &str| {
         let source = source.encode_utf16().collect::<Vec<_>>();

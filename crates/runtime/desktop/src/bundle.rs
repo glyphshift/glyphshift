@@ -40,6 +40,8 @@ struct ArtifactManifest {
     technical_target: Option<Box<str>>,
     #[serde(default, alias = "documentationUrl")]
     documentation_url: Option<Box<str>>,
+    #[serde(default, alias = "processResidentAfterDeactivate")]
+    process_resident_after_deactivate: bool,
 }
 
 #[derive(Deserialize)]
@@ -159,6 +161,8 @@ pub struct RuntimeAdapterOption {
     technical_target: Box<str>,
     documentation_url: Option<Box<str>>,
     configuration: Box<str>,
+    process_resident_after_deactivate: bool,
+    source_policy: glyphshift_domain::SourceTextPolicy,
 }
 
 impl RuntimeAdapterOption {
@@ -221,6 +225,12 @@ impl RuntimeAdapterOption {
     pub fn configuration(&self) -> &str {
         &self.configuration
     }
+
+    #[must_use]
+    pub const fn process_resident_after_deactivate(&self) -> bool {
+        self.process_resident_after_deactivate
+    }
+    pub const fn source_policy(&self) -> glyphshift_domain::SourceTextPolicy { self.source_policy }
 }
 
 /// A verified, path-private set of production runtime artifacts.
@@ -292,8 +302,8 @@ impl RuntimeBundle {
             let path = verified_artifact(&root, &adapter.file, hash)?;
             // SAFETY: `verified_artifact` measured the exact file against the bundle manifest hash
             // before native code is loaded. The bundle authority is fixed by the product above.
-            let descriptor =
-                unsafe { LoadedNativeAdapter::inspect(&path) }.map_err(adapter_inspection_error)?;
+            let (descriptor, source_policy) =
+                unsafe { LoadedNativeAdapter::inspect_with_source_policy(&path) }.map_err(adapter_inspection_error)?;
             let features = descriptor
                 .features()
                 .filter(|feature| {
@@ -334,6 +344,8 @@ impl RuntimeBundle {
                         adapter.documentation_url.as_deref(),
                     )?,
                     configuration: "none".into(),
+                    process_resident_after_deactivate: adapter.process_resident_after_deactivate,
+                    source_policy,
                 });
             }
             let artifact_id = PackageArtifactId::new(format!("adapters/{index}"));
@@ -417,6 +429,8 @@ impl RuntimeBundle {
                     .unwrap_or_else(|| adapter_id.as_str().into()),
                 documentation_url: parse_documentation_url(worker.documentation_url.as_deref())?,
                 configuration: "none".into(),
+                process_resident_after_deactivate: false,
+                source_policy: glyphshift_domain::SourceTextPolicy::Exact,
             });
             packages.push(AdapterPackage::new(
                 descriptor,

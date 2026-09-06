@@ -46,6 +46,7 @@ function toggle(adapterId: string, checked: boolean | 'indeterminate') {
       >
         <UCheckbox :model-value="modelValue.includes(adapter.id)" :disabled="disabled" :aria-label="adapterName(adapter, t)" @update:model-value="toggle(adapter.id, $event)" />
         <span class="type-label min-w-0 flex-1 truncate font-medium">{{ adapterName(adapter, t) }}</span>
+        <span v-if="adapter.processResidentAfterDeactivate" data-testid="adapter-resident-marker" class="type-caption shrink-0 text-[var(--text-muted)]" :title="t('capture.residentAdapterHint')">{{ t('capture.residentAdapter') }}</span>
       </label>
     </section>
   </div>
