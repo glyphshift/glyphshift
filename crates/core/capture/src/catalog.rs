@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const CAPTURE_CATALOG_SCHEMA: &str = "glyphshift.capture-catalog/2";
 pub const DEFAULT_MAX_ENTRIES: u32 = 50_000;
@@ -381,8 +381,11 @@ impl FileCaptureSink {
             .spawn(move || {
                 let mut dirty = true;
                 let mut finishing = false;
+                let mut checkpoint_deadline = Instant::now() + CHECKPOINT_INTERVAL;
                 while !finishing {
-                    let command = match receiver.recv_timeout(CHECKPOINT_INTERVAL) {
+                    let command = match receiver
+                        .recv_timeout(checkpoint_deadline.saturating_duration_since(Instant::now()))
+                    {
                         Ok(command) => Some(command),
                         Err(RecvTimeoutError::Timeout) => None,
                         Err(RecvTimeoutError::Disconnected) => {
@@ -390,7 +393,7 @@ impl FileCaptureSink {
                             None
                         }
                     };
-                    let checkpoint_due = command.is_none();
+                    let checkpoint_due = Instant::now() >= checkpoint_deadline;
                     match command {
                         Some(CaptureCommand::Observe {
                             adapter_id,
@@ -411,6 +414,9 @@ impl FileCaptureSink {
                             .snapshot(unix_time_millis(), worker_dropped.load(Ordering::Relaxed));
                         write_catalog_checkpoint(configuration.output_path(), &catalog)?;
                         dirty = false;
+                    }
+                    if checkpoint_due {
+                        checkpoint_deadline = Instant::now() + CHECKPOINT_INTERVAL;
                     }
                 }
                 let catalog =

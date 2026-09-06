@@ -5,6 +5,8 @@ param(
 
     [string]$DataRoot,
 
+    [switch]$UseUserData,
+
     [switch]$BuildOnly
 )
 
@@ -21,6 +23,17 @@ $webViewProfileRoot = Join-Path $reviewRoot 'webview-profile'
 $cargoTargetDir = Join-Path $localTestRoot 'desktop-review\cargo-target'
 $profileDirectory = $Profile.ToLowerInvariant()
 
+if ($UseUserData) {
+    if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
+        throw 'UseUserData cannot be combined with DataRoot.'
+    }
+    $DataRoot = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Glyphshift\workspace'
+    $reviewRoot = Join-Path $localTestRoot "evidence\desktop-app\$buildId"
+    $runtimeRoot = Join-Path $reviewRoot 'runtime'
+    $cargoTargetDir = Join-Path $localTestRoot 'desktop-build\cargo-target'
+    $webViewProfileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Glyphshift\webview-profile'
+}
+
 if ([string]::IsNullOrWhiteSpace($DataRoot)) {
     $DataRoot = Join-Path $localTestRoot 'desktop-review-data'
 }
@@ -33,7 +46,9 @@ function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
     }
 }
 
-Assert-LocalTestPath $DataRoot 'Desktop review data'
+if (-not $UseUserData) {
+    Assert-LocalTestPath $DataRoot 'Desktop review data'
+}
 
 $requiredCommands = @(
     (Join-Path $desktopRoot 'node_modules\.bin\vite.cmd'),
@@ -101,6 +116,13 @@ if ($LASTEXITCODE -ne 0) {
 $desktopExecutable = Join-Path $cargoTargetDir "$profileDirectory\glyphshift-desktop-shell.exe"
 if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) {
     throw 'The synchronized desktop executable is missing.'
+}
+
+if ($UseUserData) {
+    $appBinRoot = Join-Path $reviewRoot 'bin'
+    New-Item -ItemType Directory -Path $appBinRoot -Force | Out-Null
+    Copy-Item -LiteralPath $desktopExecutable -Destination $appBinRoot
+    $desktopExecutable = Join-Path $appBinRoot 'glyphshift-desktop-shell.exe'
 }
 
 if ($BuildOnly) {

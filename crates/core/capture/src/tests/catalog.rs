@@ -139,6 +139,60 @@ fn preferred_sources_displace_fallback_evidence_when_capacity_is_full() {
 }
 
 #[test]
+fn capture_sink_checkpoints_during_continuous_observations() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    let root = tempdir().expect("capture root");
+    let output = root.path().join("capture.json");
+    let sink = FileCaptureSink::start(
+        CaptureConfiguration::new(
+            CaptureSessionId::new("capture-continuous").expect("session id"),
+            &output,
+            10,
+        )
+        .expect("configuration"),
+    )
+    .expect("capture sink");
+    let ingress = sink.ingress();
+    let running = Arc::new(AtomicBool::new(true));
+    let producing = running.clone();
+    let producer = std::thread::spawn(move || {
+        while producing.load(Ordering::Acquire) {
+            let _ = ingress.try_observe("synthetic.draw-text", "Synthetic effect parameter");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut first_revision = None;
+    let mut visible_while_producing = false;
+    while Instant::now() < deadline {
+        if let Ok(catalog) = CaptureCatalog::read_current(&output) {
+            if catalog
+                .entries()
+                .iter()
+                .any(|entry| entry.source() == "Synthetic effect parameter")
+            {
+                if first_revision.is_some_and(|revision| catalog.revision() > revision) {
+                    visible_while_producing = true;
+                    break;
+                }
+                first_revision.get_or_insert(catalog.revision());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    running.store(false, Ordering::Release);
+    producer.join().expect("continuous producer");
+    sink.finish().expect("finish capture");
+    assert!(
+        visible_while_producing,
+        "live observations must keep reaching the catalog without an idle gap"
+    );
+}
+
+#[test]
 fn capture_sink_checkpoints_while_running_and_pause_does_not_end_the_session() {
     let root = tempdir().expect("capture root");
     let output = root.path().join("capture.json");
