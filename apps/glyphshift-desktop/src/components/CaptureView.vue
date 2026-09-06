@@ -252,7 +252,7 @@ const settingsChanged = computed(() => {
 const activeRunExists = computed(() => Boolean(probe.activityStatus.value))
 const bulkRunDeletionBlocked = computed(() => [...listSelected.value].some((id) => {
   const run = probe.runs.value.find(item => item.id === id)
-  return Boolean(run?.quickProbe) || ['running', 'paused'].includes(run?.status ?? '')
+  return !run?.quickProbe && ['running', 'paused'].includes(run?.status ?? '')
 }))
 const filteredRuns = computed(() => {
   const needle = listQuery.value.trim().toLowerCase()
@@ -978,7 +978,10 @@ async function chooseExport(format: ProbeExportFormat) {
 
 async function confirmRemoval() {
   const ids = pendingRemoval.value.map(run => run.id)
-  if (await probe.remove(ids)) {
+  const removed = await probe.remove(ids)
+  emit('workspace-changed')
+  listSelected.value = new Set([...listSelected.value].filter(id => probe.runs.value.some(run => run.id === id)))
+  if (removed) {
     listSelected.value = new Set([...listSelected.value].filter(id => !ids.includes(id)))
     pendingRemoval.value = []
   }

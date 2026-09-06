@@ -515,6 +515,9 @@ pub(super) fn rebind_software_capture_shortcut(
     if !capture.can_rebind_shortcut() {
         return Err(CommandError::new("settings.shortcut_busy"));
     }
+    if app.global_shortcut().is_registered(candidate) {
+        return Err(CommandError::new("settings.shortcut_unavailable"));
+    }
     let previous_shortcut = capture
         .shortcut_available
         .then(|| shortcut::parse_global_shortcut(&capture.shortcut_label))

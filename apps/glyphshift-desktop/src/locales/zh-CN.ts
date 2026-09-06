@@ -1,5 +1,7 @@
 export default {
   common: {
+    copy: '复制',
+    delete: '删除',
     system: '跟随系统',
     cancel: '取消',
     confirmDelete: '确认删除',
@@ -688,6 +690,10 @@ export default {
     },
   },
   workflows: {
+    globalShortcut: '全局快捷键',
+    shortcutPlaceholder: '点击设置快捷键',
+    shortcutRecording: '按下组合键 · Backspace 清空 · Esc 取消',
+    shortcutHint: '使用 Ctrl、Alt 或 Win 组合键。保存后，即使窗口未聚焦也能切换此工作流。',
     title: '工作流',
     create: '新建工作流',
     edit: '编辑工作流',
@@ -1112,7 +1118,7 @@ export default {
     empty: '还没有探针任务',
     emptyHint: '新建任务并绑定词典，即可持续观察、翻译和实时查看效果。',
     deleteTitle: '删除探针任务',
-    deleteDescription: '将删除 {count} 个探针任务及其收集记录；使用的词典不会被删除。',
+    deleteDescription: '将删除 {count} 个任务及其收集记录。临时任务同时清理自身创建且未被引用的资产；复用或仍被引用的软件、词典会保留。',
     deleteConfirm: '删除探针任务',
   },
   workspace: {
@@ -1166,6 +1172,7 @@ export default {
       installationStorageFailure: '无法保存词典安装信息，请检查应用数据目录。',
     },
     workflow: {
+      shortcutConflict: '快捷键已被其他工作流、快速捕获或其他程序占用，请换一个组合键。',
       noEffectiveRules: '无法启用工作流：词典没有可应用规则，请先添加文字替换或字体规则。',
       emptyAdapterPlan: '还不能启用工作流：请为每个软件选择至少一种兼容方式。',
       localeMismatch: '无法启用工作流：软件与词典的语言不一致。',

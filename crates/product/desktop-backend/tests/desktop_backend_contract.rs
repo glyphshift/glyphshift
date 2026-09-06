@@ -30,6 +30,62 @@ fn environment() -> DesktopEnvironment {
 }
 
 #[test]
+fn workflow_shortcut_survives_restart_and_is_not_copied() {
+    let root = tempdir().expect("product data");
+    let executable = root.path().join("SyntheticShortcutEditor.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable");
+    let mut backend =
+        DesktopBackend::open_with_environment(root.path(), environment()).expect("backend");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            &executable,
+        ))
+        .expect("software")
+        .selected_software_id()
+        .expect("selected")
+        .to_owned();
+    let create = WorkflowCreate::new("shortcut-workflow", "Shortcut workflow")
+        .with_global_shortcut("Ctrl+Alt+KeyT")
+        .with_targets([WorkflowTargetCreate::new(
+            software_id,
+            ["adapter-gdi"],
+            [] as [&str; 0],
+        )]);
+    backend.create_workflow(create).expect("workflow");
+    let mut reopened =
+        DesktopBackend::open_with_environment(root.path(), environment()).expect("restart");
+    assert_eq!(
+        reopened
+            .workflow("shortcut-workflow")
+            .expect("workflow")
+            .global_shortcut(),
+        "Ctrl+Alt+KeyT"
+    );
+    assert_eq!(
+        reopened.snapshot().workflows()[0].global_shortcut(),
+        "Ctrl+Alt+KeyT"
+    );
+    let copy = reopened
+        .copy_workflow("shortcut-workflow", "shortcut-copy", "Copy")
+        .expect("copy");
+    assert_eq!(copy.global_shortcut(), "");
+    let path = root.path().join("workflows/shortcut-workflow.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    value["globalShortcut"] = serde_json::json!({"invalid":true});
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let recovered = DesktopBackend::open_with_environment(root.path(), environment())
+        .expect("invalid optional field recovery");
+    assert_eq!(
+        recovered
+            .workflow("shortcut-workflow")
+            .expect("workflow retained")
+            .global_shortcut(),
+        ""
+    );
+}
+
+#[test]
 fn desktop_summary_derives_verified_then_modified_without_polluting_dictionary_content() {
     const ARTIFACT_URL: &str = "https://catalog.example/dictionary.json";
     let root = tempdir().expect("isolated product data");

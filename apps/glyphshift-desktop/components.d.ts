@@ -36,6 +36,7 @@ declare module 'vue' {
     SelectedFontTags: typeof import('./src/components/SelectedFontTags.vue')['default']
     SemanticVersionInput: typeof import('./src/components/SemanticVersionInput.vue')['default']
     SettingsView: typeof import('./src/components/SettingsView.vue')['default']
+    ShortcutRecorder: typeof import('./src/components/ShortcutRecorder.vue')['default']
     SoftwareTable: typeof import('./src/components/SoftwareTable.vue')['default']
     TitleBar: typeof import('./src/components/TitleBar.vue')['default']
     TranslationTasksView: typeof import('./src/components/TranslationTasksView.vue')['default']

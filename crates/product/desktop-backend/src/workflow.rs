@@ -16,6 +16,7 @@ pub struct WorkflowSummaryView {
     pub(super) id: Box<str>,
     pub(super) name: Box<str>,
     pub(super) description: Box<str>,
+    pub(super) global_shortcut: Box<str>,
     pub(super) revision: u64,
     pub(super) software_ids: Vec<Box<str>>,
     pub(super) dictionary_ids: Vec<Box<str>>,
@@ -56,6 +57,10 @@ impl WorkflowSummaryView {
     #[must_use]
     pub fn targets(&self) -> &[WorkflowTargetView] {
         &self.targets
+    }
+    #[must_use]
+    pub fn global_shortcut(&self) -> &str {
+        &self.global_shortcut
     }
 }
 
@@ -185,6 +190,8 @@ pub struct WorkflowCreate {
     name: Box<str>,
     #[serde(default)]
     description: Box<str>,
+    #[serde(default)]
+    global_shortcut: Box<str>,
     targets: Vec<WorkflowTargetCreate>,
 }
 
@@ -195,6 +202,7 @@ impl WorkflowCreate {
             id: id.into(),
             name: name.into(),
             description: "".into(),
+            global_shortcut: "".into(),
             targets: Vec::new(),
         }
     }
@@ -210,6 +218,18 @@ impl WorkflowCreate {
         self.targets = targets.into_iter().collect();
         self
     }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn global_shortcut(&self) -> &str {
+        &self.global_shortcut
+    }
+    #[must_use]
+    pub fn with_global_shortcut(mut self, value: impl Into<Box<str>>) -> Self {
+        self.global_shortcut = value.into();
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -219,6 +239,8 @@ pub struct WorkflowEdit {
     name: Box<str>,
     #[serde(default)]
     description: Box<str>,
+    #[serde(default)]
+    global_shortcut: Box<str>,
     base_revision: u64,
     targets: Vec<WorkflowTargetCreate>,
 }
@@ -230,6 +252,7 @@ impl WorkflowEdit {
             id: id.into(),
             name: name.into(),
             description: "".into(),
+            global_shortcut: "".into(),
             base_revision,
             targets: Vec::new(),
         }
@@ -244,6 +267,18 @@ impl WorkflowEdit {
     #[must_use]
     pub fn with_targets(mut self, targets: impl IntoIterator<Item = WorkflowTargetCreate>) -> Self {
         self.targets = targets.into_iter().collect();
+        self
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn global_shortcut(&self) -> &str {
+        &self.global_shortcut
+    }
+    #[must_use]
+    pub fn with_global_shortcut(mut self, value: impl Into<Box<str>>) -> Self {
+        self.global_shortcut = value.into();
         self
     }
 }
@@ -285,6 +320,7 @@ pub struct WorkflowView {
     id: Box<str>,
     name: Box<str>,
     description: Box<str>,
+    global_shortcut: Box<str>,
     revision: u64,
     targets: Vec<WorkflowTargetView>,
 }
@@ -314,6 +350,10 @@ impl WorkflowView {
     pub fn targets(&self) -> &[WorkflowTargetView] {
         &self.targets
     }
+    #[must_use]
+    pub fn global_shortcut(&self) -> &str {
+        &self.global_shortcut
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -323,6 +363,8 @@ pub(super) struct WorkflowArtifact {
     pub(super) name: Box<str>,
     #[serde(default)]
     pub(super) description: Box<str>,
+    #[serde(default)]
+    pub(super) global_shortcut: Box<str>,
     pub(super) revision: u64,
     pub(super) targets: Vec<WorkflowTargetArtifact>,
 }
@@ -409,6 +451,7 @@ impl DesktopBackend {
             id: create.id,
             name: create.name,
             description: create.description,
+            global_shortcut: create.global_shortcut,
             revision: 1,
             targets: create
                 .targets
@@ -445,6 +488,7 @@ impl DesktopBackend {
             id: edit.id,
             name: edit.name,
             description: edit.description,
+            global_shortcut: edit.global_shortcut,
             revision: current.revision + 1,
             targets: edit
                 .targets
@@ -505,6 +549,7 @@ impl DesktopBackend {
             id: new_workflow_id.into(),
             name: name.into(),
             description: source.description.clone(),
+            global_shortcut: "".into(),
             targets,
         })
     }
@@ -810,6 +855,7 @@ fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
         id: artifact.id.clone(),
         name: artifact.name.clone(),
         description: artifact.description.clone(),
+        global_shortcut: artifact.global_shortcut.clone(),
         revision: artifact.revision,
         targets: artifact
             .targets
@@ -837,6 +883,8 @@ fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result
         || artifact.name.trim().is_empty()
         || artifact.name.chars().count() > 128
         || artifact.description.chars().count() > 512
+        || artifact.global_shortcut.len() > 64
+        || artifact.global_shortcut.chars().any(char::is_control)
         || artifact.revision == 0
         || artifact.targets.is_empty()
         || !unique_software
@@ -960,6 +1008,12 @@ fn workflow_artifact_from_value(value: &serde_json::Value) -> Option<WorkflowArt
         id: id.into(),
         name: name.into(),
         description: description.into(),
+        global_shortcut: object
+            .get("globalShortcut")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| value.len() <= 64 && !value.chars().any(char::is_control))
+            .unwrap_or_default()
+            .into(),
         revision,
         targets,
     })

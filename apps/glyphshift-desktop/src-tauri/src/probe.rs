@@ -319,11 +319,29 @@ impl DesktopApplication {
         if run_ids.is_empty() {
             return Err(CommandError::new("capture.invalid_configuration"));
         }
-        for run_id in run_ids {
-            if self.active_probe_run_id.as_deref() == Some(run_id) {
+        let run_ids = run_ids.iter().cloned().collect::<BTreeSet<_>>();
+        for run_id in &run_ids {
+            let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+            self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
+            if !self.quick_probe_sessions.contains(run_id)
+                && (self.active_probe_run_id.as_deref() == Some(run_id)
+                    || matches!(
+                        summary.status(),
+                        ProbeRunStatus::Running | ProbeRunStatus::Paused
+                    ))
+            {
                 return Err(CommandError::new("capture.invalid_state"));
             }
-            self.probe_runs.delete(run_id).map_err(probe_run_error)?;
+        }
+        for run_id in &run_ids {
+            if !self.quick_probe_sessions.contains(run_id) {
+                self.probe_runs.delete(run_id).map_err(probe_run_error)?;
+            }
+        }
+        for run_id in &run_ids {
+            if self.quick_probe_sessions.contains(run_id) {
+                self.cleanup_quick_probe(run_id)?;
+            }
         }
         Ok(())
     }

@@ -81,6 +81,12 @@ pub(super) fn probe_global_shortcut(
                 available: true,
             });
         }
+        if app.global_shortcut().is_registered(candidate) {
+            return Ok(GlobalShortcutProbeView {
+                shortcut: label,
+                available: false,
+            });
+        }
         let available = match app.global_shortcut().register(candidate) {
             Ok(()) => {
                 app.global_shortcut()

@@ -8,6 +8,7 @@ mod settings;
 mod shortcut;
 mod software;
 mod workflow;
+mod workflow_shortcut;
 
 use command_error::CommandError;
 use dictionary::offline_dictionary_distribution;
@@ -656,7 +657,9 @@ pub fn run() {
     let builder = builder.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
+                workflow_shortcut::handle(app, shortcut, event.state());
                 if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed
+                    && !workflow_shortcut::recording(app)
                     && software::matches_software_quick_capture_shortcut(app, shortcut)
                 {
                     software::handle_software_quick_capture_shortcut(app);
@@ -695,9 +698,12 @@ pub fn run() {
             app.manage(Mutex::new(ai_state));
             app.manage(Mutex::new(application));
             software::manage_quick_capture(app);
+            workflow_shortcut::manage(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            workflow_shortcut::desktop_set_shortcut_recording,
+            workflow_shortcut::desktop_workflow_shortcut_errors,
             desktop_status,
             desktop_settings,
             desktop_update_settings,

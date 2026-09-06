@@ -136,6 +136,7 @@ export function useWorkflowWorkspace() {
             id: detail.id,
             name: detail.name,
             description: detail.description,
+            globalShortcut: detail.globalShortcut ?? '',
             baseRevision: detail.revision,
             targets: detail.targets,
           } })
@@ -153,15 +154,15 @@ export function useWorkflowWorkspace() {
     }
   }
 
-  async function createWorkflow(name: string, description: string, targets: WorkflowTarget[]) {
+  async function createWorkflow(name: string, description: string, targets: WorkflowTarget[], globalShortcut = '') {
     if (workspaceBusy.value) return false
     workspaceBusy.value = true
     setMessage('workflows', '')
     const id = `workflow-${crypto.randomUUID()}`
     try {
       const snapshot = hasDesktopRuntime()
-        ? await invoke<DesktopSnapshot>('desktop_create_workflow', { create: { id, name, description, targets } })
-        : localCreateWorkflow({ id, name, description, revision: 1, targets })
+        ? await invoke<DesktopSnapshot>('desktop_create_workflow', { create: { id, name, description, targets, globalShortcut } })
+        : localCreateWorkflow({ id, name, description, revision: 1, targets, globalShortcut })
       applyDesktopSnapshot(snapshot)
       return true
     }
@@ -226,7 +227,7 @@ export function useWorkflowWorkspace() {
   function localCopyWorkflow(sourceId: string, id: string, name: string): DesktopSnapshot {
     const source = model.value.workflowDetails[sourceId]
     if (!source) throw presentationError(i18n.global.t('workspace.missingCopySource'))
-    return localCreateWorkflow({ ...clone(source), id, name, revision: 1 })
+    return localCreateWorkflow({ ...clone(source), id, name, revision: 1, globalShortcut: '' })
   }
 
   async function removeWorkflows(ids: string[]) {
@@ -280,6 +281,7 @@ export function useWorkflowWorkspace() {
   }
 
   return {
+    applyWorkflowResult,
     activationIds,
     setWorkflowEnabled,
     refreshWorkflows,

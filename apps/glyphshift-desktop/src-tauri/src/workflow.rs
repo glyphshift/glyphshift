@@ -127,6 +127,7 @@ impl DesktopApplication {
         Ok(self.snapshot())
     }
 
+    #[cfg(test)]
     pub(super) fn update_workflow(
         &mut self,
         edit: WorkflowEdit,
@@ -660,23 +661,38 @@ pub(super) fn desktop_workflow(
 #[tauri::command]
 pub(super) fn desktop_create_workflow(
     create: WorkflowCreate,
+    app: tauri::AppHandle,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .create_workflow(create)
+    let id = create.id().to_owned();
+    let key = create.global_shortcut().to_owned();
+    workflow_shortcut::with_binding(&app, &id, &key, || {
+        application
+            .lock()
+            .map_err(|_| workspace_unavailable())?
+            .create_workflow(create)
+    })
 }
 
 #[tauri::command]
 pub(super) fn desktop_update_workflow(
     edit: WorkflowEdit,
+    app: tauri::AppHandle,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .update_workflow(edit)
+    let id = edit.id().to_owned();
+    let key = edit.global_shortcut().to_owned();
+    workflow_shortcut::with_binding(&app, &id, &key, || {
+        application
+            .lock()
+            .map_err(|_| workspace_unavailable())?
+            .backend
+            .update_workflow(edit)
+            .map_err(|_| CommandError::new("workflow.invalid_update"))
+    })?;
+    let mut application = application.lock().map_err(|_| workspace_unavailable())?;
+    application.reconcile_workflow_if_enabled(&id)?;
+    Ok(application.snapshot())
 }
 
 #[tauri::command]
@@ -695,16 +711,25 @@ pub(super) fn desktop_copy_workflow(
 #[tauri::command]
 pub(super) fn desktop_delete_workflows(
     workflow_ids: Vec<String>,
+    app: tauri::AppHandle,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<DesktopProductSnapshot, CommandError> {
     let workflow_ids = workflow_ids
         .into_iter()
         .map(Box::<str>::from)
         .collect::<Vec<_>>();
-    application
+    for id in &workflow_ids {
+        workflow_shortcut::with_binding(&app, id, "", || {
+            application
+                .lock()
+                .map_err(|_| workspace_unavailable())?
+                .delete_workflows(&[id.clone()])
+        })?;
+    }
+    Ok(application
         .lock()
         .map_err(|_| workspace_unavailable())?
-        .delete_workflows(&workflow_ids)
+        .snapshot())
 }
 #[tauri::command]
 pub(super) fn desktop_enable_workflow(

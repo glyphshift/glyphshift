@@ -6,6 +6,8 @@ type MessageShape<T> = {
 
 export default {
   common: {
+    copy: 'Copy',
+    delete: 'Delete',
     system: 'Use system setting',
     cancel: 'Cancel',
     confirmDelete: 'Delete',
@@ -670,6 +672,10 @@ export default {
     },
   },
   workflows: {
+    globalShortcut: 'Global shortcut',
+    shortcutPlaceholder: 'Click to record a shortcut',
+    shortcutRecording: 'Press a combination · Backspace clears · Esc cancels',
+    shortcutHint: 'Use Ctrl, Alt or Win with another key. Once saved, it toggles this workflow even when the window is unfocused.',
     title: 'Workflows',
     create: 'New workflow',
     edit: 'Edit workflow',
@@ -1094,7 +1100,7 @@ export default {
     empty: 'No probe runs yet',
     emptyHint: 'Create a run and bind a dictionary to observe, translate, and preview continuously.',
     deleteTitle: 'Delete probe runs',
-    deleteDescription: 'Delete {count} probe tasks and their collection records. Their dictionaries are kept.',
+    deleteDescription: 'Delete {count} tasks and their collection records. Temporary tasks also clean up unreferenced assets they created; reused or referenced software and dictionaries are kept.',
     deleteConfirm: 'Delete probe tasks',
   },
   workspace: {
@@ -1148,6 +1154,7 @@ export default {
       installationStorageFailure: 'Dictionary installation data could not be saved. Check the app data directory.',
     },
     workflow: {
+      shortcutConflict: 'This shortcut is used by another workflow, Quick capture, or another application. Choose a different combination.',
       noEffectiveRules: 'This workflow cannot be enabled because its dictionaries have no applicable rules. Add a text replacement or font rule first.',
       emptyAdapterPlan: 'This workflow cannot be enabled until every application has a compatibility method.',
       localeMismatch: 'This workflow cannot be enabled because a software target and dictionary use incompatible languages.',

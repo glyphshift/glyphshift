@@ -205,6 +205,7 @@ export interface WorkflowTarget {
 }
 
 export interface WorkflowSummary {
+  globalShortcut?: string
   id: string
   name: string
   description: string
@@ -215,6 +216,7 @@ export interface WorkflowSummary {
 }
 
 export interface WorkflowDetail {
+  globalShortcut?: string
   id: string
   name: string
   description: string

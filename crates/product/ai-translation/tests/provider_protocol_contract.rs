@@ -55,6 +55,87 @@ struct ProtocolCase {
 }
 
 #[test]
+fn malformed_translation_text_uses_the_configured_retry_budget() {
+    for (budget, recover, expected_status, expected_attempts) in [
+        (1, true, TranslationJobStatus::Completed, 2),
+        (0, true, TranslationJobStatus::CompletedWithFailures, 1),
+        (1, false, TranslationJobStatus::CompletedWithFailures, 2),
+    ] {
+        let root = tempdir().expect("profile root");
+        let mut profiles = AiProfileCatalog::open(root.path()).expect("profiles");
+        profiles
+            .save_profile(
+                AiProfileDraft::new(
+                    "profile.format",
+                    "Format retry",
+                    AiProviderProtocol::OpenAiResponses,
+                    "synthetic-model",
+                )
+                .with_max_retries(budget)
+                .with_credential(CredentialUpdate::replace("synthetic-secret")),
+            )
+            .expect("profile");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let transport = Arc::new(SequencedTransport {
+            requests: requests.clone(),
+            responses: Mutex::new(VecDeque::from([
+                HttpResponse::json(
+                    200,
+                    r#"{"status":"completed","output":[{"content":[{"type":"output_text","text":"Unable to provide the requested structure."}]}]}"#,
+                ),
+                HttpResponse::json(
+                    200,
+                    if recover {
+                        r#"{"status":"completed","output":[{"content":[{"type":"output_text","text":"{\"translations\":[\"保存\"]}"}]}]}"#
+                    } else {
+                        r#"{"status":"completed","output":[{"content":[{"type":"output_text","text":"Still not JSON."}]}]}"#
+                    },
+                ),
+            ])),
+        });
+        let mut translation = AiTranslation::new();
+        translation.register_http_provider(AiProviderProtocol::OpenAiResponses, transport);
+        let plan = translation
+            .plan_translation(TranslationPlanRequest::new(
+                "dictionary.pending",
+                1,
+                "en-US",
+                "zh-CN",
+                [TranslationItem::untranslated("save", "Save")],
+            ))
+            .expect("plan");
+        let job = translation
+            .start_translation(
+                plan.token(),
+                profiles
+                    .resolve_profile("profile.format")
+                    .expect("resolved profile"),
+            )
+            .expect("job");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let result = loop {
+            let snapshot = translation.translation_job(&job).expect("snapshot");
+            if snapshot.status().is_terminal() {
+                break snapshot;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(result.status(), expected_status);
+        if expected_status == TranslationJobStatus::Completed {
+            assert_eq!(result.results().len(), 1);
+            assert_eq!(result.results()[0].translation(), "保存");
+        } else {
+            assert!(
+                result.results().is_empty(),
+                "malformed output must never be published"
+            );
+        }
+        assert_eq!(requests.lock().unwrap().len(), expected_attempts);
+    }
+}
+
+#[test]
 fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_results() {
     let cases = [
         ProtocolCase {

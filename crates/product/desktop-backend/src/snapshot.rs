@@ -77,6 +77,7 @@ impl DesktopBackend {
                     id: workflow.id.clone(),
                     name: workflow.name.clone(),
                     description: workflow.description.clone(),
+                    global_shortcut: workflow.global_shortcut.clone(),
                     revision: workflow.revision,
                     software_ids: workflow
                         .targets

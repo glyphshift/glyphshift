@@ -16,7 +16,8 @@ import TranslationTasksView from './components/TranslationTasksView.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
 import { useAppSettings } from './appSettings'
 import { useAiTranslation } from './useAiTranslation'
-import type { SoftwareQuickCaptureEvent, WorkflowDetail, WorkflowTarget } from './model'
+import type { SoftwareQuickCaptureEvent, WorkflowCommandResult, WorkflowDetail, WorkflowTarget } from './model'
+import { translateCommandError, type CommandError } from './commandError'
 import { useProbeRuns } from './useProbeRuns'
 import { useWorkspace } from './useWorkspace'
 
@@ -44,6 +45,7 @@ const translationTaskProgress = computed(() => {
   return task && ai.taskRunning.value ? `${task.finishedBatches}/${task.totalBatches}` : ''
 })
 let unlistenSoftwareCapture: UnlistenFn | null = null
+let unlistenWorkflowShortcut: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
 
 async function openWorkflow(id: string) {
@@ -139,12 +141,13 @@ function handleShellShortcut(event: KeyboardEvent) {
   focusMainContent()
 }
 
-async function createWorkflow(name: string, description: string, targets: WorkflowTarget[]) {
-  await workspace.createWorkflow(name, description, targets)
+async function createWorkflow(name: string, description: string, targets: WorkflowTarget[], globalShortcut: string, done: (saved: boolean) => void) {
+  done(await workspace.createWorkflow(name, description, targets, globalShortcut))
 }
 
-async function saveWorkflow(detail: WorkflowDetail) {
-  if (await workspace.saveWorkflow(detail)) workspace.workflowDetail.value = null
+async function saveWorkflow(detail: WorkflowDetail, done: (saved: boolean) => void) {
+  const saved = await workspace.saveWorkflow(detail)
+  done(saved)
 }
 
 async function connectDesktopShell() {
@@ -213,11 +216,27 @@ async function connectSoftwareQuickCaptureEvents() {
   }
 }
 
+async function connectWorkflowShortcuts() {
+  if (!('__TAURI_INTERNALS__' in window)) return
+  try {
+    unlistenWorkflowShortcut = await listen<{ workflowId: string; result: WorkflowCommandResult | null; error: CommandError | null }>('workflow-shortcut', event => {
+      const { workflowId, result, error } = event.payload
+      if (result) workspace.applyWorkflowResult(result)
+      workspace.messages.value = { ...workspace.messages.value, [workflowId]: error ? translateCommandError(error) : '' }
+    })
+    const errors = await invoke<Record<string, CommandError>>('desktop_workflow_shortcut_errors')
+    for (const [id, error] of Object.entries(errors ?? {})) {
+      workspace.messages.value = { ...workspace.messages.value, [id]: translateCommandError(error) }
+    }
+  } catch { /* Shortcuts are available only in the native desktop. */ }
+}
+
 onMounted(() => {
   window.addEventListener('beforeunload', guardBrowserExit)
   window.addEventListener('keydown', handleShellShortcut)
   void connectDesktopShell()
   void connectSoftwareQuickCaptureEvents()
+  void connectWorkflowShortcuts()
   void connectWindowCloseBehavior()
   void ai.connectTaskMonitor().catch(() => undefined)
 })
@@ -236,6 +255,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleShellShortcut)
   window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
   unlistenSoftwareCapture?.()
+  unlistenWorkflowShortcut?.()
   unlistenWindowClose?.()
 })
 </script>

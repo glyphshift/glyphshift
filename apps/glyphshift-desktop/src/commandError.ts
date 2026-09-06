@@ -14,6 +14,7 @@ interface PresentationError {
 }
 
 const messageKeys: Record<string, string> = {
+  'workflow.shortcut_conflict': 'errors.workflow.shortcutConflict',
   'settings.invalid_data': 'errors.settings.invalidData',
   'settings.unavailable': 'errors.settings.unavailable',
   'settings.write_failed': 'errors.settings.writeFailed',

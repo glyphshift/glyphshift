@@ -16,6 +16,7 @@ function hasVisibleBlockingOverlay() {
 
 export function usePageEscape(active: () => boolean, back: () => void) {
   function handleKeydown(event: KeyboardEvent) {
+    if (event.target instanceof Element && event.target.closest('[data-shortcut-recording="true"]')) return
     if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || !active()) return
     if (hasVisibleBlockingOverlay()) return
     event.preventDefault()

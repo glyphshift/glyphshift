@@ -226,6 +226,9 @@ export function useProbeRuns() {
       return true
     }
     catch (error) {
+      if (hasDesktopRuntime()) {
+        try { runs.value = await invoke<ProbeRunSummary[]>('desktop_probe_runs') } catch { /* Keep the original deletion error. */ }
+      }
       reportError(error)
       return false
     }

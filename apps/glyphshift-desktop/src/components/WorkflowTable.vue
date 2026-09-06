@@ -25,6 +25,7 @@ import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 import AdapterSelectionTable from './AdapterSelectionTable.vue'
 import SelectedFontTags from './SelectedFontTags.vue'
+import ShortcutRecorder from './ShortcutRecorder.vue'
 
 const props = defineProps<{
   items: WorkflowSummary[]
@@ -50,8 +51,8 @@ const emit = defineEmits<{
   refresh: []
   refreshFonts: []
   open: [id: string]
-  create: [name: string, description: string, targets: WorkflowTarget[]]
-  save: [detail: WorkflowDetail]
+  create: [name: string, description: string, targets: WorkflowTarget[], globalShortcut: string, done: (saved: boolean) => void]
+  save: [detail: WorkflowDetail, done: (saved: boolean) => void]
   closeEdit: []
   copy: [id: string]
   remove: [ids: string[]]
@@ -75,6 +76,7 @@ const { columns: visibleColumns, toggleColumn } = useTableColumns('glyphshift.ta
 const creating = ref(false)
 const name = ref('')
 const description = ref('')
+const globalShortcut = ref('')
 const targets = ref<WorkflowTarget[]>([])
 const activeSoftwareId = ref<string | null>(null)
 const softwareQuery = ref('')
@@ -89,7 +91,7 @@ const formBaseline = ref('')
 const discardFormOpen = ref(false)
 
 function serializeForm() {
-  return JSON.stringify({ name: name.value, description: description.value, targets: targets.value })
+  return JSON.stringify({ name: name.value, description: description.value, targets: targets.value, globalShortcut: globalShortcut.value })
 }
 
 const statusFilterOptions = computed(() => [
@@ -223,11 +225,11 @@ const tableColumns = computed<TableColumn<WorkflowSummary>[]>(() => [
 ])
 function workflowOverflowItems(item: WorkflowSummary): DropdownMenuItem[][] {
   return [[{
-    label: t('workflows.copyNamed', { name: item.name }),
+    label: t('common.copy'),
     icon: 'i-tabler-copy',
     onSelect: () => emit('copy', item.id),
   }], [{
-    label: t('common.deleteNamed', { name: item.name }),
+    label: t('common.delete'),
     icon: 'i-tabler-trash',
     color: 'error',
     onSelect: () => { pendingRemoval.value = [item] },
@@ -244,13 +246,18 @@ watch(activeSoftwareId, () => {
   dictionaryFilter.value = 'all'
   fontFilter.value = 'all'
 })
-watch(() => props.editing, (detail) => {
+watch(() => props.editing, (detail, previous) => {
   if (!detail) return
   name.value = detail.name
   description.value = detail.description
+  globalShortcut.value = detail.globalShortcut ?? ''
   targets.value = clone(detail.targets)
-  activeSoftwareId.value = targets.value[0]?.softwareId ?? null
-  activeEditorTab.value = 'basic'
+  if (detail.id !== previous?.id) {
+    activeSoftwareId.value = targets.value[0]?.softwareId ?? null
+    activeEditorTab.value = 'basic'
+  } else if (!targets.value.some(target => target.softwareId === activeSoftwareId.value)) {
+    activeSoftwareId.value = targets.value[0]?.softwareId ?? null
+  }
   formBaseline.value = serializeForm()
 }, { immediate: true })
 
@@ -360,6 +367,7 @@ function togglePageSelection() {
   selected.value = next
 }
 function resetForm() {
+  globalShortcut.value = ''
   name.value = ''
   description.value = ''
   targets.value = []
@@ -449,10 +457,9 @@ function moveFontFamily(family: string, offset: number) {
 function submitForm() {
   if (!formValid.value) return
   const nextTargets = clone(targets.value)
-  if (props.editing) emit('save', { ...props.editing, name: name.value.trim(), description: description.value.trim(), targets: nextTargets })
-  else emit('create', name.value.trim(), description.value.trim(), nextTargets)
-  if (!props.editing) creating.value = false
-  resetForm()
+  const done = (saved: boolean) => { if (saved && creating.value) { creating.value = false; resetForm() } }
+  if (props.editing) emit('save', { ...props.editing, name: name.value.trim(), description: description.value.trim(), targets: nextTargets, globalShortcut: globalShortcut.value }, done)
+  else emit('create', name.value.trim(), description.value.trim(), nextTargets, globalShortcut.value, done)
 }
 function confirmRemoval() {
   const ids = pendingRemoval.value.map(item => item.id)
@@ -549,7 +556,11 @@ usePageEscape(() => formOpen.value, requestCloseForm)
             <ManagementFormRow :label="t('workflows.workflowDescription')" multiline>
               <UTextarea v-model="description" :maxlength="512" :rows="3" autoresize :maxrows="6" class="w-full" />
             </ManagementFormRow>
+            <ManagementFormRow :label="t('workflows.globalShortcut')" multiline>
+              <ShortcutRecorder v-model="globalShortcut" :disabled="busy" />
+            </ManagementFormRow>
             <template #after>
+              <UAlert v-if="messages[editing?.id ?? 'workflows']" color="error" variant="soft" :title="messages[editing?.id ?? 'workflows']" />
               <UAlert v-if="basicProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(basicProblems)" />
             </template>
           </ManagementFormSection>

@@ -8,6 +8,7 @@ import {
   type ThemePreference,
 } from '../appSettings'
 import AiProfilesPanel from './AiProfilesPanel.vue'
+import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -15,16 +16,6 @@ const appSettings = useAppSettings()
 type ShortcutTarget = 'softwareCapture'
 type ShortcutStatus = 'idle' | 'checking' | 'conflict' | 'invalid' | 'failed' | 'saved'
 
-const modifierCodes = new Set([
-  'ControlLeft',
-  'ControlRight',
-  'AltLeft',
-  'AltRight',
-  'ShiftLeft',
-  'ShiftRight',
-  'MetaLeft',
-  'MetaRight',
-])
 const shortcutRecording = ref<ShortcutTarget | null>(null)
 const shortcutStatusTarget = ref<ShortcutTarget | null>(null)
 const shortcutPreview = ref('')
@@ -54,17 +45,6 @@ const shortcutRows = computed(() => [
   },
 ])
 
-function displayShortcutToken(token: string) {
-  if (token === 'Super') return 'Win'
-  if (token.startsWith('Key') && token.length === 4) return token.slice(3)
-  if (token.startsWith('Digit') && token.length === 6) return token.slice(5)
-  if (token.startsWith('Numpad')) return `Num ${token.slice(6)}`
-  if (token === 'ArrowUp') return '↑'
-  if (token === 'ArrowDown') return '↓'
-  if (token === 'ArrowLeft') return '←'
-  if (token === 'ArrowRight') return '→'
-  return token
-}
 
 function displayShortcut(shortcut: string) {
   return shortcut.split('+').map(displayShortcutToken).join(' + ')
@@ -108,17 +88,6 @@ function shortcutStatusClass(target: ShortcutTarget) {
   return 'text-[var(--text-muted)]'
 }
 
-function shortcutFromEvent(event: KeyboardEvent) {
-  if (modifierCodes.has(event.code)) return null
-  const tokens: string[] = []
-  if (event.ctrlKey) tokens.push('Ctrl')
-  if (event.altKey) tokens.push('Alt')
-  if (event.shiftKey) tokens.push('Shift')
-  if (event.metaKey) tokens.push('Super')
-  if (!event.ctrlKey && !event.altKey && !event.metaKey) return ''
-  tokens.push(event.code)
-  return tokens.join('+')
-}
 
 function stopShortcutRecording(resetStatus = true) {
   shortcutRecording.value = null

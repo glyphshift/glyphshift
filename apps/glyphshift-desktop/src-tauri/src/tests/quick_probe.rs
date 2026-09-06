@@ -20,6 +20,96 @@ fn quick_probe_request(executable: &Path) -> ProbeCreationRequest {
 }
 
 #[test]
+fn bulk_delete_cleans_a_temporary_probe_and_preserves_reused_software() {
+    let (mut application, _calls, software_id, _root) = workflow_application();
+    let executable = software_executable(&application, &software_id);
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
+        .expect("temporary probe");
+    let run_id: Box<str> = started.summary.id().into();
+    let dictionary_id: Box<str> = started.summary.dictionary_id().into();
+    application
+        .delete_probe_runs(&[run_id.clone()])
+        .expect("bulk delete active temporary probe");
+    assert!(!application.quick_probe_sessions.contains(&run_id));
+    assert!(application.probe_runs.summary(&run_id).is_err());
+    assert!(application.backend.dictionary(&dictionary_id).is_err());
+    assert!(application
+        .backend
+        .snapshot()
+        .software()
+        .iter()
+        .any(|software| software.id() == software_id.as_ref()));
+}
+
+#[test]
+fn bulk_delete_mixes_regular_and_temporary_probes_without_deleting_reused_assets() {
+    let (mut application, _calls, software_id, _root) = workflow_application();
+    let existing_dictionary = first_dictionary_id(&application);
+    let regular = application
+        .create_probe_from_sources_for_test(library_probe_request(
+            software_id.clone(),
+            existing_dictionary.clone(),
+        ))
+        .expect("regular probe");
+    application
+        .disconnect_probe_run(regular.summary.id())
+        .expect("release regular probe");
+    let temporary = application
+        .create_probe_from_sources_for_test(quick_probe_request(&software_executable(
+            &application,
+            &software_id,
+        )))
+        .expect("temporary probe");
+    application
+        .delete_probe_runs(&[regular.summary.id().into(), temporary.summary.id().into()])
+        .expect("mixed bulk delete");
+    assert!(application
+        .probe_runs
+        .summary(regular.summary.id())
+        .is_err());
+    assert!(application
+        .probe_runs
+        .summary(temporary.summary.id())
+        .is_err());
+    assert!(application.backend.dictionary(&existing_dictionary).is_ok());
+    assert!(application
+        .backend
+        .dictionary(temporary.summary.dictionary_id())
+        .is_err());
+}
+
+#[test]
+fn bulk_delete_checks_all_targets_before_removing_anything() {
+    let (mut application, _calls, software_id, _root) = workflow_application();
+    let temporary = application
+        .create_probe_from_sources_for_test(quick_probe_request(&software_executable(
+            &application,
+            &software_id,
+        )))
+        .expect("temporary probe");
+    assert!(application
+        .delete_probe_runs(&[temporary.summary.id().into(), "unknown-probe".into()])
+        .is_err());
+    assert!(application
+        .probe_runs
+        .summary(temporary.summary.id())
+        .is_ok());
+    assert!(application
+        .backend
+        .dictionary(temporary.summary.dictionary_id())
+        .is_ok());
+    application.ai_locked_dictionary_id = Some(temporary.summary.dictionary_id().into());
+    assert!(application
+        .delete_probe_runs(&[temporary.summary.id().into()])
+        .is_err());
+    assert!(application
+        .probe_runs
+        .summary(temporary.summary.id())
+        .is_ok());
+}
+
+#[test]
 fn temporary_probe_persists_the_explicit_language_direction_and_rejects_auto() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     let executable = software_executable(&application, &software_id);

@@ -594,6 +594,7 @@ impl DesktopApplication {
             .record(run_id)
             .ok_or_else(|| CommandError::new("quick_probe.not_found"))?;
         let probe_run_exists = self.probe_runs.summary(run_id).is_ok();
+        self.ensure_ai_dictionary_writable(record.dictionary_id.as_ref())?;
         if self.active_probe_run_id.as_deref() == Some(run_id) {
             if probe_run_exists {
                 self.disconnect_probe_run(run_id)?;
@@ -608,7 +609,7 @@ impl DesktopApplication {
             }
         }
         if probe_run_exists {
-            self.delete_probe_runs(&[run_id.into()])?;
+            self.probe_runs.delete(run_id).map_err(probe_run_error)?;
         }
 
         let dictionary = if record.owns_dictionary
