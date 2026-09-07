@@ -22,9 +22,8 @@ $localTestRoot = [System.IO.Path]::GetFullPath(
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $localTestRoot "runtime-bundle\$($Profile.ToLowerInvariant())"
 }
-if ([string]::IsNullOrWhiteSpace($CargoTargetDir)) {
-    $CargoTargetDir = Join-Path $localTestRoot 'runtime-build'
-}
+. (Join-Path $PSScriptRoot 'cargo-target.ps1')
+$CargoTargetDir = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot -Override $CargoTargetDir
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $CargoTargetDir = [System.IO.Path]::GetFullPath($CargoTargetDir)
 
@@ -36,12 +35,12 @@ function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
 }
 
 Assert-LocalTestPath $OutputRoot 'Runtime Bundle output'
-Assert-LocalTestPath $CargoTargetDir 'Cargo target directory'
 
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
     'build',
     '--manifest-path', $manifestPath,
+    '--target-dir', $CargoTargetDir,
     '-p', 'glyphshift-controller-windows',
     '-p', 'glyphshift-target-runtime',
     '-p', 'glyphshift-adapter-draw-text-native',
@@ -51,6 +50,7 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native',
+    '-p', 'glyphshift-adapter-qt-quick-native',
     '-p', 'glyphshift-adapter-raylib-native',
     '-p', 'glyphshift-adapter-unity-mono-standard-ui-native'
 )
@@ -62,7 +62,6 @@ if ($Profile -eq 'Release') {
 }
 
 New-Item -ItemType Directory -Path $CargoTargetDir -Force | Out-Null
-$env:CARGO_TARGET_DIR = $CargoTargetDir
 Write-Output "Building the $Profile target-process Runtime bundle..."
 & cargo @cargoArguments
 if ($LASTEXITCODE -ne 0) {
@@ -72,6 +71,7 @@ if ($LASTEXITCODE -ne 0) {
 $verifierArguments = @(
     'build',
     '--manifest-path', $manifestPath,
+    '--target-dir', $CargoTargetDir,
     '-p', 'glyphshift-desktop-runtime',
     '--bin', 'glyphshift-runtime-bundle-verify'
 )
@@ -125,6 +125,8 @@ $gtk3PangoBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
+$qtQuickBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_qt_quick_native.dll' 'adapter-qt-quick' 'dll'
 $raylibBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
 $unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
@@ -169,6 +171,7 @@ $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
 $directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-layout'
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
+$qtQuickPresentation = Get-AdapterPresentation 'windows.qt.quick-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
@@ -259,6 +262,16 @@ $runtimeManifest = [ordered]@{
             technology = $qtPainterPresentation.technology
             technicalTarget = $qtPainterPresentation.technicalTarget
             documentationUrl = $qtPainterPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $qtQuickBundle.file
+            sha256 = $qtQuickBundle.sha256
+            name = $qtQuickPresentation.name
+            summary = $qtQuickPresentation.summary
+            technology = $qtQuickPresentation.technology
+            technicalTarget = $qtQuickPresentation.technicalTarget
+            documentationUrl = $qtQuickPresentation.documentationUrl
+            process_resident_after_deactivate = $true
         },
         [ordered]@{
             file = $raylibBundle.file

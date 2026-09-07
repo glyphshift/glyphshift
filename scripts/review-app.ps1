@@ -20,7 +20,8 @@ $buildId = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmssfff')
 $reviewRoot = Join-Path $localTestRoot "evidence\desktop-review\$buildId"
 $runtimeRoot = Join-Path $reviewRoot 'runtime'
 $webViewProfileRoot = Join-Path $reviewRoot 'webview-profile'
-$cargoTargetDir = Join-Path $localTestRoot 'desktop-review\cargo-target'
+. (Join-Path $PSScriptRoot 'cargo-target.ps1')
+$cargoTargetDir = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $profileDirectory = $Profile.ToLowerInvariant()
 
 if ([string]::IsNullOrWhiteSpace($DataRoot)) {
@@ -37,7 +38,6 @@ if ($UseUserData) {
     $DataRoot = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Glyphshift\workspace'
     $reviewRoot = Join-Path $localTestRoot "evidence\desktop-app\$buildId"
     $runtimeRoot = Join-Path $reviewRoot 'runtime'
-    $cargoTargetDir = Join-Path $localTestRoot 'desktop-build\cargo-target'
     $webViewProfileRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Glyphshift\webview-profile'
 }
 
@@ -96,10 +96,10 @@ finally {
     Pop-Location
 }
 
-$env:CARGO_TARGET_DIR = $cargoTargetDir
 $desktopBuildArguments = @(
     'build',
     '--manifest-path', (Join-Path $repoRoot 'Cargo.toml'),
+    '--target-dir', $cargoTargetDir,
     '-p', 'glyphshift-desktop-shell'
 )
 $desktopBuildArguments += @('--features', 'custom-protocol')
@@ -122,7 +122,8 @@ if (-not (Test-Path -LiteralPath $desktopExecutable -PathType Leaf)) {
     throw 'The synchronized desktop executable is missing.'
 }
 
-if ($UseUserData) {
+# Launch an isolated copy so a running review never locks the shared Cargo artifact.
+. {
     $appBinRoot = Join-Path $reviewRoot 'bin'
     New-Item -ItemType Directory -Path $appBinRoot -Force | Out-Null
     Copy-Item -LiteralPath $desktopExecutable -Destination $appBinRoot

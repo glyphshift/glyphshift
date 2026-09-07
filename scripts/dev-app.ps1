@@ -9,7 +9,8 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
 $localTaskRoot = Join-Path $repoRoot 'local-test\evidence\desktop-dev'
-$cargoTargetDir = Join-Path $repoRoot 'local-test\tauri-build'
+. (Join-Path $PSScriptRoot 'cargo-target.ps1')
+$cargoTargetDir = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $runtimeBundleRoot = Join-Path $repoRoot 'local-test\runtime-bundle'
 $desktopDataRoot = Join-Path $repoRoot 'local-test\desktop-data'
 $env:GLYPHSHIFT_DATA_ROOT = $desktopDataRoot
@@ -111,7 +112,6 @@ if ($dependenciesNeedRepair) {
 }
 
 New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
-$env:CARGO_TARGET_DIR = $cargoTargetDir
 
 $runtimeBundleArguments = @{
     Profile = 'Debug'

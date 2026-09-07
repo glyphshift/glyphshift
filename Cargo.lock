@@ -1606,6 +1606,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-qt-quick"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-qt-quick-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "glyphshift-adapter-qt-quick",
+ "libloading 0.8.9",
+ "retour",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "glyphshift-adapter-raylib"
 version = "0.1.0"
 dependencies = [

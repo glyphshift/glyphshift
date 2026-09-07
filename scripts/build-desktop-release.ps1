@@ -11,7 +11,8 @@ $buildId = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmssfff')
 $buildRoot = Join-Path $localTestRoot "evidence\desktop-release\$buildId"
 $runtimeRoot = Join-Path $buildRoot 'runtime'
 $candidateRoot = Join-Path $buildRoot 'candidate'
-$cargoTargetDir = Join-Path $localTestRoot 'desktop-release\tauri-build'
+. (Join-Path $PSScriptRoot 'cargo-target.ps1')
+$cargoTargetDir = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $localConfigPath = Join-Path $buildRoot 'tauri.release.local.conf.json'
 
 $requiredCommands = @(
@@ -57,7 +58,6 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
     $utf8WithoutBom
 )
 
-$env:CARGO_TARGET_DIR = $cargoTargetDir
 $buildStartedAt = Get-Date
 Push-Location $desktopRoot
 try {
