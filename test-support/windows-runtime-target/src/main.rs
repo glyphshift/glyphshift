@@ -1,10 +1,10 @@
 #![cfg(windows)]
 
 use glyphshift_windows_host::{
-    render_raw_draw_text, render_raw_gdi_glyph_indices, render_raw_gdi_symbol,
-    render_raw_gdi_unicode, render_raw_gdiplus_symbol, render_raw_gdiplus_unicode,
-    render_raw_text_out, run_ocr_capture_server, run_uia_standard_control_server,
-    write_raw_console,
+    render_raw_directwrite_layout, render_raw_draw_text, render_raw_gdi_glyph_indices,
+    render_raw_gdi_symbol, render_raw_gdi_unicode, render_raw_gdiplus_symbol,
+    render_raw_gdiplus_unicode, render_raw_text_out, run_ocr_capture_server,
+    run_uia_standard_control_server, write_raw_console,
 };
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -195,6 +195,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "render-draw-text" => {
                 let evidence = render_raw_draw_text("Open")?;
+                writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
+                stdout.flush()?;
+            }
+            "render-directwrite" => {
+                let evidence = render_raw_directwrite_layout("Open")?;
                 writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
                 stdout.flush()?;
             }

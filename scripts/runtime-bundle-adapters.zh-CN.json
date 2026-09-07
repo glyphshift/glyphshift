@@ -2,7 +2,7 @@
   {
     "id": "windows.monogame.sprite-batch-draw-string",
     "name": "MonoGame 标准文字",
-    "summary": "适合 Windows x64 .NET 6+ 的 MonoGame DrawString 标准文字，支持缺字字体回退；自绘纹理文字不覆盖。停用后恢复原文，组件保留到目标退出。",
+    "summary": "适合 Windows x86/x64 .NET 6+ 的 MonoGame DrawString 标准文字，支持缺字字体回退；自绘纹理文字不覆盖。停用后恢复原文，组件保留到目标退出。",
     "technology": "CoreCLR / MonoGame",
     "technicalTarget": "SpriteBatch.DrawString + SpriteFont.MeasureString",
     "documentationUrl": "https://docs.monogame.net/api/Microsoft.Xna.Framework.Graphics.SpriteBatch.html"
@@ -50,7 +50,7 @@
   {
     "id": "windows.qt.painter-draw-text",
     "name": "Qt Painter drawText",
-    "summary": "适合动态链接的 Qt 5/6 Widgets；不适用于静态 Qt 或 QML",
+    "summary": "适合动态 MSVC Qt 5（x86/x64）和 Qt 6（x64）Widgets；不适用于静态 Qt 或 QML",
     "technology": "Qt 5 / Qt 6 Widgets",
     "technicalTarget": "QtGui!QPainter::drawText",
     "documentationUrl": "https://doc.qt.io/qt-6/qpainter.html#drawText"
@@ -58,7 +58,7 @@
   {
     "id": "windows.qt.quick-text",
     "name": "Qt Quick 标准文字",
-    "summary": "适合动态 Qt 6.8.3 的 QML 标签、菜单和提示；输入框、富文本和自绘文字不覆盖。停用后恢复原文，组件保留到目标退出。",
+    "summary": "适合动态 Qt 6.8.3 x64 的 QML 标签、菜单和提示；输入框、富文本和自绘文字不覆盖。停用后恢复原文，组件保留到目标退出。",
     "technology": "Qt 6.8.3 / Qt Quick",
     "technicalTarget": "QtQuick!QQuickText + GUI thread lifecycle",
     "documentationUrl": "https://doc.qt.io/qt-6.8/qml-qtquick-text.html"
@@ -82,7 +82,7 @@
   {
     "id": "windows.unity.mono.standard-ui",
     "name": "Unity Mono 标准界面",
-    "summary": "适合 Windows x64 的 Unity Mono 标准界面；不适用于 IL2CPP、UI Toolkit、NGUI 或自绘文字",
+    "summary": "适合 Windows x86/x64 的 Unity Mono 标准界面，需具备支持的 Mono 导出和主线程入口；不适用于 IL2CPP、UI Toolkit、NGUI 或自绘文字",
     "technology": "Unity Mono / TextMeshPro / uGUI",
     "technicalTarget": "Mono JIT!TMP_Text.set_text + UnityEngine.UI.Text.set_text",
     "documentationUrl": "https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html"

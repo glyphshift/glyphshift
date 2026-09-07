@@ -71,7 +71,7 @@ package = "slice-pool2"
 default = []
 nightly = []
 static-detour = ["nightly"]
-thiscall-abi = ["nightly"]
+thiscall-abi = []
 
 [target."cfg(any(target_arch = \"x86\", target_arch = \"x86_64\"))".dependencies.udis]
 version = "0.2.1"

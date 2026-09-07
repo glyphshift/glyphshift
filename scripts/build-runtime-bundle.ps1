@@ -85,7 +85,10 @@ if ($LASTEXITCODE -ne 0) {
 
 $x86Arguments = @('build', '--manifest-path', $manifestPath, '--target-dir', $CargoTargetDir,
     '--target', 'i686-pc-windows-msvc', '-p', 'glyphshift-controller-windows', '-p', 'glyphshift-target-runtime',
-    '-p', 'glyphshift-adapter-gdi-native', '-p', 'glyphshift-adapter-gdi-text-out-native', '-p', 'glyphshift-adapter-draw-text-native')
+    '-p', 'glyphshift-adapter-gdi-native', '-p', 'glyphshift-adapter-gdi-text-out-native', '-p', 'glyphshift-adapter-draw-text-native',
+    '-p', 'glyphshift-adapter-gdiplus-native', '-p', 'glyphshift-adapter-directwrite-native',
+    '-p', 'glyphshift-adapter-gtk3-pango-native', '-p', 'glyphshift-adapter-raylib-native',
+    '-p', 'glyphshift-adapter-qt-painter-native', '-p', 'glyphshift-adapter-unity-mono-standard-ui-native')
 if ($IncludeTestTarget) { $x86Arguments += @('-p', 'glyphshift-windows-runtime-target') }
 if ($Profile -eq 'Release') { $x86Arguments += '--release' }
 & cargo @x86Arguments
@@ -94,6 +97,7 @@ if ($LASTEXITCODE -ne 0) { throw 'The x86 Runtime components did not build.' }
 $profileDirectory = $Profile.ToLowerInvariant()
 $x86ProfileRoot = Join-Path $CargoTargetDir "i686-pc-windows-msvc\$profileDirectory"
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
+& (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -Architecture x86 -OutputRoot $x86ProfileRoot
 $stagingRoot = "$OutputRoot.staging"
 Assert-LocalTestPath $stagingRoot 'Runtime Bundle staging output'
 if (Test-Path -LiteralPath $stagingRoot) {
@@ -149,6 +153,13 @@ $x86Runtime = Copy-VersionedBundleArtifact 'glyphshift_target_runtime.dll' 'runt
 $x86Gdi = Copy-VersionedBundleArtifact 'glyphshift_adapter_gdi_native.dll' 'adapter-gdi-x86' 'dll' $x86ProfileRoot
 $x86TextOut = Copy-VersionedBundleArtifact 'glyphshift_adapter_gdi_text_out_native.dll' 'adapter-gdi-text-out-x86' 'dll' $x86ProfileRoot
 $x86DrawText = Copy-VersionedBundleArtifact 'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text-x86' 'dll' $x86ProfileRoot
+$x86GdiPlus = Copy-VersionedBundleArtifact 'glyphshift_adapter_gdiplus_native.dll' 'adapter-gdiplus-x86' 'dll' $x86ProfileRoot
+$x86DirectWrite = Copy-VersionedBundleArtifact 'glyphshift_adapter_directwrite_native.dll' 'adapter-directwrite-x86' 'dll' $x86ProfileRoot
+$x86Gtk = Copy-VersionedBundleArtifact 'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango-x86' 'dll' $x86ProfileRoot
+$x86QtPainter = Copy-VersionedBundleArtifact 'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter-x86' 'dll' $x86ProfileRoot
+$x86Raylib = Copy-VersionedBundleArtifact 'glyphshift_adapter_raylib_native.dll' 'adapter-raylib-x86' 'dll' $x86ProfileRoot
+$x86Unity = Copy-VersionedBundleArtifact 'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-x86' 'dll' $x86ProfileRoot
+$x86MonoGame = Copy-VersionedBundleArtifact 'glyphshift_adapter_monogame_native.dll' 'adapter-monogame-x86' 'dll' $x86ProfileRoot
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -314,11 +325,15 @@ $runtimeManifest = [ordered]@{
     acquisition_workers = @()
 }
 $x86Adapters = @()
-foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOutPresentation), @($x86DrawText, $drawTextPresentation))) {
+foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOutPresentation), @($x86DrawText, $drawTextPresentation),
+    @($x86GdiPlus, $gdiPlusPresentation), @($x86DirectWrite, $directWritePresentation), @($x86Gtk, $gtk3PangoPresentation),
+    @($x86QtPainter, $qtPainterPresentation), @($x86Raylib, $raylibPresentation),
+    @($x86Unity, $unityMonoStandardUiPresentation), @($x86MonoGame, $monoGamePresentation))) {
     $artifact = $pair[0]; $presentation = $pair[1]
     $x86Adapters += [ordered]@{ file=$artifact.file; sha256=$artifact.sha256; name=$presentation.name;
         summary=$presentation.summary; technology=$presentation.technology; technicalTarget=$presentation.technicalTarget;
         documentationUrl=$presentation.documentationUrl }
+    if ($artifact.file -eq $x86MonoGame.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
 }
 $runtimeManifest.additional_architectures = @([ordered]@{
     architecture = 'x86'

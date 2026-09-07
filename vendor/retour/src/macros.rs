@@ -186,7 +186,7 @@ macro_rules! impl_hookable {
     impl_hookable!(@impl_pair ($($nm : $ty),*) (extern "C"        fn($($ty),*) -> Ret));
     impl_hookable!(@impl_pair ($($nm : $ty),*) (extern "system"   fn($($ty),*) -> Ret));
 
-    #[cfg(feature = "thiscall-abi")]
+    #[cfg(all(feature = "thiscall-abi", target_arch = "x86"))]
     #[cfg_attr(docsrs, doc(cfg(feature = "thiscall-abi")))]
     impl_hookable!(@impl_pair ($($nm : $ty),*) (extern "thiscall" fn($($ty),*) -> Ret));
   };

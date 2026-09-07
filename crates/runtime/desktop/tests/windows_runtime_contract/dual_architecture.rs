@@ -146,12 +146,14 @@ fn one_x64_session_translates_x86_and_x64_with_one_adapter_identity() {
 
 #[test]
 #[ignore = "requires the dual-architecture Runtime bundle built with -IncludeTestTarget"]
-fn x86_text_out_and_draw_text_use_their_native_calling_conventions() {
+fn x86_native_drawing_adapters_use_their_native_calling_conventions() {
     let root = std::path::PathBuf::from(std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT").unwrap());
     let executable = root.join("test-target-x86.exe");
     for (adapter, command) in [
         ("windows.gdi.text-out", "render-text-out"),
         ("windows.user32.draw-text", "render-draw-text"),
+        ("windows.gdiplus.draw-string", "render-gdiplus"),
+        ("windows.directwrite.text-layout", "render-directwrite"),
     ] {
         let mut target = TargetProcess::spawn(&executable);
         let baseline = target.render_command(command);
