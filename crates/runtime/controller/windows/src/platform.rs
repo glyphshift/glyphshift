@@ -180,7 +180,7 @@ pub(super) fn enumerate_processes() -> Result<Vec<ProcessRecord>, PluginError> {
 }
 
 #[cfg(windows)]
-fn process_started_at(process_id: u32) -> Option<u64> {
+pub(super) fn process_started_at(process_id: u32) -> Option<u64> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -230,7 +230,7 @@ pub(super) fn process_executable_path(process_id: u32) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn process_architecture(process_id: u32) -> String {
+pub(super) fn process_architecture(process_id: u32) -> String {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::SystemInformation::{
         IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_UNKNOWN,
@@ -241,7 +241,7 @@ fn process_architecture(process_id: u32) -> String {
 
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
     if process.is_null() {
-        return std::env::consts::ARCH.into();
+        return "unknown".into();
     }
     let mut process_machine = IMAGE_FILE_MACHINE_UNKNOWN;
     let mut native_machine = IMAGE_FILE_MACHINE_UNKNOWN;
@@ -251,7 +251,7 @@ fn process_architecture(process_id: u32) -> String {
         CloseHandle(process);
     }
     if !queried {
-        return std::env::consts::ARCH.into();
+        return "unknown".into();
     }
     match if process_machine == IMAGE_FILE_MACHINE_UNKNOWN {
         native_machine

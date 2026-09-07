@@ -20,6 +20,8 @@ const TEST_ADAPTER_ID: &str = "windows.gdi.ext-text-out";
 const TEST_GDIPLUS_ADAPTER_ID: &str = "windows.gdiplus.draw-string";
 #[path = "windows_runtime_contract/authorized_host.rs"]
 mod authorized_host;
+#[path = "windows_runtime_contract/dual_architecture.rs"]
+mod dual_architecture;
 #[path = "windows_runtime_contract/pool.rs"]
 mod pool;
 #[path = "windows_runtime_contract/synthetic_runtime.rs"]

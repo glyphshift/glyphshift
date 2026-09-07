@@ -11,10 +11,22 @@ pub(super) struct BundleManifest {
     authority: Box<str>,
     controller: ControllerManifest,
     runtime: ArtifactManifest,
+    #[serde(default)]
+    architecture: Option<Box<str>>,
+    #[serde(default)]
+    additional_architectures: Vec<ArchitectureManifest>,
     adapters: Vec<ArtifactManifest>,
     #[serde(default)]
     isolated_workers: Vec<IsolatedWorkerManifest>,
     pub(super) acquisition_workers: Vec<AcquisitionWorkerManifest>,
+}
+
+#[derive(Deserialize)]
+struct ArchitectureManifest {
+    architecture: Box<str>,
+    controller: ControllerManifest,
+    runtime: ArtifactManifest,
+    adapters: Vec<ArtifactManifest>,
 }
 
 #[derive(Deserialize)]
@@ -42,6 +54,8 @@ struct ArtifactManifest {
     documentation_url: Option<Box<str>>,
     #[serde(default, alias = "processResidentAfterDeactivate")]
     process_resident_after_deactivate: bool,
+    #[serde(default)]
+    native_metadata: Option<glyphshift_adapter_native_host::NativeAdapterMetadata>,
 }
 
 #[derive(Deserialize)]
@@ -230,12 +244,15 @@ impl RuntimeAdapterOption {
     pub const fn process_resident_after_deactivate(&self) -> bool {
         self.process_resident_after_deactivate
     }
-    pub const fn source_policy(&self) -> glyphshift_domain::SourceTextPolicy { self.source_policy }
+    pub const fn source_policy(&self) -> glyphshift_domain::SourceTextPolicy {
+        self.source_policy
+    }
 }
 
 /// A verified, path-private set of production runtime artifacts.
 pub struct RuntimeBundle {
-    controller: VerifiedControllerArtifact,
+    controllers: BTreeMap<Box<str>, VerifiedControllerArtifact>,
+    architecture_requirements: BTreeMap<Box<str>, Vec<AdapterRequirement>>,
     controller_protocol: ProtocolVersion,
     registry: AdapterRegistry,
     artifacts: TargetArtifactCatalog,
@@ -259,14 +276,34 @@ impl RuntimeBundle {
                 .map_err(|_| DesktopRuntimeError::BundleUnavailable)?,
         )
         .map_err(|_| DesktopRuntimeError::InvalidManifest)?;
-        if manifest.schema.as_ref() != BUNDLE_SCHEMA
-            || manifest.authority.as_ref() != FIRST_PARTY_BUNDLE_AUTHORITY
+        if !matches!(
+            manifest.schema.as_ref(),
+            BUNDLE_SCHEMA | "glyphshift.runtime-bundle/4"
+        ) || manifest.authority.as_ref() != FIRST_PARTY_BUNDLE_AUTHORITY
             || manifest.controller.artifact.trim().is_empty()
             || manifest.adapters.is_empty()
         {
             return Err(DesktopRuntimeError::InvalidManifest);
         }
 
+        let multi = manifest.schema.as_ref() == "glyphshift.runtime-bundle/4";
+        if !multi
+            && (!manifest.additional_architectures.is_empty() || manifest.architecture.is_some())
+        {
+            return Err(DesktopRuntimeError::InvalidManifest);
+        }
+        let primary_architecture: Box<str> = if multi {
+            manifest
+                .architecture
+                .clone()
+                .filter(|value| matches!(value.as_ref(), "x86" | "x86_64"))
+                .ok_or(DesktopRuntimeError::InvalidManifest)?
+        } else {
+            std::env::consts::ARCH.into()
+        };
+        if manifest.additional_architectures.len() > 1 {
+            return Err(DesktopRuntimeError::InvalidManifest);
+        }
         let signer = SignerId::new(manifest.authority.clone());
         let controller_signer = ControllerSignerId::new(manifest.authority.clone());
         let controller_hash = parse_hash(&manifest.controller.sha256)?;
@@ -276,13 +313,13 @@ impl RuntimeBundle {
             manifest.controller.protocol[1],
         );
         let controller_identity = ControllerCodeIdentity::new(
-            ControllerArtifactId::new(manifest.controller.artifact),
+            ControllerArtifactId::new(manifest.controller.artifact.clone()),
             controller_signer,
             CodeHash::new(controller_hash),
             controller_protocol,
         );
         let controller = VerifiedControllerArtifact::verify(
-            controller_path,
+            controller_path.clone(),
             &controller_identity,
             &ControllerTrustPolicy::new([manifest.authority.clone()]),
         )
@@ -290,20 +327,97 @@ impl RuntimeBundle {
 
         let runtime_hash = parse_hash(&manifest.runtime.sha256)?;
         let runtime_path = verified_artifact(&root, &manifest.runtime.file, runtime_hash)?;
+        if multi {
+            verify_architecture(&controller_path, &primary_architecture)?;
+            verify_architecture(&runtime_path, &primary_architecture)?;
+        }
         let runtime_artifact = RuntimeArtifact::new(runtime_path, runtime_hash);
+        let mut controllers = BTreeMap::from([(primary_architecture.clone(), controller)]);
+        let mut architecture_runtimes =
+            BTreeMap::from([(primary_architecture.clone(), runtime_artifact.clone())]);
+        let mut native_artifacts = manifest
+            .adapters
+            .iter()
+            .map(|adapter| (primary_architecture.clone(), adapter))
+            .collect::<Vec<_>>();
+        for variant in &manifest.additional_architectures {
+            if !matches!(variant.architecture.as_ref(), "x86" | "x86_64")
+                || controllers.contains_key(&variant.architecture)
+                || variant.adapters.is_empty()
+                || variant.controller.protocol != manifest.controller.protocol
+            {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            let hash = parse_hash(&variant.controller.sha256)?;
+            let path = verified_artifact(&root, &variant.controller.file, hash)?;
+            verify_architecture(&path, &variant.architecture)?;
+            let identity = ControllerCodeIdentity::new(
+                ControllerArtifactId::new(variant.controller.artifact.clone()),
+                ControllerSignerId::new(manifest.authority.clone()),
+                CodeHash::new(hash),
+                controller_protocol,
+            );
+            let controller = VerifiedControllerArtifact::verify(
+                path,
+                &identity,
+                &ControllerTrustPolicy::new([manifest.authority.clone()]),
+            )
+            .map_err(|_| DesktopRuntimeError::ControllerRejected)?;
+            controllers.insert(variant.architecture.clone(), controller);
+            let hash = parse_hash(&variant.runtime.sha256)?;
+            let path = verified_artifact(&root, &variant.runtime.file, hash)?;
+            verify_architecture(&path, &variant.architecture)?;
+            architecture_runtimes.insert(
+                variant.architecture.clone(),
+                RuntimeArtifact::new(path, hash),
+            );
+            native_artifacts.extend(
+                variant
+                    .adapters
+                    .iter()
+                    .map(|adapter| (variant.architecture.clone(), adapter)),
+            );
+        }
+        let mut architecture_requirements: BTreeMap<Box<str>, Vec<AdapterRequirement>> =
+            BTreeMap::new();
 
         let mut packages = Vec::new();
         let mut catalog_adapters = Vec::new();
         let mut authorized_adapters = Vec::new();
         let mut discovered_requirements = Vec::new();
         let mut adapter_options = Vec::new();
-        for (index, adapter) in manifest.adapters.iter().enumerate() {
+        for (index, (architecture, adapter)) in native_artifacts.into_iter().enumerate() {
             let hash = parse_hash(&adapter.sha256)?;
             let path = verified_artifact(&root, &adapter.file, hash)?;
-            // SAFETY: `verified_artifact` measured the exact file against the bundle manifest hash
-            // before native code is loaded. The bundle authority is fixed by the product above.
-            let (descriptor, source_policy) =
-                unsafe { LoadedNativeAdapter::inspect_with_source_policy(&path) }.map_err(adapter_inspection_error)?;
+            if multi {
+                verify_architecture(&path, &architecture)?;
+            }
+            let declared = adapter
+                .native_metadata
+                .as_ref()
+                .map(|metadata| {
+                    Ok((
+                        metadata.descriptor().map_err(adapter_inspection_error)?,
+                        metadata.source_policy().map_err(adapter_inspection_error)?,
+                    ))
+                })
+                .transpose()?;
+            let (descriptor, source_policy) = if architecture.as_ref() == std::env::consts::ARCH {
+                // The exact artifact hash is checked before running same-architecture inspection.
+                let actual = unsafe { LoadedNativeAdapter::inspect_with_source_policy(&path) }
+                    .map_err(adapter_inspection_error)?;
+                if declared
+                    .as_ref()
+                    .is_some_and(|declared| declared != &actual)
+                {
+                    return Err(DesktopRuntimeError::AdapterAbiMismatch);
+                }
+                actual
+            } else {
+                // Metadata is emitted by the matching Controller at build time. The target's
+                // loader compares the actual native descriptor to this binding again on activation.
+                declared.ok_or(DesktopRuntimeError::InvalidManifest)?
+            };
             let features = descriptor
                 .features()
                 .filter(|feature| {
@@ -332,7 +446,7 @@ impl RuntimeBundle {
                         .clone()
                         .unwrap_or_else(|| "运行时文字与字体拦截适配器".into()),
                     platforms: descriptor.platforms().map(Into::into).collect(),
-                    architectures: descriptor.architectures().map(Into::into).collect(),
+                    architectures: vec![architecture.clone()],
                     placement: descriptor.placement(),
                     technologies: adapter.technology.iter().cloned().collect(),
                     features: features.clone(),
@@ -349,19 +463,27 @@ impl RuntimeBundle {
                 });
             }
             let artifact_id = PackageArtifactId::new(format!("adapters/{index}"));
-            discovered_requirements.push(AdapterRequirement::new(
+            let requirement = AdapterRequirement::new(
                 descriptor.adapter_id().clone(),
                 AdapterVersionRequirement::Exact(descriptor.version()),
                 features,
-            ));
+            );
+            architecture_requirements
+                .entry(architecture.clone())
+                .or_default()
+                .push(requirement.clone());
+            discovered_requirements.push(requirement);
             authorized_adapters.push(descriptor.adapter_id().clone());
-            packages.push(AdapterPackage::new(
-                descriptor,
-                artifact_id.clone(),
-                signer.clone(),
-                ArtifactHash::sha256(hash),
-                ArtifactHash::sha256(hash),
-            ));
+            packages.push(
+                AdapterPackage::new(
+                    descriptor,
+                    artifact_id.clone(),
+                    signer.clone(),
+                    ArtifactHash::sha256(hash),
+                    ArtifactHash::sha256(hash),
+                )
+                .for_architecture(architecture),
+            );
             catalog_adapters.push((artifact_id, path));
         }
 
@@ -403,6 +525,18 @@ impl RuntimeBundle {
                 AdapterVersionRequirement::Exact(version),
                 features.iter().copied(),
             ));
+            for architecture in controllers.keys() {
+                if worker.architectures.is_empty() || worker.architectures.contains(architecture) {
+                    architecture_requirements
+                        .entry(architecture.clone())
+                        .or_default()
+                        .push(AdapterRequirement::new(
+                            adapter_id.clone(),
+                            AdapterVersionRequirement::Exact(version),
+                            features.iter().copied(),
+                        ));
+                }
+            }
             adapter_options.push(RuntimeAdapterOption {
                 id: adapter_id.as_str().into(),
                 name: worker
@@ -444,12 +578,15 @@ impl RuntimeBundle {
             catalog_workers.push((artifact_id, path));
         }
 
+        let adapter_options = merge_adapter_options(adapter_options)?;
+        let discovered_requirements = merge_requirements(discovered_requirements)?;
         let mut registry =
             AdapterRegistry::new(AdapterTrustPolicy::new([signer], authorized_adapters));
         registry
             .reload(AdapterPackageSet::new(packages))
             .map_err(|_| DesktopRuntimeError::AdapterRegistryRejected)?;
         let artifacts = TargetArtifactCatalog::new(runtime_artifact, catalog_adapters)
+            .and_then(|catalog| catalog.with_architecture_runtimes(architecture_runtimes))
             .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
         let worker_artifacts = WorkerArtifactCatalog::new(catalog_workers)
             .map_err(|_| DesktopRuntimeError::BundleUnavailable)?;
@@ -457,7 +594,8 @@ impl RuntimeBundle {
             AcquisitionWorkerCatalog::load(&root, &manifest.acquisition_workers)?;
 
         Ok(Self {
-            controller,
+            controllers,
+            architecture_requirements,
             controller_protocol,
             registry,
             artifacts,
@@ -517,17 +655,56 @@ impl RuntimeBundle {
         } else {
             spec.requirements().to_vec()
         };
-        let transport = ProcessControllerTransport::spawn_configured(
-            self.controller.clone(),
-            CONTROLLER_TIMEOUT,
-            ControllerStartupConfig::new(
-                spec.executable_names().iter().cloned(),
-                requirements.clone(),
-            )
-            .with_executable_paths(spec.executable_paths().iter().cloned())
-            .with_descendant_executable_names(spec.descendant_executable_names().iter().cloned()),
-        )
-        .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        let mut transports = Vec::new();
+        let mut unavailable = Vec::new();
+        for (architecture, controller) in &self.controllers {
+            let available = self
+                .architecture_requirements
+                .get(architecture)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let scoped = requirements
+                .iter()
+                .filter_map(|wanted| {
+                    let supported = available.iter().find(|r| {
+                        r.adapter_id() == wanted.adapter_id()
+                            && r.version_requirement() == wanted.version_requirement()
+                    })?;
+                    let supported = supported.features().collect::<BTreeSet<_>>();
+                    let features = wanted
+                        .features()
+                        .filter(|feature| supported.contains(feature))
+                        .collect::<Vec<_>>();
+                    (!features.is_empty()).then(|| {
+                        AdapterRequirement::new(
+                            wanted.adapter_id().clone(),
+                            wanted.version_requirement(),
+                            features,
+                        )
+                    })
+                })
+                .collect::<Vec<_>>();
+            let transport = ProcessControllerTransport::spawn_configured(
+                controller.clone(),
+                CONTROLLER_TIMEOUT,
+                ControllerStartupConfig::new(spec.executable_names().iter().cloned(), scoped)
+                    .with_executable_paths(spec.executable_paths().iter().cloned())
+                    .with_descendant_executable_names(
+                        spec.descendant_executable_names().iter().cloned(),
+                    ),
+            );
+            match transport {
+                Ok(transport) => transports.push((architecture.to_string(), transport)),
+                Err(_) => unavailable.push(architecture.to_string()),
+            }
+        }
+        let mut transport = glyphshift_protocol::ArchitectureControllerTransport::new(transports)
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        for architecture in unavailable {
+            transport = transport
+                .with_unavailable(architecture, glyphshift_protocol::TransportFailure::Crashed)
+                .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        }
         self.nonce_sequence = self.nonce_sequence.saturating_add(1);
         DesktopRuntime::connect(
             transport,
@@ -650,4 +827,63 @@ fn valid_acquisition_file_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+fn verify_architecture(path: &Path, expected: &str) -> Result<(), DesktopRuntimeError> {
+    if glyphshift_adapter_native_host::inspect_pe_architecture(path)
+        .map_err(|_| DesktopRuntimeError::AdapterAbiMismatch)?
+        != expected
+    {
+        return Err(DesktopRuntimeError::AdapterAbiMismatch);
+    }
+    Ok(())
+}
+fn merge_requirements(
+    requirements: Vec<AdapterRequirement>,
+) -> Result<Vec<AdapterRequirement>, DesktopRuntimeError> {
+    let mut result: Vec<AdapterRequirement> = Vec::new();
+    for requirement in requirements {
+        if let Some(old) = result
+            .iter_mut()
+            .find(|value| value.adapter_id() == requirement.adapter_id())
+        {
+            if old.version_requirement() != requirement.version_requirement() {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            *old = AdapterRequirement::new(
+                old.adapter_id().clone(),
+                old.version_requirement(),
+                old.features().chain(requirement.features()),
+            );
+        } else {
+            result.push(requirement);
+        }
+    }
+    Ok(result)
+}
+fn merge_adapter_options(
+    options: Vec<RuntimeAdapterOption>,
+) -> Result<Vec<RuntimeAdapterOption>, DesktopRuntimeError> {
+    let mut result: Vec<RuntimeAdapterOption> = Vec::new();
+    for option in options {
+        if let Some(old) = result.iter_mut().find(|value| value.id == option.id) {
+            if old.version != option.version
+                || old.placement != option.placement
+                || old.source_policy != option.source_policy
+                || old.name != option.name
+            {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            old.architectures.extend(option.architectures);
+            old.architectures.sort();
+            old.architectures.dedup();
+            old.features.extend(option.features);
+            old.features.sort();
+            old.features.dedup();
+            old.process_resident_after_deactivate |= option.process_resident_after_deactivate;
+        } else {
+            result.push(option);
+        }
+    }
+    Ok(result)
 }

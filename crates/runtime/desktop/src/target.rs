@@ -25,7 +25,9 @@ struct TargetRecord {
     controller_id: OpaqueTargetId,
     facts: TargetFacts,
 }
-pub type WindowsDesktopRuntime = DesktopRuntime<ProcessControllerTransport>;
+pub type WindowsDesktopRuntime = DesktopRuntime<
+    glyphshift_protocol::ArchitectureControllerTransport<ProcessControllerTransport>,
+>;
 
 pub(super) trait ManagedRuntime: Send {
     fn application_id(&self) -> &str;

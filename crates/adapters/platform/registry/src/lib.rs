@@ -84,6 +84,7 @@ pub struct AdapterPackage {
     signer: SignerId,
     declared_hash: ArtifactHash,
     observed_hash: ArtifactHash,
+    artifact_architecture: Option<Box<str>>,
 }
 
 impl AdapterPackage {
@@ -101,7 +102,19 @@ impl AdapterPackage {
             signer,
             declared_hash,
             observed_hash,
+            artifact_architecture: None,
         }
+    }
+
+    /// Restricts a physical artifact without changing its exported logical descriptor.
+    pub fn for_architecture(mut self, architecture: impl Into<Box<str>>) -> Self {
+        self.artifact_architecture = Some(architecture.into());
+        self
+    }
+    fn matches_architecture(&self, architecture: &str) -> bool {
+        self.artifact_architecture
+            .as_deref()
+            .is_none_or(|value| value == architecture)
     }
 }
 
@@ -226,7 +239,7 @@ pub enum RegistryError {
 #[derive(Debug)]
 struct RegistryState {
     revision: u64,
-    packages: BTreeMap<AdapterId, BTreeMap<AdapterVersion, AdapterPackage>>,
+    packages: BTreeMap<AdapterId, BTreeMap<AdapterVersion, Vec<AdapterPackage>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -253,7 +266,7 @@ impl AdapterRegistry {
         &mut self,
         packages: AdapterPackageSet,
     ) -> Result<RegistryRevision, RegistryError> {
-        let mut next_packages: BTreeMap<AdapterId, BTreeMap<AdapterVersion, AdapterPackage>> =
+        let mut next_packages: BTreeMap<AdapterId, BTreeMap<AdapterVersion, Vec<AdapterPackage>>> =
             BTreeMap::new();
 
         for package in packages.packages {
@@ -273,7 +286,21 @@ impl AdapterRegistry {
             }
 
             let versions = next_packages.entry(adapter_id.clone()).or_default();
-            if let Some(registered) = versions.get(&version) {
+            let variants = versions.entry(version).or_default();
+            if let Some(architecture) = package.artifact_architecture.as_deref() {
+                let declared = descriptor.architectures().collect::<Vec<_>>();
+                if !declared.is_empty() && !declared.contains(&architecture) {
+                    return Err(RegistryError::UnsupportedArchitecture {
+                        adapter_id,
+                        architecture: architecture.into(),
+                    });
+                }
+            }
+            if let Some(registered) = variants.iter().find(|registered| {
+                registered.artifact_architecture.is_none()
+                    || package.artifact_architecture.is_none()
+                    || registered.artifact_architecture == package.artifact_architecture
+            }) {
                 if registered.declared_hash != package.declared_hash {
                     return Err(RegistryError::ConflictingAdapterContent {
                         adapter_id,
@@ -287,7 +314,7 @@ impl AdapterRegistry {
                     version,
                 });
             }
-            versions.insert(version, package);
+            variants.push(package);
         }
 
         let mut state = self
@@ -314,12 +341,19 @@ impl AdapterRegistry {
             .get(&requirement.adapter_id)
             .ok_or_else(|| RegistryError::AdapterNotFound(requirement.adapter_id.clone()))?;
         let AdapterVersionRequirement::Exact(requested_version) = requirement.version;
-        let package = versions.get(&requested_version).ok_or_else(|| {
+        let variants = versions.get(&requested_version).ok_or_else(|| {
             RegistryError::AdapterVersionNotFound {
                 adapter_id: requirement.adapter_id.clone(),
                 version: requested_version,
             }
         })?;
+        let package = variants
+            .iter()
+            .find(|package| package.matches_architecture(target.architecture()))
+            .ok_or_else(|| RegistryError::UnsupportedArchitecture {
+                adapter_id: requirement.adapter_id.clone(),
+                architecture: target.architecture().into(),
+            })?;
         let descriptor = &package.descriptor;
 
         if package.declared_hash != package.observed_hash {

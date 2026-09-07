@@ -304,6 +304,37 @@ fn probe_creation_reuses_both_library_sources_without_temporary_ownership() {
 }
 
 #[test]
+fn quick_probe_x86_preflight_and_adapter_selection_use_native_bundle_support() {
+    let (mut application, _calls, _software_id, data_root) = workflow_application();
+    let executable = write_synthetic_executable(data_root.path(), "SyntheticX86Target.exe");
+    let mut image = fs::read(&executable).expect("read fixture");
+    image[0x84..0x86].copy_from_slice(&0x014c_u16.to_le_bytes());
+    fs::write(&executable, image).expect("write x86 fixture");
+
+    assert_eq!(
+        application.software_preflight(&executable).unwrap().state,
+        SoftwarePreflightState::UnsupportedArchitecture,
+    );
+    application
+        .adapter_target_support
+        .get_mut(TEST_ADAPTER_ID)
+        .unwrap()
+        .architectures
+        .push("x86".into());
+    assert_eq!(
+        application.software_preflight(&executable).unwrap().state,
+        SoftwarePreflightState::NotRunning,
+    );
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&executable))
+        .expect("x86 quick probe passes preflight and selects its native adapter");
+    assert!(started.quick_probe);
+    application
+        .cleanup_quick_probe(started.summary.id())
+        .expect("clean probe");
+}
+
+#[test]
 fn probe_creation_can_pair_an_active_process_with_a_library_dictionary() {
     let (mut application, _calls, _software_id, data_root) = workflow_application();
     let dictionary_id = first_dictionary_id(&application);

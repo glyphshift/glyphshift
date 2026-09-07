@@ -292,6 +292,17 @@ pub struct DesktopRuntimeSpec {
 }
 
 impl DesktopRuntimeSpec {
+    /// Restrict a compiled intent to explicit executable identities (including a
+    /// software family with architecture-specific launchers). The Controller
+    /// validates these paths and binds live process instances before deployment.
+    #[must_use]
+    pub fn with_executable_paths(
+        mut self,
+        paths: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.executable_paths = paths.into_iter().map(Into::into).collect();
+        self
+    }
     #[must_use]
     pub fn executable_names(&self) -> &[Box<str>] {
         &self.executable_names

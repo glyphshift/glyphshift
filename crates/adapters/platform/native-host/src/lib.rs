@@ -1,5 +1,8 @@
 //! Dynamic loader for trusted target-process Adapter packages.
 
+mod metadata;
+pub use metadata::{inspect_pe_architecture, NativeAdapterMetadata};
+
 use glyphshift_adapter_native_abi::{
     descriptor_matches, feature_bits, NativeAbiError, NativeAdapterApiV1, NativeAdapterEntryV1,
     NativeRuntimeHostV1, ENTRY_SYMBOL_V1, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
@@ -45,7 +48,12 @@ impl LoadedNativeAdapter {
     }
 
     /// Same trust requirements as `inspect`; policy is optional metadata.
-    pub unsafe fn inspect_with_source_policy(path: &Path) -> Result<(AdapterDescriptor, SourceTextPolicy), NativeHostError> {
+    ///
+    /// # Safety
+    /// The path must identify the exact trusted native artifact already verified by the caller.
+    pub unsafe fn inspect_with_source_policy(
+        path: &Path,
+    ) -> Result<(AdapterDescriptor, SourceTextPolicy), NativeHostError> {
         let (library, _, descriptor) = unsafe { open_package(path) }?;
         Ok((descriptor, unsafe { read_source_policy(&library) }?))
     }
@@ -74,7 +82,9 @@ impl LoadedNativeAdapter {
         &self.descriptor
     }
 
-    pub const fn source_policy(&self) -> SourceTextPolicy { self.source_policy }
+    pub const fn source_policy(&self) -> SourceTextPolicy {
+        self.source_policy
+    }
 
     pub fn negotiate(
         &self,
@@ -135,7 +145,9 @@ impl LoadedNativeAdapter {
 }
 
 unsafe fn read_source_policy(library: &Library) -> Result<SourceTextPolicy, NativeHostError> {
-    let Ok(policy) = (unsafe { library.get::<extern "C" fn() -> u32>(b"glyphshift_adapter_source_policy_v1\0") }) else {
+    let Ok(policy) = (unsafe {
+        library.get::<extern "C" fn() -> u32>(b"glyphshift_adapter_source_policy_v1\0")
+    }) else {
         return Ok(SourceTextPolicy::Exact);
     };
     SourceTextPolicy::from_code(policy()).ok_or(NativeHostError::InvalidSourcePolicy)

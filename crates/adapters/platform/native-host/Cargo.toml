@@ -13,6 +13,7 @@ glyphshift-adapter-native-abi = { path = "../native-abi" }
 glyphshift-adapter-sdk = { path = "../sdk" }
 glyphshift-domain = { path = "../../../core/domain" }
 libloading = "0.8"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 glyphshift-adapter-direct2d = { path = "../../implementations/native/direct2d" }

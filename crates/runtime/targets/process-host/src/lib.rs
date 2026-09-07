@@ -55,6 +55,7 @@ pub enum ArtifactCatalogError {
 #[derive(Clone, Debug)]
 pub struct TargetArtifactCatalog {
     runtime: RuntimeArtifact,
+    architecture_runtimes: BTreeMap<Box<str>, RuntimeArtifact>,
     adapters: BTreeMap<PackageArtifactId, PathBuf>,
 }
 
@@ -77,8 +78,34 @@ impl TargetArtifactCatalog {
         }
         Ok(Self {
             runtime,
+            architecture_runtimes: BTreeMap::new(),
             adapters: indexed,
         })
+    }
+
+    pub fn with_architecture_runtimes(
+        mut self,
+        runtimes: impl IntoIterator<Item = (Box<str>, RuntimeArtifact)>,
+    ) -> Result<Self, ArtifactCatalogError> {
+        for (architecture, runtime) in runtimes {
+            if !matches!(architecture.as_ref(), "x86" | "x86_64")
+                || !available_library(&runtime.library)
+                || self
+                    .architecture_runtimes
+                    .insert(architecture, runtime)
+                    .is_some()
+            {
+                return Err(ArtifactCatalogError::RuntimeLibraryUnavailable);
+            }
+        }
+        Ok(self)
+    }
+    fn runtime_for(&self, architecture: &str) -> Option<&RuntimeArtifact> {
+        if self.architecture_runtimes.is_empty() {
+            Some(&self.runtime)
+        } else {
+            self.architecture_runtimes.get(architecture)
+        }
     }
 }
 
@@ -364,15 +391,14 @@ impl<T: ControllerTransport + Send + 'static> AdapterHostPort for TargetProcessH
         let deployment_json = deployment
             .encode_json()
             .map_err(|_| HostFailure::HandshakeRejected)?;
-        let runtime_library = self
+        let runtime = self
             .artifacts
-            .runtime
-            .library
-            .to_str()
+            .runtime_for(target.facts().architecture())
             .ok_or(HostFailure::Unavailable)?;
+        let runtime_library = runtime.library.to_str().ok_or(HostFailure::Unavailable)?;
         let command = ControllerRuntimeDeployment::new(
             runtime_library,
-            self.artifacts.runtime.sha256,
+            runtime.sha256,
             deployment_json,
             publication.generation().value(),
         );

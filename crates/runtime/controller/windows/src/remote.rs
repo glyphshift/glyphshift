@@ -1,3 +1,4 @@
+use crate::controller::ProcessRecord;
 use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_target_runtime_contract::{
     RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1, RuntimeDiagnosticsControl,
@@ -18,7 +19,9 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     TH32CS_SNAPMODULE32,
 };
 use windows::Win32::System::LibraryLoader::{
-    GetModuleHandleW, GetProcAddress, LoadLibraryExW, DONT_RESOLVE_DLL_REFERENCES,
+    GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress, LoadLibraryExW,
+    DONT_RESOLVE_DLL_REFERENCES, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 };
 use windows::Win32::System::Memory::{
     VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
@@ -63,15 +66,53 @@ impl RemoteError {
 struct ProcessHandle(HANDLE);
 
 impl ProcessHandle {
-    fn open(process_id: u32) -> Result<Self, RemoteError> {
+    fn open(target: &ProcessRecord) -> Result<Self, RemoteError> {
+        let process_id = target.process_id;
         let access = PROCESS_CREATE_THREAD
             | PROCESS_QUERY_INFORMATION
             | PROCESS_VM_OPERATION
             | PROCESS_VM_WRITE
             | PROCESS_VM_READ;
-        unsafe { OpenProcess(access, false, process_id) }
+        let process = unsafe { OpenProcess(access, false, process_id) }
             .map(Self)
-            .map_err(|_| RemoteError::ProcessUnavailable)
+            .map_err(|_| RemoteError::ProcessUnavailable)?;
+        // Validate on the exact handle used for all later remote writes. PID reuse
+        // between discovery and OpenProcess must not authorize a different process.
+        let mut created = windows_sys::Win32::Foundation::FILETIME::default();
+        let mut exited = created;
+        let mut kernel = created;
+        let mut user = created;
+        let mut machine = 0u16;
+        let mut native = 0u16;
+        let handle = process.0 .0;
+        let valid = unsafe {
+            windows_sys::Win32::System::Threading::GetProcessTimes(
+                handle,
+                &mut created,
+                &mut exited,
+                &mut kernel,
+                &mut user,
+            ) != 0
+                && windows_sys::Win32::System::Threading::IsWow64Process2(
+                    handle,
+                    &mut machine,
+                    &mut native,
+                ) != 0
+        };
+        let started = ((created.dwHighDateTime as u64) << 32) | created.dwLowDateTime as u64;
+        let architecture = match if machine == 0 { native } else { machine } {
+            0x14c => "x86",
+            0x8664 => "x86_64",
+            _ => "unknown",
+        };
+        if !valid
+            || target.started_at != Some(started)
+            || target.architecture != architecture
+            || architecture != std::env::consts::ARCH
+        {
+            return Err(RemoteError::ProcessUnavailable);
+        }
+        Ok(process)
     }
 }
 
@@ -146,11 +187,12 @@ impl Drop for RemoteAllocation {
 }
 
 pub fn activate(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
     deployment_json: &str,
 ) -> Result<RuntimeActivationReport, RemoteError> {
-    let process = ProcessHandle::open(process_id)?;
+    let process_id = target.process_id;
+    let process = ProcessHandle::open(target)?;
     inject_library(process_id, process.0, runtime_library)?;
     invoke_json_export(
         process_id,
@@ -160,7 +202,7 @@ pub fn activate(
         deployment_json,
     )?;
     let report = query_json_export(
-        process_id,
+        target,
         runtime_library,
         "glyphshift_runtime_activation_query_v1",
         MAX_RUNTIME_ACTIVATION_REPORT_BYTES,
@@ -170,17 +212,18 @@ pub fn activate(
         RuntimeActivationReport::decode_json(&json).map_err(|_| RemoteError::ReadFailed)
     });
     if report.is_err() {
-        let _ = deactivate(process_id, runtime_library);
+        let _ = deactivate(target, runtime_library);
     }
     report
 }
 
 pub fn update(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
     publication_json: &str,
 ) -> Result<(), RemoteError> {
-    let process = ProcessHandle::open(process_id)?;
+    let process_id = target.process_id;
+    let process = ProcessHandle::open(target)?;
     invoke_json_export(
         process_id,
         process.0,
@@ -191,16 +234,17 @@ pub fn update(
 }
 
 pub fn control_capture(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
     paused: bool,
 ) -> Result<(), RemoteError> {
+    let process_id = target.process_id;
     let command = if paused {
         r#"{"paused":true}"#
     } else {
         r#"{"paused":false}"#
     };
-    let process = ProcessHandle::open(process_id)?;
+    let process = ProcessHandle::open(target)?;
     invoke_json_export(
         process_id,
         process.0,
@@ -211,14 +255,15 @@ pub fn control_capture(
 }
 
 pub fn control_diagnostics(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
     enabled: bool,
 ) -> Result<(), RemoteError> {
+    let process_id = target.process_id;
     let command = RuntimeDiagnosticsControl::new(enabled)
         .encode_json()
         .map_err(|_| RemoteError::WriteFailed)?;
-    let process = ProcessHandle::open(process_id)?;
+    let process = ProcessHandle::open(target)?;
     invoke_json_export(
         process_id,
         process.0,
@@ -229,11 +274,11 @@ pub fn control_diagnostics(
 }
 
 pub fn query_diagnostics(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
 ) -> Result<RuntimeTraceBatch, RemoteError> {
     let json = query_json_export(
-        process_id,
+        target,
         runtime_library,
         "glyphshift_runtime_diagnostics_query_v1",
         MAX_RUNTIME_TRACE_BYTES,
@@ -243,11 +288,11 @@ pub fn query_diagnostics(
 }
 
 pub fn query_observations(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
 ) -> Result<CaptureObservationBatch, RemoteError> {
     let json = query_json_export(
-        process_id,
+        target,
         runtime_library,
         "glyphshift_runtime_observation_query_v1",
         MAX_RUNTIME_OBSERVATION_BYTES,
@@ -265,16 +310,17 @@ struct RemoteJsonQueryV1 {
 }
 
 fn query_json_export(
-    process_id: u32,
+    target: &ProcessRecord,
     runtime_library: &Path,
     export: &str,
     max_output_bytes: usize,
     expected_struct_size: usize,
 ) -> Result<String, RemoteError> {
+    let process_id = target.process_id;
     if size_of::<RemoteJsonQueryV1>() != expected_struct_size {
         return Err(RemoteError::ReadFailed);
     }
-    let process = ProcessHandle::open(process_id)?;
+    let process = ProcessHandle::open(target)?;
     let remote_output = RemoteAllocation::allocate(process.0, max_output_bytes)?;
     let query = RemoteJsonQueryV1 {
         struct_size: size_of::<RemoteJsonQueryV1>() as u32,
@@ -306,8 +352,9 @@ fn query_json_export(
     String::from_utf8(output).map_err(|_| RemoteError::ReadFailed)
 }
 
-pub fn deactivate(process_id: u32, runtime_library: &Path) -> Result<(), RemoteError> {
-    let process = ProcessHandle::open(process_id)?;
+pub fn deactivate(target: &ProcessRecord, runtime_library: &Path) -> Result<(), RemoteError> {
+    let process_id = target.process_id;
+    let process = ProcessHandle::open(target)?;
     let function = remote_export(
         process_id,
         runtime_library,
@@ -428,7 +475,7 @@ fn remote_export(process_id: u32, library: &Path, export: &str) -> Result<usize,
 
 fn remote_system_export(
     process_id: u32,
-    module_name: &str,
+    _module_name: &str,
     export: &str,
 ) -> Result<usize, RemoteError> {
     let local = unsafe { GetModuleHandleW(w!("kernel32.dll")) }
@@ -440,10 +487,33 @@ fn remote_system_export(
         }
     }
     .ok_or(RemoteError::ExportUnavailable)? as usize;
+    // GetProcAddress may resolve a forwarded kernel32 export into KernelBase.
+    // Compute the RVA relative to the module that actually owns the address.
+    let mut owner = windows::Win32::Foundation::HMODULE::default();
+    unsafe {
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            PCWSTR(address as *const u16),
+            &mut owner,
+        )
+    }
+    .map_err(|_| RemoteError::ModuleUnavailable)?;
+    let mut filename = [0u16; 32768];
+    let length = unsafe { GetModuleFileNameW(owner, &mut filename) } as usize;
+    if length == 0 || length >= filename.len() {
+        return Err(RemoteError::ModuleUnavailable);
+    }
+    let path = String::from_utf16_lossy(&filename[..length]);
+    let module = Path::new(&path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(RemoteError::ModuleUnavailable)?;
     let offset = address
-        .checked_sub(local.0 as usize)
+        .checked_sub(owner.0 as usize)
         .ok_or(RemoteError::ExportUnavailable)?;
-    Ok(remote_module_base_by_name(process_id, module_name)? + offset)
+    remote_module_base_by_name(process_id, module)?
+        .checked_add(offset)
+        .ok_or(RemoteError::ExportUnavailable)
 }
 
 fn remote_module_base(process_id: u32, library: &Path) -> Result<usize, RemoteError> {
@@ -485,4 +555,27 @@ fn remote_module_base_by_name(process_id: u32, name: &str) -> Result<usize, Remo
         let _ = CloseHandle(snapshot);
     }
     found.ok_or(RemoteError::ModuleUnavailable)
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn remote_handle_rejects_reused_identity_and_wrong_architecture() {
+        let process_id = std::process::id();
+        let mut target = ProcessRecord {
+            process_id,
+            parent_process_id: 0,
+            started_at: crate::platform::process_started_at(process_id),
+            executable_name: "synthetic-self".into(),
+            executable_path: None,
+            architecture: std::env::consts::ARCH.into(),
+        };
+        assert!(ProcessHandle::open(&target).is_ok());
+        target.started_at = target.started_at.map(|value| value + 1);
+        assert!(ProcessHandle::open(&target).is_err());
+        target.started_at = crate::platform::process_started_at(process_id);
+        target.architecture = "unknown".into();
+        assert!(ProcessHandle::open(&target).is_err());
+    }
 }

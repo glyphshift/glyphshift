@@ -1,9 +1,10 @@
 #![cfg(windows)]
 
 use glyphshift_windows_host::{
-    render_raw_gdi_glyph_indices, render_raw_gdi_symbol, render_raw_gdi_unicode,
-    render_raw_gdiplus_symbol, render_raw_gdiplus_unicode, run_ocr_capture_server,
-    run_uia_standard_control_server, write_raw_console,
+    render_raw_draw_text, render_raw_gdi_glyph_indices, render_raw_gdi_symbol,
+    render_raw_gdi_unicode, render_raw_gdiplus_symbol, render_raw_gdiplus_unicode,
+    render_raw_text_out, run_ocr_capture_server, run_uia_standard_control_server,
+    write_raw_console,
 };
 use std::io::{self, BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -66,6 +67,41 @@ impl ConsoleChild {
             return Err(io::Error::other("synthetic child exited unsuccessfully"));
         }
         Ok(())
+    }
+
+    fn start_renderer(executable: &std::path::Path) -> io::Result<Self> {
+        use std::os::windows::process::CommandExt;
+        let mut child = Command::new(executable)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000)
+            .spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("missing child input"))?;
+        let stdout = BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("missing child output"))?,
+        );
+        Ok(Self {
+            child,
+            stdin,
+            stdout,
+        })
+    }
+    fn render(&mut self, command: &str) -> io::Result<String> {
+        writeln!(self.stdin, "{command}")?;
+        self.stdin.flush()?;
+        let mut value = String::new();
+        self.stdout.read_line(&mut value)?;
+        if value.is_empty() {
+            return Err(io::Error::other("child render failed"));
+        }
+        Ok(value)
     }
 }
 
@@ -131,8 +167,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     let mut console_child = None;
+    let mut render_child: Option<ConsoleChild> = None;
     for line in stdin.lock().lines() {
         match line?.trim() {
+            command if command.starts_with("start-render-child ") => {
+                if render_child.is_some() {
+                    return Err(io::Error::other("child already started").into());
+                }
+                render_child = Some(ConsoleChild::start_renderer(std::path::Path::new(
+                    &command[19..],
+                ))?);
+                writeln!(stdout, "child-started")?;
+                stdout.flush()?;
+            }
+            command if command.starts_with("render-child ") => {
+                let response = render_child
+                    .as_mut()
+                    .ok_or_else(|| io::Error::other("child missing"))?
+                    .render(&command[13..])?;
+                write!(stdout, "{response}")?;
+                stdout.flush()?;
+            }
+            "render-text-out" => {
+                let evidence = render_raw_text_out("Open")?;
+                writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
+                stdout.flush()?;
+            }
+            "render-draw-text" => {
+                let evidence = render_raw_draw_text("Open")?;
+                writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
+                stdout.flush()?;
+            }
+            command if command.starts_with("render-text ") => {
+                let text = &command[12..];
+                if text.len() > 1024 {
+                    return Err(io::Error::other("synthetic text limit").into());
+                }
+                let evidence = render_raw_gdi_unicode(text)?;
+                writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
+                stdout.flush()?;
+            }
             "render" => {
                 let evidence = render_raw_gdi_unicode("Open")?;
                 writeln!(stdout, "{}:{}", evidence.ink_pixels(), evidence.signature())?;
@@ -187,6 +261,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "exit" => {
                 if let Some(child) = console_child.take() {
+                    child.stop()?;
+                }
+                if let Some(child) = render_child.take() {
                     child.stop()?;
                 }
                 break;

@@ -180,7 +180,7 @@ impl AdapterTargetSupport {
                     .any(|candidate| candidate.as_ref() == platform))
             && match self.placement {
                 Placement::TargetProcess => {
-                    architecture == "x86_64"
+                    matches!(architecture, "x86" | "x86_64")
                         && (self.architectures.is_empty()
                             || self
                                 .architectures
@@ -362,7 +362,9 @@ impl DesktopApplication {
         let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
         let runtime_bundle = runtime_bundle.ok();
         if let Some(bundle) = &runtime_bundle {
-            for adapter in bundle.adapter_options() { probe_runs.set_source_policy(adapter.id(), adapter.source_policy()); }
+            for adapter in bundle.adapter_options() {
+                probe_runs.set_source_policy(adapter.id(), adapter.source_policy());
+            }
         }
         let adapter_target_support = runtime_bundle
             .as_ref()
@@ -403,7 +405,8 @@ impl DesktopApplication {
                         technical_target: adapter.technical_target().into(),
                         documentation_url: adapter.documentation_url().map(Into::into),
                         configuration: adapter.configuration().into(),
-                        process_resident_after_deactivate: adapter.process_resident_after_deactivate(),
+                        process_resident_after_deactivate: adapter
+                            .process_resident_after_deactivate(),
                     })
                     .collect()
             })

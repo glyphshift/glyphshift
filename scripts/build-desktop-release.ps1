@@ -35,8 +35,8 @@ New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 
 $runtimeManifestPath = Join-Path $runtimeRoot 'runtime-bundle.json'
 $runtimeManifest = Get-Content -Raw -LiteralPath $runtimeManifestPath | ConvertFrom-Json
-if ($runtimeManifest.schema -ne 'glyphshift.runtime-bundle/3') {
-    throw 'Desktop Release requires Runtime Bundle /3.'
+if ($runtimeManifest.schema -notin @('glyphshift.runtime-bundle/3', 'glyphshift.runtime-bundle/4')) {
+    throw 'Desktop Release requires a supported Runtime Bundle schema.'
 }
 if (Test-Path -LiteralPath (Join-Path $runtimeRoot 'test-target.exe')) {
     throw 'Desktop Release Runtime must not include the synthetic test target.'

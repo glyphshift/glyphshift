@@ -70,6 +70,7 @@ members = [
     "test-support/windows-runtime-target",
 ]
 exclude = [
+    "vendor/retour",
     "crates/adapters/implementations/accessibility/uia",
     "crates/adapters/implementations/accessibility/uia-worker",
     "crates/adapters/implementations/fallback/ocr-worker",
@@ -84,3 +85,6 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+[patch.crates-io]
+retour = { path = "vendor/retour" }

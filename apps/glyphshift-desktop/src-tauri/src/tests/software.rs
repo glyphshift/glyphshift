@@ -45,7 +45,7 @@ fn software_preflight_keeps_each_deterministic_failure_distinct() {
 }
 
 #[test]
-fn software_preflight_accepts_an_architecture_with_an_isolated_observer() {
+fn software_preflight_accepts_native_observer_architectures_from_the_bundle() {
     let (mut application, _calls, _software_id, _data_root) = workflow_application();
 
     application.adapter_target_support.insert(
@@ -59,6 +59,23 @@ fn software_preflight_accepts_an_architecture_with_an_isolated_observer() {
     );
 
     assert!(application.supports_probe_architecture("x86_64"));
+    assert!(application.supports_probe_architecture("x86"));
+    assert_eq!(
+        software_preflight_state(
+            false,
+            false,
+            application.supports_probe_architecture("x86"),
+            true,
+            true,
+        ),
+        SoftwarePreflightState::Ready,
+    );
+
+    let native = application
+        .adapter_target_support
+        .get_mut("test.native")
+        .unwrap();
+    native.architectures = vec!["x86_64".into()];
     assert!(!application.supports_probe_architecture("x86"));
 
     application.adapter_target_support.insert(

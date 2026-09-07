@@ -83,7 +83,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "The $Profile Runtime Bundle verifier did not build."
 }
 
+$x86Arguments = @('build', '--manifest-path', $manifestPath, '--target-dir', $CargoTargetDir,
+    '--target', 'i686-pc-windows-msvc', '-p', 'glyphshift-controller-windows', '-p', 'glyphshift-target-runtime',
+    '-p', 'glyphshift-adapter-gdi-native', '-p', 'glyphshift-adapter-gdi-text-out-native', '-p', 'glyphshift-adapter-draw-text-native')
+if ($IncludeTestTarget) { $x86Arguments += @('-p', 'glyphshift-windows-runtime-target') }
+if ($Profile -eq 'Release') { $x86Arguments += '--release' }
+& cargo @x86Arguments
+if ($LASTEXITCODE -ne 0) { throw 'The x86 Runtime components did not build.' }
+
 $profileDirectory = $Profile.ToLowerInvariant()
+$x86ProfileRoot = Join-Path $CargoTargetDir "i686-pc-windows-msvc\$profileDirectory"
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 $stagingRoot = "$OutputRoot.staging"
 Assert-LocalTestPath $stagingRoot 'Runtime Bundle staging output'
@@ -95,9 +104,10 @@ New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
 function Copy-VersionedBundleArtifact(
     [string]$SourceName,
     [string]$TargetStem,
-    [string]$Extension
+    [string]$Extension,
+    [string]$SourceRoot = (Join-Path $CargoTargetDir $profileDirectory)
 ) {
-    $sourcePath = Join-Path $CargoTargetDir "$profileDirectory\$SourceName"
+    $sourcePath = Join-Path $SourceRoot $SourceName
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
         throw "Missing Runtime Bundle artifact: $SourceName"
     }
@@ -134,9 +144,16 @@ $unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
 $monoGameBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_monogame_native.dll' 'adapter-monogame' 'dll'
 
+$x86Controller = Copy-VersionedBundleArtifact 'glyphshift-controller-windows.exe' 'controller-x86' 'exe' $x86ProfileRoot
+$x86Runtime = Copy-VersionedBundleArtifact 'glyphshift_target_runtime.dll' 'runtime-x86' 'dll' $x86ProfileRoot
+$x86Gdi = Copy-VersionedBundleArtifact 'glyphshift_adapter_gdi_native.dll' 'adapter-gdi-x86' 'dll' $x86ProfileRoot
+$x86TextOut = Copy-VersionedBundleArtifact 'glyphshift_adapter_gdi_text_out_native.dll' 'adapter-gdi-text-out-x86' 'dll' $x86ProfileRoot
+$x86DrawText = Copy-VersionedBundleArtifact 'glyphshift_adapter_draw_text_native.dll' 'adapter-draw-text-x86' 'dll' $x86ProfileRoot
+
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
     Copy-Item -LiteralPath $testTarget -Destination (Join-Path $stagingRoot 'test-target.exe')
+    Copy-Item -LiteralPath (Join-Path $x86ProfileRoot 'glyphshift-windows-runtime-target.exe') -Destination (Join-Path $stagingRoot 'test-target-x86.exe')
 }
 
 $adapterPresentationPath = Join-Path $PSScriptRoot 'runtime-bundle-adapters.zh-CN.json'
@@ -177,7 +194,8 @@ $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.s
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
 
 $runtimeManifest = [ordered]@{
-    schema = 'glyphshift.runtime-bundle/3'
+    schema = 'glyphshift.runtime-bundle/4'
+    architecture = 'x86_64'
     authority = 'app.glyphshift.runtime.first-party'
     controller = [ordered]@{
         artifact = 'windows-generic-controller'
@@ -295,7 +313,30 @@ $runtimeManifest = [ordered]@{
     isolated_workers = @()
     acquisition_workers = @()
 }
-$runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 6
+$x86Adapters = @()
+foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOutPresentation), @($x86DrawText, $drawTextPresentation))) {
+    $artifact = $pair[0]; $presentation = $pair[1]
+    $x86Adapters += [ordered]@{ file=$artifact.file; sha256=$artifact.sha256; name=$presentation.name;
+        summary=$presentation.summary; technology=$presentation.technology; technicalTarget=$presentation.technicalTarget;
+        documentationUrl=$presentation.documentationUrl }
+}
+$runtimeManifest.additional_architectures = @([ordered]@{
+    architecture = 'x86'
+    controller = [ordered]@{artifact='windows-generic-controller-x86';file=$x86Controller.file;sha256=$x86Controller.sha256;protocol=@(1,0)}
+    runtime = $x86Runtime
+    adapters = $x86Adapters
+})
+# Produce descriptors with an inspector compiled for the same architecture.
+# The x64 App reads this bounded metadata; the target loader revalidates the native ABI.
+foreach ($group in @(@($runtimeManifest.adapters, $controllerBundle.file), @($x86Adapters, $x86Controller.file))) {
+    $inspector = Join-Path $stagingRoot $group[1]
+    foreach ($adapter in $group[0]) {
+        $metadata = & $inspector --inspect-adapter (Join-Path $stagingRoot $adapter.file)
+        if ($LASTEXITCODE -ne 0) { throw "Native descriptor inspection failed: $($adapter.file)" }
+        $adapter.native_metadata = $metadata | ConvertFrom-Json
+    }
+}
+$runtimeManifestJson = $runtimeManifest | ConvertTo-Json -Depth 12
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText(
     (Join-Path $stagingRoot 'runtime-bundle.json'),
@@ -306,10 +347,10 @@ $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 $declaredArtifacts = @(
     $runtimeManifest.controller,
     $runtimeManifest.runtime
-) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers)
+) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers) + @($x86Controller, $x86Runtime) + @($x86Adapters)
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
 if ($IncludeTestTarget) {
-    $expectedFiles += 'test-target.exe'
+    $expectedFiles += @('test-target.exe', 'test-target-x86.exe')
 }
 $actualFiles = @(Get-ChildItem -LiteralPath $stagingRoot -File | ForEach-Object { $_.Name })
 $unexpectedFiles = @(Compare-Object $expectedFiles $actualFiles)

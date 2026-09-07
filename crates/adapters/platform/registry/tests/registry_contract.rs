@@ -8,6 +8,58 @@ use glyphshift_domain::{AdapterId, ApplyModel, Feature, Placement, RegistryRevis
 
 const TRUSTED_SIGNER: &str = "example.signer.trusted";
 
+#[test]
+fn one_logical_adapter_resolves_distinct_architecture_artifacts() {
+    let id = AdapterId::new("example.dual");
+    let descriptor = AdapterDescriptor::new(
+        id.clone(),
+        foundation_version(),
+        ApplyModel::InlineRender,
+        Placement::TargetProcess,
+        [Feature::TextReplace],
+    )
+    .with_architectures(["x86", "x86_64"]);
+    let make = |arch: &str, byte: u8| {
+        let hash = ArtifactHash::sha256([byte; 32]);
+        AdapterPackage::new(
+            descriptor.clone(),
+            PackageArtifactId::new(arch),
+            SignerId::new(TRUSTED_SIGNER),
+            hash,
+            hash,
+        )
+        .for_architecture(arch)
+    };
+    let mut registry = registry_for("example.dual");
+    registry
+        .reload(AdapterPackageSet::new([make("x86", 1), make("x86_64", 2)]))
+        .unwrap();
+    let req = requirement(id, [Feature::TextReplace]);
+    for arch in ["x86", "x86_64"] {
+        let binding = registry
+            .resolve(&req, &TargetFacts::new("windows", arch))
+            .unwrap();
+        assert_eq!(binding.adapter_id, AdapterId::new("example.dual"));
+        assert_eq!(
+            binding.host,
+            AdapterHostBinding::TargetProcess {
+                library: PackageArtifactId::new(arch)
+            }
+        );
+    }
+    assert!(matches!(
+        registry.resolve(&req, &TargetFacts::new("windows", "unknown")),
+        Err(RegistryError::UnsupportedArchitecture { .. })
+    ));
+    assert!(registry
+        .reload(AdapterPackageSet::new([make("x86", 1), make("x86", 2)]))
+        .is_err());
+    // A rejected reload does not destroy the previously verified x64 variant.
+    assert!(registry
+        .resolve(&req, &TargetFacts::new("windows", "x86_64"))
+        .is_ok());
+}
+
 const fn foundation_version() -> AdapterVersion {
     AdapterVersion::new(1, 0, 0)
 }

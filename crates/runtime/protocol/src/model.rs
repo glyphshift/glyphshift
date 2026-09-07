@@ -613,6 +613,8 @@ pub enum RecipeViolation {
     },
 }
 
+mod architecture;
 mod connection;
+pub use architecture::ArchitectureControllerTransport;
 
 pub use connection::*;

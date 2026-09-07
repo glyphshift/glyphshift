@@ -350,17 +350,32 @@ impl ControllerPlugin for WindowsController {
         {
             return Err(PluginError::new("invalid_runtime_deployment"));
         }
+        if target.architecture != std::env::consts::ARCH
+            || crate::platform::process_architecture(target.process_id) != target.architecture
+            || target.started_at.is_none()
+            || crate::platform::process_started_at(target.process_id) != target.started_at
+            || crate::platform::process_executable_path(target.process_id) != target.executable_path
+        {
+            return Err(PluginError::new("target_architecture_or_instance_changed"));
+        }
+        if glyphshift_adapter_native_host::inspect_pe_architecture(&runtime_library).ok()
+            != Some(target.architecture.as_str())
+            || decoded.adapters().iter().any(|adapter| {
+                glyphshift_adapter_native_host::inspect_pe_architecture(adapter.library()).ok()
+                    != Some(target.architecture.as_str())
+            })
+        {
+            return Err(PluginError::new("invalid_runtime_deployment"));
+        }
         let publication_identity = decoded
             .publication()
             .identity()
             .map_err(|_| PluginError::new("invalid_runtime_deployment"))?
             .as_bytes();
-        let activation = remote::activate(
-            target.process_id,
-            &runtime_library,
-            &deployment.deployment_json,
-        )
-        .map_err(|error| PluginError::new(format!("runtime_activation_failed:{}", error.code())))?;
+        let activation = remote::activate(target, &runtime_library, &deployment.deployment_json)
+            .map_err(|error| {
+                PluginError::new(format!("runtime_activation_failed:{}", error.code()))
+            })?;
         self.runtime_libraries
             .insert(target_token.into(), runtime_library);
         Ok(WireRuntimeAck {
@@ -393,7 +408,7 @@ impl ControllerPlugin for WindowsController {
             .identity()
             .map_err(|_| PluginError::new("invalid_runtime_publication"))?
             .as_bytes();
-        remote::update(target.process_id, runtime_library, publication_json)
+        remote::update(target, runtime_library, publication_json)
             .map_err(|error| PluginError::new(format!("runtime_update_failed:{}", error.code())))?;
         Ok(WireRuntimeAck {
             generation,
@@ -411,7 +426,7 @@ impl ControllerPlugin for WindowsController {
             .runtime_libraries
             .get(target_token)
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
-        remote::control_capture(target.process_id, runtime_library, paused)
+        remote::control_capture(target, runtime_library, paused)
             .map_err(|error| PluginError::new(format!("capture_control_failed:{}", error.code())))
     }
 
@@ -428,7 +443,7 @@ impl ControllerPlugin for WindowsController {
             .runtime_libraries
             .get(target_token)
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
-        remote::control_diagnostics(target.process_id, runtime_library, enabled).map_err(|error| {
+        remote::control_diagnostics(target, runtime_library, enabled).map_err(|error| {
             PluginError::new(format!("runtime_diagnostics_failed:{}", error.code()))
         })
     }
@@ -445,10 +460,9 @@ impl ControllerPlugin for WindowsController {
             .runtime_libraries
             .get(target_token)
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
-        let batch =
-            remote::query_diagnostics(target.process_id, runtime_library).map_err(|error| {
-                PluginError::new(format!("runtime_diagnostics_failed:{}", error.code()))
-            })?;
+        let batch = remote::query_diagnostics(target, runtime_library).map_err(|error| {
+            PluginError::new(format!("runtime_diagnostics_failed:{}", error.code()))
+        })?;
         Ok(WireRuntimeTraceBatch {
             records: batch
                 .records()
@@ -520,10 +534,9 @@ impl ControllerPlugin for WindowsController {
             .runtime_libraries
             .get(target_token)
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
-        let batch =
-            remote::query_observations(target.process_id, runtime_library).map_err(|error| {
-                PluginError::new(format!("runtime_observations_failed:{}", error.code()))
-            })?;
+        let batch = remote::query_observations(target, runtime_library).map_err(|error| {
+            PluginError::new(format!("runtime_observations_failed:{}", error.code()))
+        })?;
         Ok(WireCaptureObservationBatch {
             producer_id: batch.producer_id().as_str().into(),
             generation: batch.generation(),
@@ -549,7 +562,7 @@ impl ControllerPlugin for WindowsController {
             .runtime_libraries
             .get(target_token)
             .ok_or_else(|| PluginError::new("runtime_not_active"))?;
-        remote::deactivate(target.process_id, runtime_library).map_err(|error| {
+        remote::deactivate(target, runtime_library).map_err(|error| {
             PluginError::new(format!("runtime_deactivation_failed:{}", error.code()))
         })
     }

@@ -1576,6 +1576,7 @@ dependencies = [
  "glyphshift-domain",
  "glyphshift-windows-host",
  "libloading 0.8.9",
+ "serde",
  "windows 0.58.0",
 ]
 
@@ -1748,6 +1749,7 @@ name = "glyphshift-controller-windows"
 version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-gdi",
+ "glyphshift-adapter-native-host",
  "glyphshift-adapter-registry",
  "glyphshift-capture",
  "glyphshift-controller-sdk",
@@ -1755,6 +1757,7 @@ dependencies = [
  "glyphshift-runtime-contract",
  "glyphshift-target-runtime-contract",
  "glyphshift-translation",
+ "serde_json",
  "sha2",
  "windows 0.58.0",
  "windows-sys 0.61.2",
@@ -1812,7 +1815,7 @@ dependencies = [
 
 [[package]]
 name = "glyphshift-desktop-shell"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-ai-translation",
@@ -3602,8 +3605,6 @@ dependencies = [
 [[package]]
 name = "retour"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9af44d40e2400b44d491bfaf8eae111b09f23ac4de6e92728e79d93e699c527"
 dependencies = [
  "cfg-if",
  "generic-array",
