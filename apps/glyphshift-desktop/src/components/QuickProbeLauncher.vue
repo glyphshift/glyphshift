@@ -278,7 +278,7 @@ async function start() {
               class="min-w-0 flex-1"
               @update:model-value="chooseRunningTarget"
             />
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :aria-label="t('capture.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
+            <UButton :title="t('capture.refreshRunningSoftware')" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :aria-label="t('capture.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
           </div>
           <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('capture.runningSoftwareHint') }}</p>
           <UAlert v-if="runningTargetsError" role="alert" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('capture.error')" :description="runningTargetsError" />

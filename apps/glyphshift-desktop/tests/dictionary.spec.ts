@@ -72,7 +72,8 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
         if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
         if (command === 'desktop_snapshot') return current
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
-        if (command === 'desktop_import_dictionary') {
+        if (command === 'desktop_preview_dictionary_import') return { metadata: imported.dictionaries[1].metadata, entries: [{ source: 'Save', translation: '保存' }] }
+        if (command === 'desktop_create_dictionary') {
           ;(window as unknown as { __dictionaryImport?: unknown }).__dictionaryImport = args
           return imported
         }
@@ -93,10 +94,11 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
 
   await page.getByRole('button', { name: '词典', exact: true }).click()
   await page.getByRole('button', { name: '导入', exact: true }).click()
+  await page.getByRole('dialog', { name: '导入字典' }).getByRole('button', { name: '导入', exact: true }).click()
   await expect(page.getByText('导入词典', { exact: true })).toBeVisible()
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __dictionaryImport?: { inputPath?: string } }).__dictionaryImport
-  ))).toEqual(expect.objectContaining({ inputPath: 'X:\\SyntheticFixtures\\dictionary-imported.json' }))
+  ))).toEqual(expect.objectContaining({ create: expect.objectContaining({ entries: [{ source: 'Save', translation: '保存' }], metadata: expect.objectContaining({ name: '导入词典' }) }) }))
 
   await page.getByRole('button', { name: '导出发布文件 导入词典' }).click()
   await expect.poll(() => page.evaluate(() => (

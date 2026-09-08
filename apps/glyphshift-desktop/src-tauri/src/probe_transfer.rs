@@ -15,8 +15,12 @@ pub(super) struct ProbeImportRequest {
     pub(super) mode: ImportMode,
 }
 
-#[derive(Deserialize)]
-struct Entry { source: String, #[serde(default)] translation: String }
+#[derive(Deserialize, Serialize)]
+struct Entry { source: String, #[serde(default, deserialize_with = "translation_or_empty")] translation: String }
+
+fn translation_or_empty<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 fn parse_entries(text: &str, format: &str) -> Result<Vec<Entry>, ()> {
     let text = text.trim_start_matches('\u{feff}');
@@ -124,6 +128,69 @@ mod tests {
     fn malformed_and_duplicate_imports_are_rejected_before_writing() {
         for text in ["source,translation\n\"open,x", "source,translation\n\"closed\"oops,x", "source,translation\nsame,a\nsame,b", "source,translation\nonly-one"] {
             assert!(parse_entries(text, "csv").is_err());
+        }
+    }
+}
+
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct EntryFilePreview {
+    entries: Vec<Entry>,
+    metadata: Option<serde_json::Value>,
+}
+
+fn read_entry_file(input_path: &std::path::Path) -> Result<EntryFilePreview, CommandError> {
+    let invalid = || CommandError::new("dictionary.import_invalid");
+    if !input_path.is_absolute() { return Err(invalid()); }
+    let format = input_path.extension().and_then(|extension| extension.to_str()).unwrap_or("").to_ascii_lowercase();
+    let mut bytes = Vec::new();
+    std::fs::File::open(input_path).map_err(|_| invalid())?.take(16 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|_| invalid())?;
+    if bytes.len() > 16 * 1024 * 1024 { return Err(invalid()); }
+    let text = std::str::from_utf8(&bytes).map_err(|_| invalid())?.trim_start_matches('\u{feff}');
+    let entries = parse_entries(text, &format).map_err(|_| invalid())?;
+    let metadata = if format == "json" {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|_| invalid())?;
+        match value.get("metadata") {
+            Some(metadata) => {
+                let typed: glyphshift_desktop_backend::DictionaryMetadata = serde_json::from_value(metadata.clone()).map_err(|_| invalid())?;
+                Some(serde_json::to_value(typed).map_err(|_| invalid())?)
+            },
+            None => None,
+        }
+    } else { None };
+    Ok(EntryFilePreview { entries, metadata })
+}
+
+#[tauri::command]
+pub(super) fn desktop_preview_dictionary_import(input_path: PathBuf) -> Result<EntryFilePreview, CommandError> {
+    read_entry_file(&input_path)
+}
+
+
+#[cfg(test)]
+mod dictionary_import_tests {
+    use super::*;
+    #[test]
+    fn file_preview_preserves_portable_metadata_and_pending_entries_and_rejects_invalid_csv() {
+        let root = tempfile::tempdir().unwrap();
+        let json = root.path().join("dictionary.json");
+        let package = glyphshift_dictionary_package::DictionaryPackage::create(
+            glyphshift_dictionary_package::DictionaryCreate::new("dictionary.import", "Import", "ja-JP", "zh-CN")
+                .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::pending("Pending"), glyphshift_dictionary_package::DictionaryEntryCreate::new("Done", "完成")])
+        ).unwrap();
+        std::fs::write(&json, package.encode_json().unwrap()).unwrap();
+        let preview = read_entry_file(&json).unwrap();
+        assert_eq!(preview.metadata.unwrap()["sourceLocale"], "ja-JP");
+        assert!(preview.entries.iter().any(|entry| entry.source == "Pending" && entry.translation.is_empty()));
+        let csv = root.path().join("dictionary.csv");
+        std::fs::write(&csv, "source,translation\nPending,\nDone,完成").unwrap();
+        let preview = read_entry_file(&csv).unwrap();
+        assert!(preview.metadata.is_none());
+        assert_eq!(preview.entries.len(), 2);
+        for invalid in ["wrong,header\nA,B", "source,translation\nA,B\nA,C", "source,translation\nA,B,extra"] {
+            std::fs::write(&csv, invalid).unwrap();
+            assert!(read_entry_file(&csv).is_err());
         }
     }
 }

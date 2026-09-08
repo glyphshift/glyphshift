@@ -351,7 +351,6 @@ onBeforeUnmount(() => {
         :artifact-warnings="workspace.model.value.artifactWarnings"
         @open="openDictionary"
         @create="workspace.createDictionary"
-        @import-dictionary="workspace.importDictionary"
         @export-dictionary="workspace.exportDictionary"
         @remove="workspace.removeDictionaries"
         @query-catalog="workspace.queryDictionaryCatalog"

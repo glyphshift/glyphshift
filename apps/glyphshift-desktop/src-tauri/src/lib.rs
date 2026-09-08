@@ -749,6 +749,7 @@ pub fn run() {
             probe::desktop_bulk_probe_entries,
             probe::desktop_export_probe_run,
             probe_transfer::desktop_import_probe_entries,
+            probe_transfer::desktop_preview_dictionary_import,
             quick_probe::desktop_create_probe_from_sources,
             quick_probe::desktop_retain_quick_probe,
             quick_probe::desktop_cleanup_quick_probe,

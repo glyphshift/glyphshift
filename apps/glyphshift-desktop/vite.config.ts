@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [
     vue(),
     ui({
+      icon: { clientBundle: { scan: { globInclude: ['src/**/*.{vue,ts}'] } } },
       ui: {
         colors: {
           primary: 'blue',

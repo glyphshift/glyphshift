@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { save } from '@tauri-apps/plugin-dialog'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
+import DictionaryImportDialog from './DictionaryImportDialog.vue'
+import { useWorkspace } from '../useWorkspace'
+import type { DictionaryImportData } from '../dictionaryImport'
 import { useI18n } from 'vue-i18n'
 import type {
   DictionaryCatalogInstallRequest,
@@ -33,13 +36,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   open: [id: string]
   create: [metadata: Omit<DictionaryMetadata, 'id'>]
-  importDictionary: [inputPath: string]
   exportDictionary: [dictionaryId: string, outputPath: string]
   remove: [ids: string[]]
   queryCatalog: [request: DictionaryCatalogQueryRequest]
   installCatalog: [request: DictionaryCatalogInstallRequest]
 }>()
 const { t } = useI18n()
+const workspace = useWorkspace()
+const importDialog = ref<InstanceType<typeof DictionaryImportDialog>>()
+async function applyImport(data: DictionaryImportData) { return workspace.createDictionary(data.metadata, data.entries) }
 const dictionaryWarnings = computed(() => props.artifactWarnings.filter(warning => warning.artifactKind === 'dictionary'))
 const dictionaryWarningDescription = computed(() => t('dictionaries.skippedArtifactsDescription', {
   count: dictionaryWarnings.value.length,
@@ -305,16 +310,7 @@ function confirmInstall() {
   pendingInstall.value = null
 }
 
-async function chooseImport() {
-  if (!('__TAURI_INTERNALS__' in window)) return
-  const inputPath = await open({
-    directory: false,
-    multiple: false,
-    title: t('dictionaries.importDialogTitle'),
-    filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
-  })
-  if (typeof inputPath === 'string') emit('importDictionary', inputPath)
-}
+async function chooseImport() { await importDialog.value?.choose() }
 
 async function chooseExport(item: DictionarySummary) {
   exportError.value = ''
@@ -441,9 +437,9 @@ async function chooseExport(item: DictionarySummary) {
         <template #rules-cell="{ row }">{{ row.original.entryCount }}</template>
         <template #actions-cell="{ row }">
           <div class="flex justify-center gap-0.5">
-            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.metadata.name })" @click="emit('open', row.original.metadata.id)" />
-            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-file-export" :aria-label="t('dictionaries.exportNamed', { name: row.original.metadata.name })" :disabled="busy" @click="chooseExport(row.original)" />
-            <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.metadata.name })" :disabled="busy" @click="pendingRemoval = [row.original]" />
+            <UButton :title="t('common.editNamed', { name: row.original.metadata.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.metadata.name })" @click="emit('open', row.original.metadata.id)" />
+            <UButton :title="t('dictionaries.exportNamed', { name: row.original.metadata.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-file-export" :aria-label="t('dictionaries.exportNamed', { name: row.original.metadata.name })" :disabled="busy" @click="chooseExport(row.original)" />
+            <UButton :title="t('common.deleteNamed', { name: row.original.metadata.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.metadata.name })" :disabled="busy" @click="pendingRemoval = [row.original]" />
           </div>
         </template>
         <template #empty>
@@ -473,7 +469,7 @@ async function chooseExport(item: DictionarySummary) {
       @next-page="nextCatalogPage"
     >
       <template #toolbar-actions>
-        <UButton
+        <UButton :title="t('dictionaries.catalog.clearTag', { tag: catalogTag })"
           v-if="catalogTag"
           color="primary"
           variant="soft"
@@ -507,7 +503,7 @@ async function chooseExport(item: DictionarySummary) {
         </template>
         <template #tags-cell="{ row }">
           <div class="flex flex-wrap gap-1">
-            <UButton
+            <UButton :title="t('dictionaries.catalog.filterTag', { tag })"
               v-for="tag in row.original.tags.slice(0, 3)"
               :key="tag"
               :color="catalogTag === tag ? 'primary' : 'neutral'"
@@ -581,5 +577,6 @@ async function chooseExport(item: DictionarySummary) {
       @update:open="$event || (pendingInstall = null)"
       @confirm="confirmInstall"
     />
+    <DictionaryImportDialog ref="importDialog" :apply="applyImport" />
   </section>
 </template>

@@ -38,9 +38,9 @@ const { t } = useI18n()
         </span>
         <span class="type-label max-w-44 truncate font-medium" :title="family">{{ family }}</span>
         <div class="ml-0.5 flex shrink-0 items-center">
-          <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-left" :disabled="index === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="emit('move', family, -1)" />
-          <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-right" :disabled="index === families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="emit('move', family, 1)" />
-          <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :aria-label="t('workflows.removeSelectedFont', { name: family })" @click="emit('remove', family)" />
+          <UButton :title="t('workflows.raiseFont', { name: family })" color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-left" :disabled="index === 0" :aria-label="t('workflows.raiseFont', { name: family })" @click="emit('move', family, -1)" />
+          <UButton :title="t('workflows.lowerFont', { name: family })" color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-right" :disabled="index === families.length - 1" :aria-label="t('workflows.lowerFont', { name: family })" @click="emit('move', family, 1)" />
+          <UButton :title="t('workflows.removeSelectedFont', { name: family })" color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :aria-label="t('workflows.removeSelectedFont', { name: family })" @click="emit('remove', family)" />
         </div>
       </div>
     </div>

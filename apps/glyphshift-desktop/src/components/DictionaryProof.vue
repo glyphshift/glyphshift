@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import DictionaryImportDialog from './DictionaryImportDialog.vue'
+import { mergeDictionaryEntries, type DictionaryImportData } from '../dictionaryImport'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -27,6 +29,14 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const ai = useAiTranslation()
 const workspace = useWorkspace()
+const importDialog = ref<InstanceType<typeof DictionaryImportDialog>>()
+async function applyImport(data: DictionaryImportData) {
+  if (dictionaryLocked.value || props.busy || !commitNewEntry()) return false
+  draft.value.entries = mergeDictionaryEntries(draft.value.entries, data.entries, data.mode)
+  selected.value = new Set()
+  query.value = ''
+  return true
+}
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -335,6 +345,7 @@ usePageEscape(() => true, () => emit('back'))
         </div>
       </template>
       <template #actions>
+        <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :title="t('dictionaries.importFile')" :disabled="dictionaryLocked || busy" @click="importDialog?.choose()" />
         <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" :disabled="dictionaryLocked" @click="openMetadata" />
         <div class="inline-flex">
           <UButton
@@ -349,7 +360,7 @@ usePageEscape(() => true, () => emit('back'))
             @click="dictionaryLocked ? emit('open-ai-tasks') : selectedProfile ? runAiTranslation() : emit('configure-ai')"
           />
           <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
-            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="dictionaryLocked || busy || ai.busy.value" />
+            <UButton :title="t('ai.translationOptions')" color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="dictionaryLocked || busy || ai.busy.value" />
           </UDropdownMenu>
         </div>
         <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="t('dictionaryEditor.saveDictionary')" :loading="busy" :disabled="dictionaryLocked || busy || !canSave" @click="saveDraft" />
@@ -471,7 +482,7 @@ usePageEscape(() => true, () => emit('back'))
         </template>
         <template #actions-cell="{ row }">
           <span v-if="row.original.kind === 'new'" class="type-metadata text-[var(--text-muted)]">{{ t('dictionaryEditor.pressEnterToAdd') }}</span>
-          <UButton
+          <UButton :title="t('common.deleteNamed', { name: row.original.entry.source })"
             v-else
             color="error"
             variant="ghost"
@@ -537,5 +548,6 @@ usePageEscape(() => true, () => emit('back'))
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"
     />
+    <DictionaryImportDialog ref="importDialog" existing :apply="applyImport" />
   </section>
 </template>

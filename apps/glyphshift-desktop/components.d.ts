@@ -17,6 +17,7 @@ declare module 'vue' {
     AiTranslationProgress: typeof import('./src/components/AiTranslationProgress.vue')['default']
     CaptureView: typeof import('./src/components/CaptureView.vue')['default']
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
+    DictionaryImportDialog: typeof import('./src/components/DictionaryImportDialog.vue')['default']
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryMetadataForm: typeof import('./src/components/DictionaryMetadataForm.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']

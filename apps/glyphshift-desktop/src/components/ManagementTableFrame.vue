@@ -114,7 +114,7 @@ function updatePageSize(value: unknown) {
       />
 
       <UDropdownMenu v-if="filterOptions.length" :items="filterItems" :content="{ align: 'end' }">
-        <UButton
+        <UButton :title="filterAriaLabel || t('table.filterItems', { items: itemLabel })"
           color="neutral"
           variant="outline"
           size="sm"
@@ -132,7 +132,7 @@ function updatePageSize(value: unknown) {
         :content="{ align: 'end' }"
         :ui="{ content: 'min-w-32' }"
       >
-        <UButton
+        <UButton :title="columnsLabel || t('table.columns')"
           color="neutral"
           variant="outline"
           size="sm"
@@ -182,20 +182,20 @@ function updatePageSize(value: unknown) {
           @update:page="emit('update:page', $event)"
         >
           <template #first>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-left" :aria-label="t('table.firstPage')" />
+            <UButton :title="t('table.firstPage')" color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-left" :aria-label="t('table.firstPage')" />
           </template>
           <template #prev>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-left" :aria-label="t('table.previousPage')" />
+            <UButton :title="t('table.previousPage')" color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-left" :aria-label="t('table.previousPage')" />
           </template>
           <template #next>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-right" :aria-label="t('table.nextPage')" />
+            <UButton :title="t('table.nextPage')" color="neutral" variant="outline" size="sm" icon="i-tabler-chevron-right" :aria-label="t('table.nextPage')" />
           </template>
           <template #last>
-            <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-right" :aria-label="t('table.lastPage')" />
+            <UButton :title="t('table.lastPage')" color="neutral" variant="outline" size="sm" icon="i-tabler-chevrons-right" :aria-label="t('table.lastPage')" />
           </template>
         </UPagination>
         <div v-else class="flex items-center gap-1">
-          <UButton
+          <UButton :title="t('table.previousPage')"
             color="neutral"
             variant="outline"
             size="sm"
@@ -205,7 +205,7 @@ function updatePageSize(value: unknown) {
             @click="emit('previousPage')"
           />
           <span class="type-label min-w-14 text-center text-[var(--text-secondary)]">{{ t('table.pageNumber', { page: cursorPage }) }}</span>
-          <UButton
+          <UButton :title="t('table.nextPage')"
             color="neutral"
             variant="outline"
             size="sm"

@@ -225,11 +225,8 @@ onMounted(() => void ai.connect())
 </script>
 
 <template>
-  <section data-testid="ai-profile-settings" class="border-t border-[var(--border)] py-4" aria-labelledby="ai-profile-settings-title">
-    <div class="flex items-start justify-between gap-4">
-      <div class="min-w-0">
-        <h3 id="ai-profile-settings-title" class="type-body m-0 font-semibold text-[var(--text)]">{{ t('ai.profilesTitle') }}</h3>
-      </div>
+  <section data-testid="ai-profile-settings" class="py-2" :aria-label="t('ai.profilesTitle')">
+    <div class="flex items-start justify-end gap-4">
       <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" class="shrink-0" @click="openCreate" />
     </div>
 
@@ -266,12 +263,6 @@ onMounted(() => void ai.connect())
             <span v-if="ai.connectionReports.value[profile.id]?.safeMessage" class="truncate text-[var(--danger)]">{{ ai.connectionReports.value[profile.id]?.safeMessage }}</span>
           </div>
         </div>
-        <UBadge
-          :color="profile.credentialRequired && !profile.hasCredential ? 'warning' : 'neutral'"
-          variant="soft"
-          size="sm"
-          :label="profile.protocol === 'codex_subscription' ? t('ai.codexSubscription') : profile.protocol === 'ollama_chat' ? t('ai.localProvider') : profile.hasCredential ? t('ai.credentialStored') : t('ai.credentialMissing')"
-        />
         <div class="flex shrink-0 items-center gap-1">
           <UButton
             color="neutral"
@@ -285,9 +276,9 @@ onMounted(() => void ai.connect())
             :disabled="ai.busy.value || ai.taskRunning.value || (profile.credentialRequired && !profile.hasCredential)"
             @click="ai.testProfile(profile.id)"
           />
-          <UButton v-if="ai.catalog.value.defaultProfileId !== profile.id" color="neutral" variant="ghost" size="xs" :label="t('ai.makeDefault')" :disabled="ai.busy.value" @click="ai.setDefaultProfile(profile.id)" />
-          <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('ai.editProfile', { name: profile.name })" @click="openEdit(profile)" />
-          <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('ai.deleteProfile', { name: profile.name })" @click="pendingDelete = profile" />
+          <UButton v-if="ai.catalog.value.defaultProfileId !== profile.id" color="neutral" variant="ghost" size="xs" :label="t('ai.makeDefault')" :title="t('ai.useAsDefault')" :disabled="ai.busy.value" @click="ai.setDefaultProfile(profile.id)" />
+          <UButton :title="t('ai.editProfile', { name: profile.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('ai.editProfile', { name: profile.name })" @click="openEdit(profile)" />
+          <UButton :title="t('ai.deleteProfile', { name: profile.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('ai.deleteProfile', { name: profile.name })" @click="pendingDelete = profile" />
         </div>
       </div>
     </div>

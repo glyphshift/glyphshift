@@ -48,7 +48,7 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
 
-  await expect(page.getByRole('heading', { name: 'AI 翻译', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '添加 AI 配置' }).click()
   const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('本地 Ollama')
@@ -91,7 +91,7 @@ test('settings creates a Codex subscription profile without endpoint or credenti
   await dialog.getByRole('button', { name: '保存配置' }).click()
 
   await expect(page.getByText('我的 Codex', { exact: true })).toBeVisible()
-  await expect(page.getByText('Codex 订阅', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Codex 订阅', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/Codex 订阅 · gpt-5\.6-sol/)).toBeVisible()
 })
 
@@ -203,10 +203,10 @@ test('settings keeps AI profiles without a translation confirmation toggle', asy
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
 
-  const aiSection = page.getByRole('region', { name: 'AI 翻译', exact: true })
+  const aiSection = page.getByTestId('settings-section-ai')
   await expect(aiSection).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 翻译执行' })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'AI 翻译', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toHaveCount(1)
   await expect(aiSection.getByRole('heading', { name: 'AI 配置' })).toBeVisible()
   await expect(aiSection.getByRole('button', { name: '添加 AI 配置' })).toBeVisible()
   await expect(page.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveCount(0)

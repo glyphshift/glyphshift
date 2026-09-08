@@ -6,6 +6,7 @@ import type {
   DictionaryCatalogPage,
   DictionaryCatalogQueryRequest,
   DictionaryDetail,
+  DictionaryEntry,
   DictionaryMetadata,
 } from '../model'
 import {
@@ -60,17 +61,17 @@ export function useDictionaryWorkspace() {
     }
   }
 
-  async function createDictionary(metadata: Omit<DictionaryMetadata, 'id'>) {
+  async function createDictionary(metadata: Omit<DictionaryMetadata, 'id'>, entries: DictionaryEntry[] = []) {
     if (workspaceBusy.value) return false
     workspaceBusy.value = true
     setMessage('dictionaries', '')
     const id = `dictionary-${crypto.randomUUID()}`
-    const detail: DictionaryDetail = { metadata: { id, ...metadata }, revision: 1, entries: [] }
+    const detail: DictionaryDetail = { metadata: { ...metadata, id }, revision: 1, entries: clone(entries) }
     try {
       if (hasDesktopRuntime()) {
         applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_create_dictionary', { create: {
           metadata: detail.metadata,
-          entries: [],
+          entries: detail.entries,
         } }))
       }
       else {
@@ -78,7 +79,7 @@ export function useDictionaryWorkspace() {
         model.value.dictionaries = [...model.value.dictionaries, {
           metadata: detail.metadata,
           revision: 1,
-          entryCount: 0,
+          entryCount: detail.entries.length,
           installation: unmanagedInstallation(),
         }].sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
       }

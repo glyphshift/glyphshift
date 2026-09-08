@@ -74,7 +74,7 @@ async function native(action: 'minimize' | 'maximize') {
       <span class="type-caption tabular-nums text-[var(--text-muted)]">v{{ appVersion }}</span>
     </div>
     <nav class="flex items-stretch" :aria-label="t('titleBar.navigation')">
-      <UButton
+      <UButton :title="item.label"
         v-for="item in nav"
         :key="item.id"
         color="neutral"
@@ -127,11 +127,11 @@ async function native(action: 'minimize' | 'maximize') {
         :title="themeToggleLabel"
         @click="toggleTheme"
       />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-help-circle" class="h-full w-10 rounded-none" :class="current === 'help' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.help')" :aria-current="current === 'help' ? 'page' : undefined" @click="emit('navigate', 'help')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.settings')" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" :aria-label="t('titleBar.minimize')" @click="native('minimize')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" :aria-label="t('titleBar.maximize')" @click="native('maximize')" />
-      <UButton color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="emit('close')" />
+      <UButton :title="t('titleBar.help')" color="neutral" variant="ghost" icon="i-tabler-help-circle" class="h-full w-10 rounded-none" :class="current === 'help' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.help')" :aria-current="current === 'help' ? 'page' : undefined" @click="emit('navigate', 'help')" />
+      <UButton :title="t('titleBar.settings')" color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.settings')" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
+      <UButton :title="t('titleBar.minimize')" color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" :aria-label="t('titleBar.minimize')" @click="native('minimize')" />
+      <UButton :title="t('titleBar.maximize')" color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" :aria-label="t('titleBar.maximize')" @click="native('maximize')" />
+      <UButton :title="t('titleBar.close')" color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="emit('close')" />
     </div>
   </header>
 </template>

@@ -11,6 +11,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@iconify-json/lucide": "^1.2.130",
     "@iconify-json/tabler": "^1.2.38",
     "@nuxt/ui": "^4.10.0",
     "@tauri-apps/api": "^2.11.1",

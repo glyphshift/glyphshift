@@ -266,7 +266,9 @@ onBeforeUnmount(() => {
             control-width="compact"
           >
             <div class="space-y-2">
-              <UButton
+              <UButton :title="shortcutRecording === row.target
+                  ? t('settings.shortcutRecordingLabel', { name: row.label })
+                  : t('settings.shortcutChangeLabel', { name: row.label, shortcut: currentShortcutDisplay(row.target) })"
                 color="neutral"
                 variant="outline"
                 class="flex min-h-9 w-full items-center justify-between gap-3 rounded-md border px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"

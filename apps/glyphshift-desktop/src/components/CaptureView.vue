@@ -1098,7 +1098,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
-            <UButton data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
+            <UButton :title="t('capture.adapterFilterLabel')" data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
           </UDropdownMenu>
           <div data-testid="probe-ai-actions" class="inline-flex">
             <UButton
@@ -1112,7 +1112,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
               @click="selectedAiProfile ? runAiTranslation() : emit('configure-ai')"
             />
             <UDropdownMenu :items="aiMenuItems" :content="{ align: 'end' }">
-              <UButton color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
+              <UButton :title="t('ai.translationOptions')" color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
             </UDropdownMenu>
           </div>
         </template>
@@ -1168,7 +1168,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <div class="flex min-w-0 items-center gap-1.5">
             <div class="truncate font-semibold">{{ row.original.name }}</div>
             <UPopover mode="hover" :open-delay="150" :close-delay="100" :content="{ side: 'right', align: 'start', sideOffset: 6 }" :ui="{ content: 'z-[80] w-80 p-0' }">
-              <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-info-circle" class="shrink-0" :aria-label="t('capture.viewTechnicalDetails', { name: row.original.name })" />
+              <UButton :title="t('capture.viewTechnicalDetails', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-info-circle" class="shrink-0" :aria-label="t('capture.viewTechnicalDetails', { name: row.original.name })" />
               <template #content>
                 <div class="space-y-3 p-3">
                   <div>
@@ -1199,7 +1199,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </template>
         <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
-        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
+        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton :title="t('capture.openNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton :title="t('common.deleteNamed', { name: row.original.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
         <template #empty><UEmpty icon="i-tabler-radar-off" :title="listQuery ? t('capture.noRunMatch') : t('capture.empty')" :description="listQuery ? t('capture.adjustSearch') : t('capture.emptyHint')" /></template>
       </UTable>
     </ManagementTableFrame>

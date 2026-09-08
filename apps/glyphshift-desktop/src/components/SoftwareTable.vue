@@ -396,8 +396,8 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
         </template>
         <template #actions-cell="{ row }">
           <div class="flex items-center justify-center gap-1">
-            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.name })" @click="startEdit(row.original)" />
-            <UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original.id]" />
+            <UButton :title="t('common.editNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.name })" @click="startEdit(row.original)" />
+            <UButton :title="t('common.deleteNamed', { name: row.original.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original.id]" />
           </div>
         </template>
         <template #empty>
@@ -437,7 +437,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
               <p class="m-0 text-xs font-semibold text-[var(--text)]">{{ t('software.runningSoftware') }}</p>
               <p class="type-metadata m-0 mt-0.5 leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareHint') }}</p>
             </div>
-            <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-refresh" :aria-label="t('software.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
+            <UButton :title="t('software.refreshRunningSoftware')" color="neutral" variant="ghost" size="xs" icon="i-tabler-refresh" :aria-label="t('software.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
           </div>
           <USelect
             :model-value="runningTargetPath"
