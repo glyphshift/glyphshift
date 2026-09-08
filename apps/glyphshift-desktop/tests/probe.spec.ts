@@ -53,7 +53,7 @@ test('probe detail can launch its bound software', async ({ page }) => {
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-launch-software-compact.png' })
 })
 
-test('empty libraries stay actionable and a running application can create a temporary probe', async ({ page }) => {
+test('empty libraries stay actionable and a running application creates an ordinary probe with a new dictionary', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     const softwareTemplate = structuredClone(snapshot.software[0])
     const dictionaryTemplate = structuredClone(snapshot.dictionaries[0])
@@ -105,14 +105,14 @@ test('empty libraries stay actionable and a running application can create a tem
             dictionaryId: 'quick-dictionary-ui', adapterIds: ['synthetic.ext-text-out'], status: 'running',
             livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
             droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
-            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: false,
           }
           runs = [summary]
           currentSnapshot = {
             ...currentSnapshot,
             selectedSoftwareId: 'software.quick-target',
             software: [{ ...softwareTemplate, id: 'software.quick-target', name: 'QuickTarget', executableName: 'QuickTarget.exe', executablePath: args?.request.target.executablePath }],
-            dictionaries: [{ ...dictionaryTemplate, metadata: { ...dictionaryTemplate.metadata, id: 'quick-dictionary-ui', name: 'QuickTarget 临时词典' }, revision: 1, entryCount: 0 }],
+            dictionaries: [{ ...dictionaryTemplate, metadata: { ...dictionaryTemplate.metadata, id: 'quick-dictionary-ui', name: 'QuickTarget 字典' }, revision: 1, entryCount: 0 }],
           }
           return summary
         }
@@ -143,11 +143,11 @@ test('empty libraries stay actionable and a running application can create a tem
   await page.getByRole('option', { name: 'QuickTarget · QuickTarget.exe · x86_64' }).click()
   await expect(dialog.getByTestId('quick-probe-preflight')).toContainText('已识别 QuickTarget')
 
-  await expect(dialog.getByRole('button', { name: '使用已有词典' })).toBeEnabled()
-  await dialog.getByRole('button', { name: '使用已有词典' }).click()
-  await expect(dialog.getByText('还没有可用词典。')).toBeVisible()
-  await dialog.getByRole('button', { name: '使用临时词典' }).click()
-  await expect(dialog.getByRole('button', { name: '使用临时词典' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('button', { name: '使用已有字典' })).toBeEnabled()
+  await dialog.getByRole('button', { name: '使用已有字典' }).click()
+  await expect(dialog.getByText('还没有字典，可以选择创建新字典。')).toBeVisible()
+  await dialog.getByRole('button', { name: '创建新字典' }).click()
+  await expect(dialog.getByRole('button', { name: '创建新字典' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toBeVisible()
   await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
   await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
@@ -163,7 +163,7 @@ test('empty libraries stay actionable and a running application can create a tem
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __probeCreateRequest?: { dictionary?: unknown } }
   ).__probeCreateRequest?.dictionary)).toEqual({
-    kind: 'temporary',
+    kind: 'new',
     sourceLocale: 'ja-JP',
     targetLocale: 'ko-KR',
   })
@@ -180,20 +180,16 @@ test('empty libraries stay actionable and a running application can create a tem
   await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(5)
   await expect(page.getByTestId('probe-refresh-text')).toBeDisabled()
   await expect(page.getByTestId('probe-ai-actions')).toBeVisible()
-  await expect(page.getByTestId('probe-temporary-task-badge')).toHaveText('临时')
-  await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('临时词典')
-  await expect(page.getByTestId('probe-temporary-dictionary-badge')).toHaveText('临时')
+  await expect(page.getByTestId('probe-temporary-task-badge')).toHaveCount(0)
+  await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('QuickTarget 字典')
+  await expect(page.getByTestId('probe-temporary-dictionary-badge')).toHaveCount(0)
   await openProbeTaskActions(page)
-  await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toBeVisible()
-  await expect(page.getByRole('menuitem', { name: '结束并清理临时内容', exact: true })).toBeVisible()
-  await page.getByRole('menuitem', { name: '保留为常规任务', exact: true }).click()
-  await expect(page.getByTestId('probe-task-actions')).toHaveText('任务操作')
-  await openProbeTaskActions(page)
-  await expect(page.getByRole('menuitem', { name: '探针设置', exact: true })).toBeVisible()
+  for (const name of ['探针设置', '导入 JSON', '导入 CSV', '导出 JSON', '导出 CSV']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toHaveCount(0)
+
 })
 
-test('current-app source can end and clean up at compact English layout', async ({ page }) => {
+test('current-app source can stop without deleting the task at compact English layout', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     let runs: any[] = []
     const preflight = {
@@ -215,15 +211,15 @@ test('current-app source can end and clean up at compact English layout', async 
             dictionaryId: 'quick-dictionary-captured', adapterIds: ['synthetic.ext-text-out'], status: 'running',
             livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
             droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
-            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+            dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: false,
           }
           runs = [summary]
           return summary
         }
-        if (command === 'desktop_cleanup_quick_probe') {
-          runs = []
+        if (command === 'desktop_disconnect_probe_run') {
+          runs = [{ ...runs[0], status: 'disconnected' }]
           ;(window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned = true
-          return { software: 'reused', dictionary: 'removed' }
+          return runs[0]
         }
         if (command === 'desktop_probe_run_entries') {
           return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
@@ -242,7 +238,7 @@ test('current-app source can end and clean up at compact English layout', async 
   await page.getByRole('button', { name: 'New probe run' }).click()
   const dialog = page.getByRole('dialog', { name: 'New probe run' })
   await dialog.getByRole('button', { name: 'Running apps' }).click()
-  await dialog.getByRole('button', { name: 'Use temporary dictionary' }).click()
+  await dialog.getByRole('button', { name: 'Create new dictionary' }).click()
   await expect(dialog.getByRole('textbox', { name: 'Source locale' })).toHaveValue('en-US')
   await expect(dialog.getByRole('textbox', { name: 'Target locale' })).toHaveValue('zh-CN')
   await expect(dialog.getByText(/detected automatically/i)).toHaveCount(0)
@@ -264,22 +260,14 @@ test('current-app source can end and clean up at compact English layout', async 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-tab-running-compact-en.png' })
   await expect(page.getByTestId('probe-detail-actions').getByRole('button')).toHaveCount(5)
-  await expect(page.getByTestId('probe-bound-dictionary-name')).toHaveText('Temporary dictionary')
-  await expect(page.getByText('quick-dictionary-captured', { exact: false })).toHaveCount(0)
-  await openProbeTaskActions(page)
-  await page.getByRole('menuitem', { name: 'End and clean up temporary content', exact: true }).click()
-  const confirmation = page.getByRole('dialog', { name: 'End temporary probe' })
-  await expect(confirmation).toContainText('Existing content and anything still used elsewhere are kept')
-  await confirmation.getByRole('button', { name: 'End and clean up' }).click()
-
-  await expect(confirmation).toHaveCount(0)
+  await expect(page.getByTestId('probe-temporary-task-badge')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Stop running', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Captured Target probe', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Capture', exact: true })).toBeVisible()
-  await expect(page.getByText('Running', { exact: true })).toHaveCount(0)
-  await expect(page.getByText('No probe runs yet')).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('Existing software and dictionaries are unchanged')
+  await expect(page.getByText('No probe runs yet')).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => Boolean((window as unknown as { __quickProbeCleaned?: boolean }).__quickProbeCleaned))).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/quick-probe-compact-en.png' })
+
 })
 
 test('paused probe remains visible on the navigation tab after startup', async ({ page }) => {
@@ -318,7 +306,7 @@ test('current-app source keeps creation recoverable after a target stops during 
       dictionaryId: 'quick-dictionary-retry', adapterIds: ['synthetic.ext-text-out'], status: 'running',
       livePreviewEnabled: false, observationRevision: 0, observedCount: 0, ignoredCount: 0,
       droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1,
-      dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: true,
+      dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: 'direct_replace', quickProbe: false,
     }
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
@@ -354,7 +342,7 @@ test('current-app source keeps creation recoverable after a target stops during 
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
   await dialog.getByRole('button', { name: '运行中软件' }).click()
-  await dialog.getByRole('button', { name: '使用临时词典' }).click()
+  await dialog.getByRole('button', { name: '创建新字典' }).click()
   await dialog.getByRole('button', { name: '使用快捷键捕获' }).click()
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
     detail: {
@@ -382,8 +370,9 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
   await expect(dialog.getByRole('button', { name: '软件列表' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('button', { name: '运行中软件' })).toHaveAttribute('aria-pressed', 'false')
-  await expect(dialog.getByText('使用已有词典', { exact: true })).toBeVisible()
-  await expect(dialog.getByText('使用临时词典', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('使用已有字典', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('创建新字典', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '使用已有字典' }).click()
   await expect(dialog.getByText('界面基础词典', { exact: true })).toBeVisible()
   await expect(dialog.getByText('探针技术', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('实时预览', { exact: true })).toHaveCount(0)
@@ -504,6 +493,7 @@ test('library sources create a normal probe without temporary ownership', async 
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
   const dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  await dialog.getByRole('button', { name: '使用已有字典' }).click()
   await dialog.getByRole('textbox', { name: '任务名称' }).fill('离线软件探针')
   await dialog.getByRole('button', { name: '创建并连接' }).click()
 
@@ -515,17 +505,16 @@ test('library sources create a normal probe without temporary ownership', async 
   await expect(page.getByRole('menuitem', { name: '保留为常规任务', exact: true })).toHaveCount(0)
 })
 
-test('new probe resets temporary source choices after cancellation', async ({ page }) => {
+test('new probe defaults to a new dictionary after cancellation', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 640 })
   await page.getByRole('button', { name: '探针', exact: true }).click()
   await page.getByRole('button', { name: '新建探针任务' }).click()
 
   let dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  const existingDictionaryMode = dialog.getByRole('button', { name: '使用已有词典' })
-  const temporaryDictionaryMode = dialog.getByRole('button', { name: '使用临时词典' })
-  await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'true')
-  await expect(existingDictionaryMode).toHaveClass(/text-primary/)
-  await expect(temporaryDictionaryMode).toHaveAttribute('aria-pressed', 'false')
+  const existingDictionaryMode = dialog.getByRole('button', { name: '使用已有字典' })
+  const temporaryDictionaryMode = dialog.getByRole('button', { name: '创建新字典' })
+  await expect(existingDictionaryMode).toHaveAttribute('aria-pressed', 'false')
+  await expect(temporaryDictionaryMode).toHaveAttribute('aria-pressed', 'true')
   await temporaryDictionaryMode.click()
   await expect(temporaryDictionaryMode).toHaveAttribute('aria-pressed', 'true')
   await expect(temporaryDictionaryMode).toHaveClass(/text-primary/)
@@ -537,8 +526,7 @@ test('new probe resets temporary source choices after cancellation', async ({ pa
 
   await page.getByRole('button', { name: '新建探针任务' }).click()
   dialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await expect(dialog.getByRole('button', { name: '使用已有词典' })).toHaveAttribute('aria-pressed', 'true')
-  await dialog.getByRole('button', { name: '使用临时词典' }).click()
+  await expect(dialog.getByRole('button', { name: '创建新字典' })).toHaveAttribute('aria-pressed', 'true')
   await expect(dialog.getByRole('textbox', { name: '任务名称' })).toHaveValue('')
   await expect(dialog.getByRole('textbox', { name: '源语言' })).toHaveValue('en-US')
   await expect(dialog.getByRole('textbox', { name: '目标语言' })).toHaveValue('zh-CN')
@@ -875,10 +863,10 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toBe('Source 00')
   await page.getByRole('button', { name: '暂停收集' }).click()
   await expect(page.getByRole('button', { name: '继续收集' })).toBeVisible()
-  const disconnect = page.getByRole('button', { name: '释放当前连接', exact: true })
+  const disconnect = page.getByRole('button', { name: '停止运行', exact: true })
   await expect(disconnect).toBeVisible()
   await openProbeTaskActions(page)
-  await expect(page.getByRole('menuitem', { name: '释放当前连接', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: '停止运行', exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
   const pausedTranslation = page.getByRole('textbox', { name: '“Source 0003”的译文' })
   await pausedTranslation.fill('暂停时译文')
@@ -887,7 +875,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
     (window as unknown as { __captureEditRequests?: Array<{ translation: string }> }).__captureEditRequests?.at(-1)?.translation
   ))).toBe('暂停时译文')
   await openProbeTaskActions(page)
-  await expect(page.getByRole('menuitem', { name: '当前联合表 CSV', exact: true })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: '导出 CSV', exact: true })).toBeVisible()
   await page.keyboard.press('Escape')
   await disconnect.click()
   await expect(page.getByRole('button', { name: '连接并继续' })).toBeVisible()
@@ -1121,4 +1109,58 @@ test('probe reconnect gives restart-first recovery when no selected component ac
   await expect(alert).toContainText('请完整退出并重新启动目标软件后重试')
   await expect(alert).toContainText('当前界面暂不受支持')
   await expect(alert).not.toContainText('请在探针设置中重新选择')
+})
+
+
+test('probe import confirms overwrite by default and sends the selected conflict strategy', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const run = { id: 'probe-transfer', name: '导入测试', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.text-out'], status: 'disconnected', livePreviewEnabled: false,
+      observationRevision: 0, observedCount: 0, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 0 }
+    ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 32 }
+      if (command === 'desktop_snapshot') return snapshot
+      if (command === 'desktop_probe_runs') return [run]
+      if (command === 'desktop_probe_run_summary') return run
+      if (command === 'desktop_probe_run_entries') return { observationRevision: 0, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] }
+      if (command === 'plugin:dialog|open') return 'X:/SyntheticFixtures/entries.json'
+      if (command === 'desktop_import_probe_entries') { (window as any).__importRequest = args.request; return run }
+      return null
+    } }
+  }, { snapshot: model })
+  await page.goto('/')
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: '导入测试' }).dblclick()
+  await openProbeTaskActions(page)
+  await page.getByText('导入 JSON', { exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '导入词条' })
+  await expect(dialog.getByText('同原文覆盖（默认）', { exact: true }).first()).toBeVisible()
+  await dialog.getByRole('combobox', { name: '同原文处理方式' }).click()
+  await page.getByRole('option', { name: '保留已有词条' }).click()
+  await dialog.getByRole('button', { name: '导入', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__importRequest)).toEqual({ runId: 'probe-transfer', inputPath: 'X:/SyntheticFixtures/entries.json', format: 'json', mode: 'keep_existing' })
+  await expect(dialog).toHaveCount(0)
+})
+
+
+test('new probe can exclude several dictionaries and prevents excluding its selected dictionary', async ({ page }) => {
+  const snapshot = structuredClone(model)
+  snapshot.dictionaries.push({ ...structuredClone(model.dictionaries[0]), metadata: { ...model.dictionaries[0].metadata, id: 'dictionary-extra', name: '额外字典' } })
+  await replaceModel(page, snapshot)
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '新建探针任务' }).click()
+  const dialog = page.getByRole('dialog', { name: '新建探针任务' })
+  const excluded = dialog.getByRole('button', { name: '排除字典', exact: true })
+  await excluded.click()
+  await page.getByRole('option', { name: '界面基础词典' }).click()
+  await page.getByRole('option', { name: '额外字典' }).click()
+  await page.keyboard.press('Escape')
+  await expect(excluded).toContainText('界面基础词典')
+  await expect(excluded).toContainText('额外字典')
+  await dialog.getByRole('button', { name: '使用已有字典' }).click()
+  await expect(excluded).not.toContainText('界面基础词典')
+  await expect(excluded).toContainText('额外字典')
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-excluded-dictionaries.png' })
 })

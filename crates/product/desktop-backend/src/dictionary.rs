@@ -250,6 +250,14 @@ pub struct DictionaryEdit {
 
 impl DictionaryEdit {
     #[must_use]
+    pub fn from_dictionary(dictionary: &DictionaryView) -> Self {
+        Self { metadata: dictionary.metadata.clone(), base_revision: dictionary.revision,
+            entries: dictionary.entries.iter().map(dictionary_entry_create).collect() }
+    }
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<Box<str>>) -> Self { self.metadata.name = name.into(); self }
+
+    #[must_use]
     pub fn id(&self) -> &str {
         self.metadata.id()
     }

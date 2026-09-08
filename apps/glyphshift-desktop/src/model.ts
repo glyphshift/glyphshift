@@ -141,6 +141,8 @@ export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
 export type ProbeRuntimeCapability = 'direct_replace' | 'collection_only' | 'no_signal'
 
 export interface ProbeRunSummary {
+  excludedDictionaryIds?: string[]
+  exclusionRevisions?: number[]
   id: string
   name: string
   softwareId: string
@@ -182,7 +184,8 @@ export interface ProbeEntryPage {
 }
 
 export type ProbeExportFormat
-  = 'observations_json'
+  = 'entries_json'
+    | 'observations_json'
     | 'observations_csv'
     | 'entries_csv'
     | 'dictionary_json'

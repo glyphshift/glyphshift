@@ -15,6 +15,7 @@ fn incompatible_probe_plan_is_rejected_before_its_draft_dictionary_is_created() 
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     let error = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-incompatible".into(),
             name: "Incompatible probe".into(),
             software_id,
@@ -48,6 +49,7 @@ fn probe_reports_an_incompatible_runtime_bundle_before_adapter_availability() {
 
     let error = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-incompatible-runtime-bundle".into(),
             name: "Incompatible Runtime Bundle".into(),
             software_id,
@@ -84,6 +86,7 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
 
     let created = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-live-preview".into(),
             name: "Live preview probe".into(),
             software_id: software_id.clone(),
@@ -181,6 +184,7 @@ fn probe_creation_waits_for_an_offline_target_instead_of_reporting_creation_fail
 
     let created = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-waiting-target".into(),
             name: "Waiting target probe".into(),
             software_id,
@@ -213,6 +217,7 @@ fn probe_reconnect_explains_when_a_workflow_owns_the_target() {
     }));
     let created = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-workflow-conflict".into(),
             name: "Workflow conflict probe".into(),
             software_id,
@@ -249,6 +254,7 @@ fn probe_view_reports_actual_collection_only_capability_without_persisting_it() 
 
     let created = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-collection-only".into(),
             name: "Collection-only probe".into(),
             software_id,
@@ -275,6 +281,7 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let first = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-first".into(),
             name: "First probe".into(),
             software_id: software_id.clone(),
@@ -336,6 +343,7 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
 
     application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-second".into(),
             name: "Second probe".into(),
             software_id,
@@ -366,6 +374,7 @@ fn probe_resume_reconnects_after_the_old_target_stops_confirming_runtime_control
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-target-exited-before-pause".into(),
             name: "Target exited before pause".into(),
             software_id,
@@ -416,6 +425,7 @@ fn probe_resume_reuses_a_live_runtime_after_pause_confirmation_fails() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-live-after-pause-rejection".into(),
             name: "Live target after pause rejection".into(),
             software_id,
@@ -463,6 +473,7 @@ fn probe_resume_reports_an_offline_target_after_discarding_the_stale_runtime() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-offline-after-pause-rejection".into(),
             name: "Offline target after pause rejection".into(),
             software_id,
@@ -508,6 +519,7 @@ fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary(
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-settings".into(),
             name: "Probe settings".into(),
             software_id: software_id.clone(),
@@ -521,6 +533,7 @@ fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary(
 
     let renamed = application
         .update_probe_run(ProbeRunUpdateRequest {
+            excluded_dictionary_ids: Vec::new(),
             run_id: run.summary.id().into(),
             name: "Renamed probe".into(),
             dictionary_id: "dictionary.product".into(),
@@ -554,6 +567,7 @@ fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary(
     assert!(application.active_probe_run_id.is_none());
     let blocked = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-blocked-while-paused".into(),
             name: "Blocked while paused".into(),
             software_id: software_id.clone(),
@@ -602,6 +616,7 @@ fn cleared_paused_probe_can_be_released_without_stopping_runtime_twice() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-clear-then-release".into(),
             name: "Clear then release".into(),
             software_id,
@@ -658,6 +673,7 @@ fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-ai-plan".into(),
             name: "AI plan probe".into(),
             software_id,
@@ -709,6 +725,7 @@ fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     let run = application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe-ai-writeback".into(),
             name: "AI writeback probe".into(),
             software_id,
@@ -775,4 +792,71 @@ fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
         .entries()
         .iter()
         .any(|entry| entry.source() == "Close" && entry.translation() == "关闭"));
+}
+
+#[test]
+fn probe_import_modes_preserve_metadata_pending_entries_and_reject_partial_bad_input() {
+    use crate::probe_transfer::{ImportMode, ProbeImportRequest};
+    let (mut app, _, software_id, root) = workflow_application();
+    let run = app.create_probe_run(ProbeRunCreateRequest {
+        excluded_dictionary_ids: Vec::new(), id: "probe-import".into(), name: "Import".into(), software_id,
+        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
+        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
+    }).unwrap();
+    let original = app.backend.dictionary(run.summary.dictionary_id()).unwrap().clone();
+    let input = root.path().join("entries.csv");
+    std::fs::write(&input, "source,translation\r\nNew,First\r\nPending,\r\n").unwrap();
+    let request = |mode| ProbeImportRequest { run_id: "probe-import".into(), input_path: input.clone(), format: "csv".into(), mode };
+    app.import_probe_entries(request(ImportMode::Overwrite)).unwrap();
+    assert!(app.backend.dictionary(original.id()).unwrap().entries().iter().any(|e| e.source() == "Pending" && e.translation().is_empty()));
+    std::fs::write(&input, "source,translation\nNew,Second").unwrap();
+    app.import_probe_entries(request(ImportMode::KeepExisting)).unwrap();
+    assert_eq!(app.backend.dictionary(original.id()).unwrap().entries().iter().find(|e| e.source() == "New").unwrap().translation(), "First");
+    app.import_probe_entries(request(ImportMode::Overwrite)).unwrap();
+    assert_eq!(app.backend.dictionary(original.id()).unwrap().entries().iter().find(|e| e.source() == "New").unwrap().translation(), "Second");
+    let before = app.backend.dictionary(original.id()).unwrap().clone();
+    std::fs::write(&input, "source,translation\nNew,Third\nNew,Duplicate").unwrap();
+    assert!(app.import_probe_entries(request(ImportMode::Replace)).is_err());
+    assert_eq!(app.backend.dictionary(original.id()).unwrap(), &before);
+    std::fs::write(&input, "source,translation\nOnly,Replacement").unwrap();
+    app.import_probe_entries(request(ImportMode::Replace)).unwrap();
+    let dictionary = app.backend.dictionary(original.id()).unwrap();
+    assert_eq!(dictionary.metadata(), original.metadata());
+    assert_eq!(dictionary.entries().len(), 1);
+    assert_eq!(dictionary.entries()[0].source(), "Only");
+}
+
+
+#[test]
+fn invalid_exclusion_is_rejected_before_creating_a_dictionary() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    for excluded in ["dictionary.missing", "dictionary.new"] {
+        assert!(app.create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: vec![excluded.into()], id: "probe-excluded".into(), name: "Excluded".into(), software_id: software_id.clone(),
+            adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::New { id: "dictionary.new".into(), name: "New".into(), description: "".into(), source_locale: "en-US".into(), target_locale: "zh-CN".into() },
+        }).is_err());
+        assert!(app.backend.dictionary("dictionary.new").is_err());
+    }
+}
+
+
+#[test]
+fn excluded_dictionary_references_and_revisions_are_preserved() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.excluded", "Excluded", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Done", "完成")])).unwrap();
+    let run = app.create_probe_run(ProbeRunCreateRequest {
+        excluded_dictionary_ids: vec!["dictionary.excluded".into()], id: "probe-exclusion-reference".into(), name: "Exclusion".into(), software_id,
+        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
+        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
+    }).unwrap();
+    assert_eq!(run.exclusion_revisions, vec![1]);
+    let error = app.delete_dictionaries(&["dictionary.excluded".into()]).unwrap_err();
+    assert_eq!(serde_json::to_value(error).unwrap()["code"], "dictionary.referenced");
+    let dictionary = app.backend.dictionary("dictionary.excluded").unwrap().clone();
+    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries([DictionaryEntryCreate::new("Done", "更新")])).unwrap();
+    let refreshed = app.probe_run_summary(run.summary.id()).unwrap();
+    assert_eq!(refreshed.dictionary_revision, run.dictionary_revision);
+    assert_eq!(refreshed.exclusion_revisions, vec![2]);
 }

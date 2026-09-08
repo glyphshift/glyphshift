@@ -16,6 +16,7 @@ export interface ProbeRunQueryInput {
 export type ProbeTranslationFilter = 'all' | 'untranslated' | 'translated'
 
 export interface ProbeRunUpdateInput {
+  excludedDictionaryIds: string[]
   runId: string
   name: string
   dictionaryId: string
@@ -34,9 +35,10 @@ export type ProbeTargetSource
 
 export type ProbeDictionarySource
   = { kind: 'library'; dictionaryId: string }
-    | { kind: 'temporary'; sourceLocale: string; targetLocale: string }
+    | { kind: 'new'; sourceLocale: string; targetLocale: string }
 
 export interface ProbeCreationInput {
+  excludedDictionaryIds: string[]
   target: ProbeTargetSource
   dictionary: ProbeDictionarySource
   name?: string
@@ -48,11 +50,6 @@ export interface ProbeCreationBrowserFallback {
   softwareId?: string
   softwareName: string
   dictionaryId?: string
-}
-
-export interface QuickProbeCleanupResult {
-  software: 'removed' | 'reused' | 'retained'
-  dictionary: 'removed' | 'reused' | 'retained'
 }
 
 export type ProbeActivityStatus = 'running' | 'paused' | null
@@ -135,8 +132,6 @@ export function useProbeRuns() {
     clearMessage()
     try {
       const now = Date.now()
-      const ownsSoftware = input.target.kind === 'active_process' && !fallback.softwareId
-      const ownsDictionary = input.dictionary.kind === 'temporary'
       const summary = hasDesktopRuntime()
         ? await invoke<ProbeRunSummary>('desktop_create_probe_from_sources', { request: input })
         : {
@@ -157,7 +152,8 @@ export function useProbeRuns() {
             dictionaryRevision: 1,
             dictionaryEntryCount: 0,
             runtimeCapability: null,
-            quickProbe: ownsSoftware || ownsDictionary,
+            quickProbe: false,
+            excludedDictionaryIds: input.excludedDictionaryIds,
           }
       upsert(summary)
       selectRun(summary.id)
@@ -165,49 +161,6 @@ export function useProbeRuns() {
     }
     catch (error) {
       reportError(error)
-      return null
-    }
-    finally {
-      busy.value = false
-    }
-  }
-
-  async function retainQuickProbe(runId: string) {
-    if (busy.value) return null
-    const current = runs.value.find(run => run.id === runId)
-    if (!current) return null
-    busy.value = true
-    clearMessage()
-    try {
-      const summary = hasDesktopRuntime()
-        ? await invoke<ProbeRunSummary>('desktop_retain_quick_probe', { runId })
-        : { ...current, quickProbe: false, updatedAtMs: Date.now() }
-      upsert(summary)
-      return summary
-    }
-    catch (error) {
-      reportError(error, runId)
-      return null
-    }
-    finally {
-      busy.value = false
-    }
-  }
-
-  async function cleanupQuickProbe(runId: string) {
-    if (busy.value) return null
-    busy.value = true
-    clearMessage()
-    try {
-      const result = hasDesktopRuntime()
-        ? await invoke<QuickProbeCleanupResult>('desktop_cleanup_quick_probe', { runId })
-        : { software: 'reused' as const, dictionary: 'removed' as const }
-      runs.value = runs.value.filter(run => run.id !== runId)
-      if (selectedRunId.value === runId) selectRun('')
-      return result
-    }
-    catch (error) {
-      reportError(error, runId)
       return null
     }
     finally {
@@ -315,6 +268,10 @@ export function useProbeRuns() {
 
   async function disconnect(runId: string) {
     return runSummaryCommand('desktop_disconnect_probe_run', { runId })
+  }
+
+  async function importEntries(runId: string, inputPath: string, format: 'json' | 'csv', mode: string) {
+    return runSummaryCommand('desktop_import_probe_entries', { request: { runId, inputPath, format, mode } })
   }
 
   async function refreshText(runId: string) {
@@ -455,8 +412,6 @@ export function useProbeRuns() {
     selectRun,
     compatibleAdapters,
     createFromSources,
-    retainQuickProbe,
-    cleanupQuickProbe,
     remove,
     update,
     clearEntries,
@@ -470,6 +425,7 @@ export function useProbeRuns() {
     syncDictionaryEntries,
     bulk,
     exportRun,
+    importEntries,
     report,
   }
 }

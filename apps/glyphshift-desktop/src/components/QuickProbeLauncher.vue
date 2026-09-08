@@ -8,7 +8,7 @@ import { useProbeRuns } from '../useProbeRuns'
 import ManagementFormModal from './ManagementFormModal.vue'
 
 type TargetMode = 'library' | 'active'
-type DictionaryMode = 'library' | 'temporary'
+type DictionaryMode = 'library' | 'new'
 
 const props = defineProps<{
   open: boolean
@@ -31,8 +31,11 @@ const { t } = useI18n()
 const probe = useProbeRuns()
 const targetMode = ref<TargetMode>('library')
 const softwareId = ref('')
-const dictionaryMode = ref<DictionaryMode>('library')
+const dictionaryMode = ref<DictionaryMode>('new')
 const dictionaryId = ref('')
+const excludedDictionaryIds = ref<string[]>([])
+const exclusionItems = computed(() => props.dictionaries.filter(item => dictionaryMode.value !== 'library' || item.metadata.id !== dictionaryId.value).map(item => ({ value: item.metadata.id, label: item.metadata.name })))
+watch([dictionaryId, dictionaryMode], () => { excludedDictionaryIds.value = excludedDictionaryIds.value.filter(id => exclusionItems.value.some(item => item.value === id)) })
 const sourceLocale = ref('en-US')
 const targetLocale = ref('zh-CN')
 const runName = ref('')
@@ -152,7 +155,8 @@ watch(() => props.open, (open) => {
   if (!open) return
   targetMode.value = librarySoftware.value.length ? 'library' : 'active'
   softwareId.value = librarySoftware.value[0]?.id ?? ''
-  dictionaryMode.value = props.dictionaries.length ? 'library' : 'temporary'
+  dictionaryMode.value = 'new'
+  excludedDictionaryIds.value = []
   dictionaryId.value = props.dictionaries[0]?.metadata.id ?? ''
   sourceLocale.value = 'en-US'
   targetLocale.value = 'zh-CN'
@@ -216,11 +220,12 @@ async function start() {
     dictionary: dictionaryMode.value === 'library'
       ? { kind: 'library', dictionaryId: selectedDictionary.value!.metadata.id }
       : {
-          kind: 'temporary',
+          kind: 'new',
           sourceLocale: sourceLocale.value.trim(),
           targetLocale: targetLocale.value.trim(),
         },
     name: runName.value.trim() || undefined,
+    excludedDictionaryIds: [...excludedDictionaryIds.value],
     adapterIds: [],
     livePreviewEnabled: false,
   }, {
@@ -290,15 +295,19 @@ async function start() {
 
       <UFormField :label="t('capture.dictionaryBinding')" required>
         <div class="mb-2 flex rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] p-0.5" role="group" :aria-label="t('capture.dictionaryBinding')">
+          <UButton class="flex-1" :color="dictionaryMode === 'new' ? 'primary' : 'neutral'" size="xs" :variant="dictionaryMode === 'new' ? 'soft' : 'ghost'" :label="t('capture.useTemporaryDictionary')" :aria-pressed="dictionaryMode === 'new'" @click="selectDictionaryMode('new')" />
           <UButton class="flex-1" :color="dictionaryMode === 'library' ? 'primary' : 'neutral'" size="xs" :variant="dictionaryMode === 'library' ? 'soft' : 'ghost'" :label="t('capture.useExistingDictionary')" :aria-pressed="dictionaryMode === 'library'" @click="selectDictionaryMode('library')" />
-          <UButton class="flex-1" :color="dictionaryMode === 'temporary' ? 'primary' : 'neutral'" size="xs" :variant="dictionaryMode === 'temporary' ? 'soft' : 'ghost'" :label="t('capture.useTemporaryDictionary')" :aria-pressed="dictionaryMode === 'temporary'" @click="selectDictionaryMode('temporary')" />
         </div>
         <USelect v-if="dictionaryMode === 'library' && dictionaries.length" v-model="dictionaryId" :items="dictionaries.map(item => ({ value: item.metadata.id, label: item.metadata.name }))" value-key="value" label-key="label" :aria-label="t('capture.useExistingDictionary')" class="w-full" />
         <UAlert v-else-if="dictionaryMode === 'library'" color="neutral" variant="soft" icon="i-tabler-books" :title="t('capture.dictionaryLibraryEmptyTitle')" :description="t('capture.dictionaryLibraryEmptyDescription')" />
         <UAlert v-else color="neutral" variant="soft" icon="i-tabler-wand" :title="t('capture.temporaryDictionaryTitle')" :description="t('capture.temporaryDictionaryHint')" />
       </UFormField>
 
-      <div v-if="dictionaryMode === 'temporary'" class="grid grid-cols-2 gap-3 @max-[560px]:grid-cols-1">
+      <UFormField :label="t('capture.excludedDictionaries')" :description="t('capture.excludedDictionariesHint')">
+        <USelectMenu v-model="excludedDictionaryIds" :items="exclusionItems" multiple value-key="value" :aria-label="t('capture.excludedDictionaries')" :placeholder="t('capture.noExcludedDictionaries')" class="w-full" />
+      </UFormField>
+
+      <div v-if="dictionaryMode === 'new'" class="grid grid-cols-2 gap-3 @max-[560px]:grid-cols-1">
         <UFormField :label="t('capture.sourceLocale')" :hint="t('capture.quickProbe.sourceLocaleHint')" required>
           <UInput v-model="sourceLocale" :aria-label="t('capture.sourceLocale')" class="w-full" maxlength="64" />
         </UFormField>

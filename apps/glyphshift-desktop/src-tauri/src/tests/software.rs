@@ -143,6 +143,7 @@ fn software_delete_reports_references_before_touching_the_runtime() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe.software-reference".into(),
             name: "Software reference".into(),
             software_id: software_id.clone(),

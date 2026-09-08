@@ -322,7 +322,7 @@ impl DesktopApplication {
             .filter(|run| {
                 dictionary_ids
                     .iter()
-                    .any(|id| id.as_ref() == run.dictionary_id())
+                    .any(|id| id.as_ref() == run.dictionary_id() || run.excluded_dictionary_ids().contains(id))
             })
             .map(|run| Box::<str>::from(run.name()))
             .collect::<BTreeSet<_>>();

@@ -199,6 +199,7 @@ fn dictionary_delete_reports_the_workflows_and_probes_that_reference_it() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     application
         .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
             id: "probe.dictionary-reference".into(),
             name: "词典定位探针".into(),
             software_id,

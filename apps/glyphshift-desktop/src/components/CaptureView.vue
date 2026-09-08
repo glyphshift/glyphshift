@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { save } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
 import { adapterDisplayName, adapterSummary } from '../adapterPresentation'
@@ -22,7 +22,7 @@ import {
   managementSelectionColumnMeta,
 } from '../tableInteraction'
 import { useCaptureScrollbar } from '../useCaptureScrollbar'
-import { useProbeRuns, type ProbeTranslationFilter, type QuickProbeCleanupResult } from '../useProbeRuns'
+import { useProbeRuns, type ProbeTranslationFilter } from '../useProbeRuns'
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
@@ -95,11 +95,13 @@ const { columns: entryVisibleColumns, toggleColumn: toggleEntryColumn } = useTab
 })
 const pendingRemoval = ref<ProbeRunSummary[]>([])
 const quickProbeOpen = ref(false)
-const pendingQuickCleanup = ref<ProbeRunSummary | null>(null)
-const quickProbeNotice = ref('')
 const settingsOpen = ref(false)
 const settingsName = ref('')
+const pendingImport = ref<{ runId: string; path: string; format: 'json' | 'csv' } | null>(null)
+const importMode = ref('overwrite')
+const importModeItems = computed(() => ['overwrite', 'keep_existing', 'replace'].map(value => ({ value, label: t(`capture.importModes.${value}`) })))
 const settingsDictionaryId = ref('')
+const settingsExcludedDictionaryIds = ref<string[]>([])
 const settingsAdapterIds = ref<string[]>([])
 const settingsLivePreview = ref(false)
 const settingsCompatibleAdapterIds = ref<string[] | null>(null)
@@ -160,9 +162,6 @@ const activeDisplayedAiJob = computed(() => {
 })
 const selectedSoftware = computed(() => props.software.find(item => item.id === selectedRun.value?.softwareId))
 const selectedDictionary = computed(() => props.dictionaries.find(item => item.metadata.id === selectedRun.value?.dictionaryId))
-const selectedRunHasTemporaryDictionary = computed(() => Boolean(
-  selectedRun.value && isTemporaryProbeDictionary(selectedRun.value),
-))
 const selectedRunDictionaryName = computed(() => (
   selectedRun.value ? runDictionaryName(selectedRun.value) : ''
 ))
@@ -246,6 +245,7 @@ const settingsChanged = computed(() => {
   return (
     settingsName.value.trim() !== run.name
     || settingsDictionaryId.value !== run.dictionaryId
+    || JSON.stringify(settingsExcludedDictionaryIds.value) !== JSON.stringify(run.excludedDictionaryIds ?? [])
     || JSON.stringify(settingsAdapterIds.value) !== JSON.stringify(run.adapterIds)
     || settingsLivePreview.value !== run.livePreviewEnabled
   )
@@ -253,7 +253,7 @@ const settingsChanged = computed(() => {
 const activeRunExists = computed(() => Boolean(probe.activityStatus.value))
 const bulkRunDeletionBlocked = computed(() => [...listSelected.value].some((id) => {
   const run = probe.runs.value.find(item => item.id === id)
-  return !run?.quickProbe && ['running', 'paused'].includes(run?.status ?? '')
+  return ['running', 'paused'].includes(run?.status ?? '')
 }))
 const filteredRuns = computed(() => {
   const needle = listQuery.value.trim().toLowerCase()
@@ -304,39 +304,16 @@ const entryColumns = computed<TableColumn<ProbeEntryRow>[]>(() => [
   ...(entryVisibleColumns.value.lastSeen ? [{ accessorKey: 'lastSeenMs', header: t('capture.columns.lastSeen'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeEntryRow>] : []),
 ])
 const exportItems = computed<DropdownMenuItem[][]>(() => [[
-  { label: t('capture.exportEntriesCsv'), icon: 'i-tabler-file-type-csv', onSelect: () => void chooseExport('entries_csv') },
-  { label: t('capture.exportDictionary'), icon: 'i-tabler-language', disabled: !selectedRun.value?.dictionaryEntryCount, onSelect: () => void chooseExport('dictionary_json') },
+  { label: t('capture.importJson'), icon: 'i-tabler-file-import', onSelect: () => void chooseImport('json') },
+  { label: t('capture.importCsv'), icon: 'i-tabler-file-import', onSelect: () => void chooseImport('csv') },
 ], [
-  { label: t('capture.exportObservationsCsv'), icon: 'i-tabler-file-type-csv', onSelect: () => void chooseExport('observations_csv') },
-  { label: t('capture.exportObservationsJson'), icon: 'i-tabler-braces', onSelect: () => void chooseExport('observations_json') },
+  { label: t('capture.exportJson'), icon: 'i-tabler-file-export', onSelect: () => void chooseExport('entries_json') },
+  { label: t('capture.exportCsv'), icon: 'i-tabler-file-export', onSelect: () => void chooseExport('entries_csv') },
 ]])
-const taskActionLabel = computed(() => selectedRun.value?.quickProbe
-  ? t('capture.quickProbe.menu')
-  : t('capture.taskActions'))
-const taskActionItems = computed<DropdownMenuItem[][]>(() => {
-  const run = selectedRun.value
-  if (!run) return []
-  if (run.quickProbe) {
-    return [[{
-      label: t('capture.quickProbe.retainAsRegular'),
-      icon: 'i-tabler-bookmark',
-      disabled: probe.busy.value,
-      onSelect: () => void retainQuickProbe(),
-    }], [{
-      label: t('capture.quickProbe.cleanupTemporaryAssets'),
-      icon: 'i-tabler-trash-x',
-      color: 'error',
-      disabled: probe.busy.value,
-      onSelect: () => { pendingQuickCleanup.value = run },
-    }]]
-  }
-
-  return [[{
-    label: t('capture.settings'),
-    icon: 'i-tabler-settings',
-    onSelect: () => void openSettings(),
-  }], ...exportItems.value]
-})
+const taskActionLabel = computed(() => t('capture.taskActions'))
+const taskActionItems = computed<DropdownMenuItem[][]>(() => selectedRun.value ? [[{
+  label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings(),
+}], ...exportItems.value] : [])
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
     type: 'checkbox' as const,
@@ -353,6 +330,8 @@ const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   }],
 ])
 
+watch(settingsDictionaryId, (id) => { settingsExcludedDictionaryIds.value = settingsExcludedDictionaryIds.value.filter(excluded => excluded !== id) })
+
 watch(settingsAdapterIds, () => {
   if (!settingsPreviewAvailable.value) settingsLivePreview.value = false
 }, { deep: true })
@@ -361,6 +340,7 @@ watch(() => probe.selectedRunId.value, async (id, previous) => {
   if (id === previous) return
   selected.value = new Set()
   dictionaryNotice.value = ''
+  pendingImport.value = null
   restoreViewState(id)
   await loadPage()
 })
@@ -544,10 +524,12 @@ async function poll() {
   if (!run) return
   const previousObservation = run.observationRevision
   const previousDictionary = run.dictionaryRevision
+  const previousExclusions = JSON.stringify([run.excludedDictionaryIds, run.exclusionRevisions])
   const summary = await probe.refreshSummary(run.id)
   if (summary && (
     summary.observationRevision !== previousObservation
     || summary.dictionaryRevision !== previousDictionary
+    || JSON.stringify([summary.excludedDictionaryIds, summary.exclusionRevisions]) !== previousExclusions
   )) await loadPage()
 }
 
@@ -558,6 +540,7 @@ async function openSettings() {
   if (!run) return
   settingsName.value = run.name
   settingsDictionaryId.value = run.dictionaryId
+  settingsExcludedDictionaryIds.value = [...(run.excludedDictionaryIds ?? [])]
   settingsAdapterIds.value = [...run.adapterIds]
   settingsLivePreview.value = run.livePreviewEnabled
   settingsCompatibleAdapterIds.value = null
@@ -575,38 +558,10 @@ async function openSettings() {
 }
 
 async function handleQuickProbeStarted(runId: string) {
-  quickProbeNotice.value = ''
   emit('workspace-changed')
   probe.selectRun(runId)
   await nextTick()
   await loadPage()
-}
-
-async function retainQuickProbe() {
-  const run = selectedRun.value
-  if (!run?.quickProbe) return
-  if (await probe.retainQuickProbe(run.id)) emit('workspace-changed')
-}
-
-async function confirmQuickProbeCleanup() {
-  const run = pendingQuickCleanup.value
-  if (!run) return
-  const result = await probe.cleanupQuickProbe(run.id)
-  if (result) {
-    pendingQuickCleanup.value = null
-    quickProbeNotice.value = quickProbeCleanupNotice(result)
-    emit('workspace-changed')
-  }
-}
-
-function quickProbeCleanupNotice(result: QuickProbeCleanupResult) {
-  if (result.software === 'retained' || result.dictionary === 'retained') {
-    return t('capture.quickProbe.cleanupReferencedNotice')
-  }
-  if (result.software === 'reused' || result.dictionary === 'reused') {
-    return t('capture.quickProbe.cleanupReusedNotice')
-  }
-  return t('capture.quickProbe.cleanupCompleteNotice')
 }
 
 async function closeDetail() {
@@ -623,6 +578,7 @@ async function applySettings() {
     runId: run.id,
     name: settingsName.value.trim(),
     dictionaryId: settingsDictionaryId.value,
+    excludedDictionaryIds: [...settingsExcludedDictionaryIds.value],
     adapterIds: [...settingsAdapterIds.value],
     livePreviewEnabled: settingsLivePreview.value,
   })
@@ -917,15 +873,7 @@ function dictionaryName(id: string) {
   return props.dictionaries.find(item => item.metadata.id === id)?.metadata.name ?? t('capture.dictionaryUnavailable')
 }
 
-function isTemporaryProbeDictionary(run: ProbeRunSummary) {
-  return run.quickProbe && run.dictionaryId.startsWith('quick-dictionary-')
-}
-
-function runDictionaryName(run: ProbeRunSummary) {
-  return isTemporaryProbeDictionary(run)
-    ? t('capture.quickProbe.temporaryDictionary')
-    : dictionaryName(run.dictionaryId)
-}
+function runDictionaryName(run: ProbeRunSummary) { return dictionaryName(run.dictionaryId) }
 
 function adapterName(id: string) {
   const adapter = props.adapters.find(candidate => candidate.id === id)
@@ -987,13 +935,35 @@ function formatTime(value: number) {
   return new Intl.DateTimeFormat(locale.value, { hour: '2-digit', minute: '2-digit' }).format(value)
 }
 
+async function chooseImport(format: 'json' | 'csv') {
+  const run = selectedRun.value
+  if (!run || !('__TAURI_INTERNALS__' in window)) return
+  const path = await open({ title: t('capture.importTitle'), multiple: false, filters: [{ name: format.toUpperCase(), extensions: [format] }] })
+  if (typeof path !== 'string' || selectedRun.value?.id !== run.id) return
+  importMode.value = 'overwrite'
+  pendingImport.value = { runId: run.id, path, format }
+}
+
+async function confirmImport() {
+  const input = pendingImport.value
+  if (!input || selectedRun.value?.id !== input.runId) return
+  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  await translationSaveQueue
+  if (dirtyTranslations.size || selectedRun.value?.id !== input.runId) return
+  if (await probe.importEntries(input.runId, input.path, input.format, importMode.value)) {
+    pendingImport.value = null
+    emit('workspace-changed')
+    await loadPage()
+  }
+}
+
 async function chooseExport(format: ProbeExportFormat) {
   const run = selectedRun.value
   if (!run || !('__TAURI_INTERNALS__' in window)) return
   const csv = format.endsWith('_csv')
   const outputPath = await save({
     title: t('capture.export'),
-    defaultPath: `${run.name}-${format}.${csv ? 'csv' : 'json'}`,
+    defaultPath: `${run.name}.${csv ? 'csv' : 'json'}`,
     filters: [{ name: csv ? 'CSV' : 'JSON', extensions: [csv ? 'csv' : 'json'] }],
   })
   if (outputPath) await probe.exportRun(run.id, format, outputPath)
@@ -1026,7 +996,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <template #status>
         <div class="flex items-center gap-1.5">
           <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
-          <UBadge v-if="selectedRun.quickProbe" data-testid="probe-temporary-task-badge" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
           <UBadge
             v-if="selectedRun.runtimeCapability"
             data-testid="probe-runtime-capability"
@@ -1080,7 +1049,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="probe.clearMessage()" /></template>
     </UAlert>
-    <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
 
     <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
@@ -1118,7 +1086,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 items-center gap-2">
           <strong data-testid="probe-bound-dictionary-name" class="truncate text-xs text-[var(--text)]">{{ selectedRunDictionaryName }}</strong>
-          <UBadge v-if="selectedRunHasTemporaryDictionary" data-testid="probe-temporary-dictionary-badge" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
           <UBadge v-if="selectedDictionary" color="neutral" variant="soft" size="sm" :label="`${selectedDictionary.metadata.sourceLocale} → ${selectedDictionary.metadata.targetLocale}`" />
           <span class="type-metadata shrink-0 text-[var(--text-muted)]">{{ t('capture.dictionaryEntries', { count: selectedRun.dictionaryEntryCount }) }}</span>
         </div>
@@ -1200,7 +1167,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         <template #run-cell="{ row }">
           <div class="flex min-w-0 items-center gap-1.5">
             <div class="truncate font-semibold">{{ row.original.name }}</div>
-            <UBadge v-if="row.original.quickProbe" color="primary" variant="soft" size="sm" :label="t('capture.quickProbe.badge')" />
             <UPopover mode="hover" :open-delay="150" :close-delay="100" :content="{ side: 'right', align: 'start', sideOffset: 6 }" :ui="{ content: 'z-[80] w-80 p-0' }">
               <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-info-circle" class="shrink-0" :aria-label="t('capture.viewTechnicalDetails', { name: row.original.name })" />
               <template #content>
@@ -1233,7 +1199,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </template>
         <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
-        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton v-if="row.original.quickProbe" color="error" variant="ghost" size="xs" icon="i-tabler-trash-x" :aria-label="t('capture.quickProbe.cleanupNamed', { name: row.original.name })" @click="pendingQuickCleanup = row.original" /><UButton v-else color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
+        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
         <template #empty><UEmpty icon="i-tabler-radar-off" :title="listQuery ? t('capture.noRunMatch') : t('capture.empty')" :description="listQuery ? t('capture.adjustSearch') : t('capture.emptyHint')" /></template>
       </UTable>
     </ManagementTableFrame>
@@ -1300,6 +1266,9 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         <UFormField :label="t('capture.boundDictionary')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : t('capture.dictionaryBindingHint')" required>
           <USelect v-model="settingsDictionaryId" :items="settingsDictionaryItems" value-key="value" label-key="label" class="w-full" :disabled="settingsConfigurationLocked" />
         </UFormField>
+        <UFormField :label="t('capture.excludedDictionaries')" :description="t('capture.excludedDictionariesHint')">
+          <USelectMenu v-model="settingsExcludedDictionaryIds" :items="settingsDictionaryItems.filter(item => item.value !== settingsDictionaryId)" multiple value-key="value" :aria-label="t('capture.excludedDictionaries')" :placeholder="t('capture.noExcludedDictionaries')" class="w-full" :disabled="settingsConfigurationLocked" />
+        </UFormField>
 
         <UFormField :label="t('capture.adapters')" :hint="settingsConfigurationLocked ? t('capture.releaseToEditSettings') : settingsCompatibilityLoading ? t('capture.loadingCompatibleAdapters') : compatibleSettingsAdapters.length ? t('capture.adaptersHint') : t('capture.noCompatibleAdapters')" required><ProbeAdapterPicker v-model="settingsAdapterIds" :adapters="compatibleSettingsAdapters" :disabled="settingsConfigurationLocked || settingsCompatibilityLoading" /></UFormField>
 
@@ -1319,16 +1288,15 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </div>
     </ManagementFormModal>
 
+    <ManagementFormModal :open="Boolean(pendingImport)" :title="t('capture.importTitle')" :confirm-label="t('capture.importConfirm')" :busy="probe.busy.value" @update:open="$event || (pendingImport = null)" @confirm="confirmImport">
+      <UFormField :label="t('capture.importConflict')">
+        <USelect v-model="importMode" :items="importModeItems" value-key="value" :aria-label="t('capture.importConflict')" class="w-full" />
+      </UFormField>
+      <p class="type-metadata text-[var(--text-muted)]">{{ t(importMode === 'replace' ? 'capture.importReplaceHint' : 'capture.importMergeHint') }}</p>
+      <UAlert v-if="probe.message.value" role="alert" color="error" :description="probe.message.value" />
+    </ManagementFormModal>
+
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :confirm-label="t('capture.deleteConfirm')" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />
-    <ConfirmDialog
-      :open="Boolean(pendingQuickCleanup)"
-      :title="t('capture.quickProbe.cleanupTitle')"
-      :description="t('capture.quickProbe.cleanupDescription')"
-      :confirm-label="t('capture.quickProbe.cleanupConfirm')"
-      :busy="probe.busy.value"
-      @update:open="$event || (pendingQuickCleanup = null)"
-      @confirm="confirmQuickProbeCleanup"
-    />
     <ConfirmDialog
       :open="clearAllOpen"
       :title="t('capture.clearAllTitle')"

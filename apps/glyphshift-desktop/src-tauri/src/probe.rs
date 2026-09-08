@@ -43,6 +43,8 @@ pub(super) struct ProbeRunCreateRequest {
     pub(super) software_id: Box<str>,
     pub(super) adapter_ids: Vec<Box<str>>,
     pub(super) live_preview_enabled: bool,
+    #[serde(default)]
+    pub(super) excluded_dictionary_ids: Vec<Box<str>>,
     pub(super) dictionary: ProbeDictionaryBindingRequest,
 }
 
@@ -52,6 +54,8 @@ pub(super) struct ProbeRunUpdateRequest {
     pub(super) run_id: Box<str>,
     pub(super) name: Box<str>,
     pub(super) dictionary_id: Box<str>,
+    #[serde(default)]
+    pub(super) excluded_dictionary_ids: Vec<Box<str>>,
     pub(super) adapter_ids: Vec<Box<str>>,
     pub(super) live_preview_enabled: bool,
 }
@@ -132,6 +136,7 @@ pub(super) struct ProbeRunView {
     #[serde(flatten)]
     pub(super) summary: ProbeRunSummary,
     pub(super) dictionary_revision: u64,
+    pub(super) exclusion_revisions: Vec<u64>,
     pub(super) dictionary_entry_count: usize,
     pub(super) runtime_capability: Option<ProbeRuntimeCapability>,
     pub(super) quick_probe: bool,
@@ -223,7 +228,11 @@ impl DesktopApplication {
             runtime_capability: (self.active_probe_run_id.as_deref() == Some(summary.id()))
                 .then_some(self.active_probe_capability)
                 .flatten(),
-            quick_probe: self.quick_probe_sessions.contains(summary.id()),
+            quick_probe: false,
+            exclusion_revisions: summary.excluded_dictionary_ids().iter()
+                .map(|id| self.backend.dictionary(id).map(|dictionary| dictionary.revision())
+                    .map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string())))
+                .collect::<Result<Vec<_>, _>>()?,
             summary,
             dictionary_revision: dictionary.revision(),
             dictionary_entry_count: dictionary.entries().len(),
@@ -242,10 +251,26 @@ impl DesktopApplication {
             dictionary
                 .entries()
                 .iter()
-                .filter(|entry| !entry.translation().trim().is_empty())
                 .map(|entry| ProbeDictionaryEntry::new(entry.source(), entry.translation())),
         )
         .map_err(probe_run_error)
+    }
+
+    fn validate_probe_exclusions(&self, dictionary_id: &str, excluded: &[Box<str>]) -> Result<(), CommandError> {
+        if excluded.iter().any(|id| id.as_ref() == dictionary_id) || excluded.iter().collect::<BTreeSet<_>>().len() != excluded.len() {
+            return Err(CommandError::new("capture.invalid_configuration"));
+        }
+        for id in excluded { self.backend.dictionary(id).map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string()))?; }
+        Ok(())
+    }
+
+    pub(super) fn probe_entries_snapshot(&self, summary: &ProbeRunSummary) -> Result<ProbeDictionarySnapshot, CommandError> {
+        let mut excluded = BTreeSet::new();
+        for id in summary.excluded_dictionary_ids() {
+            let dictionary = self.backend.dictionary(id).map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string()))?;
+            excluded.extend(dictionary.entries().iter().filter(|entry| !entry.translation().trim().is_empty()).map(|entry| entry.source().to_owned()));
+        }
+        Ok(self.probe_dictionary_snapshot(summary.dictionary_id())?.with_excluded_sources(excluded))
     }
 
     pub(super) fn probe_run_list(&mut self) -> Result<Vec<ProbeRunView>, CommandError> {
@@ -279,6 +304,11 @@ impl DesktopApplication {
         if request.live_preview_enabled && !self.adapters_support_preview(&adapter_ids) {
             return Err(CommandError::new("capture.preview_unavailable"));
         }
+        let requested_dictionary_id = match &request.dictionary {
+            ProbeDictionaryBindingRequest::Existing { dictionary_id } => dictionary_id,
+            ProbeDictionaryBindingRequest::New { id, .. } => id,
+        };
+        self.validate_probe_exclusions(requested_dictionary_id, &request.excluded_dictionary_ids)?;
         let dictionary_id = match request.dictionary {
             ProbeDictionaryBindingRequest::Existing { dictionary_id } => {
                 self.backend.dictionary(&dictionary_id).map_err(|_| {
@@ -302,6 +332,7 @@ impl DesktopApplication {
                 id
             }
         };
+        self.validate_probe_exclusions(&dictionary_id, &request.excluded_dictionary_ids)?;
         let create = ProbeRunCreate::new(
             request.id,
             request.name,
@@ -311,6 +342,7 @@ impl DesktopApplication {
             request.live_preview_enabled,
         )
         .map_err(probe_run_error)?;
+        let create = create.with_excluded_dictionaries(request.excluded_dictionary_ids).map_err(probe_run_error)?;
         let summary = self.probe_runs.create(create).map_err(probe_run_error)?;
         self.start_probe_run_runtime(summary.id(), true)
     }
@@ -361,7 +393,9 @@ impl DesktopApplication {
                     .with_arg("dictionaryId", request.dictionary_id.to_string())
             })?;
         let adapter_ids = request.adapter_ids.clone();
-        let configuration_changed = current.adapter_ids() != adapter_ids.as_slice()
+        self.validate_probe_exclusions(&request.dictionary_id, &request.excluded_dictionary_ids)?;
+        let configuration_changed = current.excluded_dictionary_ids() != request.excluded_dictionary_ids.as_slice()
+            || current.adapter_ids() != adapter_ids.as_slice()
             || current.dictionary_id() != request.dictionary_id.as_ref()
             || current.live_preview_enabled() != request.live_preview_enabled;
         if configuration_changed {
@@ -380,6 +414,7 @@ impl DesktopApplication {
             request.live_preview_enabled,
         )
         .map_err(probe_run_error)?;
+        let update = update.with_excluded_dictionaries(request.excluded_dictionary_ids).map_err(probe_run_error)?;
         let summary = self
             .probe_runs
             .update(&request.run_id, update)
@@ -516,6 +551,7 @@ impl DesktopApplication {
                     true,
                 )
                 .map_err(probe_run_error)?;
+                let update = update.with_excluded_dictionaries(summary.excluded_dictionary_ids().to_vec()).map_err(probe_run_error)?;
                 self.probe_runs
                     .update(run_id, update)
                     .map_err(probe_run_error)
@@ -648,7 +684,7 @@ impl DesktopApplication {
             .probe_runs
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
-        let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+        let dictionary = self.probe_entries_snapshot(&summary)?;
         self.probe_runs
             .query_entries(&request.run_id, &query, &dictionary)
             .map_err(probe_run_error)
@@ -819,7 +855,7 @@ impl DesktopApplication {
                 .dictionary_json(summary.dictionary_id())
                 .map_err(|_| CommandError::new("capture.export_failed"))?
         } else {
-            let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+            let dictionary = self.probe_entries_snapshot(&summary)?;
             self.probe_runs
                 .export(&request.run_id, request.format, &dictionary)
                 .map_err(probe_run_error)?
@@ -907,7 +943,7 @@ impl DesktopApplication {
                 | RouteOperator::Io => {}
             }
         }
-        let dictionary = self.probe_dictionary_snapshot(summary.dictionary_id())?;
+        let dictionary = self.probe_entries_snapshot(&summary)?;
         let entries = self
             .probe_runs
             .preview_entries(run_id, &dictionary)

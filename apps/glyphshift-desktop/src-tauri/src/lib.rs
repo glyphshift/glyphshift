@@ -3,6 +3,7 @@ mod command_error;
 mod dictionary;
 mod font_catalog;
 mod probe;
+mod probe_transfer;
 mod quick_probe;
 mod settings;
 mod shortcut;
@@ -747,6 +748,7 @@ pub fn run() {
             probe::desktop_sync_probe_dictionary_entries,
             probe::desktop_bulk_probe_entries,
             probe::desktop_export_probe_run,
+            probe_transfer::desktop_import_probe_entries,
             quick_probe::desktop_create_probe_from_sources,
             quick_probe::desktop_retain_quick_probe,
             quick_probe::desktop_cleanup_quick_probe,

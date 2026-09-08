@@ -424,7 +424,7 @@ impl DesktopApplication {
             .dictionary(summary.dictionary_id())
             .cloned()
             .map_err(|_| CommandError::new("dictionary.not_found"))?;
-        let snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
+        let snapshot = self.probe_entries_snapshot(&summary)?;
         let mut page_number = 1;
         let mut row_number = 0_usize;
         let mut items = Vec::new();
@@ -485,7 +485,7 @@ impl DesktopApplication {
         if request.snapshot_revision == 0 || request.snapshot_revision > dictionary.revision() {
             return Err(CommandError::new("ai.writeback_revision_invalid"));
         }
-        let dictionary_snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
+        let dictionary_snapshot = self.probe_entries_snapshot(&summary)?;
         let mut observed_sources = BTreeSet::new();
         let mut protected_sources = BTreeSet::new();
         let mut page_number = 1;

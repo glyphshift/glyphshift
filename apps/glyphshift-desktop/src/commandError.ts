@@ -125,6 +125,7 @@ const messageKeys: Record<string, string> = {
   'capture.invalid_workspace': 'errors.capture.invalidWorkspace',
   'capture.preview_unavailable': 'errors.capture.previewUnavailable',
   'capture.preview_publish_failed': 'errors.capture.previewPublishFailed',
+  'capture.import_failed': 'errors.capture.importFailed',
   'capture.export_failed': 'errors.capture.exportFailed',
   'quick_probe.storage_failed': 'errors.quickProbe.storageFailed',
   'quick_probe.invalid_ledger': 'errors.quickProbe.invalidLedger',

@@ -37,11 +37,19 @@ pub struct ProbeRunCreate {
     name: Box<str>,
     software_id: Box<str>,
     dictionary_id: Box<str>,
+    excluded_dictionary_ids: Vec<Box<str>>,
     adapter_ids: Vec<Box<str>>,
     live_preview_enabled: bool,
 }
 
 impl ProbeRunCreate {
+    pub fn with_excluded_dictionaries(mut self, ids: Vec<Box<str>>) -> Result<Self, ProbeRunError> {
+        if ids.iter().any(|id| !safe_identifier(id) || *id == self.dictionary_id)
+            || ids.iter().collect::<BTreeSet<_>>().len() != ids.len() { return Err(ProbeRunError::InvalidInput); }
+        self.excluded_dictionary_ids = ids;
+        Ok(self)
+    }
+
     pub fn new(
         id: impl Into<Box<str>>,
         name: impl Into<Box<str>>,
@@ -70,6 +78,7 @@ impl ProbeRunCreate {
             name: name.trim().into(),
             software_id,
             dictionary_id,
+            excluded_dictionary_ids: Vec::new(),
             adapter_ids,
             live_preview_enabled,
         })
@@ -80,11 +89,19 @@ impl ProbeRunCreate {
 pub struct ProbeRunUpdate {
     name: Box<str>,
     dictionary_id: Box<str>,
+    excluded_dictionary_ids: Vec<Box<str>>,
     adapter_ids: Vec<Box<str>>,
     live_preview_enabled: bool,
 }
 
 impl ProbeRunUpdate {
+    pub fn with_excluded_dictionaries(mut self, ids: Vec<Box<str>>) -> Result<Self, ProbeRunError> {
+        if ids.iter().any(|id| !safe_identifier(id) || *id == self.dictionary_id)
+            || ids.iter().collect::<BTreeSet<_>>().len() != ids.len() { return Err(ProbeRunError::InvalidInput); }
+        self.excluded_dictionary_ids = ids;
+        Ok(self)
+    }
+
     pub fn new(
         name: impl Into<Box<str>>,
         dictionary_id: impl Into<Box<str>>,
@@ -105,6 +122,7 @@ impl ProbeRunUpdate {
         Ok(Self {
             name: name.trim().into(),
             dictionary_id,
+            excluded_dictionary_ids: Vec::new(),
             adapter_ids,
             live_preview_enabled,
         })
@@ -118,6 +136,8 @@ pub struct ProbeRunSummary {
     name: Box<str>,
     software_id: Box<str>,
     dictionary_id: Box<str>,
+    #[serde(default)]
+    excluded_dictionary_ids: Vec<Box<str>>,
     adapter_ids: Vec<Box<str>>,
     status: ProbeRunStatus,
     live_preview_enabled: bool,
@@ -131,6 +151,8 @@ pub struct ProbeRunSummary {
 }
 
 impl ProbeRunSummary {
+    pub fn excluded_dictionary_ids(&self) -> &[Box<str>] { &self.excluded_dictionary_ids }
+
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -206,10 +228,13 @@ impl ProbeDictionaryEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProbeDictionarySnapshot {
     revision: u64,
+    excluded_sources: BTreeSet<String>,
     entries: Vec<ProbeDictionaryEntry>,
 }
 
 impl ProbeDictionarySnapshot {
+    pub fn with_excluded_sources(mut self, sources: BTreeSet<String>) -> Self { self.excluded_sources = sources; self }
+
     pub fn new(
         revision: u64,
         entries: impl IntoIterator<Item = ProbeDictionaryEntry>,
@@ -218,7 +243,7 @@ impl ProbeDictionarySnapshot {
         entries.sort_by(|left, right| left.source.cmp(&right.source));
         let valid = entries
             .iter()
-            .all(|entry| !entry.source.trim().is_empty() && !entry.translation.trim().is_empty());
+            .all(|entry| !entry.source.trim().is_empty());
         let unique = entries
             .iter()
             .map(|entry| &entry.source)
@@ -228,7 +253,7 @@ impl ProbeDictionarySnapshot {
         if revision == 0 || !valid || !unique {
             return Err(ProbeRunError::InvalidInput);
         }
-        Ok(Self { revision, entries })
+        Ok(Self { revision, entries, excluded_sources: BTreeSet::new() })
     }
 
     #[must_use]
@@ -393,6 +418,7 @@ impl PreviewEntry {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProbeExportFormat {
+    EntriesJson,
     ObservationsJson,
     ObservationsCsv,
     EntriesCsv,
@@ -471,6 +497,7 @@ impl ProbeRunStore {
                 name: create.name,
                 software_id: create.software_id,
                 dictionary_id: create.dictionary_id,
+                excluded_dictionary_ids: create.excluded_dictionary_ids,
                 adapter_ids: create.adapter_ids,
                 status: ProbeRunStatus::Ready,
                 live_preview_enabled: create.live_preview_enabled,
@@ -506,7 +533,8 @@ impl ProbeRunStore {
         update: ProbeRunUpdate,
     ) -> Result<ProbeRunSummary, ProbeRunError> {
         let mut document = self.synchronized_document(run_id)?;
-        let configuration_changed = document.summary.adapter_ids != update.adapter_ids
+        let configuration_changed = document.summary.excluded_dictionary_ids != update.excluded_dictionary_ids
+            || document.summary.adapter_ids != update.adapter_ids
             || document.summary.dictionary_id != update.dictionary_id
             || document.summary.live_preview_enabled != update.live_preview_enabled;
         if configuration_changed
@@ -517,7 +545,8 @@ impl ProbeRunStore {
         {
             return Err(ProbeRunError::InvalidState);
         }
-        if document.summary.name == update.name
+        if document.summary.excluded_dictionary_ids == update.excluded_dictionary_ids
+            && document.summary.name == update.name
             && document.summary.dictionary_id == update.dictionary_id
             && document.summary.adapter_ids == update.adapter_ids
             && document.summary.live_preview_enabled == update.live_preview_enabled
@@ -526,6 +555,7 @@ impl ProbeRunStore {
         }
         document.summary.name = update.name;
         document.summary.dictionary_id = update.dictionary_id;
+        document.summary.excluded_dictionary_ids = update.excluded_dictionary_ids;
         document.summary.adapter_ids = update.adapter_ids;
         document.summary.live_preview_enabled = update.live_preview_enabled;
         self.touch(&mut document);
@@ -754,7 +784,7 @@ impl ProbeRunStore {
         Ok(dictionary
             .entries
             .iter()
-            .filter(|entry| !ignored.contains(&Box::<str>::from(keys.key(&entry.source))))
+            .filter(|entry| !entry.translation.trim().is_empty() && !ignored.contains(&Box::<str>::from(keys.key(&entry.source))))
             .map(|entry| PreviewEntry {
                 source: entry.source.clone(),
                 translation: entry.translation.clone(),
@@ -780,6 +810,11 @@ impl ProbeRunStore {
     ) -> Result<Vec<u8>, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         match format {
+            ProbeExportFormat::EntriesJson => {
+                let entries = self.combined_rows(&document, dictionary)?.into_iter().map(|row|
+                    serde_json::json!({"source": row.source, "translation": row.translation})).collect::<Vec<_>>();
+                serde_json::to_vec_pretty(&serde_json::json!({"schema": "glyphshift.probe-entries/1", "entries": entries})).map_err(|_| ProbeRunError::Export)
+            }
             ProbeExportFormat::ObservationsJson => self
                 .read_observations(run_id)?
                 .encode_json()
@@ -879,7 +914,7 @@ impl ProbeRunStore {
             row.adapter_ids.dedup();
             if let Some(translation) = translations.get(row.source.as_ref()) {
                 row.translation = (*translation).into();
-                row.state = ProbeEntryState::Translated;
+                if !translation.trim().is_empty() { row.state = ProbeEntryState::Translated; }
             }
             if ignored.contains(&row.source) {
                 row.state = ProbeEntryState::Ignored;
@@ -900,6 +935,8 @@ impl ProbeRunStore {
                 });
         }
         let keys = self.source_keys(document, observations.as_ref());
+        let excluded = dictionary.excluded_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
+        aggregate.retain(|source, _| !excluded.contains(&keys.key(source)));
         if keys.common == glyphshift_domain::SourceTextPolicy::Exact && keys.normalized.is_empty() { return Ok(aggregate.into_values().collect()); }
         let mut grouped = BTreeMap::<Box<str>, ProbeEntryRow>::new();
         for mut row in aggregate.into_values() {
@@ -1099,6 +1136,7 @@ fn probe_document_from_value(value: &serde_json::Value) -> Option<ProbeRunDocume
                 .into(),
             software_id: software_id.into(),
             dictionary_id: dictionary_id.into(),
+            excluded_dictionary_ids: summary.get("excludedDictionaryIds").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(|id| id.as_str()).filter(|id| safe_identifier(id) && *id != dictionary_id).map(Into::into).collect(),
             adapter_ids,
             status,
             live_preview_enabled: summary

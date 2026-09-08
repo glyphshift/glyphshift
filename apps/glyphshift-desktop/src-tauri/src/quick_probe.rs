@@ -260,6 +260,7 @@ pub(super) enum ProbeDictionarySourceRequest {
     Library {
         dictionary_id: Box<str>,
     },
+    #[serde(rename = "new", alias = "temporary")]
     Temporary {
         source_locale: Box<str>,
         target_locale: Box<str>,
@@ -271,6 +272,8 @@ pub(super) enum ProbeDictionarySourceRequest {
 pub(super) struct ProbeCreationRequest {
     pub(super) target: ProbeTargetSourceRequest,
     pub(super) dictionary: ProbeDictionarySourceRequest,
+    #[serde(default)]
+    pub(super) excluded_dictionary_ids: Vec<Box<str>>,
     #[serde(default)]
     pub(super) name: Option<Box<str>>,
     #[serde(default)]
@@ -526,7 +529,7 @@ impl DesktopApplication {
                 self.backend
                     .create_dictionary(DictionaryCreate::new(
                         dictionary_id.clone(),
-                        format!("{software_name} 临时词典"),
+                        format!("{software_name} 字典"),
                         source_locale.trim(),
                         target_locale.trim(),
                     ))
@@ -541,6 +544,7 @@ impl DesktopApplication {
                 software_id,
                 adapter_ids,
                 live_preview_enabled: request.live_preview_enabled,
+                excluded_dictionary_ids: request.excluded_dictionary_ids.clone(),
                 dictionary: ProbeDictionaryBindingRequest::Existing {
                     dictionary_id: dictionary_id.clone(),
                 },
@@ -567,7 +571,8 @@ impl DesktopApplication {
                 }
             }
         }
-        result
+        if result.is_ok() { self.quick_probe_sessions.remove(&run_id)?; }
+        result.map(|view| ProbeRunView { quick_probe: false, ..view })
     }
 
     pub(super) fn retain_quick_probe(
@@ -705,6 +710,18 @@ impl DesktopApplication {
         for record in self.quick_probe_sessions.records() {
             if self.probe_runs.summary(record.run_id.as_ref()).is_err() {
                 self.cleanup_quick_probe(record.run_id.as_ref())?;
+            } else {
+                // Rename only the old generated label, preserving metadata and entries.
+                if record.owns_dictionary && record.dictionary_id.starts_with("quick-dictionary-") {
+                    if let Ok(dictionary) = self.backend.dictionary(&record.dictionary_id).cloned() {
+                        if let Some(name) = dictionary.metadata().name().strip_suffix(" 临时词典") {
+                            let edit = DictionaryEdit::from_dictionary(&dictionary).with_name(format!("{name} 字典"));
+                            self.backend.update_dictionary(edit).map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+                        }
+                    }
+                }
+                // Successful legacy tasks become ordinary assets; never clean them up on stop/delete.
+                self.quick_probe_sessions.remove(record.run_id.as_ref())?;
             }
         }
         Ok(())
