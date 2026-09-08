@@ -786,8 +786,7 @@ async function launchSelectedSoftware() {
   }
 }
 
-async function disconnectSelectedRun() {
-  const run = selectedRun.value
+async function disconnectRun(run: ProbeRunSummary | null) {
   if (!run || disconnectingRunId.value || !['running', 'paused'].includes(run.status)) return
   disconnectingRunId.value = run.id
   try {
@@ -1033,7 +1032,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           />
           <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="probe.setPaused(selectedRun.id, true)" />
           <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
-          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" data-testid="probe-disconnect" color="neutral" variant="outline" size="sm" icon="i-tabler-plug-off" :label="t('capture.disconnect')" :loading="disconnectingRunId === selectedRun.id" :disabled="probe.busy.value && disconnectingRunId !== selectedRun.id" @click="disconnectSelectedRun" />
+          <UButton v-if="['running', 'paused'].includes(selectedRun.status)" data-testid="probe-disconnect" color="neutral" variant="outline" size="sm" icon="i-tabler-plug-off" :label="t('capture.disconnect')" :loading="disconnectingRunId === selectedRun.id" :disabled="probe.busy.value && disconnectingRunId !== selectedRun.id" @click="disconnectRun(selectedRun)" />
           <UDropdownMenu :items="taskActionItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-60' }">
             <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" :aria-label="taskActionLabel" :title="taskActionLabel" :ui="{ label: 'hidden min-[1080px]:inline' }" />
           </UDropdownMenu>
@@ -1199,7 +1198,13 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         </template>
         <template #progress-cell="{ row }"><div class="tabular-nums">{{ t('capture.observedCount', { count: row.original.observedCount }) }}</div><div v-if="row.original.ignoredCount" class="type-metadata mt-0.5 text-[var(--text-muted)]">{{ t('capture.ignoredCount', { count: row.original.ignoredCount }) }}</div></template>
         <template #updatedAtMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.updatedAtMs) }}</span></template>
-        <template #actions-cell="{ row }"><div class="flex justify-center gap-0.5"><UButton :title="t('capture.openNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" /><UButton :title="t('common.deleteNamed', { name: row.original.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" /></div></template>
+        <template #actions-cell="{ row }">
+          <div class="flex justify-center gap-0.5">
+            <UButton v-if="['running', 'paused'].includes(row.original.status)" data-testid="probe-list-stop" :title="t('capture.disconnect')" color="neutral" variant="ghost" size="xs" icon="i-tabler-player-stop" :aria-label="t('capture.disconnect')" :loading="disconnectingRunId === row.original.id" :disabled="probe.busy.value && disconnectingRunId !== row.original.id" @click.stop="disconnectRun(row.original)" />
+            <UButton :title="t('capture.openNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-arrow-right" :aria-label="t('capture.openNamed', { name: row.original.name })" @click="probe.selectRun(row.original.id)" />
+            <UButton :title="t('common.deleteNamed', { name: row.original.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :disabled="['running', 'paused'].includes(row.original.status)" :aria-label="t('common.deleteNamed', { name: row.original.name })" @click="pendingRemoval = [row.original]" />
+          </div>
+        </template>
         <template #empty><UEmpty icon="i-tabler-radar-off" :title="listQuery ? t('capture.noRunMatch') : t('capture.empty')" :description="listQuery ? t('capture.adjustSearch') : t('capture.emptyHint')" /></template>
       </UTable>
     </ManagementTableFrame>

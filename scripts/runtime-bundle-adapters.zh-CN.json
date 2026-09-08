@@ -2,9 +2,9 @@
   {
     "id": "windows.catsystem2.utf8-text",
     "name": "CatSystem2 对话文字（实验）",
-    "summary": "适用于已验证的 CatSystem2 x86 UTF-8 文字对象，采集和替换正文及历史记录；字典更新时自动刷新，停用后恢复原文。复杂标记文字不替换，其他引擎版本及字体回退尚未覆盖。组件保留到游戏退出。",
+    "summary": "适用于已验证的 CatSystem2 x86 UTF-8 和经典 ANSI 对话对象，支持即时刷新及停用恢复；历史记录仅验证 UTF-8 分支。经典分支使用目标的系统代码页，不支持的控制标记或无法编码的译文保持原文。其他引擎版本及字体回退尚未覆盖。组件保留到游戏退出。",
     "technology": "CatSystem2（x86）",
-    "technicalTarget": "CatSystem2 UTF-8 text objects",
+    "technicalTarget": "CatSystem2 UTF-8 / classic ANSI text objects",
     "documentationUrl": "https://cs2.suki.jp/manual/"
   },
   {

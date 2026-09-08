@@ -1,6 +1,50 @@
 import { expect, test, type Page } from '@playwright/test'
 import { model, replaceModel, storageKey } from './fixtures/productModel'
 
+test('probe list stops tasks and reports failure without opening detail', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    let fail = true
+    const runs = ['running', 'paused', 'disconnected'].map((status, index) => ({
+      id: `list-stop-${index}`, name: `List task ${index}`, softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.text-out'], status, livePreviewEnabled: false,
+      observationRevision: 0, observedCount: 0, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1,
+      dictionaryEntryCount: 0, runtimeCapability: null, quickProbe: false,
+    }))
+    const internals = { invoke: async (command: string, args?: any) => {
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+      if (command === 'desktop_snapshot') return snapshot
+      if (command === 'desktop_probe_runs') return runs
+      if (command === 'desktop_disconnect_probe_run') {
+        if (fail) { fail = false; throw 'Synthetic stop failure' }
+        const run = runs.find(run => run.id === args.runId)!
+        run.status = 'disconnected'
+        return run
+      }
+      return null
+    } }
+    ;(window as any).__TAURI_INTERNALS__ = internals
+    localStorage.removeItem('glyphshift.probe.selectedRun')
+  }, { snapshot: model })
+  await page.goto('/')
+  await page.getByRole('button', { name: '探针', exact: true }).click()
+  const table = page.getByTestId('capture-run-management-table')
+  const running = table.getByRole('row').filter({ hasText: 'List task 0' })
+  const paused = table.getByRole('row').filter({ hasText: 'List task 1' })
+  await expect(table.getByTestId('probe-list-stop')).toHaveCount(2)
+  await running.getByTestId('probe-list-stop').click()
+  await expect(page.getByRole('alert')).toContainText('操作失败，请重试。')
+  await expect(table).toBeVisible()
+  await running.getByTestId('probe-list-stop').click()
+  await expect(running.getByTestId('probe-list-stop')).toHaveCount(0)
+  await paused.getByTestId('probe-list-stop').click()
+  await expect(table.getByTestId('probe-list-stop')).toHaveCount(0)
+  await expect(table.getByRole('row').filter({ hasText: 'List task' })).toHaveCount(3)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-list-stop.png' })
+})
+
 async function openProbeTaskActions(page: Page) {
   await page.getByTestId('probe-task-actions').click()
 }

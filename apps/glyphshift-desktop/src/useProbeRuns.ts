@@ -91,7 +91,7 @@ function clearMessage() {
 }
 
 function reportError(error: unknown, runId?: string) {
-  if (runId && selectedRunId.value !== runId) return
+  if (runId && selectedRunId.value && selectedRunId.value !== runId) return
   lastError.value = isCommandError(error) ? error : null
   message.value = translateCommandError(error)
 }
