@@ -107,11 +107,24 @@ fn native_directwrite_observes_replaces_fails_open_and_deactivates() {
         source_characters_utf16: source_characters,
     }));
 
+    let extended = Box::leak(Box::new(glyphshift_adapter_native_abi::NativeTextHostV1 {
+        struct_size: size_of::<glyphshift_adapter_native_abi::NativeTextHostV1>() as u32,
+        version: glyphshift_adapter_native_abi::TEXT_HOST_VERSION_V1,
+        context: host.context,
+        decide_text: structured_decide,
+        enter_scope: None,
+        leave_scope: None,
+    }));
     MODE.store(0, Ordering::Release);
     OBSERVED.store(0, Ordering::Release);
     assert_eq!(
         package
-            .activate(host, [Feature::TextObserve], [Feature::TextObserve])
+            .activate_with_text_host(
+                host,
+                Some(extended),
+                [Feature::TextObserve],
+                [Feature::TextObserve]
+            )
             .expect("observe activation installs TextLayout detours"),
         [Feature::TextObserve]
     );
@@ -125,6 +138,7 @@ fn native_directwrite_observes_replaces_fails_open_and_deactivates() {
         compatible_baseline
     );
     assert_eq!(OBSERVED.load(Ordering::Acquire), 2);
+    assert_eq!(EXTENDED_CALLS.load(Ordering::Acquire), 2);
     package.deactivate().expect("deactivate observation");
 
     MODE.store(1, Ordering::Release);
@@ -168,4 +182,36 @@ fn native_directwrite_observes_replaces_fails_open_and_deactivates() {
         compatible_baseline
     );
     package.deactivate().expect("final deactivation");
+    assert_eq!(
+        EXTENDED_CALLS.load(Ordering::Acquire),
+        2,
+        "legacy activation clears the optional binding"
+    );
+}
+
+static EXTENDED_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+extern "C" fn structured_decide(
+    context: *mut core::ffi::c_void,
+    event: *const glyphshift_adapter_native_abi::NativeTextEventV1,
+    text: *mut u16,
+    text_capacity: u32,
+    font: *mut u16,
+    font_capacity: u32,
+) -> NativeDecisionV1 {
+    let event = unsafe { &*event };
+    assert_eq!(event.kind, glyphshift_adapter_native_abi::TEXT_EVENT_DRAW);
+    assert_eq!(
+        event.struct_size,
+        size_of::<glyphshift_adapter_native_abi::NativeTextEventV1>() as u32
+    );
+    EXTENDED_CALLS.fetch_add(1, Ordering::AcqRel);
+    decide(
+        context,
+        event.source,
+        event.source_len,
+        text,
+        text_capacity,
+        font,
+        font_capacity,
+    )
 }

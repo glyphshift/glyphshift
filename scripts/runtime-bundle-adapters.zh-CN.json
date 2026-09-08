@@ -1,5 +1,13 @@
 [
   {
+    "id": "windows.vgui.localize-query",
+    "name": "VGUI 本地化查询（实验）",
+    "summary": "适用于已验证的 Windows x86 VGUI 本地化短标签。支持标准标签随字典更新自动刷新及停用恢复；未识别控件仍需重开界面，格式化文字不替换。组件保留到游戏退出。",
+    "technology": "Source / VGUI（x86）",
+    "technicalTarget": "VGUI_Localize005 · Find / GetValueByIndex",
+    "documentationUrl": "https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/public/vgui/ILocalize.h"
+  },
+  {
     "id": "windows.monogame.sprite-batch-draw-string",
     "name": "MonoGame 标准文字",
     "summary": "适合 Windows x86/x64 .NET 6+ 的 MonoGame DrawString 标准文字，支持缺字字体回退；自绘纹理文字不覆盖。停用后恢复原文，组件保留到目标退出。",

@@ -1701,6 +1701,26 @@ name = "glyphshift-adapter-unity-standard-ui"
 version = "0.1.0"
 
 [[package]]
+name = "glyphshift-adapter-vgui-localize-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "iced-x86",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "glyphshift-adapter-vgui-runs-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "glyphshift-domain",
+ "iced-x86",
+ "retour",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "glyphshift-ai-translation"
 version = "0.1.0"
 dependencies = [
@@ -2329,6 +2349,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced-x86"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "ico"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2620,6 +2649,12 @@ dependencies = [
  "serde",
  "unicode-segmentation",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libappindicator"

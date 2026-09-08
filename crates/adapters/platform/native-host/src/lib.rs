@@ -8,6 +8,7 @@ use glyphshift_adapter_native_abi::{
     NativeRuntimeHostV1, ENTRY_SYMBOL_V1, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
     STATUS_UNSUPPORTED_FEATURE,
 };
+use glyphshift_adapter_native_abi::{BindTextHostV1, NativeTextHostV1, TEXT_HOST_BIND_SYMBOL_V1};
 use glyphshift_adapter_sdk::AdapterDescriptor;
 use glyphshift_domain::{Feature, SourceTextPolicy};
 use libloading::Library;
@@ -113,6 +114,26 @@ impl LoadedNativeAdapter {
         requested: impl IntoIterator<Item = Feature>,
         granted: impl IntoIterator<Item = Feature>,
     ) -> Result<Vec<Feature>, NativeHostError> {
+        self.activate_with_text_host(host, None, requested, granted)
+    }
+
+    pub fn activate_with_text_host(
+        &self,
+        host: &'static NativeRuntimeHostV1,
+        text_host: Option<&'static NativeTextHostV1>,
+        requested: impl IntoIterator<Item = Feature>,
+        granted: impl IntoIterator<Item = Feature>,
+    ) -> Result<Vec<Feature>, NativeHostError> {
+        // Binding is optional: old packages retain their unchanged V1 activation.
+        if let Ok(bind) = unsafe {
+            self._library
+                .get::<BindTextHostV1>(TEXT_HOST_BIND_SYMBOL_V1)
+        } {
+            let status = unsafe { bind(text_host.map_or(std::ptr::null(), std::ptr::from_ref)) };
+            if status != STATUS_OK {
+                return Err(NativeHostError::PackageFailure(status));
+            }
+        }
         let requested = requested.into_iter().collect::<Vec<_>>();
         let result = (self.api.activate)(
             host,

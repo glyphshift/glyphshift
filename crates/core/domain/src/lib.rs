@@ -1,8 +1,15 @@
 //! Host-independent value types for Glyphshift.
 
 use std::sync::Arc;
+mod deferred_text;
+pub use deferred_text::{DeferredGlyph, DeferredTextCommit, DeferredTextDraw, GlyphStyle};
 mod source_text;
 pub use source_text::SourceTextPolicy;
+mod text_run;
+pub use text_run::{
+    ResolvedText, TextRunEvent, TextRunKey, TextRunOutcome, TextRunResolver, TextUse,
+    MAX_TEXT_RUN_UNITS,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AdapterId(Box<str>);

@@ -1,5 +1,8 @@
 //! Stable C ABI values shared by target-process Adapter packages and their loader.
 
+mod text_host;
+pub use text_host::*;
+
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
 use glyphshift_domain::{AbiVersion, AdapterId, ApplyModel, Feature, Placement};
 
