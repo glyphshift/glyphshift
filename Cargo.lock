@@ -1405,6 +1405,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-catsystem2-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "iced-x86",
+ "retour",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "glyphshift-adapter-console"
 version = "0.1.0"
 dependencies = [

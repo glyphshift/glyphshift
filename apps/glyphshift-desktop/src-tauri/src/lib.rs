@@ -740,6 +740,7 @@ pub fn run() {
             probe::desktop_resume_probe_run,
             probe::desktop_set_probe_run_paused,
             probe::desktop_disconnect_probe_run,
+            probe::desktop_refresh_probe_text,
             probe::desktop_probe_run_summary,
             probe::desktop_probe_run_entries,
             probe::desktop_edit_probe_translation,

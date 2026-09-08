@@ -317,6 +317,10 @@ export function useProbeRuns() {
     return runSummaryCommand('desktop_disconnect_probe_run', { runId })
   }
 
+  async function refreshText(runId: string) {
+    return runSummaryCommand('desktop_refresh_probe_text', { runId })
+  }
+
   async function runSummaryCommand(command: string, args: Record<string, unknown>) {
     if (busy.value || !hasDesktopRuntime()) return null
     busy.value = true
@@ -459,6 +463,7 @@ export function useProbeRuns() {
     resume,
     setPaused,
     disconnect,
+    refreshText,
     refreshSummary,
     queryEntries,
     editTranslation,

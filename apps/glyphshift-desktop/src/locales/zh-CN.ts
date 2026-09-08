@@ -1005,6 +1005,8 @@ export default {
     resume: '连接并继续',
     launchSoftware: '运行软件',
     disconnect: '释放当前连接',
+    refreshText: '刷新目标文字',
+    refreshTextHint: '重新应用当前词典。不支持即时刷新的控件，可能需要重新打开界面或推进对话。',
     taskActions: '任务操作',
     backToRuns: '返回探针管理',
     settings: '探针设置',

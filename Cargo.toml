@@ -25,6 +25,7 @@ members = [
     "crates/adapters/implementations/framework/qt-quick-native",
     "crates/adapters/implementations/framework/vgui-runs-native",
     "crates/adapters/implementations/framework/vgui-localize-native",
+    "crates/adapters/implementations/framework/catsystem2-native",
     "crates/adapters/implementations/framework/raylib",
     "crates/adapters/implementations/framework/monogame",
     "crates/adapters/implementations/framework/raylib-native",

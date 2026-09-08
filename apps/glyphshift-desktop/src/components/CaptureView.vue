@@ -106,6 +106,7 @@ const settingsCompatibleAdapterIds = ref<string[] | null>(null)
 const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const dictionaryNotice = ref('')
+const refreshingText = ref(false)
 const launchingSoftware = ref(false)
 const disconnectingRunId = ref('')
 const translationValues = ref<Record<string, string>>({})
@@ -841,6 +842,21 @@ async function disconnectSelectedRun() {
   }
 }
 
+async function refreshTargetText() {
+  const run = selectedRun.value
+  if (!run || refreshingText.value || probe.busy.value) return
+  refreshingText.value = true
+  try {
+    for (const source of [...dirtyTranslations]) await saveTranslation(source)
+    await translationSaveQueue
+    if (dirtyTranslations.size || selectedRun.value?.id !== run.id) return
+    await probe.refreshText(run.id)
+  }
+  finally {
+    refreshingText.value = false
+  }
+}
+
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
   const next = { ...translationValues.value }
   for (const row of rows) if (!dirtyTranslations.has(row.source)) next[row.source] = row.translation
@@ -1032,6 +1048,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
       <template #actions>
         <div data-testid="probe-detail-actions" class="flex items-center gap-2">
+          <UButton data-testid="probe-refresh-text" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('capture.refreshText')" :aria-label="t('capture.refreshText')" :title="t('capture.refreshTextHint')" :ui="{ label: 'hidden min-[1080px]:inline' }" :loading="refreshingText" :disabled="probe.busy.value || !selectedRun.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.status)" @click="refreshTargetText" />
           <UButton
             color="neutral"
             variant="outline"
@@ -1065,6 +1082,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </UAlert>
     <UAlert v-else-if="quickProbeNotice" role="status" color="success" variant="soft" :title="t('capture.quickProbe.cleanupCompleteTitle')" :description="quickProbeNotice" class="mb-3" />
     <UAlert v-if="dictionaryNotice" role="status" color="success" variant="soft" icon="i-tabler-book-check" :title="t('capture.dictionaryUpdated')" :description="dictionaryNotice" class="mb-3" />
+
     <UAlert v-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" /></template>
     </UAlert>

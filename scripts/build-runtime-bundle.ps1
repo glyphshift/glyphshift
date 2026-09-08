@@ -89,7 +89,7 @@ $x86Arguments = @('build', '--manifest-path', $manifestPath, '--target-dir', $Ca
     '-p', 'glyphshift-adapter-gdiplus-native', '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native', '-p', 'glyphshift-adapter-raylib-native',
     '-p', 'glyphshift-adapter-qt-painter-native', '-p', 'glyphshift-adapter-unity-mono-standard-ui-native',
-    '-p', 'glyphshift-adapter-vgui-localize-native')
+    '-p', 'glyphshift-adapter-vgui-localize-native', '-p', 'glyphshift-adapter-catsystem2-native')
 if ($IncludeTestTarget) { $x86Arguments += @('-p', 'glyphshift-windows-runtime-target') }
 if ($Profile -eq 'Release') { $x86Arguments += '--release' }
 & cargo @x86Arguments
@@ -162,6 +162,7 @@ $x86Raylib = Copy-VersionedBundleArtifact 'glyphshift_adapter_raylib_native.dll'
 $x86Unity = Copy-VersionedBundleArtifact 'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-x86' 'dll' $x86ProfileRoot
 $x86MonoGame = Copy-VersionedBundleArtifact 'glyphshift_adapter_monogame_native.dll' 'adapter-monogame-x86' 'dll' $x86ProfileRoot
 $x86VguiLocalize = Copy-VersionedBundleArtifact 'glyphshift_adapter_vgui_localize_native.dll' 'adapter-vgui-localize-x86' 'dll' $x86ProfileRoot
+$x86CatSystem2 = Copy-VersionedBundleArtifact 'glyphshift_adapter_catsystem2_native.dll' 'adapter-catsystem2-x86' 'dll' $x86ProfileRoot
 
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
@@ -206,6 +207,7 @@ $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
 $vguiLocalizePresentation = Get-AdapterPresentation 'windows.vgui.localize-query'
+$catSystem2Presentation = Get-AdapterPresentation 'windows.catsystem2.utf8-text'
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/4'
@@ -332,13 +334,14 @@ foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOut
     @($x86GdiPlus, $gdiPlusPresentation), @($x86DirectWrite, $directWritePresentation), @($x86Gtk, $gtk3PangoPresentation),
     @($x86QtPainter, $qtPainterPresentation), @($x86Raylib, $raylibPresentation),
     @($x86Unity, $unityMonoStandardUiPresentation), @($x86MonoGame, $monoGamePresentation),
-    @($x86VguiLocalize, $vguiLocalizePresentation))) {
+    @($x86VguiLocalize, $vguiLocalizePresentation), @($x86CatSystem2, $catSystem2Presentation))) {
     $artifact = $pair[0]; $presentation = $pair[1]
     $x86Adapters += [ordered]@{ file=$artifact.file; sha256=$artifact.sha256; name=$presentation.name;
         summary=$presentation.summary; technology=$presentation.technology; technicalTarget=$presentation.technicalTarget;
         documentationUrl=$presentation.documentationUrl }
     if ($artifact.file -eq $x86MonoGame.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
     if ($artifact.file -eq $x86VguiLocalize.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
+    if ($artifact.file -eq $x86CatSystem2.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
 }
 $runtimeManifest.additional_architectures = @([ordered]@{
     architecture = 'x86'

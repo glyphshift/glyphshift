@@ -105,8 +105,22 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
         .expect("edit and publish live preview");
     assert_eq!(edited.summary.preview_generation(), 2);
 
+    let refreshed = application
+        .refresh_probe_text(created.summary.id())
+        .expect("manual refresh");
+    assert_eq!(refreshed.summary.preview_generation(), 3);
+    assert_eq!(refreshed.summary.status(), ProbeRunStatus::Running);
+    application
+        .set_probe_run_paused(created.summary.id(), true)
+        .expect("pause capture");
+    let refreshed = application
+        .refresh_probe_text(created.summary.id())
+        .expect("refresh paused capture");
+    assert_eq!(refreshed.summary.preview_generation(), 4);
+    assert_eq!(refreshed.summary.status(), ProbeRunStatus::Paused);
+
     let calls = calls.lock().expect("runtime call log");
-    assert_eq!(calls.capture_publications.len(), 2);
+    assert_eq!(calls.capture_publications.len(), 4);
     assert!(calls
         .capture_publications
         .iter()
@@ -114,7 +128,7 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
     assert_eq!(calls.capture_publications[0].1.generation().value(), 1);
     assert_eq!(calls.capture_publications[1].1.generation().value(), 2);
     let mut published_entries = Vec::new();
-    calls.capture_publications[1]
+    calls.capture_publications[3]
         .1
         .snapshot()
         .visit_entries_with_adapters(|location, source, translation, adapters| {
@@ -136,6 +150,23 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
             "立即打开".to_owned(),
             vec![TEST_ADAPTER_ID.to_owned()],
         )]
+    );
+    assert_eq!(
+        calls.captures_started.len(),
+        1,
+        "refresh keeps the same connection"
+    );
+    assert!(calls.captures_stopped.is_empty());
+    drop(calls);
+    application
+        .disconnect_probe_run(created.summary.id())
+        .expect("disconnect");
+    let error = application
+        .refresh_probe_text(created.summary.id())
+        .expect_err("disconnected refresh must fail");
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["code"],
+        "capture.not_active"
     );
 }
 
@@ -256,6 +287,14 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
         .expect("create first probe");
     assert_eq!(first.summary.status(), ProbeRunStatus::Running);
     assert_eq!(first.summary.dictionary_id(), "dictionary.product");
+    let error = application
+        .refresh_probe_text(first.summary.id())
+        .expect_err("read-only capture must not publish translations");
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["code"],
+        "capture.preview_unavailable"
+    );
+    assert!(calls.lock().unwrap().capture_publications.is_empty());
 
     let edited = application
         .edit_probe_translation(ProbeTranslationEditRequest {

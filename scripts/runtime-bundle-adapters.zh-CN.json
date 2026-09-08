@@ -1,5 +1,13 @@
 [
   {
+    "id": "windows.catsystem2.utf8-text",
+    "name": "CatSystem2 对话文字（实验）",
+    "summary": "适用于已验证的 CatSystem2 x86 UTF-8 文字对象，采集和替换正文及历史记录；字典更新时自动刷新，停用后恢复原文。复杂标记文字不替换，其他引擎版本及字体回退尚未覆盖。组件保留到游戏退出。",
+    "technology": "CatSystem2（x86）",
+    "technicalTarget": "CatSystem2 UTF-8 text objects",
+    "documentationUrl": "https://cs2.suki.jp/manual/"
+  },
+  {
     "id": "windows.vgui.localize-query",
     "name": "VGUI 本地化查询（实验）",
     "summary": "适用于已验证的 Windows x86 VGUI 本地化短标签。支持标准标签随字典更新自动刷新及停用恢复；未识别控件仍需重开界面，格式化文字不替换。组件保留到游戏退出。",

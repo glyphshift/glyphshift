@@ -850,6 +850,29 @@ impl DesktopApplication {
             .collect()
     }
 
+    pub(super) fn refresh_probe_text(
+        &mut self,
+        run_id: &str,
+    ) -> Result<ProbeRunView, CommandError> {
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if self.active_probe_run_id.as_deref() != Some(run_id)
+            || !matches!(
+                summary.status(),
+                ProbeRunStatus::Running | ProbeRunStatus::Paused
+            )
+        {
+            return Err(CommandError::new("capture.not_active"));
+        }
+        if !summary.live_preview_enabled() {
+            return Err(CommandError::new("capture.preview_unavailable"));
+        }
+        // Republish the current dictionary to dispatch native refresh callbacks
+        // and asynchronous redraw. Acceptance does not prove visual completion.
+        self.publish_probe_preview_if_active(run_id)?;
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        self.probe_run_view(summary)
+    }
+
     pub(super) fn publish_probe_preview_if_active(
         &mut self,
         run_id: &str,
@@ -1011,6 +1034,17 @@ pub(super) fn desktop_set_probe_run_paused(
         .lock()
         .map_err(|_| runtime_unavailable())?
         .set_probe_run_paused(&run_id, paused)
+}
+
+#[tauri::command]
+pub(super) fn desktop_refresh_probe_text(
+    run_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<ProbeRunView, CommandError> {
+    application
+        .lock()
+        .map_err(|_| runtime_unavailable())?
+        .refresh_probe_text(&run_id)
 }
 
 #[tauri::command]

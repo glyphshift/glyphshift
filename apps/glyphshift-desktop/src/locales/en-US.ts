@@ -987,6 +987,8 @@ export default {
     resume: 'Connect and continue',
     launchSoftware: 'Run software',
     disconnect: 'Disconnect',
+    refreshText: 'Refresh target text',
+    refreshTextHint: 'Reapply the current dictionary. Controls without immediate refresh support may require reopening the screen or advancing dialogue.',
     taskActions: 'Task actions',
     backToRuns: 'Back to probe management',
     settings: 'Probe settings',
