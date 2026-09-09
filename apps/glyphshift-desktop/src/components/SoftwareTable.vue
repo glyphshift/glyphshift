@@ -336,6 +336,9 @@ function submitAdd() {
 
 usePageEscape(() => Boolean(editing.value), requestCloseEdit)
 
+function softwareMetadata(item: { vendor: string; version: string }) {
+  return [item.vendor, item.version].map(value => value?.trim()).filter(value => value && !/^[-—–·*\s]+$/.test(value))
+}
 </script>
 
 <template>
@@ -392,7 +395,7 @@ usePageEscape(() => Boolean(editing.value), requestCloseEdit)
           <div class="truncate" :title="row.original.executablePath ?? row.original.executableName">
             {{ row.original.executablePath ?? row.original.executableName }}
           </div>
-          <div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.vendor }} · {{ row.original.version }}</div>
+          <div v-if="softwareMetadata(row.original).length" class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ softwareMetadata(row.original).join(' · ') }}</div>
         </template>
         <template #actions-cell="{ row }">
           <div class="flex items-center justify-center gap-1">

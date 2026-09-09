@@ -15,13 +15,16 @@ withDefaults(defineProps<{
     :aria-label="title"
   >
     <header class="border-b border-[var(--border)] px-5" :class="description ? 'py-4' : 'py-3'">
+      <div class="flex items-center justify-between gap-3">
       <component
         :is="`h${headingLevel}`"
         class="type-section-title m-0 font-semibold tracking-[-0.01em] text-[var(--text)]"
       >
         {{ title }}
       </component>
-      <p v-if="description" class="type-metadata mb-0 mt-1 max-w-[72ch] leading-4 text-[var(--text-muted)]">
+      <slot name="actions" />
+      </div>
+      <p v-if="description" class="type-metadata mb-0 mt-1 w-full leading-4 text-[var(--text-muted)]">
         {{ description }}
       </p>
     </header>

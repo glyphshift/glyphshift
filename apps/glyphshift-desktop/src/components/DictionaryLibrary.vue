@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { save } from '@tauri-apps/plugin-dialog'
+import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
 import DictionaryImportDialog from './DictionaryImportDialog.vue'
 import { useWorkspace } from '../useWorkspace'
@@ -36,13 +36,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   open: [id: string]
   create: [metadata: Omit<DictionaryMetadata, 'id'>]
-  exportDictionary: [dictionaryId: string, outputPath: string]
   remove: [ids: string[]]
   queryCatalog: [request: DictionaryCatalogQueryRequest]
   installCatalog: [request: DictionaryCatalogInstallRequest]
 }>()
 const { t } = useI18n()
 const workspace = useWorkspace()
+const exportDialog = ref<InstanceType<typeof DictionaryExportDialog>>()
 const importDialog = ref<InstanceType<typeof DictionaryImportDialog>>()
 async function applyImport(data: DictionaryImportData) { return workspace.createDictionary(data.metadata, data.entries) }
 const dictionaryWarnings = computed(() => props.artifactWarnings.filter(warning => warning.artifactKind === 'dictionary'))
@@ -54,16 +54,15 @@ const dictionaryWarningDescription = computed(() => t('dictionaries.skippedArtif
 const mode = ref<'local' | 'catalog'>('local')
 const query = ref('')
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(50)
 const selected = ref(new Set<string>())
 const creating = ref(false)
-const exportError = ref('')
 const pendingRemoval = ref<DictionarySummary[]>([])
 const pendingInstall = ref<DictionaryCatalogRelease | null>(null)
 const catalogQuery = ref('')
 const catalogTag = ref('')
 const catalogPageNumber = ref(1)
-const catalogPageSize = ref(20)
+const catalogPageSize = ref(50)
 const catalogCursors = ref<(string | null)[]>([null])
 const { columns: localVisibleColumns, toggleColumn: toggleLocalColumn } = useTableColumns('glyphshift.table-columns.dictionaries.local', {
   languages: true,
@@ -154,7 +153,6 @@ watch(() => props.presentationLocale, () => {
 
 function setMode(next: 'local' | 'catalog') {
   mode.value = next
-  exportError.value = ''
   if (next === 'catalog') requestCatalog(true)
 }
 
@@ -312,23 +310,8 @@ function confirmInstall() {
 
 async function chooseImport() { await importDialog.value?.choose() }
 
-async function chooseExport(item: DictionarySummary) {
-  exportError.value = ''
-  if (!('__TAURI_INTERNALS__' in window)) {
-    exportError.value = t('dictionaries.exportDialogFailed')
-    return
-  }
-  try {
-    const outputPath = await save({
-      title: t('dictionaries.exportDialogTitle'),
-      defaultPath: `${item.metadata.id}.json`,
-      filters: [{ name: t('dictionaries.jsonFile'), extensions: ['json'] }],
-    })
-    if (outputPath) emit('exportDictionary', item.metadata.id, outputPath)
-  } catch {
-    exportError.value = t('dictionaries.exportDialogFailed')
-  }
-}
+
+
 </script>
 
 <template>
@@ -370,13 +353,13 @@ async function chooseExport(item: DictionarySummary) {
               @click="setMode('catalog')"
             />
           </div>
-          <UButton v-if="mode === 'local'" color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :disabled="busy" @click="chooseImport" />
+          <UButton v-if="mode === 'local'" color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :title="t('dictionaryExport.importHint')" :disabled="busy" @click="chooseImport" />
           <UButton v-if="mode === 'local'" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('dictionaries.create')" :disabled="busy" @click="openCreate" />
         </div>
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="mode === 'local' && (messages.dictionaries || exportError)" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries || exportError" class="mb-3" />
+    <UAlert v-if="mode === 'local' && messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
     <UAlert
       v-if="mode === 'local' && dictionaryWarnings.length"
       role="status"
@@ -393,6 +376,7 @@ async function chooseExport(item: DictionarySummary) {
       v-model:query="query"
       v-model:page="page"
       v-model:page-size="pageSize"
+      :page-sizes="[50, 100, 200]"
       :search-placeholder="t('dictionaries.searchPlaceholder')"
       :search-label="t('dictionaries.searchLabel')"
       :column-options="localColumnOptions"
@@ -404,6 +388,7 @@ async function chooseExport(item: DictionarySummary) {
       @toggle-column="toggleLocalColumn"
     >
       <template #bulk-actions>
+        <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-file-export" :label="t('dictionaryExport.batchTitle')" :disabled="busy" @click="exportDialog?.openBatch(items.filter(item => selected.has(item.metadata.id)).map(item => item.metadata.id))" />
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />
       </template>
 
@@ -438,7 +423,6 @@ async function chooseExport(item: DictionarySummary) {
         <template #actions-cell="{ row }">
           <div class="flex justify-center gap-0.5">
             <UButton :title="t('common.editNamed', { name: row.original.metadata.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-edit" :aria-label="t('common.editNamed', { name: row.original.metadata.name })" @click="emit('open', row.original.metadata.id)" />
-            <UButton :title="t('dictionaries.exportNamed', { name: row.original.metadata.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-file-export" :aria-label="t('dictionaries.exportNamed', { name: row.original.metadata.name })" :disabled="busy" @click="chooseExport(row.original)" />
             <UButton :title="t('common.deleteNamed', { name: row.original.metadata.name })" color="error" variant="ghost" size="xs" icon="i-tabler-trash" :aria-label="t('common.deleteNamed', { name: row.original.metadata.name })" :disabled="busy" @click="pendingRemoval = [row.original]" />
           </div>
         </template>
@@ -452,6 +436,7 @@ async function chooseExport(item: DictionarySummary) {
       v-else
       v-model:query="catalogQuery"
       v-model:page-size="catalogPageSize"
+      :page-sizes="[50, 100, 200]"
       :page="catalogPageNumber"
       :search-placeholder="t('dictionaries.catalog.searchPlaceholder')"
       :search-label="t('dictionaries.catalog.searchLabel')"
@@ -577,6 +562,7 @@ async function chooseExport(item: DictionarySummary) {
       @update:open="$event || (pendingInstall = null)"
       @confirm="confirmInstall"
     />
+    <DictionaryExportDialog ref="exportDialog" />
     <DictionaryImportDialog ref="importDialog" :apply="applyImport" />
   </section>
 </template>

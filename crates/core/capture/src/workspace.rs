@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 pub const PROBE_RUN_SCHEMA: &str = "glyphshift.probe-run/1";
-pub const MAX_PROBE_QUERY_PAGE_SIZE: usize = 100;
+pub const MAX_PROBE_QUERY_PAGE_SIZE: usize = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeRunError {
@@ -34,6 +34,7 @@ pub enum ProbeRunStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProbeRunCreate {
     id: Box<str>,
+    workflow_id: Option<Box<str>>,
     name: Box<str>,
     software_id: Box<str>,
     dictionary_id: Box<str>,
@@ -43,6 +44,13 @@ pub struct ProbeRunCreate {
 }
 
 impl ProbeRunCreate {
+    pub fn with_workflow(mut self, workflow_id: impl Into<Box<str>>) -> Result<Self, ProbeRunError> {
+        let workflow_id = workflow_id.into();
+        if !safe_identifier(&workflow_id) { return Err(ProbeRunError::InvalidInput); }
+        self.workflow_id = Some(workflow_id);
+        Ok(self)
+    }
+
     pub fn with_excluded_dictionaries(mut self, ids: Vec<Box<str>>) -> Result<Self, ProbeRunError> {
         if ids.iter().any(|id| !safe_identifier(id) || *id == self.dictionary_id)
             || ids.iter().collect::<BTreeSet<_>>().len() != ids.len() { return Err(ProbeRunError::InvalidInput); }
@@ -75,6 +83,7 @@ impl ProbeRunCreate {
         }
         Ok(Self {
             id,
+            workflow_id: None,
             name: name.trim().into(),
             software_id,
             dictionary_id,
@@ -133,6 +142,8 @@ impl ProbeRunUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct ProbeRunSummary {
     id: Box<str>,
+    #[serde(default)]
+    workflow_id: Option<Box<str>>,
     name: Box<str>,
     software_id: Box<str>,
     dictionary_id: Box<str>,
@@ -151,6 +162,9 @@ pub struct ProbeRunSummary {
 }
 
 impl ProbeRunSummary {
+    #[must_use]
+    pub fn workflow_id(&self) -> Option<&str> { self.workflow_id.as_deref() }
+
     pub fn excluded_dictionary_ids(&self) -> &[Box<str>] { &self.excluded_dictionary_ids }
 
     #[must_use]
@@ -494,6 +508,7 @@ impl ProbeRunStore {
             catalog_revision: 0,
             summary: ProbeRunSummary {
                 id: create.id,
+                workflow_id: create.workflow_id,
                 name: create.name,
                 software_id: create.software_id,
                 dictionary_id: create.dictionary_id,
@@ -640,6 +655,18 @@ impl ProbeRunStore {
         .map_err(|_| ProbeRunError::InvalidRun)
     }
 
+    pub fn attach_workflow(&mut self, run_id: &str, workflow_id: &str) -> Result<(), ProbeRunError> {
+        if !safe_identifier(workflow_id) { return Err(ProbeRunError::InvalidInput); }
+        let mut document = self.read_document(run_id)?;
+        if document.summary.workflow_id.as_deref() == Some(workflow_id) { return Ok(()) }
+        if document.summary.workflow_id.is_some() || matches!(document.summary.status, ProbeRunStatus::Running | ProbeRunStatus::Paused) {
+            return Err(ProbeRunError::InvalidState);
+        }
+        document.summary.workflow_id = Some(workflow_id.into());
+        self.touch(&mut document);
+        self.write_document(&document)
+    }
+
     pub fn set_status(
         &mut self,
         run_id: &str,
@@ -662,6 +689,32 @@ impl ProbeRunStore {
         self.touch(&mut document);
         self.write_document(&document)?;
         Ok(document.summary)
+    }
+
+    /// Uses the same source normalization as the collection table when checking writes.
+    pub fn excluded_sources_for(
+        &self,
+        run_id: &str,
+        dictionary: &ProbeDictionarySnapshot,
+        sources: &[Box<str>],
+    ) -> Result<BTreeSet<Box<str>>, ProbeRunError> {
+        let document = self.read_document(run_id)?;
+        let observations = self.read_observations(run_id).ok();
+        let keys = self.source_keys(&document, observations.as_ref());
+        let excluded = dictionary.excluded_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
+        Ok(sources.iter().filter(|source| excluded.contains(&keys.key(source))).cloned().collect())
+    }
+
+    pub fn uncollected_sources(
+        &mut self, run_id: &str, dictionary: &ProbeDictionarySnapshot,
+    ) -> Result<Vec<Box<str>>, ProbeRunError> {
+        let document = self.synchronized_document(run_id)?;
+        let observations = self.read_observations(run_id).ok();
+        let keys = self.source_keys(&document, observations.as_ref());
+        let existing = dictionary.entries.iter().map(|entry| keys.key(&entry.source)).collect::<BTreeSet<_>>();
+        Ok(self.combined_rows(&document, dictionary)?.into_iter()
+            .filter(|row| row.state == ProbeEntryState::Pending && !existing.contains(&keys.key(&row.source)))
+            .map(|row| row.source).collect())
     }
 
     pub fn query_entries(
@@ -920,7 +973,7 @@ impl ProbeRunStore {
                 row.state = ProbeEntryState::Ignored;
             }
         }
-        for entry in &dictionary.entries {
+        for entry in dictionary.entries.iter().filter(|_| document.summary.workflow_id.is_none()) {
             aggregate
                 .entry(entry.source.clone())
                 .or_insert_with(|| ProbeEntryRow {
@@ -1136,6 +1189,7 @@ fn probe_document_from_value(value: &serde_json::Value) -> Option<ProbeRunDocume
                 .into(),
             software_id: software_id.into(),
             dictionary_id: dictionary_id.into(),
+            workflow_id: summary.get("workflowId").and_then(serde_json::Value::as_str).filter(|id| safe_identifier(id)).map(Into::into),
             excluded_dictionary_ids: summary.get("excludedDictionaryIds").and_then(serde_json::Value::as_array).into_iter().flatten().filter_map(|id| id.as_str()).filter(|id| safe_identifier(id) && *id != dictionary_id).map(Into::into).collect(),
             adapter_ids,
             status,
@@ -1196,3 +1250,13 @@ impl From<CaptureError> for ProbeRunError {
 #[cfg(test)]
 #[path = "workspace/tests/mod.rs"]
 mod tests;
+
+#[cfg(test)]
+mod pagination_boundary_tests {
+    use super::*;
+    #[test]
+    fn dictionary_collection_accepts_supported_page_sizes() {
+        for size in [50, 100, 200] { assert!(ProbeQuery::new("", 1, size).is_ok()); }
+        assert!(ProbeQuery::new("", 1, 201).is_err());
+    }
+}

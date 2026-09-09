@@ -42,6 +42,7 @@ pub(super) trait ManagedRuntime: Send {
         0
     }
     fn applied_generation(&self) -> Option<Generation>;
+    fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> { Ok(!self.targets().is_empty()) }
     fn start(
         &mut self,
         target_id: u64,
@@ -76,6 +77,10 @@ pub(super) trait ManagedRuntime: Send {
 }
 
 impl ManagedRuntime for WindowsDesktopRuntime {
+    fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
+        self.refresh_target_liveness()
+    }
+
     fn application_id(&self) -> &str {
         &self.application_id
     }
@@ -180,6 +185,7 @@ enum RuntimePhase<T> {
     Discovered(ControllerConnection<T>),
     Active {
         manager: SessionManager,
+        monitor: glyphshift_target_process_host::TargetProcessMonitor<T>,
         sessions: BTreeMap<u64, SessionId>,
         failures: BTreeMap<u64, DesktopRuntimeError>,
         capture_owner: Option<FileCaptureSink>,
@@ -491,6 +497,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         for (_, target_instance_id, controller_id, _, _) in &runtime_targets {
             host.register_target(target_instance_id.clone(), *controller_id);
         }
+        let monitor = host.monitor();
         let mut hybrid_host = HybridAdapterHost::new(host);
         if runtime_targets
             .iter()
@@ -545,12 +552,30 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         }
         self.phase = Some(RuntimePhase::Active {
             manager,
+            monitor,
             sessions,
             failures,
             capture_owner,
         });
         self.active_features = active_features;
         Ok(())
+    }
+
+    fn refresh_target_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
+        let Some(RuntimePhase::Active { monitor, sessions, .. }) = self.phase.as_mut() else {
+            return Ok(false);
+        };
+        let ids = self.targets.iter().filter(|target| sessions.contains_key(&target.view.id))
+            .map(|target| target.controller_id).collect::<Vec<_>>();
+        let running = monitor.running_targets(&ids).map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        if running.len() == ids.len() && !ids.is_empty() { return Ok(true); }
+        // Dead instances no longer accept stop commands. Remove them before stopping surviving
+        // family members once, then rediscover the changed process family with fresh authority.
+        let live_ids = self.targets.iter().filter(|target| running.contains(&target.controller_id))
+            .map(|target| target.view.id).collect::<BTreeSet<_>>();
+        sessions.retain(|id, _| live_ids.contains(id));
+        self.stop()?;
+        Ok(false)
     }
 
     pub fn publish(

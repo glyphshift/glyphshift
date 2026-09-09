@@ -673,6 +673,11 @@ impl AiTranslation {
             .get(plan_token)
             .cloned()
             .ok_or_else(|| TranslationJobError::UnknownPlan(plan_token.into()))?;
+        let profile = if plan.scope_id.starts_with("connection:") {
+            profile.for_connection_check()
+        } else {
+            profile
+        };
         let provider = self
             .providers
             .get(&profile.protocol())

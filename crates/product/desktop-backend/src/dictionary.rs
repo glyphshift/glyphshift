@@ -117,9 +117,18 @@ pub struct DictionaryMetadata {
     license: Option<Box<str>>,
     homepage: Option<Box<str>>,
     tags: Vec<Box<str>>,
+    #[serde(default)]
+    font_families: Vec<Box<str>>,
+    #[serde(default)]
+    font_scale_percent: Option<u16>,
 }
 
 impl DictionaryMetadata {
+    #[must_use]
+    pub fn font_scale_percent(&self) -> Option<u16> { self.font_scale_percent }
+    #[must_use]
+    pub fn font_families(&self) -> &[Box<str>] { &self.font_families }
+
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -189,6 +198,8 @@ impl DictionaryCreate {
                 license: None,
                 homepage: None,
                 tags: Vec::new(),
+                font_families: Vec::new(),
+                font_scale_percent: None,
             },
             entries: Vec::new(),
         }
@@ -203,6 +214,18 @@ impl DictionaryCreate {
     #[must_use]
     pub fn with_release_version(mut self, version: impl Into<Box<str>>) -> Self {
         self.metadata.release_version = version.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
+        self.metadata.font_scale_percent = percent;
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_families(mut self, families: impl IntoIterator<Item = impl Into<Box<str>>>) -> Self {
+        self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
 
@@ -251,11 +274,21 @@ pub struct DictionaryEdit {
 impl DictionaryEdit {
     #[must_use]
     pub fn from_dictionary(dictionary: &DictionaryView) -> Self {
-        Self { metadata: dictionary.metadata.clone(), base_revision: dictionary.revision,
-            entries: dictionary.entries.iter().map(dictionary_entry_create).collect() }
+        Self {
+            metadata: dictionary.metadata.clone(),
+            base_revision: dictionary.revision,
+            entries: dictionary
+                .entries
+                .iter()
+                .map(dictionary_entry_create)
+                .collect(),
+        }
     }
     #[must_use]
-    pub fn with_name(mut self, name: impl Into<Box<str>>) -> Self { self.metadata.name = name.into(); self }
+    pub fn with_name(mut self, name: impl Into<Box<str>>) -> Self {
+        self.metadata.name = name.into();
+        self
+    }
 
     #[must_use]
     pub fn id(&self) -> &str {
@@ -287,6 +320,18 @@ impl DictionaryEdit {
     #[must_use]
     pub fn with_release_version(mut self, version: impl Into<Box<str>>) -> Self {
         self.metadata.release_version = version.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
+        self.metadata.font_scale_percent = percent;
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_families(mut self, families: impl IntoIterator<Item = impl Into<Box<str>>>) -> Self {
+        self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
 
@@ -423,8 +468,15 @@ impl DesktopBackend {
         if !output_path.is_absolute() {
             return Err(BackendError::InvalidInput("dictionary-export-path"));
         }
-        let source = String::from_utf8(self.dictionary_json(dictionary_id)?)
+        let format = output_path.extension().and_then(|value| value.to_str())
+            .ok_or(BackendError::InvalidInput("dictionary-export-format"))?;
+        let entries = self.dictionary(dictionary_id)?.entries().iter().map(|entry| crate::dictionary_transfer::Entry {
+            source: entry.source().into(), translation: entry.translation().into(),
+        }).collect::<Vec<_>>();
+        let document = serde_json::from_slice(&self.dictionary_json(dictionary_id)?)
             .map_err(|_| BackendError::InvalidArtifact("dictionary-json"))?;
+        let source = crate::dictionary_transfer::encode_entries(format, &entries, Some(&document))
+            .map_err(|_| BackendError::InvalidInput("dictionary-export-format"))?;
         write_atomic(output_path, &source)
     }
 
@@ -715,6 +767,8 @@ fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::Di
         license,
         homepage,
         tags,
+        font_families,
+        font_scale_percent,
     } = metadata;
     let mut packaged =
         dictionary_package::DictionaryCreate::new(id, name, source_locale, target_locale)
@@ -722,6 +776,8 @@ fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::Di
             .with_description(description)
             .with_authors(authors)
             .with_tags(tags)
+            .with_font_families(font_families)
+            .with_font_scale_percent(font_scale_percent)
             .with_entries(entries.into_iter().map(package_dictionary_entry));
     if let Some(license) = license {
         packaged = packaged.with_license(license);
@@ -757,6 +813,8 @@ fn dictionary_view(artifact: &DictionaryArtifact) -> DictionaryView {
             license: metadata.license().map(Into::into),
             homepage: metadata.homepage().map(Into::into),
             tags: metadata.tags().to_vec(),
+            font_families: metadata.font_families().to_vec(),
+            font_scale_percent: metadata.font_scale_percent(),
         },
         revision: packaged.revision(),
         entries: packaged
@@ -787,7 +845,7 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
         dictionary.id(),
         dictionary.metadata.target_locale.clone(),
         entries,
-    )
+    ).with_font_families(dictionary.metadata.font_families.iter().cloned()).with_font_scale_percent(dictionary.metadata.font_scale_percent)
 }
 
 pub(super) struct DictionaryLoad {

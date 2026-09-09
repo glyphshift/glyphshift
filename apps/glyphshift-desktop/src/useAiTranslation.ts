@@ -1,3 +1,6 @@
+import { useAppSettings } from './appSettings'
+import { defaultAiFilterPolicy, skipReason, type AiFilterPolicy } from './textFilters'
+export { defaultAiFilterPolicy, type AiFilterPolicy } from './textFilters'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
 import { isCommandError, translateCommandError } from './commandError'
@@ -16,25 +19,13 @@ export type AiProviderProtocol
 export type AiReasoningEffort
   = 'disabled' | 'automatic' | 'low' | 'medium' | 'high' | 'maximum'
 
-export interface AiFilterPolicy {
-  skipPureNumbersOrSymbols: boolean
-  skipNumericMeasurements: boolean
-  skipSingleCharacter: boolean
-  skipTextContainingDigits: boolean
-  skipUrls: boolean
-  skipEmails: boolean
-  skipFilePaths: boolean
-  skipShortcuts: boolean
-  maxSourceChars: number | null
-  excludedPatterns: string[]
-}
-
 export interface AiProfile {
   id: string
   name: string
   protocol: AiProviderProtocol
   baseUrl: string
   modelId: string
+  translationPrompt?: string | null
   reasoningEffort: AiReasoningEffort
   timeoutMs: number
   maxItemsPerRequest: number
@@ -229,19 +220,6 @@ export interface AiConnectionReport {
   safeMessage: string
 }
 
-export const defaultAiFilterPolicy = (): AiFilterPolicy => ({
-  skipPureNumbersOrSymbols: true,
-  skipNumericMeasurements: true,
-  skipSingleCharacter: true,
-  skipTextContainingDigits: false,
-  skipUrls: true,
-  skipEmails: true,
-  skipFilePaths: true,
-  skipShortcuts: true,
-  maxSourceChars: null,
-  excludedPatterns: [],
-})
-
 export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; modelId: string; concurrency: number; credentialRequired: boolean }> = {
   codex_subscription: { baseUrl: 'codex://local', modelId: 'gpt-5.6-sol', concurrency: 1, credentialRequired: false },
   open_ai_responses: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
@@ -288,6 +266,9 @@ export function estimateAiTranslationInput(plan: AiTranslationPlan, maxItemsPerR
 const BROWSER_STORAGE_KEY = 'glyphshift.ai-profiles.v2'
 const catalog = ref<AiProfilesView>({ defaultProfileId: null, profiles: [] })
 const busy = ref(false)
+const testingProfileId = ref<string | null>(null)
+let taskRefreshSequence = 0
+let appliedTaskRefreshSequence = 0
 const error = ref('')
 const currentJob = ref<AiTranslationTask | null>(null)
 const taskCenter = ref<AiTranslationTaskCenter>({ current: null, history: [] })
@@ -411,6 +392,9 @@ async function saveProfile(profile: AiProfileDraft, makeDefault: boolean) {
       }
       persistBrowserCatalog()
     }
+    const reports = { ...connectionReports.value }
+    delete reports[profile.id]
+    connectionReports.value = reports
     return catalog.value
   }
   catch (reason) {
@@ -470,27 +454,6 @@ async function deleteProfile(profileId: string) {
   }
 }
 
-function skipReason(item: AiTranslationItemInput, policy: AiFilterPolicy): AiSkipReason | null {
-  const source = item.source.trim()
-  if (item.translation?.trim()) return 'already_translated'
-  if (item.ignored) return 'ignored'
-  if (!source) return 'empty_source'
-  if (policy.skipSingleCharacter && [...source].length === 1) return 'single_character'
-  if (policy.skipUrls && /^(?:https?|ftp):\/\//i.test(source)) return 'url'
-  if (policy.skipEmails && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(source)) return 'email'
-  if (policy.skipFilePaths && /^(?:[a-z]:[\\/]|\\\\|\/)[^\n]+/i.test(source)) return 'file_path'
-  if (policy.skipShortcuts && /^(?:(?:ctrl|alt|shift|cmd|command|win|super)\s*\+\s*)+[\w\d]+$/i.test(source)) return 'shortcut'
-  if (policy.skipNumericMeasurements && /^\d+(?:[.,]\d+)?\s*(?:[x×]\s*\d+(?:[.,]\d+)?|fps|hz|px|%|ms|s|kb|mb|gb|°c)$/i.test(source)) return 'numeric_measurement'
-  if (policy.skipPureNumbersOrSymbols && !/[\p{L}]/u.test(source)) return 'pure_number_or_symbols'
-  if (policy.skipTextContainingDigits && /\d/.test(source)) return 'contains_digit'
-  if (policy.maxSourceChars && [...source].length > policy.maxSourceChars) return 'too_long'
-  if (policy.excludedPatterns.some(pattern => {
-    try { return new RegExp(pattern).test(source) }
-    catch { return false }
-  })) return 'custom_pattern'
-  return null
-}
-
 function browserPlan(input: {
   scopeId: string
   snapshotRevision: number
@@ -506,7 +469,7 @@ function browserPlan(input: {
   const sources = new Set<string>()
   input.items.forEach(item => {
     const source = item.source.trim()
-    const reason = skipReason(item, profile.filterPolicy)
+    const reason = skipReason(item, useAppSettings().settings.value.textFilterPolicy)
       ?? (sources.has(source) ? 'duplicate_source' : null)
     if (reason) skipped.push({ itemId: item.itemId, source, reason })
     else {
@@ -597,6 +560,7 @@ async function startTranslation(planToken: string, profileId?: string | null) {
     const task = await invoke<AiTranslationTask>('desktop_start_ai_translation', {
       request: { planToken, profileId: profileId ?? null },
     })
+    appliedTaskRefreshSequence = ++taskRefreshSequence
     currentJob.value = task
     taskCenter.value = { ...taskCenter.value, current: task }
     return task
@@ -735,7 +699,10 @@ function visibleCurrentJob(job: AiTranslationTask | null) {
 
 async function refreshTaskCenter() {
   if (hasDesktopRuntime()) {
+    const sequence = ++taskRefreshSequence
     const next = await invoke<AiTranslationTaskCenter>('desktop_ai_translation_tasks')
+    if (sequence < appliedTaskRefreshSequence) return taskCenter.value
+    appliedTaskRefreshSequence = sequence
     taskCenter.value = next
     currentJob.value = visibleCurrentJob(next.current)
     if (next.current) elapsedMs.value = next.current.elapsedMs
@@ -821,6 +788,8 @@ async function runPlan(plan: AiTranslationPlan, profileId?: string | null) {
 }
 
 async function testProfile(profileId: string) {
+  if (testingProfileId.value || busy.value || (currentJob.value && !taskIsTerminal(currentJob.value.status))) return null
+  testingProfileId.value = profileId
   error.value = ''
   try {
     const input = {
@@ -868,6 +837,7 @@ async function testProfile(profileId: string) {
     connectionReports.value = { ...connectionReports.value, [profileId]: report }
     return report
   }
+  finally { testingProfileId.value = null }
 }
 
 async function cancelCurrentJob() {
@@ -941,6 +911,7 @@ export function useAiTranslation() {
     lockedDictionaryId: computed(() => currentJob.value?.dictionaryLocked ? currentJob.value.targetDictionaryId : null),
     elapsed,
     connectionReports,
+    testingProfileId,
     connect,
     saveProfile,
     setDefaultProfile,

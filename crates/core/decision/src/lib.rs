@@ -441,13 +441,16 @@ fn decision_from_parts(
     let font_trace = match &font {
         None => FontTrace::Unmatched,
         Some(FontRule::Unchanged) => FontTrace::Protected,
-        Some(FontRule::Substitute(_)) => FontTrace::Substituted,
+        Some(FontRule::Substitute(_)) | Some(FontRule::Scaled { .. }) => FontTrace::Substituted,
     };
     Some(MatchedDecision {
         decision: RenderDecision {
             text: text.map_or(TextDecision::Keep, TextDecision::Replace),
             font: match font {
                 None | Some(FontRule::Unchanged) => FontDecision::Keep,
+                Some(FontRule::Scaled { family, percent }) => {
+                    FontDecision::Scaled { family, percent }
+                }
                 Some(FontRule::Substitute(family)) => FontDecision::Substitute(family),
             },
             generation: snapshot.generation(),

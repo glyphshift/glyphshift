@@ -89,11 +89,13 @@ fn profiles_persist_plaintext_credentials_and_expose_them_for_editing() {
     let profiles = reopened.profiles().expect("list reopened profiles");
     assert_eq!(profiles.len(), 2);
     assert_eq!(reopened.default_profile_id(), Some("profile.ollama"));
-    assert!(profiles
-        .iter()
-        .find(|profile| profile.id() == "profile.openai")
-        .expect("OpenAI profile")
-        .has_credential());
+    assert!(
+        profiles
+            .iter()
+            .find(|profile| profile.id() == "profile.openai")
+            .expect("OpenAI profile")
+            .has_credential()
+    );
     assert_eq!(
         serde_json::to_value(
             profiles
@@ -217,4 +219,45 @@ fn malformed_profile_artifact_opens_empty_and_preserves_the_original_file() {
     assert!(catalog.profiles().expect("list profiles").is_empty());
     assert!(root.path().join("ai-profiles.json").exists());
     assert!(root.path().join("ai-profiles.invalid.json").exists());
+}
+
+#[test]
+fn custom_translation_prompt_survives_reopen_and_can_restore_default() {
+    let root = tempdir().expect("profile root");
+    let draft = || {
+        AiProfileDraft::new(
+            "profile.prompt",
+            "Prompt",
+            AiProviderProtocol::OllamaChat,
+            "synthetic-model",
+        )
+    };
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("catalog");
+    catalog
+        .save_profile(draft().with_translation_prompt("Use concise nautical terminology."))
+        .expect("save prompt");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("reopen");
+    assert_eq!(
+        catalog
+            .resolve_profile("profile.prompt")
+            .expect("resolved")
+            .translation_prompt(),
+        "Use concise nautical terminology."
+    );
+    assert!(
+        catalog
+            .save_profile(draft().with_translation_prompt("x".repeat(16_001)))
+            .is_err()
+    );
+    catalog
+        .save_profile(draft().with_translation_prompt("  "))
+        .expect("restore");
+    let catalog = AiProfileCatalog::open(root.path()).expect("reopen default");
+    assert_eq!(
+        catalog
+            .resolve_profile("profile.prompt")
+            .expect("resolved default")
+            .translation_prompt(),
+        glyphshift_ai_translation::DEFAULT_TRANSLATION_PROMPT.trim()
+    );
 }

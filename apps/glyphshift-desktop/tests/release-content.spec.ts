@@ -41,7 +41,7 @@ test('bilingual READMEs lead with user problems and product use instead of repos
   expect(english).not.toContain('## Repository structure')
   expect(english).not.toContain('## Development validation')
   expect(chinese).toContain('任意源语言和目标语言')
-  expect(chinese).toContain('不会限制词典可以翻译的语言')
+  expect(chinese).toContain('不会限制字典可以翻译的语言')
   expect(chinese).not.toContain('让没有中文')
   expect(english).toContain('any source and target language pair')
   expect(english).toContain('do not restrict the languages a dictionary can translate')
@@ -50,7 +50,7 @@ test('bilingual READMEs lead with user problems and product use instead of repos
 test('version tags build the verified Windows installer and publish it to the current repository', () => {
   const workflow = readFileSync(join(repositoryRoot, '.github', 'workflows', 'release.yml'), 'utf8')
 
-  expect(workflow).toContain("tags:\n      - 'v*'")
+  expect(workflow).toMatch(/tags:\r?\n      - 'v\*'/)
   expect(workflow).toContain('runs-on: windows-latest')
   expect(workflow).toContain('contents: write')
   expect(workflow).toContain('./scripts/build-desktop-release.ps1')
@@ -58,6 +58,10 @@ test('version tags build the verified Windows installer and publish it to the cu
   expect(workflow).toContain('--verify-tag')
   expect(workflow).toContain('candidate-manifest.json')
   expect(workflow).toContain('SHA256SUMS.txt')
+  expect(workflow).toContain('python scripts/yueli_docs_publish.py pack docs --output local-test/evidence/docs-release/docs.zip')
+  expect(workflow).toContain('$docsChecksum  docs.zip')
+  expect(workflow).toContain('$assets.Count -ne 4')
+  expect(workflow.indexOf('name: Package documentation')).toBeLessThan(workflow.indexOf('name: Publish GitHub Release'))
   expect(workflow).not.toMatch(/OWNER\/REPO|repository:\s+[^\n]+|PERSONAL_ACCESS_TOKEN|\bPAT\b/)
 })
 

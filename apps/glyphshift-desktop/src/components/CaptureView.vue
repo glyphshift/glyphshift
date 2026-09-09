@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useProbeAutoComplete } from '../useProbeAutoComplete'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -34,6 +35,7 @@ import ProbeAdapterPicker from './ProbeAdapterPicker.vue'
 import QuickProbeLauncher from './QuickProbeLauncher.vue'
 
 const props = defineProps<{
+  workflowId?: string | null
   software: SoftwareRecord[]
   dictionaries: DictionarySummary[]
   adapters: AdapterOption[]
@@ -44,6 +46,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'back-workflow': []
+  'workflow-settings': []
   'arm-capture': []
   'cancel-capture': []
   'open-dictionary': [id: string]
@@ -55,6 +59,7 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
 const ai = useAiTranslation()
+const autoComplete = useProbeAutoComplete()
 const query = ref('')
 const adapterFilterIds = ref<string[]>([])
 const translationFilter = ref<ProbeTranslationFilter>('all')
@@ -213,6 +218,14 @@ const clearEntriesLocked = computed(() => selectedRun.value?.status === 'running
 const selectedAiProfile = computed(() => ai.profiles.value.find(profile => (
   profile.id === (selectedAiProfileId.value ?? ai.catalog.value.defaultProfileId)
 )) ?? ai.defaultProfile.value)
+const autoCompleteEnabled = computed(() => Boolean(selectedRun.value && autoComplete.runs.value[selectedRun.value.id]))
+const autoCompleteDisabled = computed(() => !selectedRun.value || (!autoCompleteEnabled.value && (!selectedAiProfile.value || selectedRun.value.status !== 'running')))
+function toggleAutoComplete(checked: boolean) {
+  const run = selectedRun.value
+  if (!run) return
+  if (checked && selectedAiProfile.value) autoComplete.start(run.id, selectedAiProfile.value.id)
+  else autoComplete.stop(run.id)
+}
 const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
   [{
     label: t('ai.previewCandidates'),
@@ -223,7 +236,7 @@ const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
   ai.profiles.value.map(profile => ({
     label: t('ai.useProfile', { name: profile.name }),
     icon: selectedAiProfile.value?.id === profile.id ? 'i-tabler-check' : 'i-tabler-sparkles',
-    onSelect: () => { selectedAiProfileId.value = profile.id },
+    onSelect: () => { selectedAiProfileId.value = profile.id; const run = selectedRun.value; if (run && autoComplete.runs.value[run.id]) autoComplete.start(run.id, profile.id) },
   })),
   [{
     label: t('ai.manageProfiles'),
@@ -312,8 +325,10 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [[
 ]])
 const taskActionLabel = computed(() => t('capture.taskActions'))
 const taskActionItems = computed<DropdownMenuItem[][]>(() => selectedRun.value ? [[{
-  label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings(),
-}], ...exportItems.value] : [])
+  label: t('capture.launchSoftware'), icon: 'i-tabler-app-window', disabled: launchingSoftware.value || !selectedSoftware.value?.executablePath, onSelect: () => void launchSelectedSoftware(),
+}, {
+  label: t('capture.refreshText'), icon: 'i-tabler-refresh', disabled: refreshingText.value || probe.busy.value || !selectedRun.value.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.value.status), onSelect: () => void refreshTargetText(),
+}], ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
     type: 'checkbox' as const,
@@ -512,7 +527,6 @@ async function executeAiTranslation() {
   try {
     await ai.startBackgroundPlan(nextPlan, selectedAiProfile.value.id)
     aiPlan.value = null
-    emit('open-ai-tasks')
   }
   catch {
     // The composable exposes the localized error near the probe header.
@@ -564,11 +578,18 @@ async function handleQuickProbeStarted(runId: string) {
   await loadPage()
 }
 
+async function openWorkflowSettings() {
+  await Promise.all([...dirtyTranslations].map(saveTranslation))
+  if (dirtyTranslations.size) return
+  emit('workflow-settings')
+}
+
 async function closeDetail() {
   await Promise.all([...dirtyTranslations].map(saveTranslation))
   if (dirtyTranslations.size) return
   probe.selectRun('')
   selected.value = new Set()
+  if (props.workflowId) emit('back-workflow')
 }
 
 async function applySettings() {
@@ -837,7 +858,7 @@ function restoreViewState(runId: string) {
       ? value.translationFilter!
       : 'all'
     page.value = Math.max(1, value.page ?? 1)
-    pageSize.value = [20, 50, 100].includes(value.pageSize ?? 0) ? value.pageSize! : 50
+    pageSize.value = [50, 100, 200].includes(value.pageSize ?? 0) ? value.pageSize! : 50
   }
   catch {
     query.value = ''
@@ -989,7 +1010,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       title-id="capture-title"
       :title="selectedRun.name"
       :description="selectedRunMetadata"
-      :back-label="t('capture.backToRuns')"
+      :back-label="workflowId ? t('workflows.title') : t('capture.backToRuns')"
       @back="closeDetail"
     >
       <template #status>
@@ -1016,23 +1037,10 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
       <template #actions>
         <div data-testid="probe-detail-actions" class="flex items-center gap-2">
-          <UButton data-testid="probe-refresh-text" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="t('capture.refreshText')" :aria-label="t('capture.refreshText')" :title="t('capture.refreshTextHint')" :ui="{ label: 'hidden min-[1080px]:inline' }" :loading="refreshingText" :disabled="probe.busy.value || !selectedRun.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.status)" @click="refreshTargetText" />
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="sm"
-            icon="i-tabler-app-window"
-            :label="t('capture.launchSoftware')"
-            :aria-label="t('capture.launchSoftware')"
-            :title="t('capture.launchSoftware')"
-            :loading="launchingSoftware"
-            :disabled="!selectedSoftware?.executablePath"
-            :ui="{ label: 'hidden min-[1080px]:inline' }"
-            @click="launchSelectedSoftware"
-          />
           <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="probe.setPaused(selectedRun.id, true)" />
-          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : t('capture.resume')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
+          <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : (workflowId ? t('workflows.start') : t('capture.resume'))" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
           <UButton v-if="['running', 'paused'].includes(selectedRun.status)" data-testid="probe-disconnect" color="neutral" variant="outline" size="sm" icon="i-tabler-plug-off" :label="t('capture.disconnect')" :loading="disconnectingRunId === selectedRun.id" :disabled="probe.busy.value && disconnectingRunId !== selectedRun.id" @click="disconnectRun(selectedRun)" />
+          <UButton v-if="workflowId" color="neutral" variant="outline" size="sm" icon="i-tabler-settings" :label="t('workflows.settings')" :disabled="probe.busy.value" @click="openWorkflowSettings" />
           <UDropdownMenu :items="taskActionItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-60' }">
             <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" :aria-label="taskActionLabel" :title="taskActionLabel" :ui="{ label: 'hidden min-[1080px]:inline' }" />
           </UDropdownMenu>
@@ -1094,7 +1102,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </section>
 
     <template v-if="selectedRun">
-      <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
+      <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :page-sizes="[50, 100, 200]" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton :title="t('capture.adapterFilterLabel')" data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
@@ -1114,6 +1122,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
               <UButton :title="t('ai.translationOptions')" color="primary" variant="soft" size="sm" icon="i-tabler-chevron-down" class="rounded-l-none border-l border-l-[var(--border)]" :aria-label="t('ai.translationOptions')" :disabled="ai.busy.value" />
             </UDropdownMenu>
           </div>
+          <UCheckbox data-testid="probe-auto-complete" :model-value="autoCompleteEnabled" :disabled="autoCompleteDisabled" :label="t('ai.autoComplete')" @update:model-value="toggleAutoComplete(Boolean($event))" />
         </template>
         <template #bulk-actions>
           <UButton color="primary" variant="soft" size="sm" icon="i-tabler-book-upload" :label="t('capture.saveSelectedToDictionary')" :disabled="!selectedDictionaryEntries.length || probe.busy.value" @click="syncSelectedToDictionary" />
@@ -1246,6 +1255,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <p v-if="aiPlan?.skipped.length" class="type-metadata mb-0 mt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
 
+    <UAlert v-if="selectedRun && autoComplete.stopped.value[selectedRun.id]" color="warning" :title="t('ai.autoStopped')" class="mt-2" @close="autoComplete.stopped.value[selectedRun!.id] = false" />
     <AiTranslationPreflight
       v-model:open="aiPreflightOpen"
       :plan="aiPlan"

@@ -1,6 +1,7 @@
 //! Desktop-facing product model for software, dictionaries, and workflows.
 
 mod dictionary;
+pub mod dictionary_transfer;
 mod snapshot;
 mod software;
 mod storage;
@@ -52,6 +53,7 @@ pub enum BackendError {
     DuplicateSoftware(Box<str>),
     DuplicateDictionary(Box<str>),
     UnknownSoftware(Box<str>),
+    SoftwareBindingMissing(Box<str>),
     UnknownDictionary(Box<str>),
     UnknownAdapter(Box<str>),
     DuplicateWorkflow(Box<str>),
@@ -199,6 +201,11 @@ pub struct DesktopBackend {
 }
 
 impl DesktopBackend {
+    /// The dictionary directory of this workspace, including custom data roots.
+    pub fn dictionary_directory(&self) -> PathBuf {
+        self.root.join("dictionaries")
+    }
+
     pub fn open(root: impl AsRef<Path>) -> Result<Self, BackendError> {
         Self::open_with_environment(root, DesktopEnvironment::new([], Vec::<Box<str>>::new()))
     }
@@ -210,7 +217,7 @@ impl DesktopBackend {
         let root = root.as_ref().to_path_buf();
         fs::create_dir_all(root.join("dictionaries"))
             .map_err(|_| BackendError::Storage("create-dictionary-directory"))?;
-        fs::create_dir_all(root.join("workflows"))
+        fs::create_dir_all(root.join("workflows-v4"))
             .map_err(|_| BackendError::Storage("create-workflow-directory"))?;
 
         let loaded_software = software::load(&root)?;

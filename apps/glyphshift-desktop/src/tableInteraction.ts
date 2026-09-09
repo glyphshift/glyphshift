@@ -30,12 +30,13 @@ export function managementIdentityColumnMeta(width: 'w-52' | 'w-60' | 'w-64', wi
   }
 }
 
-export function managementActionsColumnMeta(width: 'w-20' | 'w-24' | 'w-28'): ManagementColumnMeta {
+export function managementActionsColumnMeta(width: 'w-20' | 'w-24' | 'w-28' | 'w-48' | 'w-60'): ManagementColumnMeta {
+  const bounds = width === 'w-60' ? 'min-w-60 max-w-60' : width === 'w-48' ? 'min-w-48 max-w-48' : 'min-w-20 max-w-28'
   const edge = 'before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-[var(--border)]'
   return {
     class: {
-      th: `management-table-actions-cell right-0 ${width} min-w-20 max-w-28 text-center ${pinnedHeader} ${edge}`,
-      td: `management-table-actions-cell right-0 ${width} min-w-20 max-w-28 text-center ${pinnedCell} ${edge}`,
+      th: `management-table-actions-cell right-0 ${width} ${bounds} text-center ${pinnedHeader} ${edge}`,
+      td: `management-table-actions-cell right-0 ${width} ${bounds} text-center ${pinnedCell} ${edge}`,
     },
   }
 }

@@ -60,7 +60,7 @@ const activityStatus = computed<ProbeActivityStatus>(() => {
   if (runs.value.some(run => run.status === 'paused')) return 'paused'
   return null
 })
-const selectedRunId = ref(localStorage.getItem('glyphshift.probe.selectedRun') ?? '')
+const selectedRunId = ref(localStorage.getItem('glyphshift.workflow.selectedRecord') ?? '')
 const busy = ref(false)
 const polling = ref(false)
 const message = ref('')
@@ -81,8 +81,8 @@ function upsert(summary: ProbeRunSummary) {
 function selectRun(id: string) {
   if (selectedRunId.value !== id) clearMessage()
   selectedRunId.value = id
-  if (id) localStorage.setItem('glyphshift.probe.selectedRun', id)
-  else localStorage.removeItem('glyphshift.probe.selectedRun')
+  if (id) localStorage.setItem('glyphshift.workflow.selectedRecord', id)
+  else localStorage.removeItem('glyphshift.workflow.selectedRecord')
 }
 
 function clearMessage() {
@@ -258,6 +258,12 @@ export function useProbeRuns() {
     }
   }
 
+  async function openWorkflow(workflowId: string) {
+    const run = await runSummaryCommand('desktop_workflow_collection', { workflowId })
+    if (run) selectRun(run.id)
+    return run
+  }
+
   async function resume(runId: string) {
     return runSummaryCommand('desktop_resume_probe_run', { runId })
   }
@@ -288,7 +294,9 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      reportError(error, typeof args.runId === 'string' ? args.runId : undefined)
+      const contextualError = command === 'desktop_refresh_probe_text' && isCommandError(error)
+        ? { ...error, args: { ...error.args, action: 'refreshText' } } : error
+      reportError(contextualError, typeof args.runId === 'string' ? args.runId : undefined)
       return null
     }
     finally {
@@ -399,6 +407,7 @@ export function useProbeRuns() {
   }
 
   return {
+    openWorkflow,
     runs,
     activityStatus,
     selectedRunId,

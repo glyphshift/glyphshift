@@ -91,7 +91,7 @@ test('workflow sections and Help keep a continuous visible heading outline', asy
   await expect(page.getByTestId('workflow-editor')).toBeVisible()
   expectNoHeadingJumps(await visibleHeadingLevels(page))
 
-  for (const tab of ['软件与兼容方式', '翻译词典', '字体策略']) {
+  for (const tab of ['软件与兼容方式', '翻译字典', '字体策略']) {
     await page.getByRole('tab', { name: tab }).click()
     expectNoHeadingJumps(await visibleHeadingLevels(page))
   }
@@ -218,7 +218,7 @@ test('management tables share independent persisted column controls', async ({ p
   await expect(columnsButton).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '描述', exact: true })).toBeVisible()
 
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await columnsButton.click()
   await page.getByRole('menuitemcheckbox', { name: '发布', exact: true }).click()
   await page.keyboard.press('Escape')
@@ -268,7 +268,7 @@ test('dictionary delete names every workflow and probe that blocks it', async ({
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_delete_dictionaries') {
           throw {
@@ -287,9 +287,9 @@ test('dictionary delete names every workflow and probe that blocks it', async ({
   }, { current: snapshot })
   await replaceModel(page, snapshot)
 
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '删除 界面基础词典' }).click()
-  await page.getByRole('dialog', { name: '删除词典' }).getByRole('button', { name: '删除词典' }).click()
+  await page.getByRole('dialog', { name: '删除字典' }).getByRole('button', { name: '删除字典' }).click()
 
   const alert = page.getByRole('alert')
   await expect(alert).toContainText('默认创作工作流')
@@ -302,7 +302,7 @@ test('software batch delete keeps a rejected record and explains why', async ({ 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_remove_software') {
           throw {
@@ -361,7 +361,7 @@ test('workflow names a stopped software and exposes its actionable Runtime error
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-runtime-stopped.png' })
 })
 
-test('workflow keeps permission failures distinct from a stopped software', async ({ page }) => {
+test('workflow does not label generic access failures as permission mismatches', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
   snapshot.workflowRuntimeStatus = {
@@ -383,10 +383,38 @@ test('workflow keeps permission failures distinct from a stopped software', asyn
   }
   await replaceModel(page, snapshot)
 
-  const failedStatus = page.getByRole('button', { name: '权限不匹配', exact: true })
+  const failedStatus = page.getByRole('button', { name: '连接失败', exact: true })
   await expect(failedStatus).toBeVisible()
   await failedStatus.click()
   await expect(page.getByTestId('workflow-runtime-issues').getByText('无法写入目标软件。它可能已经退出，或正以管理员权限运行。请确认软件仍在运行；若权限更高，请在设置中开启“始终以管理员身份启动”。')).toBeVisible()
+})
+
+test('workflow identifies unavailable target processes without claiming a permission mismatch', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+  snapshot.workflowRuntimeStatus = {
+    'workflow-proof': {
+      workflowId: 'workflow-proof',
+      targets: [{
+        softwareId: 'software-proof', discovered: true, active: false,
+        translationRequested: true, fontRequested: true,
+        translationActive: false, fontActive: false, appliedGeneration: null,
+      }],
+      errors: {
+        'software-proof': {
+          schemaVersion: 1,
+          code: 'runtime.target_access_failed',
+          args: { operation: 'targetProcess' },
+        },
+      },
+    },
+  }
+  await replaceModel(page, snapshot)
+
+  const failedStatus = page.getByRole('button', { name: '软件未启动', exact: true })
+  await expect(failedStatus).toBeVisible()
+  await failedStatus.click()
+  await expect(page.getByTestId('workflow-runtime-issues')).not.toContainText('管理员权限不能')
 })
 
 test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
@@ -395,8 +423,8 @@ test('navigation keeps fonts inside workflow targets instead of a separate asset
   await expect(page.getByText('桌面服务已连接')).toHaveCount(0)
   await expect(page.getByText('本地预览')).toHaveCount(0)
 
-  await page.getByRole('button', { name: '词典', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '词典' })).toBeVisible()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '字典' })).toBeVisible()
   await expect(page.getByText('en-US')).toBeVisible()
   await expect(page.getByText('v1.2.0')).toBeVisible()
 

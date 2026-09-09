@@ -82,3 +82,19 @@ fn identical_legacy_translations_are_reused_and_hard_breaks_remain_distinct() {
     assert_eq!(canonical.translation(), "材料");
     assert!(!canonical.has_translation_conflict());
 }
+
+#[test]
+fn excluded_source_write_checks_follow_the_same_soft_wrap_policy_as_rows() {
+    let (_root, mut store) = run_store();
+    let run = create_run(&mut store);
+    store.set_source_policy("windows.gdi.text-out", SourceTextPolicy::SpacePaddedSoftWrap);
+    let source = "A long \r\nsource text";
+    let sink = FileCaptureSink::start(store.capture_configuration(run.id(), 100).unwrap()).unwrap();
+    sink.observe("windows.gdi.text-out", source);
+    sink.finish().unwrap();
+    let snapshot = ProbeDictionarySnapshot::new(1, []).unwrap()
+        .with_excluded_sources([source.to_owned()].into());
+    assert_eq!(store.query_entries(run.id(), &ProbeQuery::new("", 1, 50).unwrap(), &snapshot).unwrap().total, 0);
+    let sources = vec![Box::<str>::from("A long source text"), "Unrelated text".into()];
+    assert_eq!(store.excluded_sources_for(run.id(), &snapshot, &sources).unwrap(), [Box::<str>::from("A long source text")].into());
+}

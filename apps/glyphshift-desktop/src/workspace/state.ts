@@ -45,6 +45,7 @@ function normalizeDictionaryInstallations(model: DesktopModel): DesktopModel {
 }
 
 function readModel(): DesktopModel {
+  if (hasDesktopRuntime()) return emptyModel()
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return emptyModel()
   try {

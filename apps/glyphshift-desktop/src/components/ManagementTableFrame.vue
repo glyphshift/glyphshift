@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<{
   selectedLabel?: string
   page: number
   pageSize: number
+  pageSizes?: number[]
   total: number
   itemLabel: string
   paginationMode?: 'offset' | 'cursor'
@@ -45,6 +46,7 @@ const props = withDefaults(defineProps<{
   selectedCount: 0,
   selectedLabel: '',
   paginationMode: 'offset',
+  pageSizes: () => [20, 50, 100],
   cursorPage: 1,
   hasNextPage: false,
   footerSummary: '',
@@ -71,11 +73,7 @@ const filterItems = computed(() => props.filterOptions.map(option => ({
 
 const rangeStart = computed(() => props.total ? (props.page - 1) * props.pageSize + 1 : 0)
 const rangeEnd = computed(() => Math.min(props.page * props.pageSize, props.total))
-const pageSizeOptions = [
-  { label: '20', value: 20 },
-  { label: '50', value: 50 },
-  { label: '100', value: 100 },
-]
+const pageSizeOptions = computed(() => props.pageSizes.map(value => ({ label: String(value), value })))
 const columnItems = computed<DropdownMenuItem[][]>(() => [
   props.columnOptions.map(option => ({
     type: 'checkbox' as const,
@@ -93,7 +91,7 @@ const columnItems = computed<DropdownMenuItem[][]>(() => [
 
 function updatePageSize(value: unknown) {
   const next = Number(value)
-  if (!pageSizeOptions.some(option => option.value === next)) return
+  if (!pageSizeOptions.value.some(option => option.value === next)) return
   emit('update:pageSize', next)
   emit('update:page', 1)
 }

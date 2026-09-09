@@ -1,3 +1,4 @@
+import { defaultAiFilterPolicy, type AiFilterPolicy } from './textFilters'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
 import { setI18nLocale, type AppLocale } from './i18n'
@@ -21,6 +22,9 @@ export interface AppSettings {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
+  checkUpdatesOnStartup: boolean
+  textFilterPolicy: AiFilterPolicy
+  autoCompleteIntervalSeconds: number
 }
 
 interface AppSettingsUpdate {
@@ -30,6 +34,9 @@ interface AppSettingsUpdate {
   launchElevated: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
+  checkUpdatesOnStartup: boolean
+  textFilterPolicy: AiFilterPolicy
+  autoCompleteIntervalSeconds: number
 }
 
 interface DesktopPrivilegeStatus {
@@ -45,6 +52,9 @@ const fallbackSettings: AppSettings = {
   launchElevated: false,
   closeBehavior: 'quit',
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
+  textFilterPolicy: defaultAiFilterPolicy(),
+  autoCompleteIntervalSeconds: 10,
+  checkUpdatesOnStartup: true,
 }
 
 const settings = ref<AppSettings>({ ...fallbackSettings })
@@ -77,6 +87,7 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     ? candidate.softwareCaptureShortcut
     : fallbackSettings.softwareCaptureShortcut
   return {
+    textFilterPolicy: { ...defaultAiFilterPolicy(), ...(candidate.textFilterPolicy ?? {}) },
     settingsSchemaVersion: 1,
     localePreference,
     themePreference,
@@ -88,7 +99,8 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
       : fallbackSettings.launchElevated,
     closeBehavior,
     softwareCaptureShortcut,
-  }
+    checkUpdatesOnStartup: typeof candidate.checkUpdatesOnStartup === 'boolean' ? candidate.checkUpdatesOnStartup : true,
+    autoCompleteIntervalSeconds: Number.isInteger(candidate.autoCompleteIntervalSeconds) && candidate.autoCompleteIntervalSeconds! >= 0 && candidate.autoCompleteIntervalSeconds! <= 60 ? candidate.autoCompleteIntervalSeconds! : 10,  }
 }
 
 function readBrowserSettings(): AppSettings {
@@ -212,13 +224,20 @@ export function useAppSettings() {
       launchElevated: settings.value.launchElevated,
       closeBehavior: settings.value.closeBehavior,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
+      autoCompleteIntervalSeconds: settings.value.autoCompleteIntervalSeconds,
+      checkUpdatesOnStartup: settings.value.checkUpdatesOnStartup,
+      textFilterPolicy: settings.value.textFilterPolicy,
       ...patch,
     })
   }
 
   return {
     settings,
-    effectiveLocale,
+    async setTextFilterPolicy(value: AiFilterPolicy) { await update({ textFilterPolicy: value }) },
+    async setCheckUpdatesOnStartup(value: boolean) { await update({ checkUpdatesOnStartup: value }) },
+    async setAutoCompleteIntervalSeconds(value: number) {
+      if (Number.isInteger(value) && value >= 0 && value <= 60) await update({ autoCompleteIntervalSeconds: value })
+    },    effectiveLocale,
     effectiveTheme,
     settingsError,
     settingsBusy,

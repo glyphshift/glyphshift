@@ -113,6 +113,17 @@ fn available_library(path: &Path) -> bool {
     path.is_absolute() && path.is_file()
 }
 
+/// Read-only process-instance inventory shared with the owning host connection.
+pub struct TargetProcessMonitor<T> {
+    connection: Arc<Mutex<ControllerConnection<T>>>,
+}
+impl<T: ControllerTransport> TargetProcessMonitor<T> {
+    pub fn running_targets(&self, targets: &[OpaqueTargetId]) -> Result<std::collections::BTreeSet<OpaqueTargetId>, ControllerProtocolError> {
+        self.connection.lock().map_err(|_| ControllerProtocolError::Transport(TransportFailure::MalformedMessage))?
+            .running_targets(targets)
+    }
+}
+
 pub struct TargetProcessHost<T> {
     connection: Arc<Mutex<ControllerConnection<T>>>,
     artifacts: TargetArtifactCatalog,
@@ -139,6 +150,10 @@ impl<T> TargetProcessHost<T> {
     pub fn with_capture_ingress(mut self, ingress: CaptureIngress) -> Self {
         self.capture_ingress = Some(ingress);
         self
+    }
+
+    pub fn monitor(&self) -> TargetProcessMonitor<T> {
+        TargetProcessMonitor { connection: Arc::clone(&self.connection) }
     }
 
     pub fn register_target(

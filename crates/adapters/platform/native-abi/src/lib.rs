@@ -11,6 +11,7 @@ pub const NATIVE_ABI_V1: AbiVersion = AbiVersion::new(1, 0);
 
 pub const FEATURE_TEXT_OBSERVE: u64 = 1 << 0;
 pub const FEATURE_TEXT_REPLACE: u64 = 1 << 1;
+pub const FEATURE_FONT_SCALE: u64 = 1 << 5;
 pub const FEATURE_FONT_SUBSTITUTE: u64 = 1 << 2;
 pub const FEATURE_LAYOUT_ADJUST: u64 = 1 << 3;
 pub const FEATURE_RESOURCE_REPLACE: u64 = 1 << 4;
@@ -30,6 +31,23 @@ pub const STATUS_INVALID_HOST: i32 = 4;
 pub const STATUS_OUTPUT_TOO_SMALL: i32 = 5;
 
 pub const DECISION_TEXT_REPLACE: u32 = 1 << 0;
+pub const DECISION_FONT_SCALE: u32 = 1 << 2;
+/// Font percentages use the upper decision bits without changing the V1 C layout.
+pub fn font_scale_bits(percent: u16) -> u32 {
+    if (50..=200).contains(&percent) && percent != 100 {
+        DECISION_FONT_SCALE | (u32::from(percent) << 16)
+    } else {
+        0
+    }
+}
+pub fn font_scale_percent(bits: u32) -> u16 {
+    let percent = (bits >> 16) as u16;
+    if bits & DECISION_FONT_SCALE != 0 && (50..=200).contains(&percent) {
+        percent
+    } else {
+        100
+    }
+}
 pub const DECISION_FONT_SUBSTITUTE: u32 = 1 << 1;
 
 const APPLY_MODEL_INLINE_RENDER: u32 = 1;
@@ -265,6 +283,7 @@ pub fn feature_bits(features: impl IntoIterator<Item = Feature>) -> u64 {
             Feature::TextObserve => FEATURE_TEXT_OBSERVE,
             Feature::TextReplace => FEATURE_TEXT_REPLACE,
             Feature::FontSubstitute => FEATURE_FONT_SUBSTITUTE,
+            Feature::FontScale => FEATURE_FONT_SCALE,
             Feature::LayoutAdjust => FEATURE_LAYOUT_ADJUST,
             Feature::ResourceReplace => FEATURE_RESOURCE_REPLACE,
         }
@@ -276,7 +295,8 @@ fn features_from_bits(bits: u64) -> Result<Vec<Feature>, NativeAbiError> {
         | FEATURE_TEXT_REPLACE
         | FEATURE_FONT_SUBSTITUTE
         | FEATURE_LAYOUT_ADJUST
-        | FEATURE_RESOURCE_REPLACE;
+        | FEATURE_RESOURCE_REPLACE
+        | FEATURE_FONT_SCALE;
     if bits & !known != 0 {
         return Err(NativeAbiError::UnknownFeatureBits(bits & !known));
     }
@@ -284,6 +304,7 @@ fn features_from_bits(bits: u64) -> Result<Vec<Feature>, NativeAbiError> {
         (FEATURE_TEXT_OBSERVE, Feature::TextObserve),
         (FEATURE_TEXT_REPLACE, Feature::TextReplace),
         (FEATURE_FONT_SUBSTITUTE, Feature::FontSubstitute),
+        (FEATURE_FONT_SCALE, Feature::FontScale),
         (FEATURE_LAYOUT_ADJUST, Feature::LayoutAdjust),
         (FEATURE_RESOURCE_REPLACE, Feature::ResourceReplace),
     ];

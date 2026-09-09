@@ -721,6 +721,7 @@ enum WireFeature {
     TextObserve,
     TextReplace,
     FontSubstitute,
+    FontScale,
     LayoutAdjust,
     ResourceReplace,
 }
@@ -731,6 +732,7 @@ impl From<Feature> for WireFeature {
             Feature::TextObserve => Self::TextObserve,
             Feature::TextReplace => Self::TextReplace,
             Feature::FontSubstitute => Self::FontSubstitute,
+            Feature::FontScale => Self::FontScale,
             Feature::LayoutAdjust => Self::LayoutAdjust,
             Feature::ResourceReplace => Self::ResourceReplace,
         }
@@ -743,6 +745,7 @@ impl From<WireFeature> for Feature {
             WireFeature::TextObserve => Self::TextObserve,
             WireFeature::TextReplace => Self::TextReplace,
             WireFeature::FontSubstitute => Self::FontSubstitute,
+            WireFeature::FontScale => Self::FontScale,
             WireFeature::LayoutAdjust => Self::LayoutAdjust,
             WireFeature::ResourceReplace => Self::ResourceReplace,
         }

@@ -290,7 +290,7 @@ fn apply_decision(
         FontDecision::Substitute(font) if active_features.contains(&Feature::FontSubstitute) => {
             font.as_ref()
         }
-        FontDecision::Keep | FontDecision::Substitute(_) => original.font(),
+        FontDecision::Keep | FontDecision::Substitute(_) | FontDecision::Scaled { .. } => original.font(),
     };
     DrawCommand::new(text, font)
 }

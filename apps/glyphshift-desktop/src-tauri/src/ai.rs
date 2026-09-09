@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub(super) struct DesktopAiState {
     profiles: AiProfileCatalog,
+    filter_policy: glyphshift_ai_translation::FilterPolicy,
     translation: AiTranslation,
     history: TranslationRunHistory,
     active_task: Option<ActiveTranslationTask>,
@@ -47,6 +48,7 @@ impl DesktopAiState {
         translation.register_codex_subscription_provider();
         Ok(Self {
             profiles,
+            filter_policy: glyphshift_ai_translation::FilterPolicy::default(),
             translation,
             history,
             active_task: None,
@@ -137,12 +139,12 @@ impl DesktopAiState {
         request: TranslationPlanRequest,
     ) -> Result<TranslationPlan, CommandError> {
         let profile_id = self.selected_profile_id(profile_id)?;
-        let profile = self
+        let _profile = self
             .profiles
             .profile(&profile_id)
             .map_err(ai_profile_error)?;
         self.translation
-            .plan_translation(request.with_filter_policy(profile.filter_policy().clone()))
+            .plan_translation(request.with_filter_policy(self.filter_policy.clone()))
             .map_err(ai_plan_error)
     }
 
@@ -486,6 +488,10 @@ impl DesktopApplication {
             return Err(CommandError::new("ai.writeback_revision_invalid"));
         }
         let dictionary_snapshot = self.probe_entries_snapshot(&summary)?;
+        let excluded_sources = self.probe_runs.excluded_sources_for(
+            &request.run_id, &dictionary_snapshot,
+            &request.results.iter().map(|result| Box::<str>::from(result.source.trim())).collect::<Vec<_>>(),
+        ).map_err(probe::probe_run_error)?;
         let mut observed_sources = BTreeSet::new();
         let mut protected_sources = BTreeSet::new();
         let mut page_number = 1;
@@ -526,7 +532,7 @@ impl DesktopApplication {
                 || translation.is_empty()
                 || !item_ids.insert(result.item_id)
                 || !result_sources.insert(Box::<str>::from(source))
-                || !observed_sources.contains(source)
+                || (!observed_sources.contains(source) && !excluded_sources.contains(source))
             {
                 return Err(CommandError::new("ai.writeback_invalid"));
             }
@@ -534,7 +540,7 @@ impl DesktopApplication {
                 .entries()
                 .iter()
                 .any(|entry| entry.source() == source && !entry.translation().trim().is_empty());
-            if already_completed || protected_sources.contains(source) {
+            if already_completed || protected_sources.contains(source) || excluded_sources.contains(source) {
                 skipped_count = skipped_count.saturating_add(1);
             } else {
                 updates.push(DictionaryEntryCreate::new(source, translation));
@@ -773,11 +779,12 @@ pub(super) fn desktop_delete_ai_profile(
 pub(super) fn desktop_plan_ai_translation(
     request: AiTranslationPlanRequest,
     state: State<'_, Mutex<DesktopAiState>>,
+    settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<TranslationPlan, CommandError> {
-    state
-        .lock()
-        .map_err(|_| ai_state_unavailable())?
-        .plan_translation(request)
+    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
+    let mut ai = state.lock().map_err(|_| ai_state_unavailable())?;
+    ai.filter_policy = policy;
+    ai.plan_translation(request)
 }
 
 #[tauri::command]
@@ -785,15 +792,16 @@ pub(super) fn desktop_plan_probe_ai_translation(
     request: ProbeAiPlanRequest,
     application: State<'_, Mutex<DesktopApplication>>,
     state: State<'_, Mutex<DesktopAiState>>,
+    settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<TranslationPlan, CommandError> {
     let plan_request = application
         .lock()
         .map_err(|_| workspace_unavailable())?
         .probe_ai_plan_request(&request.run_id)?;
-    state
-        .lock()
-        .map_err(|_| ai_state_unavailable())?
-        .plan_request(request.profile_id.as_deref(), plan_request)
+    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
+    let mut ai = state.lock().map_err(|_| ai_state_unavailable())?;
+    ai.filter_policy = policy;
+    ai.plan_request(request.profile_id.as_deref(), plan_request)
 }
 
 #[tauri::command]
@@ -878,4 +886,11 @@ pub(super) fn desktop_ai_translation_tasks(
         current,
         history: state.history.records().to_vec(),
     })
+}
+
+#[tauri::command]
+pub(super) async fn desktop_filter_dictionary_sources(sources: Vec<String>, settings: State<'_, Mutex<AppSettingsStore>>) -> Result<Vec<bool>, CommandError> {
+    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
+    tauri::async_runtime::spawn_blocking(move || policy.hidden_sources(&sources))
+        .await.map_err(|_| ai_state_unavailable())?.map_err(ai_plan_error)
 }

@@ -4,7 +4,7 @@ use crate::{
     TranslationProvider,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -174,7 +174,8 @@ fn translation_prompt(request: &ProviderRequest<'_>) -> Result<String, ProviderE
     let encoded = serde_json::to_string(&input)
         .map_err(|_| local_error("could not encode Codex translation input"))?;
     Ok(format!(
-        "You are the translation model inside Glyphshift. Translate every UI text from {} to {}. Return only the JSON object required by the supplied output schema. Preserve every itemId exactly and return exactly one translation for every input item. Never reorder, merge, split, omit, duplicate, explain, number, or label translations. Preserve placeholders, format specifiers, escape sequences, keyboard shortcuts, and protected tokens exactly. Do not use shell, files, web search, tools, skills, plugins, or MCP.\n\nINPUT_JSON:\n{}",
+        "{}\n\nYou are the translation model inside Glyphshift. Translate every UI text from {} to {}. Return only the JSON object required by the supplied output schema. Preserve every itemId exactly and return exactly one translation for every input item. Never reorder, merge, split, omit, duplicate, explain, number, or label translations. Preserve placeholders, format specifiers, escape sequences, keyboard shortcuts, and protected tokens exactly. Do not use shell, files, web search, tools, skills, plugins, or MCP.\n\nINPUT_JSON:\n{}",
+        request.profile().translation_prompt(),
         request.source_locale(),
         request.target_locale(),
         encoded,

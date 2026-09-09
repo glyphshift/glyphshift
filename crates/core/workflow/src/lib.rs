@@ -40,6 +40,7 @@ pub struct WorkflowTarget {
     adapter_plan: AdapterPlan,
     dictionary_ids: Vec<Box<str>>,
     font_policy: Option<TargetFontPolicy>,
+    collect_text: bool,
 }
 
 impl WorkflowTarget {
@@ -54,7 +55,14 @@ impl WorkflowTarget {
             adapter_plan,
             dictionary_ids: dictionary_ids.into_iter().map(Into::into).collect(),
             font_policy: None,
+            collect_text: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_collection(mut self, enabled: bool) -> Self {
+        self.collect_text = enabled;
+        self
     }
 
     #[must_use]
@@ -97,9 +105,25 @@ pub struct Dictionary {
     id: Box<str>,
     locale: Box<str>,
     entries: Vec<DictionaryEntry>,
+    font_families: Vec<Box<str>>,
+    font_scale_percent: Option<u16>,
 }
 
 impl Dictionary {
+    #[must_use]
+    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
+        self.font_scale_percent = percent;
+        self
+    }
+    #[must_use]
+    pub fn with_font_families(
+        mut self,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.font_families = families.into_iter().map(Into::into).collect();
+        self
+    }
+
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -110,6 +134,8 @@ impl Dictionary {
             id: id.into(),
             locale: locale.into(),
             entries: entries.into_iter().collect(),
+            font_families: Vec::new(),
+            font_scale_percent: None,
         }
     }
 }
@@ -140,9 +166,22 @@ pub enum FontCoverage {
 pub struct TargetFontPolicy {
     families: Vec<Box<str>>,
     coverage: FontCoverage,
+    prefer_dictionary: bool,
+    scale_percent: u16,
 }
 
 impl TargetFontPolicy {
+    #[must_use]
+    pub fn with_scale_percent(mut self, percent: u16) -> Self {
+        self.scale_percent = percent;
+        self
+    }
+    #[must_use]
+    pub fn with_dictionary_fonts(mut self, enabled: bool) -> Self {
+        self.prefer_dictionary = enabled;
+        self
+    }
+
     #[must_use]
     pub fn new(
         families: impl IntoIterator<Item = impl Into<Box<str>>>,
@@ -151,6 +190,8 @@ impl TargetFontPolicy {
         Self {
             families: families.into_iter().map(Into::into).collect(),
             coverage,
+            prefer_dictionary: false,
+            scale_percent: 100,
         }
     }
 
@@ -286,6 +327,9 @@ impl CompiledTarget {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResolveError {
+    InvalidFontScale {
+        software_id: Box<str>,
+    },
     EmptyAdapterPlan {
         software_id: Box<str>,
     },
@@ -403,60 +447,132 @@ pub fn resolve(
             }
         }
 
-        let has_font_substitution = if let Some(policy) = &target.font_policy {
-            if policy.families.is_empty() {
+        let mut has_font_substitution = false;
+        let mut has_font_scaling = false;
+        if let Some(policy) = &target.font_policy {
+            let select_family = |families: &[Box<str>]| -> Result<Option<Box<str>>, ResolveError> {
+                if families.is_empty() {
+                    return Ok(None);
+                }
+                families
+                    .iter()
+                    .find(|family| environment.font_families.contains(*family))
+                    .cloned()
+                    .map(Some)
+                    .ok_or_else(|| ResolveError::FontUnavailable {
+                        software_id: software.id.clone(),
+                    })
+            };
+            if policy.families.is_empty()
+                && !policy.prefer_dictionary
+                && policy.scale_percent == 100
+            {
                 return Err(ResolveError::EmptyFontFamilies {
                     software_id: software.id.clone(),
                 });
             }
-            let family = policy
-                .families
-                .iter()
-                .find(|family| environment.font_families.contains(*family))
-                .cloned()
-                .ok_or_else(|| ResolveError::FontUnavailable {
-                    software_id: software.id.clone(),
-                })?;
-            let font_adapter_ids = selected_adapters
-                .iter()
-                .filter(|adapter| adapter.features.contains(&Feature::FontSubstitute))
-                .map(|adapter| adapter.id.clone())
-                .collect::<Vec<_>>();
-            if font_adapter_ids.is_empty() {
-                return Err(ResolveError::FeatureUnavailable {
-                    software_id: software.id.clone(),
-                    feature: Feature::FontSubstitute,
-                });
-            }
-            for location in &software.locations {
-                match policy.coverage {
-                    FontCoverage::DictionaryMatches => {
-                        for source in winning_dictionaries.keys() {
-                            font_policy = font_policy.with_entry_for_adapters(
-                                location.clone(),
-                                source.clone(),
-                                FontRule::Substitute(family.clone().into()),
-                                font_adapter_ids.iter().cloned(),
-                            );
-                        }
-                    }
-                    FontCoverage::AllObservations => {
-                        font_policy = font_policy.with_location_for_adapters(
-                            location.clone(),
-                            family.clone(),
-                            font_adapter_ids.iter().cloned(),
-                        );
+            let default_family = select_family(&policy.families)?;
+            let mut add_rule = |source: Option<&Box<str>>,
+                                family: Option<Box<str>>,
+                                percent: u16|
+             -> Result<(), ResolveError> {
+                if !(50..=200).contains(&percent) {
+                    return Err(ResolveError::InvalidFontScale {
+                        software_id: software.id.clone(),
+                    });
+                }
+                for (needed, feature) in [
+                    (family.is_some(), Feature::FontSubstitute),
+                    (percent != 100, Feature::FontScale),
+                ] {
+                    if needed
+                        && !selected_adapters
+                            .iter()
+                            .any(|adapter| adapter.features.contains(&feature))
+                    {
+                        return Err(ResolveError::FeatureUnavailable {
+                            software_id: software.id.clone(),
+                            feature,
+                        });
                     }
                 }
+                for adapter in &selected_adapters {
+                    let scoped_family = if adapter.features.contains(&Feature::FontSubstitute) {
+                        family.clone()
+                    } else {
+                        None
+                    };
+                    let scoped_percent = if adapter.features.contains(&Feature::FontScale) {
+                        percent
+                    } else {
+                        100
+                    };
+                    if !adapter.features.contains(&Feature::FontSubstitute)
+                        && !adapter.features.contains(&Feature::FontScale)
+                    {
+                        continue;
+                    }
+                    has_font_substitution |= scoped_family.is_some();
+                    has_font_scaling |= scoped_percent != 100;
+                    let rule = if scoped_percent != 100 {
+                        FontRule::Scaled {
+                            family: scoped_family.map(Into::into),
+                            percent: scoped_percent,
+                        }
+                    } else {
+                        scoped_family.map_or(FontRule::Unchanged, |family| {
+                            FontRule::Substitute(family.into())
+                        })
+                    };
+                    for location in &software.locations {
+                        font_policy = if let Some(source) = source {
+                            std::mem::take(&mut font_policy).with_entry_for_adapter(
+                                location.clone(),
+                                source.clone(),
+                                adapter.id.clone(),
+                                rule.clone(),
+                            )
+                        } else {
+                            std::mem::take(&mut font_policy).with_location_rule_for_adapters(
+                                location.clone(),
+                                rule.clone(),
+                                [adapter.id.clone()],
+                            )
+                        };
+                    }
+                }
+                Ok(())
+            };
+            if policy.coverage == FontCoverage::AllObservations {
+                add_rule(None, default_family.clone(), policy.scale_percent)?;
             }
-            policy.coverage == FontCoverage::AllObservations || !winning_dictionaries.is_empty()
-        } else {
-            false
-        };
+            for (source, dictionary_id) in &winning_dictionaries {
+                let dictionary = dictionaries_by_id[dictionary_id.as_ref()];
+                let family = if policy.prefer_dictionary && !dictionary.font_families.is_empty() {
+                    select_family(&dictionary.font_families)?
+                } else {
+                    default_family.clone()
+                };
+                let percent = if policy.prefer_dictionary {
+                    dictionary
+                        .font_scale_percent
+                        .unwrap_or(policy.scale_percent)
+                } else {
+                    policy.scale_percent
+                };
+                add_rule(Some(source), family, percent)?;
+            }
+        }
 
-        let mut requested_features = Vec::with_capacity(2);
+        let mut requested_features = Vec::with_capacity(3);
+        if target.collect_text {
+            requested_features.push(Feature::TextObserve);
+        }
         if has_text_replacement {
             requested_features.push(Feature::TextReplace);
+        }
+        if has_font_scaling {
+            requested_features.push(Feature::FontScale);
         }
         if has_font_substitution {
             requested_features.push(Feature::FontSubstitute);

@@ -39,6 +39,14 @@ pub(super) fn load(root: &Path) -> Result<LoadedSoftware, BackendError> {
             warnings.push(ArtifactWarningView::software(artifact_id, "invalid"));
             continue;
         }
+        if artifact.runtime.as_ref().is_some_and(|runtime| {
+            runtime.capabilities.is_empty()
+                || runtime.capabilities.iter().any(|capability| runtime_requirement(capability).is_err())
+                || runtime_route(&runtime.route, &artifact.locations).is_err()
+        }) {
+            warnings.push(ArtifactWarningView::software(artifact_id, "invalid_runtime"));
+            continue;
+        }
         if software.contains_key(&artifact.id) {
             warnings.push(ArtifactWarningView::software(
                 artifact_id,
@@ -329,6 +337,12 @@ impl DesktopRuntimeSpec {
     }
 }
 impl DesktopBackend {
+    pub(super) fn software_binding_paths(&self, software_id: &str) -> Result<Vec<Box<str>>, BackendError> {
+        self.local_software.get(software_id)
+            .map(|software| vec![software.executable_path.clone()])
+            .ok_or_else(|| BackendError::SoftwareBindingMissing(software_id.into()))
+    }
+
     pub fn runtime_spec(&self, extension_id: &str) -> Result<DesktopRuntimeSpec, BackendError> {
         let state = self
             .software
@@ -361,11 +375,7 @@ impl DesktopBackend {
         )?;
         Ok(DesktopRuntimeSpec {
             executable_names: state.artifact.executables.clone(),
-            executable_paths: self
-                .local_software
-                .get(extension_id)
-                .map(|software| vec![software.executable_path.clone()])
-                .unwrap_or_default(),
+            executable_paths: self.software_binding_paths(extension_id)?,
             descendant_executable_names: state.artifact.descendant_executables.clone(),
             requirements,
             publication: RuntimePublication::new(
@@ -691,6 +701,7 @@ pub(super) fn runtime_requirement(
             "text_observe" => Ok(Feature::TextObserve),
             "text_replace" => Ok(Feature::TextReplace),
             "font_substitute" => Ok(Feature::FontSubstitute),
+            "font_scale" => Ok(Feature::FontScale),
             "layout_adjust" => Ok(Feature::LayoutAdjust),
             "resource_replace" => Ok(Feature::ResourceReplace),
             _ => Err(BackendError::InvalidArtifact("runtime-feature")),

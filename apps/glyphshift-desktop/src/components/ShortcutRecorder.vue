@@ -71,6 +71,5 @@ onBeforeUnmount(stop)
       {{ recording ? (pending ? pending.split('+').map(displayShortcutToken).join(' + ') : t('workflows.shortcutRecording')) : (modelValue ? display : t('workflows.shortcutPlaceholder')) }}
     </button>
     <p v-if="error" role="alert" class="type-metadata mb-0 mt-1 text-[var(--danger)]">{{ error }}</p>
-    <p v-else class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ t('workflows.shortcutHint') }}</p>
   </div>
 </template>

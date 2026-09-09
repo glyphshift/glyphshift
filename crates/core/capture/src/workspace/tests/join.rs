@@ -173,3 +173,23 @@ fn run_recovers_disconnected_state_and_ignore_keeps_dictionary_unchanged() {
     assert_eq!(page.rows[0].state, ProbeEntryState::Ignored);
     assert_eq!(page.rows[0].translation.as_ref(), "打开");
 }
+
+#[test]
+fn workflow_collection_shows_only_observed_writer_entries() {
+    let (_root, mut store) = run_store();
+    let summary = create_run(&mut store);
+    store.attach_workflow(summary.id(), "workflow-one").unwrap();
+    let dictionary = ProbeDictionarySnapshot::new(1, [
+        ProbeDictionaryEntry::new("Observed", "Translated"),
+        ProbeDictionaryEntry::new("Never observed", "Existing"),
+    ]).unwrap();
+    let query = ProbeQuery::new("", 1, 50).unwrap();
+    assert_eq!(store.query_entries(summary.id(), &query, &dictionary).unwrap().total, 0);
+    let sink = FileCaptureSink::start(store.capture_configuration(summary.id(), 100).unwrap()).unwrap();
+    sink.observe("windows.gdi.text-out", "Observed");
+    sink.finish().unwrap();
+    let page = store.query_entries(summary.id(), &query, &dictionary).unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.rows[0].translation.as_ref(), "Translated");
+    assert_eq!(page.rows[0].state, ProbeEntryState::Translated);
+}

@@ -206,6 +206,7 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
                     case.protocol,
                     "synthetic-model",
                 )
+                .with_translation_prompt("Use concise nautical terminology.")
                 .with_base_url("https://provider.invalid/gateway")
                 .with_credential(CredentialUpdate::replace("synthetic-provider-secret")),
             )
@@ -308,6 +309,7 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
         assert!(wire_body.contains(r#""minItems":2"#));
         assert!(wire_body.contains(r#""maxItems":2"#));
         assert!(wire_body.contains("same order"));
+        assert!(wire_body.contains("Use concise nautical terminology."));
     }
 }
 
@@ -564,4 +566,27 @@ fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
     assert_eq!(completed.status(), TranslationJobStatus::Completed);
     assert_eq!(completed.results()[0].translation(), "保存");
     assert_eq!(requests.lock().expect("request capture").len(), 2);
+}
+
+#[test]
+fn connection_checks_bound_timeout_and_do_not_retry() {
+    for (scope, timeout, attempts) in [("connection:test", 30_000, 1), ("dictionary:test", 1_800_000, 3)] {
+        let root = tempdir().unwrap();
+        let mut profiles = AiProfileCatalog::open(root.path()).unwrap();
+        profiles.save_profile(AiProfileDraft::new("test", "Test", AiProviderProtocol::OllamaChat, "synthetic-model").with_timeout_ms(1_800_000).with_max_retries(2)).unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let mut translation = AiTranslation::new();
+        translation.register_http_provider(AiProviderProtocol::OllamaChat, Arc::new(RecordingTransport { requests: requests.clone(), response: HttpResponse::json(200, r#"{"message":{"content":"not structured output"}}"#) }));
+        let plan = translation.plan_translation(TranslationPlanRequest::new(scope, 1, "en-US", "zh-CN", [TranslationItem::untranslated("one", "Open")])).unwrap();
+        let job = translation.start_translation(plan.token(), profiles.resolve_profile("test").unwrap()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !translation.translation_job(&job).unwrap().status().is_terminal() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let captured = requests.lock().unwrap();
+        assert_eq!(captured.len(), attempts);
+        assert!(captured.iter().all(|request| request.timeout_ms() == timeout));
+        assert_eq!(profiles.resolve_profile("test").unwrap().timeout_ms(), 1_800_000);
+    }
 }

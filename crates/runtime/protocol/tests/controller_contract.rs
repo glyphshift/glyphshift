@@ -654,3 +654,35 @@ fn ctl_009_cancels_inventory_and_prepare_without_degrading_or_creating_a_recipe(
     );
     assert_eq!(prepare_connection.health(), ControllerHealth::Available);
 }
+
+#[test]
+fn liveness_inventory_preserves_ids_and_distinguishes_restarted_instances() {
+    struct ChangingInventory {
+        hello: ControllerHello,
+        snapshots: std::collections::VecDeque<ControllerInventory>,
+    }
+    impl ControllerTransport for ChangingInventory {
+        fn handshake(&mut self, _: &ExtensionId, _: ProtocolVersion, _: ControllerNonce) -> Result<ControllerHello, TransportFailure> {
+            Ok(self.hello.clone())
+        }
+        fn inventory(&mut self) -> Result<ControllerInventory, TransportFailure> {
+            self.snapshots.pop_front().ok_or(TransportFailure::MalformedMessage)
+        }
+        fn terminate(&mut self) {}
+    }
+    let snapshot = |tokens: &[&str]| ControllerInventory::new([], tokens.iter().map(|token|
+        ControllerTarget::new(ControllerTargetToken::new(*token), "Synthetic application", TargetFacts::new("windows", "x86_64"))));
+    let extension = ExtensionId::new("org.example.liveness");
+    let version = ProtocolVersion::new(1, 0);
+    let nonce = ControllerNonce::new([0x69; 32]);
+    let transport = ChangingInventory {
+        hello: ControllerHello::new(extension.clone(), version, nonce),
+        snapshots: [snapshot(&["instance-a", "instance-b"]), snapshot(&["instance-b"]), snapshot(&["instance-b", "instance-a-restarted"])].into(),
+    };
+    let mut connection = ControllerConnection::connect(transport, extension, version, nonce, &mut NonceLedger::new()).unwrap();
+    let inventory = connection.inventory().unwrap();
+    let ids = inventory.targets().iter().map(|target| target.id()).collect::<Vec<_>>();
+    assert_eq!(connection.running_targets(&ids).unwrap(), BTreeSet::from([ids[1]]));
+    // Reordered inventory must not remap the surviving ID; a new instance is not the old one.
+    assert_eq!(connection.running_targets(&ids).unwrap(), BTreeSet::from([ids[1]]));
+}

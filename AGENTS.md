@@ -22,6 +22,11 @@
 - UIA cannot change target text and must not be reintroduced into Runtime Bundle, product catalogs,
   probes, workflows, release gates, or real-software validation.
 
+## Build cache and local organization
+
+- Use the global `CARGO_TARGET_DIR` as the cache root and isolate this application in its `glyphshift` child directory. Repository build/test scripts initialize this through `scripts/cargo-target.ps1`; direct Cargo commands must dot-source that helper and call `Get-GlyphshiftCargoTargetDirectory` first. Explicit target-directory overrides remain exact. Never clean the shared global root as if it belonged only to this project.
+- Keep `local-test/` root limited to navigation and machine configuration. Place reusable local tools under `tools/`, software-specific experiments under `software/<name>/`, disposable caches under `cache/`, and evidence under `evidence/<topic>/`. After an experiment, promote verified portable conclusions to Flightdeck and retain only useful local reproductions/evidence.
+
 ## Local testing and privacy
 
 - Put every machine-specific test input and output under `local-test/`. This directory is

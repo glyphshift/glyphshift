@@ -69,7 +69,7 @@ fn workflow_shortcut_survives_restart_and_is_not_copied() {
         .copy_workflow("shortcut-workflow", "shortcut-copy", "Copy")
         .expect("copy");
     assert_eq!(copy.global_shortcut(), "");
-    let path = root.path().join("workflows/shortcut-workflow.json");
+    let path = root.path().join("workflows-v4/shortcut-workflow.json");
     let mut value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     value["globalShortcut"] = serde_json::json!({"invalid":true});
@@ -203,9 +203,14 @@ fn desktop_imports_and_exports_one_portable_dictionary_v3_file() {
             "zh-CN",
         )
         .with_release_version("1.0.0")
-        .with_entries([glyphshift_dictionary_package::DictionaryEntryCreate::new(
-            "Open", "打开",
-        )]),
+        .with_font_families(["Dictionary Sans", "Fallback Sans"]).with_font_scale_percent(Some(125))
+        .with_entries([
+            glyphshift_dictionary_package::DictionaryEntryCreate::new("Open", "打开"),
+            glyphshift_dictionary_package::DictionaryEntryCreate::new(
+                "Quoted, \"text\"",
+                "第一行\n第二行",
+            ),
+        ]),
     )
     .expect("portable dictionary package");
     fs::write(
@@ -235,7 +240,18 @@ fn desktop_imports_and_exports_one_portable_dictionary_v3_file() {
     )
     .expect("export remains a valid dictionary package");
     assert_eq!(reopened.revision(), package.revision());
+    assert_eq!(reopened.view().metadata().font_families(), package.view().metadata().font_families());
+    assert_eq!(imported.metadata().font_families(), package.view().metadata().font_families());
+    assert_eq!(reopened.view().metadata().font_scale_percent(), Some(125));
     assert_eq!(reopened.view().entries()[0].translation(), Some("打开"));
+    let csv_path = exchange.path().join("export.CSV");
+    backend
+        .export_dictionary_file("dictionary.portable", &csv_path)
+        .expect("CSV export");
+    assert_eq!(
+        fs::read_to_string(csv_path).expect("CSV text"),
+        "\u{feff}source,translation\r\n\"Open\",\"打开\"\r\n\"Quoted, \"\"text\"\"\",\"第一行\n第二行\"\r\n"
+    );
 }
 
 #[test]
@@ -366,7 +382,7 @@ fn software_extension_process_family_reaches_the_runtime_spec_without_entering_w
 }
 
 #[test]
-fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_dictionary() {
+fn desktop_workflow_v4_persists_adapter_plan_and_inline_font_policy_outside_the_dictionary() {
     let root = tempdir().expect("isolated product data");
     let executable = root.path().join("SyntheticEditor.exe");
     fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
@@ -400,12 +416,12 @@ fn desktop_workflow_v3_persists_adapter_plan_and_inline_font_policy_outside_the_
 
     let dictionary_json = fs::read_to_string(root.path().join("dictionaries/dictionary-ui.json"))
         .expect("dictionary artifact");
-    let workflow_json = fs::read_to_string(root.path().join("workflows/workflow-ui.json"))
+    let workflow_json = fs::read_to_string(root.path().join("workflows-v4/workflow-ui.json"))
         .expect("workflow artifact");
     assert!(dictionary_json.contains("glyphshift.dictionary/3"));
     assert!(!dictionary_json.contains("adapterPlan"));
     assert!(!dictionary_json.contains("fontProfile"));
-    assert!(workflow_json.contains("glyphshift.workflow/3"));
+    assert!(workflow_json.contains("glyphshift.workflow/4"));
     assert!(workflow_json.contains("adapterPlan"));
     assert!(workflow_json.contains("fontPolicy"));
     assert!(workflow_json.contains("dictionary_matches"));
@@ -728,7 +744,7 @@ fn desktop_skips_one_invalid_workflow_without_hiding_other_workflows() {
         )
         .expect("create valid workflow");
     drop(backend);
-    let valid_path = root.path().join("workflows/workflow.valid.json");
+    let valid_path = root.path().join("workflows-v4/workflow.valid.json");
     let mut valid: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&valid_path).expect("read valid workflow"))
             .expect("parse valid workflow");
@@ -746,8 +762,8 @@ fn desktop_skips_one_invalid_workflow_without_hiding_other_workflows() {
     )
     .expect("write partially invalid workflow");
     fs::write(
-        root.path().join("workflows/workflow.invalid.json"),
-        r#"{"schema":"glyphshift.workflow/3","id":42,"name":"Invalid"}"#,
+        root.path().join("workflows-v4/workflow.invalid.json"),
+        r#"{"schema":"glyphshift.workflow/4","id":42,"name":"Invalid"}"#,
     )
     .expect("write invalid workflow record");
 
@@ -757,4 +773,138 @@ fn desktop_skips_one_invalid_workflow_without_hiding_other_workflows() {
     assert_eq!(reopened.snapshot().workflows()[0].id(), "workflow.valid");
     assert_eq!(reopened.snapshot().workflows()[0].name(), "workflow.valid");
     assert_eq!(reopened.snapshot().workflows()[0].revision(), 1);
+}
+
+#[test]
+fn workflow_write_dictionary_is_selected_persistent_and_copied() {
+    let root = tempdir().unwrap();
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    let target = || WorkflowTargetCreate::new("software.synthetic", ["adapter-gdi"], ["dictionary.a", "dictionary.b"]);
+    assert!(backend.create_workflow(WorkflowCreate::new("invalid-writer", "Invalid")
+        .with_targets([target().with_write_dictionary("dictionary.other")])).is_err());
+    backend.create_workflow(WorkflowCreate::new("writer", "Writer")
+        .with_targets([target().with_write_dictionary("dictionary.a")])).unwrap();
+    let mut reopened = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    assert_eq!(reopened.workflow("writer").unwrap().targets()[0].write_dictionary_id(), Some("dictionary.a"));
+    assert_eq!(reopened.copy_workflow("writer", "writer-copy", "Copy").unwrap().targets()[0].write_dictionary_id(), Some("dictionary.a"));
+    let path = root.path().join("workflows-v4/writer.json");
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    value["targets"][0]["writeDictionaryId"] = serde_json::json!("dictionary.other");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let recovered = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    assert_eq!(recovered.workflow("writer").unwrap().targets()[0].write_dictionary_id(), None);
+    assert_eq!(recovered.workflow("writer").unwrap().targets()[0].dictionary_ids().len(), 2);
+}
+
+
+#[test]
+fn breaking_workflow_upgrade_does_not_load_legacy_tasks_or_activation() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("workflows")).unwrap();
+    fs::write(root.path().join("workflows/legacy.json"), r#"{"id":"legacy","name":"Legacy","targets":[]}"#).unwrap();
+    fs::write(root.path().join("workflow-state.json"), r#"{"enabledWorkflows":["legacy"]}"#).unwrap();
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    backend.create_dictionary(DictionaryCreate::new("keep", "Keep", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Keep", "Preserved")])).unwrap();
+    drop(backend);
+    let backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    assert!(backend.snapshot().workflows().is_empty());
+    assert!(backend.enabled_workflow_ids().is_empty());
+    assert_eq!(backend.dictionary("keep").unwrap().entries()[0].translation(), "Preserved");
+}
+
+#[test]
+fn workflow_creation_rejects_multiple_software_targets() {
+    let root = tempdir().unwrap();
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    let create = WorkflowCreate::new("multi", "Multi").with_targets([
+        WorkflowTargetCreate::new("one", ["adapter-gdi"], [] as [&str; 0]),
+        WorkflowTargetCreate::new("two", ["adapter-gdi"], [] as [&str; 0]),
+    ]);
+    assert!(backend.create_workflow(create).is_err());
+    assert!(backend.snapshot().workflows().is_empty());
+}
+
+#[test]
+fn workflow_uses_selected_dictionary_language_instead_of_software_default() {
+    let root = tempdir().unwrap();
+    let executable = root.path().join("SyntheticLanguageHost.exe");
+    fs::write(&executable, b"synthetic executable").unwrap();
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    let software = backend.add_software(glyphshift_desktop_backend::ExecutableSelection::new(&executable))
+        .unwrap().selected_software_id().unwrap().to_owned();
+    backend.create_dictionary(DictionaryCreate::new("to-english", "English", "zh-CN", "en-US")
+        .with_entries([DictionaryEntryCreate::new("打开", "Open")])).unwrap();
+    for (id, writer) in [("collect-english", true), ("translate-english", false)] {
+        let target = WorkflowTargetCreate::new(software.as_str(), ["adapter-gdi"], ["to-english"]);
+        let target = if writer { target.with_write_dictionary("to-english") } else { target };
+        backend.create_workflow(WorkflowCreate::new(id, id).with_targets([target])).unwrap();
+        let runtime = backend.workflow_runtime_spec(id, &software).expect("dictionary determines the target language");
+        let mut entries = Vec::new();
+        runtime.publication().snapshot().visit_entries(|_, source, translation| entries.push((source.to_owned(), translation.to_owned())));
+        assert_eq!(entries, vec![("打开".to_owned(), "Open".to_owned())]);
+    }
+    let restored = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    assert!(restored.workflow_runtime_spec("collect-english", &software).is_ok());
+}
+
+#[test]
+fn missing_software_binding_never_becomes_name_only_runtime_authorization() {
+    for damaged_state in ["{broken", r#"{"software":{}}"#] {
+        let root = tempdir().unwrap();
+        let executable = root.path().join("SyntheticBoundEditor.exe");
+        fs::write(&executable, b"synthetic").unwrap();
+        let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+        let id = backend.add_software(glyphshift_desktop_backend::ExecutableSelection::new(&executable))
+            .unwrap().selected_software_id().unwrap().to_owned();
+        backend.create_dictionary(DictionaryCreate::new("binding-dictionary", "Binding", "en-US", "zh-CN")
+            .with_entries([DictionaryEntryCreate::new("Save", "保存")])).unwrap();
+        backend.create_workflow(WorkflowCreate::new("binding-workflow", "Binding").with_targets([
+            WorkflowTargetCreate::new(&*id, ["adapter-gdi"], ["binding-dictionary"]).with_write_dictionary("binding-dictionary")
+        ])).unwrap();
+        drop(backend);
+        fs::write(root.path().join("desktop-state.json"), damaged_state).unwrap();
+        let mut reopened = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+        assert_eq!(reopened.snapshot().software().len(), 1, "retain the asset for repair");
+        let expected = BackendError::SoftwareBindingMissing(id.clone().into());
+        assert_eq!(reopened.runtime_spec(&id).unwrap_err(), expected);
+        assert_eq!(reopened.capture_runtime_spec(&id, &["adapter-gdi".into()]).unwrap_err(), expected);
+        assert_eq!(reopened.workflow_runtime_spec("binding-workflow", &id).unwrap_err(), expected);
+        assert_eq!(reopened.effective_workflow_intent("binding-workflow").unwrap_err(), expected);
+        assert_eq!(reopened.enable_workflow("binding-workflow").unwrap_err(), expected);
+        reopened.update_software(glyphshift_desktop_backend::SoftwareEdit::new(&*id, "Rebound", &executable)).unwrap();
+        assert_eq!(reopened.runtime_spec(&id).unwrap().executable_paths(), &[executable.to_string_lossy().into_owned().into_boxed_str()]);
+        reopened.enable_workflow("binding-workflow").unwrap();
+    }
+}
+
+#[test]
+fn malformed_legacy_runtime_is_isolated_to_its_software_record() {
+    for runtime in [
+        serde_json::json!({"capabilities":[{"adapter":"adapter-gdi","version":[1,0,0],"features":["unknown_legacy_feature"]}],"route":{"kind":"direct","locations":["internal-default"]}}),
+        serde_json::json!({"capabilities":[],"route":{"kind":"direct","locations":["internal-default"]}}),
+        serde_json::json!({"capabilities":[{"adapter":"adapter-gdi","version":[1,0,0],"features":["text_replace"]}],"route":{"kind":"direct","locations":["missing-location"]}}),
+    ] {
+        let root = tempdir().unwrap();
+        let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+        let mut ids = Vec::new();
+        for name in ["SyntheticHealthy.exe", "SyntheticLegacy.exe"] {
+            let executable = root.path().join(name);
+            fs::write(&executable, b"synthetic").unwrap();
+            ids.push(backend.add_software(glyphshift_desktop_backend::ExecutableSelection::new(executable))
+                .unwrap().selected_software_id().unwrap().to_owned());
+        }
+        drop(backend);
+        let path = root.path().join("extensions").join(format!("{}.json", ids[1]));
+        let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["runtime"] = runtime;
+        let original = serde_json::to_vec(&value).unwrap();
+        fs::write(&path, &original).unwrap();
+        let reopened = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+        assert_eq!(reopened.snapshot().software().len(), 1);
+        assert_eq!(reopened.snapshot().software()[0].id(), ids[0]);
+        assert_eq!(fs::read(path).unwrap(), original, "preserve rejected evidence");
+        let snapshot = serde_json::to_value(reopened.snapshot()).unwrap();
+        assert!(snapshot["artifactWarnings"].as_array().unwrap().iter().any(|warning| warning["artifactId"] == ids[1] && warning["issue"] == "invalid_runtime"));
+    }
 }

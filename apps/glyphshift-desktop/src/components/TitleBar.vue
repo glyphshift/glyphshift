@@ -27,9 +27,7 @@ const probeActivityLabel = computed(() => props.probeActivityStatus
   : '')
 const nav = computed(() => [
   { id: 'workflows' as const, label: t('titleBar.workflows'), icon: 'i-tabler-git-branch' },
-  { id: 'software' as const, label: t('titleBar.software'), icon: 'i-tabler-library' },
   { id: 'dictionaries' as const, label: t('titleBar.dictionaries'), icon: 'i-tabler-book-2' },
-  { id: 'capture' as const, label: t('titleBar.capture'), icon: 'i-tabler-radar' },
 ])
 const themeToggleLabel = computed(() => appSettings.effectiveTheme.value === 'dark'
   ? t('titleBar.switchToLight')
@@ -87,14 +85,14 @@ async function native(action: 'minimize' | 'maximize') {
             : 'text-[var(--text-secondary)]',
         ]"
         :aria-label="item.label"
-        :aria-describedby="item.id === 'capture' && probeActivityStatus ? 'probe-activity-status' : undefined"
+        :aria-describedby="item.id === 'workflows' && probeActivityStatus ? 'probe-activity-status' : undefined"
         :aria-current="current === item.id || (item.id === 'dictionaries' && current === 'dictionary-editor') ? 'page' : undefined"
         @click="emit('navigate', item.id)"
       >
         <UIcon :name="item.icon" class="size-4 shrink-0" />
         <span>{{ item.label }}</span>
         <UBadge
-          v-if="item.id === 'capture' && probeActivityStatus"
+          v-if="item.id === 'workflows' && probeActivityStatus"
           id="probe-activity-status"
           :color="probeActivityStatus === 'running' ? 'success' : 'warning'"
           variant="soft"

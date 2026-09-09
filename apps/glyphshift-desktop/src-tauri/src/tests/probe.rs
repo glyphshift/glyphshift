@@ -860,3 +860,52 @@ fn excluded_dictionary_references_and_revisions_are_preserved() {
     assert_eq!(refreshed.dictionary_revision, run.dictionary_revision);
     assert_eq!(refreshed.exclusion_revisions, vec![2]);
 }
+
+#[test]
+fn attached_dictionary_sources_block_collection_and_recheck_ai_writeback() {
+    let (mut app, _, software_id, root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Already owned", "")])).unwrap();
+    let run = app.create_probe_run(ProbeRunCreateRequest {
+        excluded_dictionary_ids: vec!["dictionary.attached".into()], id: "probe-ownership".into(), name: "Ownership".into(), software_id,
+        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
+        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
+    }).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for source in ["Already owned", "Claimed later", "Still new"] { sink.observe(TEST_ADAPTER_ID, source); }
+    sink.finish().unwrap();
+    let mut ai = glyphshift_ai_translation::AiTranslation::new();
+    let plan = ai.plan_translation(app.probe_ai_plan_request(run.summary.id()).unwrap()).unwrap();
+    assert!(!plan.candidates().iter().any(|entry| entry.source() == "Already owned"));
+    assert!(plan.candidates().iter().any(|entry| entry.source() == "Claimed later"));
+    assert!(app.edit_probe_translation(ProbeTranslationEditRequest {
+        run_id: run.summary.id().into(), source: "Already owned".into(), translation: "Must not append".into(),
+    }).is_err());
+    let input = root.path().join("owned.csv");
+    std::fs::write(&input, "source,translation\nFresh,Allowed\nAlready owned,Blocked").unwrap();
+    let before_import = app.backend.dictionary("dictionary.product").unwrap().clone();
+    for mode in [crate::probe_transfer::ImportMode::KeepExisting, crate::probe_transfer::ImportMode::Overwrite, crate::probe_transfer::ImportMode::Replace] {
+        assert!(app.import_probe_entries(crate::probe_transfer::ProbeImportRequest {
+            run_id: run.summary.id().into(), input_path: input.clone(), format: "csv".into(), mode,
+        }).is_err());
+        assert_eq!(app.backend.dictionary("dictionary.product").unwrap(), &before_import);
+    }
+    let attached = app.backend.dictionary("dictionary.attached").unwrap().clone();
+    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&attached).with_entries([
+        DictionaryEntryCreate::new("Already owned", ""), DictionaryEntryCreate::new("Claimed later", ""),
+    ])).unwrap();
+    let revision = app.backend.dictionary("dictionary.product").unwrap().revision();
+    let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
+        run_id: run.summary.id().into(), snapshot_revision: revision,
+        results: vec![
+            ai::ProbeAiTranslationResult { item_id: "claimed".into(), source: "Claimed later".into(), translation: "Owned elsewhere".into() },
+            ai::ProbeAiTranslationResult { item_id: "new".into(), source: "Still new".into(), translation: "New translation".into() },
+        ],
+    }).unwrap();
+    assert_eq!(applied.applied_count, 1);
+    assert_eq!(applied.skipped_count, 1);
+    let destination = app.backend.dictionary("dictionary.product").unwrap();
+    assert!(!destination.entries().iter().any(|entry| ["Already owned", "Claimed later"].contains(&entry.source())));
+    assert!(destination.entries().iter().any(|entry| entry.source() == "Still new"));
+    assert!(app.backend.dictionary("dictionary.attached").unwrap().entries().iter().all(|entry| entry.translation().is_empty()));
+}

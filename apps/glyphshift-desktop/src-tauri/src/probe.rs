@@ -1,6 +1,8 @@
 use super::*;
 fn capture_backend_error(error: BackendError) -> CommandError {
     match error {
+        BackendError::SoftwareBindingMissing(id) => CommandError::new("software.binding_missing")
+            .with_arg("softwareId", id.to_string()),
         BackendError::UnknownSoftware(id) => {
             CommandError::new("capture.unknown_software").with_arg("softwareId", id.to_string())
         }
@@ -225,9 +227,13 @@ impl DesktopApplication {
                     .with_arg("dictionaryId", summary.dictionary_id())
             })?;
         Ok(ProbeRunView {
-            runtime_capability: (self.active_probe_run_id.as_deref() == Some(summary.id()))
-                .then_some(self.active_probe_capability)
-                .flatten(),
+            runtime_capability: if let Some(owner) = summary.workflow_id() {
+                self.workflow_runtime_status.get(owner)
+                    .and_then(|runtime| runtime.targets.iter().find(|target| target.software_id.as_ref() == summary.software_id() && target.active))
+                    .map(|target| if target.translation_active { ProbeRuntimeCapability::DirectReplace } else { ProbeRuntimeCapability::CollectionOnly })
+            } else {
+                (self.active_probe_run_id.as_deref() == Some(summary.id())).then_some(self.active_probe_capability).flatten()
+            },
             quick_probe: false,
             exclusion_revisions: summary.excluded_dictionary_ids().iter()
                 .map(|id| self.backend.dictionary(id).map(|dictionary| dictionary.revision())
@@ -268,7 +274,7 @@ impl DesktopApplication {
         let mut excluded = BTreeSet::new();
         for id in summary.excluded_dictionary_ids() {
             let dictionary = self.backend.dictionary(id).map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string()))?;
-            excluded.extend(dictionary.entries().iter().filter(|entry| !entry.translation().trim().is_empty()).map(|entry| entry.source().to_owned()));
+            excluded.extend(dictionary.entries().iter().map(|entry| entry.source().to_owned()));
         }
         Ok(self.probe_dictionary_snapshot(summary.dictionary_id())?.with_excluded_sources(excluded))
     }
@@ -355,6 +361,9 @@ impl DesktopApplication {
         for run_id in &run_ids {
             let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
             self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
+            if summary.workflow_id().is_some() {
+                return Err(CommandError::new("capture.invalid_state"));
+            }
             if !self.quick_probe_sessions.contains(run_id)
                 && (self.active_probe_run_id.as_deref() == Some(run_id)
                     || matches!(
@@ -382,6 +391,9 @@ impl DesktopApplication {
         &mut self,
         request: ProbeRunUpdateRequest,
     ) -> Result<ProbeRunView, CommandError> {
+        if self.probe_runs.summary(&request.run_id).map_err(probe_run_error)?.workflow_id().is_some() {
+            return Err(CommandError::new("capture.invalid_configuration"));
+        }
         let current = self
             .probe_runs
             .summary(&request.run_id)
@@ -477,6 +489,16 @@ impl DesktopApplication {
     }
 
     pub(super) fn resume_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        if let Some(owner) = self.probe_runs.summary(run_id).map_err(probe_run_error)?.workflow_id().map(str::to_owned) {
+            let result = self.enable_workflow(&owner, false)?;
+            if let Some(error) = result.runtime.errors.values().next() {
+                return Err(error.clone());
+            }
+            if !result.runtime.targets.iter().any(|target| target.active) {
+                return Err(CommandError::new("runtime.target_not_found"));
+            }
+            return self.probe_run_summary(run_id);
+        }
         self.start_probe_run_runtime(run_id, false)
     }
 
@@ -594,6 +616,13 @@ impl DesktopApplication {
         run_id: &str,
         paused: bool,
     ) -> Result<ProbeRunView, CommandError> {
+        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if let Some(owner) = summary.workflow_id() {
+            self.runtimes.as_mut().ok_or_else(runtime_unavailable)?.control_workflow_collection(owner, summary.software_id(), paused)
+                .map_err(|error| runtime_command_error(error, true))?;
+            self.probe_runs.set_status(run_id, if paused { ProbeRunStatus::Paused } else { ProbeRunStatus::Running }).map_err(probe_run_error)?;
+            return self.probe_run_summary(run_id);
+        }
         if self.active_probe_run_id.as_deref() != Some(run_id) {
             let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
             if !paused && summary.status() == ProbeRunStatus::Paused {
@@ -641,6 +670,10 @@ impl DesktopApplication {
         &mut self,
         run_id: &str,
     ) -> Result<ProbeRunView, CommandError> {
+        if let Some(owner) = self.probe_runs.summary(run_id).map_err(probe_run_error)?.workflow_id().map(str::to_owned) {
+            self.disable_workflow(&owner)?;
+            return self.probe_run_summary(run_id);
+        }
         if self.active_probe_run_id.as_deref() != Some(run_id) {
             let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
             if summary.status() == ProbeRunStatus::Paused {
@@ -668,6 +701,7 @@ impl DesktopApplication {
     }
 
     pub(super) fn probe_run_summary(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
+        self.collect_workflow_sources(run_id)?;
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
         self.probe_run_view(summary)
     }
@@ -708,6 +742,11 @@ impl DesktopApplication {
             .entries()
             .iter()
             .find(|entry| entry.source() == request.source.as_ref());
+        if existing.is_none() && !self.probe_runs.excluded_sources_for(
+            &request.run_id, &self.probe_entries_snapshot(&summary)?, &[request.source.clone()],
+        ).map_err(probe_run_error)?.is_empty() {
+            return Err(CommandError::new("capture.source_owned_by_dictionary"));
+        }
         let translation = request.translation.trim();
         let changed = if translation.is_empty() {
             let snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
@@ -762,6 +801,13 @@ impl DesktopApplication {
             .dictionary(summary.dictionary_id())
             .cloned()
             .map_err(|_| CommandError::new("dictionary.not_found"))?;
+        let requested_sources = request.entries.iter().map(|entry| Box::<str>::from(entry.source.trim())).collect::<Vec<_>>();
+        let excluded = self.probe_runs.excluded_sources_for(
+            &request.run_id, &self.probe_entries_snapshot(&summary)?, &requested_sources,
+        ).map_err(probe_run_error)?;
+        if excluded.iter().any(|source| !dictionary.entries().iter().any(|entry| entry.source() == source.as_ref())) {
+            return Err(CommandError::new("capture.source_owned_by_dictionary"));
+        }
         let mut sources = BTreeSet::new();
         let mut entries = Vec::with_capacity(request.entries.len());
         for entry in request.entries {
@@ -891,6 +937,17 @@ impl DesktopApplication {
         run_id: &str,
     ) -> Result<ProbeRunView, CommandError> {
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
+        if let Some(owner) = summary.workflow_id() {
+            if !self.workflow_runtime_status.get(owner).is_some_and(|runtime| runtime.targets.iter().any(|target|
+                target.software_id.as_ref() == summary.software_id() && target.active && target.translation_active)) {
+                return Err(CommandError::new("capture.not_active"));
+            }
+            let intent = self.backend.effective_workflow_intent(owner).map_err(|_| CommandError::new("workflow.invalid"))?;
+            let target = intent.targets().iter().find(|target| target.software_id() == summary.software_id()).ok_or_else(|| CommandError::new("workflow.invalid"))?;
+            self.runtimes.as_mut().ok_or_else(runtime_unavailable)?.publish_capture(summary.software_id(), target.runtime_spec().publication().clone())
+                .map_err(|error| runtime_command_error(error, true))?;
+            return self.probe_run_summary(run_id);
+        }
         if self.active_probe_run_id.as_deref() != Some(run_id)
             || !matches!(
                 summary.status(),

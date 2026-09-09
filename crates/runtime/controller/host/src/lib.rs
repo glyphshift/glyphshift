@@ -634,6 +634,7 @@ fn feature_to_wire(feature: Feature) -> WireFeature {
         Feature::TextObserve => WireFeature::TextObserve,
         Feature::TextReplace => WireFeature::TextReplace,
         Feature::FontSubstitute => WireFeature::FontSubstitute,
+        Feature::FontScale => WireFeature::FontScale,
         Feature::LayoutAdjust => WireFeature::LayoutAdjust,
         Feature::ResourceReplace => WireFeature::ResourceReplace,
     }
@@ -655,6 +656,7 @@ fn feature_from_wire(feature: WireFeature) -> Feature {
         WireFeature::TextObserve => Feature::TextObserve,
         WireFeature::TextReplace => Feature::TextReplace,
         WireFeature::FontSubstitute => Feature::FontSubstitute,
+        WireFeature::FontScale => Feature::FontScale,
         WireFeature::LayoutAdjust => Feature::LayoutAdjust,
         WireFeature::ResourceReplace => Feature::ResourceReplace,
     }

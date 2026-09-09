@@ -1,6 +1,6 @@
 use super::*;
 
-const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/3";
+const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/4";
 const WORKFLOW_STATE_SCHEMA: &str = "glyphshift.workflow-state/1";
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -118,17 +118,30 @@ pub enum FontCoverage {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowFontPolicy {
+    #[serde(default)]
+    prefer_dictionary: bool,
+    #[serde(default = "default_font_scale")]
+    scale_percent: u16,
     families: Vec<Box<str>>,
     coverage: FontCoverage,
 }
 
+fn default_font_scale() -> u16 { 100 }
+
 impl WorkflowFontPolicy {
+    #[must_use]
+    pub fn with_scale_percent(mut self, percent: u16) -> Self { self.scale_percent = percent; self }
+    #[must_use]
+    pub fn with_dictionary_fonts(mut self, enabled: bool) -> Self { self.prefer_dictionary = enabled; self }
+
     #[must_use]
     pub fn new(
         families: impl IntoIterator<Item = impl Into<Box<str>>>,
         coverage: FontCoverage,
     ) -> Self {
         Self {
+            prefer_dictionary: false,
+            scale_percent: 100,
             families: families.into_iter().map(Into::into).collect(),
             coverage,
         }
@@ -152,6 +165,8 @@ pub struct WorkflowTargetCreate {
     adapter_plan: WorkflowAdapterPlan,
     dictionary_ids: Vec<Box<str>>,
     #[serde(default)]
+    write_dictionary_id: Option<Box<str>>,
+    #[serde(default)]
     font_policy: Option<WorkflowFontPolicy>,
 }
 
@@ -166,8 +181,21 @@ impl WorkflowTargetCreate {
             software_id: software_id.into(),
             adapter_plan: WorkflowAdapterPlan::parallel(adapter_ids),
             dictionary_ids: dictionary_ids.into_iter().map(Into::into).collect(),
+            write_dictionary_id: None,
             font_policy: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_write_dictionary(mut self, dictionary_id: impl Into<Box<str>>) -> Self {
+        self.write_dictionary_id = Some(dictionary_id.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_optional_write_dictionary(mut self, dictionary_id: Option<Box<str>>) -> Self {
+        self.write_dictionary_id = dictionary_id;
+        self
     }
 
     #[must_use]
@@ -289,6 +317,7 @@ pub struct WorkflowTargetView {
     pub(super) software_id: Box<str>,
     pub(super) adapter_plan: WorkflowAdapterPlan,
     pub(super) dictionary_ids: Vec<Box<str>>,
+    pub(super) write_dictionary_id: Option<Box<str>>,
     pub(super) font_policy: Option<WorkflowFontPolicy>,
 }
 
@@ -301,6 +330,11 @@ impl WorkflowTargetView {
     #[must_use]
     pub fn dictionary_ids(&self) -> &[Box<str>] {
         &self.dictionary_ids
+    }
+
+    #[must_use]
+    pub fn write_dictionary_id(&self) -> Option<&str> {
+        self.write_dictionary_id.as_deref()
     }
 
     #[must_use]
@@ -375,6 +409,8 @@ pub(super) struct WorkflowTargetArtifact {
     pub(super) software_id: Box<str>,
     pub(super) adapter_plan: WorkflowAdapterPlan,
     pub(super) dictionary_ids: Vec<Box<str>>,
+    #[serde(default)]
+    pub(super) write_dictionary_id: Option<Box<str>>,
     #[serde(default)]
     pub(super) font_policy: Option<WorkflowFontPolicy>,
 }
@@ -460,6 +496,7 @@ impl DesktopBackend {
                     software_id: target.software_id,
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
+                    write_dictionary_id: target.write_dictionary_id,
                     font_policy: target.font_policy,
                 })
                 .collect(),
@@ -497,11 +534,19 @@ impl DesktopBackend {
                     software_id: target.software_id,
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
+                    write_dictionary_id: target.write_dictionary_id,
                     font_policy: target.font_policy,
                 })
                 .collect(),
         };
         validate_workflow(&artifact, None)?;
+        if self.enabled_workflows.contains_key(&artifact.id)
+            && current.targets.iter().chain(&artifact.targets).any(|target| target.write_dictionary_id.is_some())
+            && (current.targets.len() != artifact.targets.len() || current.targets.iter().zip(&artifact.targets).any(|(old, new)|
+                old.software_id != new.software_id || old.adapter_plan != new.adapter_plan
+                || old.dictionary_ids != new.dictionary_ids || old.write_dictionary_id != new.write_dictionary_id)) {
+            return Err(BackendError::InvalidArtifact("workflow-collection-active"));
+        }
         if self.enabled_workflows.contains_key(&artifact.id) {
             self.validate_workflow_activation(&artifact)?;
             if let Some(error) = self.activation_conflict(&artifact) {
@@ -542,6 +587,7 @@ impl DesktopBackend {
                     target.adapter_plan.adapter_ids.iter().cloned(),
                     target.dictionary_ids.iter().cloned(),
                 )
+                .with_optional_write_dictionary(target.write_dictionary_id.clone())
                 .with_optional_font_policy(target.font_policy.clone())
             })
             .collect::<Vec<_>>();
@@ -654,7 +700,7 @@ impl DesktopBackend {
                     target.software_id.clone(),
                     AdapterPlan::parallel(target.adapter_plan.adapter_ids.iter().cloned()),
                     target.dictionary_ids.iter().cloned(),
-                );
+                ).with_collection(target.write_dictionary_id.is_some());
                 target
                     .font_policy
                     .as_ref()
@@ -669,7 +715,7 @@ impl DesktopBackend {
                                     CompiledFontCoverage::AllObservations
                                 }
                             },
-                        ))
+                        ).with_dictionary_fonts(policy.prefer_dictionary).with_scale_percent(policy.scale_percent))
                     })
             }),
         );
@@ -681,6 +727,7 @@ impl DesktopBackend {
                     .software
                     .get(&target.software_id)
                     .ok_or_else(|| BackendError::UnknownSoftware(target.software_id.clone()))?;
+                self.software_binding_paths(&target.software_id)?;
                 let route = state.artifact.runtime.as_ref().map_or_else(
                     || {
                         state
@@ -692,9 +739,14 @@ impl DesktopBackend {
                     },
                     |runtime| runtime_route(&runtime.route, &state.artifact.locations),
                 )?;
+                let language_dictionary = target.write_dictionary_id.as_ref().or_else(|| target.dictionary_ids.first());
+                let target_locale = language_dictionary.and_then(|id| {
+                    dictionary_override.filter(|dictionary| dictionary.id() == id.as_ref())
+                        .or_else(|| self.dictionaries.get(id.as_ref()))
+                }).map_or_else(|| state.locale.clone(), |dictionary| dictionary.metadata().target_locale().into());
                 Ok(SoftwareInput::new(
                     state.artifact.id.clone(),
-                    state.locale.clone(),
+                    target_locale,
                     glyphshift_domain::Generation::new(target.dictionary_ids.iter().fold(
                         artifact.revision,
                         |generation, dictionary_id| {
@@ -789,11 +841,7 @@ impl DesktopBackend {
                     software_id: target.software_id().into(),
                     runtime_spec: DesktopRuntimeSpec {
                         executable_names: state.artifact.executables.clone(),
-                        executable_paths: self
-                            .local_software
-                            .get(target.software_id())
-                            .map(|software| vec![software.executable_path.clone()])
-                            .unwrap_or_default(),
+                        executable_paths: self.software_binding_paths(target.software_id())?,
                         descendant_executable_names: state.artifact.descendant_executables.clone(),
                         requirements,
                         publication: RuntimePublication::new(
@@ -834,11 +882,7 @@ impl DesktopBackend {
         let requirements = self.target_requirements(target)?;
         Ok(DesktopRuntimeSpec {
             executable_names: state.artifact.executables.clone(),
-            executable_paths: self
-                .local_software
-                .get(software_id)
-                .map(|software| vec![software.executable_path.clone()])
-                .unwrap_or_default(),
+            executable_paths: self.software_binding_paths(software_id)?,
             descendant_executable_names: state.artifact.descendant_executables.clone(),
             requirements,
             publication: RuntimePublication::new(
@@ -864,13 +908,14 @@ fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
                 software_id: target.software_id.clone(),
                 adapter_plan: target.adapter_plan.clone(),
                 dictionary_ids: target.dictionary_ids.clone(),
+                write_dictionary_id: target.write_dictionary_id.clone(),
                 font_policy: target.font_policy.clone(),
             })
             .collect(),
     }
 }
 
-fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result<(), BackendError> {
+pub(super) fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result<(), BackendError> {
     let unique_software = artifact
         .targets
         .iter()
@@ -886,7 +931,7 @@ fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result
         || artifact.global_shortcut.len() > 64
         || artifact.global_shortcut.chars().any(char::is_control)
         || artifact.revision == 0
-        || artifact.targets.is_empty()
+        || artifact.targets.len() != 1
         || !unique_software
         || path.is_some_and(|path| {
             path.file_stem().and_then(|value| value.to_str()) != Some(&artifact.id)
@@ -912,8 +957,10 @@ fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result
                     .dictionary_ids
                     .iter()
                     .any(|dictionary_id| !safe_identifier(dictionary_id))
+                || target.write_dictionary_id.as_ref().is_some_and(|id| !target.dictionary_ids.contains(id))
                 || target.font_policy.as_ref().is_some_and(|policy| {
-                    policy.families.is_empty()
+                    (!(50..=200).contains(&policy.scale_percent))
+                        || (policy.families.is_empty() && !policy.prefer_dictionary && policy.scale_percent == 100)
                         || policy
                             .families
                             .iter()
@@ -934,7 +981,7 @@ pub(super) struct WorkflowLoad {
 }
 
 pub(super) fn read_workflows(root: &Path) -> Result<WorkflowLoad, BackendError> {
-    let directory = root.join("workflows");
+    let directory = root.join("workflows-v4");
     let mut paths = fs::read_dir(&directory)
         .map_err(|_| BackendError::Storage("read-workflow-directory"))?
         .filter_map(Result::ok)
@@ -1001,7 +1048,17 @@ fn workflow_artifact_from_value(value: &serde_json::Value) -> Option<WorkflowArt
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|target| serde_json::from_value(target.clone()).ok())
+        .filter_map(|target| {
+            let mut target = target.clone();
+            if let Some(object) = target.as_object_mut() {
+                let valid = object.get("writeDictionaryId").and_then(serde_json::Value::as_str)
+                    .filter(|id| object.get("dictionaryIds").and_then(serde_json::Value::as_array)
+                        .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(*id))))
+                    .map(str::to_owned);
+                object.insert("writeDictionaryId".into(), valid.map_or(serde_json::Value::Null, serde_json::Value::String));
+            }
+            serde_json::from_value(target).ok()
+        })
         .collect();
     Some(WorkflowArtifact {
         schema: WORKFLOW_SCHEMA.into(),
@@ -1023,7 +1080,7 @@ pub(super) fn read_workflow_state(
     root: &Path,
     workflows: &BTreeMap<Box<str>, WorkflowArtifact>,
 ) -> Result<BTreeMap<Box<str>, u64>, BackendError> {
-    let path = root.join("workflow-state.json");
+    let path = root.join("workflow-state-v2.json");
     if !path.exists() {
         return Ok(BTreeMap::new());
     }
@@ -1047,7 +1104,7 @@ pub(super) fn read_workflow_state(
     Ok(enabled)
 }
 
-fn write_workflow_state(
+pub(super) fn write_workflow_state(
     root: &Path,
     enabled: &BTreeMap<Box<str>, u64>,
 ) -> Result<(), BackendError> {
@@ -1057,5 +1114,5 @@ fn write_workflow_state(
     };
     let serialized = serde_json::to_string(&state)
         .map_err(|_| BackendError::InvalidArtifact("serialize-workflow-state"))?;
-    write_atomic(&root.join("workflow-state.json"), &serialized)
+    write_atomic(&root.join("workflow-state-v2.json"), &serialized)
 }

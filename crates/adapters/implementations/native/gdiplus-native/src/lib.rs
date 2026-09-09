@@ -84,7 +84,7 @@ struct CallbackGuard;
 
 impl CallbackGuard {
     fn enter() -> Option<Self> {
-        IN_CALLBACK.with(|active| (!active.replace(true)).then_some(Self))
+        IN_CALLBACK.with(|active| (!active.replace(true)).then(|| Self))
     }
 }
 

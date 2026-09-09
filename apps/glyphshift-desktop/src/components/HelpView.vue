@@ -33,16 +33,16 @@ const aboutLinks = computed(() => [
   { id: 'bilibili' as const, label: t('help.about.bilibili'), icon: 'i-tabler-brand-bilibili', url: 'https://space.bilibili.com/4279370' },
 ])
 const gettingStartedItems = computed(() => ([
-  { id: 'add-software', title: t('help.guide.steps.addSoftware.title'), description: t('help.guide.steps.addSoftware.description'), action: t('help.guide.steps.addSoftware.action'), view: 'software' as const },
-  { id: 'create-probe', title: t('help.guide.steps.createProbe.title'), description: t('help.guide.steps.createProbe.description'), action: t('help.guide.steps.createProbe.action'), view: 'capture' as const },
-  { id: 'collect-text', title: t('help.guide.steps.collectText.title'), description: t('help.guide.steps.collectText.description'), action: t('help.guide.steps.collectText.action'), view: 'capture' as const },
+  { id: 'add-software', title: t('help.guide.steps.addSoftware.title'), description: t('help.guide.steps.addSoftware.description'), action: t('help.guide.steps.addSoftware.action'), view: 'workflows' as const },
+  { id: 'create-probe', title: t('help.guide.steps.createProbe.title'), description: t('help.guide.steps.createProbe.description'), action: t('help.guide.steps.createProbe.action'), view: 'workflows' as const },
+  { id: 'collect-text', title: t('help.guide.steps.collectText.title'), description: t('help.guide.steps.collectText.description'), action: t('help.guide.steps.collectText.action'), view: 'workflows' as const },
   { id: 'translate', title: t('help.guide.steps.translate.title'), description: t('help.guide.steps.translate.description'), action: t('help.guide.steps.translate.action'), view: 'dictionaries' as const },
-  { id: 'verify', title: t('help.guide.steps.verify.title'), description: t('help.guide.steps.verify.description'), action: t('help.guide.steps.verify.action'), view: 'capture' as const },
+  { id: 'verify', title: t('help.guide.steps.verify.title'), description: t('help.guide.steps.verify.description'), action: t('help.guide.steps.verify.action'), view: 'workflows' as const },
   { id: 'enable-workflow', title: t('help.guide.steps.enableWorkflow.title'), description: t('help.guide.steps.enableWorkflow.description'), action: t('help.guide.steps.enableWorkflow.action'), view: 'workflows' as const },
 ]))
 const maintenanceItems = computed(() => ([
   { id: 'dictionary', icon: 'i-tabler-language', title: t('help.guide.maintenance.dictionary.title'), description: t('help.guide.maintenance.dictionary.description'), action: t('help.guide.maintenance.dictionary.action'), view: 'dictionaries' as const },
-  { id: 'recheck', icon: 'i-tabler-radar', title: t('help.guide.maintenance.recheck.title'), description: t('help.guide.maintenance.recheck.description'), action: t('help.guide.maintenance.recheck.action'), view: 'capture' as const },
+  { id: 'recheck', icon: 'i-tabler-radar', title: t('help.guide.maintenance.recheck.title'), description: t('help.guide.maintenance.recheck.description'), action: t('help.guide.maintenance.recheck.action'), view: 'workflows' as const },
   { id: 'tasks', icon: 'i-tabler-list-check', title: t('help.guide.maintenance.tasks.title'), description: t('help.guide.maintenance.tasks.description'), action: t('help.guide.maintenance.tasks.action'), view: 'translation-tasks' as const },
 ]))
 const aiSteps = computed(() => ([
@@ -59,9 +59,9 @@ const usageTerms = computed(() => [
   { id: 'total', term: t('help.aiGuide.usage.total.term'), description: t('help.aiGuide.usage.total.description') },
 ])
 const recoveryItems = computed(() => ([
-  { id: 'software-not-running', icon: 'i-tabler-library', title: t('help.recovery.softwareNotRunning.title'), description: t('help.recovery.softwareNotRunning.description'), action: t('help.recovery.softwareNotRunning.action'), view: 'software' as const },
+  { id: 'software-not-running', icon: 'i-tabler-library', title: t('help.recovery.softwareNotRunning.title'), description: t('help.recovery.softwareNotRunning.description'), action: t('help.recovery.softwareNotRunning.action'), view: 'workflows' as const },
   { id: 'privilege-mismatch', icon: 'i-tabler-shield-lock', title: t('help.recovery.privilegeMismatch.title'), description: t('help.recovery.privilegeMismatch.description'), action: t('help.recovery.privilegeMismatch.action'), view: 'settings' as const },
-  { id: 'no-observed-text', icon: 'i-tabler-radar-off', title: t('help.recovery.noObservedText.title'), description: t('help.recovery.noObservedText.description'), action: t('help.recovery.noObservedText.action'), view: 'capture' as const },
+  { id: 'no-observed-text', icon: 'i-tabler-radar-off', title: t('help.recovery.noObservedText.title'), description: t('help.recovery.noObservedText.description'), action: t('help.recovery.noObservedText.action'), view: 'workflows' as const },
   { id: 'ai-unavailable', icon: 'i-tabler-language-off', title: t('help.recovery.aiUnavailable.title'), description: t('help.recovery.aiUnavailable.description'), action: t('help.recovery.aiUnavailable.action'), view: 'settings' as const },
 ]))
 
@@ -139,10 +139,10 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
       }"
     >
       <template #guide>
-        <section data-testid="help-section-getting-started" class="@container" aria-labelledby="help-getting-started-title">
+        <section data-testid="help-section-getting-started" class="help-card @container" aria-labelledby="help-getting-started-title">
           <h2 id="help-getting-started-title" class="type-section-title m-0 font-semibold">{{ t('help.guide.title') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.guide.description') }}</p>
-          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0">
+          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-t border-[var(--border)] p-0">
             <li v-for="(item, index) in gettingStartedItems" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
               <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] type-label font-semibold tabular-nums text-[var(--accent-strong)]" aria-hidden="true">{{ index + 1 }}</span>
               <div class="min-w-0">
@@ -154,10 +154,10 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
           </ol>
         </section>
 
-        <section class="@container mt-6" aria-labelledby="help-maintenance-title">
+        <section class="help-card @container mt-4" aria-labelledby="help-maintenance-title">
           <h2 id="help-maintenance-title" class="type-section-title m-0 font-semibold">{{ t('help.guide.maintenanceTitle') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.guide.maintenanceDescription') }}</p>
-          <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0" role="list">
+          <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-t border-[var(--border)] p-0" role="list">
             <li v-for="item in maintenanceItems" :key="item.id" class="grid min-h-[64px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
               <UIcon :name="item.icon" class="size-4 justify-self-center text-[var(--text-secondary)]" aria-hidden="true" />
               <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 text-[var(--text-muted)]">{{ item.description }}</p></div>
@@ -165,13 +165,20 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
             </li>
           </ul>
         </section>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section v-for="topic in ['dictionary', 'probe']" :key="topic" class="help-card" :aria-labelledby="`help-${topic}-title`">
+            <h2 :id="`help-${topic}-title`" class="type-section-title m-0 font-semibold">{{ t(`help.updates.${topic}.title`) }}</h2>
+            <p class="type-body mb-0 mt-3 leading-6 text-[var(--text-secondary)]">{{ t(`help.updates.${topic}.description`) }}</p>
+          </section>
+        </div>
       </template>
 
       <template #ai>
-        <section data-testid="help-section-ai" class="@container" aria-labelledby="help-ai-title">
+        <section data-testid="help-section-ai" class="help-card @container" aria-labelledby="help-ai-title">
           <h2 id="help-ai-title" class="type-section-title m-0 font-semibold">{{ t('help.aiGuide.title') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.aiGuide.description') }}</p>
-          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0">
+          <ol class="m-0 mt-3 divide-y divide-[var(--border)] border-t border-[var(--border)] p-0">
             <li v-for="(item, index) in aiSteps" :key="item.id" class="grid min-h-[72px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
               <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--accent-soft)] type-label font-semibold tabular-nums text-[var(--accent-strong)]" aria-hidden="true">{{ index + 1 }}</span>
               <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p></div>
@@ -180,10 +187,17 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
           </ol>
         </section>
 
-        <section class="mt-6" aria-labelledby="help-ai-usage-title">
+
+        <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section v-for="topic in ['automatic', 'profiles']" :key="topic" class="help-card" :aria-labelledby="`help-${topic}-title`">
+            <h2 :id="`help-${topic}-title`" class="type-section-title m-0 font-semibold">{{ t(`help.updates.${topic}.title`) }}</h2>
+            <p class="type-body mb-0 mt-3 leading-6 text-[var(--text-secondary)]">{{ t(`help.updates.${topic}.description`) }}</p>
+          </section>
+        </div>
+        <section class="help-card mt-4" aria-labelledby="help-ai-usage-title">
           <h2 id="help-ai-usage-title" class="type-section-title m-0 font-semibold">{{ t('help.aiGuide.usageTitle') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.aiGuide.usageDescription') }}</p>
-          <dl class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)]">
+          <dl class="m-0 mt-3 divide-y divide-[var(--border)] border-t border-[var(--border)]">
             <div v-for="item in usageTerms" :key="item.id" class="grid grid-cols-[128px_minmax(0,1fr)] gap-4 px-3 py-2.5 max-[560px]:grid-cols-1 max-[560px]:gap-1">
               <dt class="type-label font-semibold text-[var(--text)]">{{ item.term }}</dt>
               <dd class="type-metadata m-0 text-[var(--text-muted)]">{{ item.description }}</dd>
@@ -193,10 +207,10 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
       </template>
 
       <template #recovery>
-        <section data-testid="help-section-recovery" class="@container" aria-labelledby="help-recovery-title">
+        <section data-testid="help-section-recovery" class="help-card @container" aria-labelledby="help-recovery-title">
           <h2 id="help-recovery-title" class="type-section-title m-0 font-semibold">{{ t('help.recoveryTitle') }}</h2>
           <p class="type-metadata mb-0 mt-1 max-w-[74ch] leading-4 text-[var(--text-muted)]">{{ t('help.recoveryDescription') }}</p>
-          <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)] p-0" role="list">
+          <ul class="m-0 mt-3 divide-y divide-[var(--border)] border-t border-[var(--border)] p-0" role="list">
             <li v-for="item in recoveryItems" :key="item.id" class="grid min-h-[68px] list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 @max-[680px]:grid-cols-[32px_minmax(0,1fr)]">
               <span class="grid size-8 place-items-center rounded-[6px] bg-[var(--surface-subtle)] text-[var(--text-secondary)]" aria-hidden="true"><UIcon :name="item.icon" class="size-4" /></span>
               <div class="min-w-0"><h3 class="type-body m-0 font-semibold">{{ item.title }}</h3><p class="type-metadata mb-0 mt-1 max-w-[76ch] leading-4 text-[var(--text-muted)]">{{ item.description }}</p></div>
@@ -204,6 +218,13 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
             </li>
           </ul>
         </section>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section v-for="topic in ['refresh', 'experimental']" :key="topic" class="help-card" :aria-labelledby="`help-${topic}-title`">
+            <h2 :id="`help-${topic}-title`" class="type-section-title m-0 font-semibold">{{ t(`help.updates.${topic}.title`) }}</h2>
+            <p class="type-body mb-0 mt-3 leading-6 text-[var(--text-secondary)]">{{ t(`help.updates.${topic}.description`) }}</p>
+          </section>
+        </div>
       </template>
 
       <template #compatibility>
@@ -236,7 +257,7 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
       </template>
 
       <template #about>
-        <section data-testid="help-section-about" class="@container" aria-labelledby="help-about-title">
+        <section data-testid="help-section-about" class="help-card @container" aria-labelledby="help-about-title">
           <div class="flex items-center gap-3 border-b border-[var(--border)] pb-5">
             <span class="grid size-10 shrink-0 place-items-center rounded-[7px] border border-[var(--border)] bg-[var(--surface-subtle)] text-[var(--accent-strong)]" aria-hidden="true">
               <UIcon name="i-tabler-info-circle" class="size-5" />
@@ -247,6 +268,7 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
             </div>
           </div>
 
+          <p class="type-body mt-4 text-[var(--text-secondary)]">{{ t('help.updates.license') }}</p>
           <p v-if="aboutLinkError" class="type-metadata mb-2 mt-4 text-[var(--danger)]" role="alert">{{ aboutLinkError }}</p>
           <ul class="m-0 divide-y divide-[var(--border)] border-b border-[var(--border)] p-0" role="list">
             <li v-for="link in aboutLinks" :key="link.id" class="grid min-h-16 list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[640px]:grid-cols-[32px_minmax(0,1fr)]">
@@ -263,3 +285,13 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
     </UTabs>
   </UtilityPageShell>
 </template>
+
+<style scoped>
+.help-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 20px;
+  min-width: 0;
+}
+</style>

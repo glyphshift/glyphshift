@@ -1,3 +1,4 @@
+use glyphshift_ai_translation::FilterPolicy;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
@@ -7,6 +8,12 @@ use tempfile::NamedTempFile;
 pub(crate) const APP_SETTINGS_SCHEMA_VERSION: u16 = 1;
 pub(crate) const DEFAULT_SOFTWARE_CAPTURE_SHORTCUT: &str = "Ctrl+Shift+F8";
 const SETTINGS_FILE_NAME: &str = "app-settings.json";
+
+fn default_check_updates() -> bool { true }
+
+fn default_auto_complete_interval() -> u16 {
+    10
+}
 
 fn default_software_capture_shortcut() -> Box<str> {
     DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into()
@@ -54,6 +61,12 @@ pub(crate) struct AppSettings {
     close_behavior: CloseBehavior,
     #[serde(default = "default_software_capture_shortcut")]
     software_capture_shortcut: Box<str>,
+    #[serde(default = "default_auto_complete_interval")]
+    auto_complete_interval_seconds: u16,
+    #[serde(default = "default_check_updates")]
+    check_updates_on_startup: bool,
+    #[serde(default)]
+    text_filter_policy: FilterPolicy,
 }
 
 impl Default for AppSettings {
@@ -66,11 +79,15 @@ impl Default for AppSettings {
             launch_elevated: false,
             close_behavior: CloseBehavior::default(),
             software_capture_shortcut: default_software_capture_shortcut(),
+            auto_complete_interval_seconds: 10,
+            check_updates_on_startup: true,
+            text_filter_policy: FilterPolicy::default(),
         }
     }
 }
 
 impl AppSettings {
+    pub(crate) fn text_filter_policy(&self) -> &FilterPolicy { &self.text_filter_policy }
     pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
     }
@@ -83,8 +100,11 @@ impl AppSettings {
         &self.software_capture_shortcut
     }
 
-    const fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION
+            && self.auto_complete_interval_seconds <= 60
+            && self.text_filter_policy.hidden_sources(&[]).is_ok()
+
     }
 }
 
@@ -131,6 +151,13 @@ fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
             .unwrap_or(false),
         close_behavior,
         software_capture_shortcut,
+        text_filter_policy: object.get("textFilterPolicy").and_then(|value| serde_json::from_value(value.clone()).ok()).filter(|policy: &FilterPolicy| policy.hidden_sources(&[]).is_ok()).unwrap_or_default(),
+        check_updates_on_startup: object.get("checkUpdatesOnStartup").and_then(serde_json::Value::as_bool).unwrap_or(true),
+        auto_complete_interval_seconds: object
+            .get("autoCompleteIntervalSeconds")
+            .and_then(serde_json::Value::as_u64)
+            .filter(|value| (0..=60).contains(value))
+            .map_or(10, |value| value as u16),
     }
 }
 
@@ -150,6 +177,12 @@ pub(crate) struct AppSettingsUpdate {
     launch_elevated: bool,
     close_behavior: CloseBehavior,
     software_capture_shortcut: Box<str>,
+    #[serde(default = "default_auto_complete_interval")]
+    auto_complete_interval_seconds: u16,
+    #[serde(default = "default_check_updates")]
+    check_updates_on_startup: bool,
+    #[serde(default)]
+    text_filter_policy: FilterPolicy,
 }
 
 impl AppSettingsUpdate {
@@ -176,6 +209,9 @@ impl From<AppSettingsUpdate> for AppSettings {
             launch_elevated: update.launch_elevated,
             close_behavior: update.close_behavior,
             software_capture_shortcut: update.software_capture_shortcut,
+            auto_complete_interval_seconds: update.auto_complete_interval_seconds,
+            check_updates_on_startup: update.check_updates_on_startup,
+            text_filter_policy: update.text_filter_policy,
         }
     }
 }
@@ -189,8 +225,8 @@ pub(crate) enum SettingsError {
 
 #[cfg(target_os = "windows")]
 pub(crate) fn configure_launch_at_startup(enabled: bool) -> Result<(), SettingsError> {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
     use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
     const VALUE_NAME: &str = "Glyphshift";
@@ -238,11 +274,26 @@ impl AppSettingsStore {
         } else {
             (AppSettings::default(), None)
         };
-        Ok(Self {
-            path,
-            current,
-            load_error,
-        })
+        let mut store = Self { path, current, load_error };
+        // Promote only the default profile's old policy once; profile selection no longer changes it.
+        let has_global_policy = fs::read(&store.path).ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|value| value.get("textFilterPolicy").is_some());
+        if !has_global_policy {
+            let legacy = fs::read(data_root.as_ref().join("ai-profiles.json")).ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+            let policy = legacy.as_ref().and_then(|value| {
+                let default_id = value.get("defaultProfileId")?.as_str()?;
+                let profile = value.get("profiles")?.as_array()?.iter()
+                    .find(|profile| profile.get("id").and_then(|id| id.as_str()) == Some(default_id))?;
+                serde_json::from_value::<FilterPolicy>(profile.get("filterPolicy")?.clone()).ok()
+            }).filter(|policy| policy.hidden_sources(&[]).is_ok());
+            if let Some(policy) = policy {
+                store.current.text_filter_policy = policy;
+                store.persist(&store.current)?;
+            }
+        }
+        Ok(store)
     }
 
     pub(crate) fn current(&self) -> Result<AppSettings, SettingsError> {
@@ -327,6 +378,19 @@ mod tests {
     }
 
     #[test]
+    fn update_check_defaults_on_and_opt_out_survives_reload() {
+        assert!(normalize_persisted_settings(&serde_json::json!({})).check_updates_on_startup);
+        let root = tempdir().unwrap();
+        let mut store = AppSettingsStore::open(root.path()).unwrap();
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("settingsSchemaVersion");
+        value["checkUpdatesOnStartup"] = false.into();
+        store.update(serde_json::from_value(value).unwrap()).unwrap();
+        let restored = AppSettingsStore::open(root.path()).unwrap();
+        assert!(!restored.current().unwrap().check_updates_on_startup);
+    }
+
+    #[test]
     fn settings_round_trip_through_the_single_store_interface() {
         let root = tempdir().expect("temporary settings root");
         let mut store = AppSettingsStore::open(root.path()).expect("open settings store");
@@ -338,6 +402,9 @@ mod tests {
                 launch_at_startup: true,
                 launch_elevated: true,
                 close_behavior: CloseBehavior::Minimize,
+                auto_complete_interval_seconds: 10,
+                check_updates_on_startup: true,
+            text_filter_policy: FilterPolicy::default(),
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
             })
             .expect("save settings");
@@ -347,10 +414,12 @@ mod tests {
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
-        assert!(serde_json::to_value(&saved)
-            .expect("serialize settings")
-            .get("confirmAiTranslation")
-            .is_none());
+        assert!(
+            serde_json::to_value(&saved)
+                .expect("serialize settings")
+                .get("confirmAiTranslation")
+                .is_none()
+        );
         assert_eq!(reopened.current(), Ok(saved));
     }
 
@@ -373,6 +442,9 @@ mod tests {
                 launch_at_startup: false,
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
+                auto_complete_interval_seconds: 10,
+                check_updates_on_startup: true,
+            text_filter_policy: FilterPolicy::default(),
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
             })
             .expect("replace invalid settings");
@@ -451,5 +523,62 @@ mod tests {
         assert!(serialized.get("unknownShortcut").is_none());
         assert!(serialized.get("unknownObject").is_none());
         assert!(serialized.get("unknownBoolean").is_none());
+    }
+}
+
+#[cfg(test)]
+mod auto_complete_tests {
+    use super::*;
+    #[test]
+    fn interval_defaults_and_bounds_are_preserved() {
+        assert_eq!(
+            normalize_persisted_settings(&serde_json::json!({})).auto_complete_interval_seconds,
+            10
+        );
+        for value in [-1, 61, 3601] {
+            assert_eq!(
+                normalize_persisted_settings(
+                    &serde_json::json!({"autoCompleteIntervalSeconds": value})
+                )
+                .auto_complete_interval_seconds,
+                10
+            );
+        }
+        for value in [0, 1, 4, 60] {
+            let settings = normalize_persisted_settings(&serde_json::json!({"autoCompleteIntervalSeconds": value}));
+            assert_eq!(settings.auto_complete_interval_seconds, value);
+            assert!(settings.is_valid());
+        }
+        let root = tempfile::tempdir().expect("settings root");
+        let path = root.path().join("settings.json");
+        let settings =
+            normalize_persisted_settings(&serde_json::json!({"autoCompleteIntervalSeconds": 25}));
+        fs::write(&path, serde_json::to_vec(&settings).expect("serialize")).expect("write");
+        let value = serde_json::from_slice(&fs::read(path).expect("read")).expect("JSON");
+        assert_eq!(
+            normalize_persisted_settings(&value).auto_complete_interval_seconds,
+            25
+        );
+    }
+}
+
+#[cfg(test)]
+mod global_filter_tests {
+    use super::*;
+    #[test]
+    fn default_profile_filter_migrates_once_and_other_profiles_cannot_change_it() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = serde_json::json!({"defaultProfileId":"chosen", "profiles":[
+            {"id":"chosen", "filterPolicy":{"skipTextContainingDigits":true}},
+            {"id":"other", "filterPolicy":{"skipTextContainingDigits":false}}
+        ]});
+        fs::write(root.path().join("ai-profiles.json"), legacy.to_string()).unwrap();
+        let store = AppSettingsStore::open(root.path()).unwrap();
+        assert_eq!(store.current().unwrap().text_filter_policy().hidden_sources(&["Chapter 2".into()]).unwrap(), vec![true]);
+        let mut changed = legacy;
+        changed["defaultProfileId"] = serde_json::json!("other");
+        fs::write(root.path().join("ai-profiles.json"), changed.to_string()).unwrap();
+        let reopened = AppSettingsStore::open(root.path()).unwrap();
+        assert_eq!(reopened.current().unwrap().text_filter_policy().hidden_sources(&["Chapter 2".into()]).unwrap(), vec![true]);
     }
 }

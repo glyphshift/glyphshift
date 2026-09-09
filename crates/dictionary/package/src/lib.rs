@@ -130,9 +130,22 @@ pub struct DictionaryMetadata {
     homepage: Option<Box<str>>,
     #[serde(default, deserialize_with = "deserialize_string_list")]
     tags: Vec<Box<str>>,
+    #[serde(default)]
+    font_families: Vec<Box<str>>,
+    #[serde(default)]
+    font_scale_percent: Option<u16>,
 }
 
 impl DictionaryMetadata {
+    #[must_use]
+    pub fn font_scale_percent(&self) -> Option<u16> {
+        self.font_scale_percent
+    }
+    #[must_use]
+    pub fn font_families(&self) -> &[Box<str>] {
+        &self.font_families
+    }
+
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -211,6 +224,8 @@ impl DictionaryCreate {
                 license: None,
                 homepage: None,
                 tags: Vec::new(),
+                font_families: Vec::new(),
+                font_scale_percent: None,
             },
             entries: Vec::new(),
         }
@@ -230,6 +245,21 @@ impl DictionaryCreate {
     #[must_use]
     pub fn with_release_version(mut self, version: impl Into<Box<str>>) -> Self {
         self.metadata.release_version = version.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
+        self.metadata.font_scale_percent = percent;
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_families(
+        mut self,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
 
@@ -311,6 +341,21 @@ impl DictionaryEdit {
     #[must_use]
     pub fn with_release_version(mut self, version: impl Into<Box<str>>) -> Self {
         self.metadata.release_version = version.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
+        self.metadata.font_scale_percent = percent;
+        self
+    }
+
+    #[must_use]
+    pub fn with_font_families(
+        mut self,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
 
@@ -506,9 +551,48 @@ impl DictionaryPackage {
         source: &str,
         expected_id: Option<&str>,
     ) -> Result<(Self, bool), PackageError> {
-        let mut artifact: DictionaryArtifact =
+        let mut value: serde_json::Value =
             serde_json::from_str(source).map_err(|_| PackageError::InvalidJson)?;
-        let migrated = artifact.schema.as_ref() != DICTIONARY_SCHEMA;
+        let mut repaired_font = false;
+        if let Some(metadata) = value
+            .get_mut("metadata")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            if let Some(fonts) = metadata.get("fontFamilies") {
+                let valid = fonts.as_array().is_some_and(|fonts| {
+                    fonts.len() <= 16
+                        && fonts.iter().all(|font| {
+                            font.as_str().is_some_and(|font| {
+                                !font.trim().is_empty()
+                                    && font.chars().count() <= 128
+                                    && !font.contains('\0')
+                            })
+                        })
+                        && fonts
+                            .iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == fonts.len()
+                });
+                if !valid {
+                    metadata.remove("fontFamilies");
+                    repaired_font = true;
+                }
+            }
+            if metadata.get("fontScalePercent").is_some_and(|percent| {
+                !percent.is_null()
+                    && !percent
+                        .as_u64()
+                        .is_some_and(|percent| (50..=200).contains(&percent))
+            }) {
+                metadata.remove("fontScalePercent");
+                repaired_font = true;
+            }
+        }
+        let mut artifact: DictionaryArtifact =
+            serde_json::from_value(value).map_err(|_| PackageError::InvalidJson)?;
+        let migrated = artifact.schema.as_ref() != DICTIONARY_SCHEMA || repaired_font;
         artifact.schema = DICTIONARY_SCHEMA.into();
         validate_dictionary(&artifact, expected_id)?;
         Ok((Self { artifact }, migrated))
@@ -675,6 +759,21 @@ fn validate_dictionary(
             .collect::<BTreeSet<_>>()
             .len()
             != artifact.metadata.tags().len()
+        || artifact
+            .metadata
+            .font_scale_percent()
+            .is_some_and(|percent| !(50..=200).contains(&percent))
+        || artifact.metadata.font_families().len() > 16
+        || artifact.metadata.font_families().iter().any(|family| {
+            family.trim().is_empty() || family.chars().count() > 128 || family.contains('\0')
+        })
+        || artifact
+            .metadata
+            .font_families()
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            != artifact.metadata.font_families().len()
         || artifact.revision == 0
         || expected_id.is_some_and(|expected| expected != artifact.metadata.id())
         || !valid_entries
@@ -832,5 +931,27 @@ mod tests {
             .expect_err("reject duplicate"),
             DictionaryMutationError::DuplicateEntry
         );
+    }
+    #[test]
+    fn local_invalid_font_preferences_preserve_entries_but_import_rejects_them() {
+        let package = DictionaryPackage::create(
+            DictionaryCreate::new("dictionary.font", "Font", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "Translated")]),
+        )
+        .unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&package.encode_json().unwrap()).unwrap();
+        value["metadata"]["fontFamilies"] = serde_json::json!([123]);
+        value["metadata"]["fontScalePercent"] = serde_json::json!(0);
+        let json = value.to_string();
+        assert!(DictionaryPackage::decode_json(&json, None).is_err());
+        let (recovered, changed) = DictionaryPackage::decode_local_json(&json, None).unwrap();
+        assert!(changed);
+        assert_eq!(
+            recovered.view().entries()[0].translation(),
+            Some("Translated")
+        );
+        assert!(recovered.view().metadata().font_families().is_empty());
+        assert_eq!(recovered.view().metadata().font_scale_percent(), None);
     }
 }

@@ -144,7 +144,8 @@ fn gdi_006_descriptor_and_activation_keep_text_and_font_capabilities_independent
         [
             Feature::TextObserve,
             Feature::TextReplace,
-            Feature::FontSubstitute
+            Feature::FontSubstitute,
+            Feature::FontScale
         ]
     );
 
@@ -200,8 +201,37 @@ fn gdi_007_declares_each_win32_text_seam_as_a_distinct_adapter() {
             [
                 Feature::TextObserve,
                 Feature::TextReplace,
-                Feature::FontSubstitute
+                Feature::FontSubstitute,
+                Feature::FontScale
             ]
         );
     }
+}
+
+#[test]
+fn font_scaling_does_not_require_or_enable_font_family_substitution() {
+    let grant = ActivationGrant::new([Feature::FontScale]);
+    let mut adapter = GdiInlineAdapter::activate([Feature::FontScale], &grant).unwrap();
+    let output = adapter.invoke(
+        GdiCall::unicode(
+            "Open",
+            0,
+            None::<[i32; 0]>,
+            GdiFont::new("Source Sans", -20, 400),
+        ),
+        None,
+        |_| {
+            Ok(decision(
+                TextDecision::Keep,
+                FontDecision::Scaled {
+                    family: Some("Not authorized".into()),
+                    percent: 150,
+                },
+            ))
+        },
+        |prepared| prepared,
+    );
+    assert_eq!(output.font().height(), -30);
+    assert_eq!(output.font().family(), "Source Sans");
+    assert_eq!(output.text(), Some("Open"));
 }

@@ -77,6 +77,15 @@ jobs:
           }
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Set up Python for documentation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Package documentation
+        shell: pwsh
+        run: python scripts/yueli_docs_publish.py pack docs --output local-test/evidence/docs-release/docs.zip
+
       - name: Install desktop dependencies
         working-directory: apps/glyphshift-desktop
         shell: pwsh
@@ -111,8 +120,10 @@ jobs:
           $assetRoot = New-Item -ItemType Directory -Path 'release-assets' -Force
           Copy-Item -LiteralPath $installer.FullName -Destination $assetRoot.FullName
           Copy-Item -LiteralPath $manifest -Destination $assetRoot.FullName
+          Copy-Item -LiteralPath 'local-test/evidence/docs-release/docs.zip' -Destination $assetRoot.FullName
+          $docsChecksum = (Get-FileHash -LiteralPath (Join-Path $assetRoot.FullName 'docs.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksum = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$checksum  $($installer.Name)" | Out-File -LiteralPath (Join-Path $assetRoot.FullName 'SHA256SUMS.txt') -Encoding ascii
+          @("$checksum  $($installer.Name)", "$docsChecksum  docs.zip") | Out-File -LiteralPath (Join-Path $assetRoot.FullName 'SHA256SUMS.txt') -Encoding ascii
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -128,8 +139,8 @@ jobs:
             throw "Release '$tag' already exists; published release assets are not overwritten."
           }
           $assets = @(Get-ChildItem -LiteralPath 'release-assets' -File | ForEach-Object { $_.FullName })
-          if ($assets.Count -ne 3) {
-            throw "Expected three release assets, found $($assets.Count)."
+          if ($assets.Count -ne 4) {
+            throw "Expected four release assets, found $($assets.Count)."
           }
           $notes = 'The Windows installer is currently unsigned. Windows SmartScreen may ask for confirmation before installation.'
           gh release create $tag @assets `

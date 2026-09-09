@@ -239,6 +239,10 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
         Ok(())
     }
 
+    fn control_workflow_collection(&mut self, _workflow_id: &str, software_id: &str, paused: bool) -> Result<(), DesktopRuntimeError> {
+        self.control_capture(software_id, paused)
+    }
+
     fn abandon_capture(&mut self, software_id: &str) {
         self.calls
             .lock()

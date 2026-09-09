@@ -1,5 +1,7 @@
-use crate::FilterPolicy;
+pub const DEFAULT_TRANSLATION_PROMPT: &str = include_str!("default-translation-prompt.txt");
+
 use crate::DEFAULT_MAX_ITEMS_PER_REQUEST;
+use crate::FilterPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
@@ -161,6 +163,7 @@ pub struct AiProfileDraft {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    translation_prompt: Option<Box<str>>,
     #[serde(default)]
     reasoning_effort: AiReasoningEffort,
     timeout_ms: u64,
@@ -188,6 +191,7 @@ impl AiProfileDraft {
             protocol,
             base_url: protocol.default_base_url().into(),
             model_id: model_id.into(),
+            translation_prompt: None,
             reasoning_effort: protocol.default_reasoning_effort(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
             max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
@@ -207,6 +211,12 @@ impl AiProfileDraft {
     #[must_use]
     pub fn with_credential(mut self, credential: CredentialUpdate) -> Self {
         self.credential = credential;
+        self
+    }
+
+    #[must_use]
+    pub fn with_translation_prompt(mut self, prompt: impl Into<Box<str>>) -> Self {
+        self.translation_prompt = Some(prompt.into());
         self
     }
 
@@ -255,6 +265,7 @@ struct StoredAiProfile {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    translation_prompt: Option<Box<str>>,
     #[serde(default)]
     reasoning_effort: AiReasoningEffort,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -294,6 +305,7 @@ pub struct AiProfileView {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    translation_prompt: Option<Box<str>>,
     reasoning_effort: AiReasoningEffort,
     timeout_ms: u64,
     max_items_per_request: u16,
@@ -311,6 +323,7 @@ pub struct ResolvedAiProfile {
     protocol: AiProviderProtocol,
     base_url: Box<str>,
     model_id: Box<str>,
+    translation_prompt: Option<Box<str>>,
     reasoning_effort: AiReasoningEffort,
     credential: Option<Box<str>>,
     timeout_ms: u64,
@@ -320,6 +333,21 @@ pub struct ResolvedAiProfile {
 }
 
 impl ResolvedAiProfile {
+    pub(crate) fn for_connection_check(mut self) -> Self {
+        self.timeout_ms = self.timeout_ms.min(30_000);
+        self.max_retries = 0;
+        self
+    }
+
+    #[must_use]
+    pub fn translation_prompt(&self) -> &str {
+        self.translation_prompt
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(DEFAULT_TRANSLATION_PROMPT)
+            .trim()
+    }
+
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
@@ -511,6 +539,7 @@ impl AiProfileCatalog {
             protocol: profile.protocol,
             base_url: profile.base_url.clone(),
             model_id: profile.model_id.clone(),
+            translation_prompt: profile.translation_prompt.clone(),
             reasoning_effort: profile.reasoning_effort,
             credential: profile.credential.clone(),
             timeout_ms: profile.timeout_ms,
@@ -622,6 +651,7 @@ fn stored_profile(
         protocol,
         base_url,
         model_id,
+        translation_prompt,
         reasoning_effort,
         timeout_ms,
         max_items_per_request,
@@ -630,6 +660,13 @@ fn stored_profile(
         filter_policy,
         credential,
     } = draft;
+    let translation_prompt = translation_prompt.filter(|value| !value.trim().is_empty());
+    if translation_prompt
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 16_000)
+    {
+        return Err(AiProfileError::InvalidProfile("translation-prompt"));
+    }
     let name = name.trim();
     let base_url = base_url.trim().trim_end_matches('/');
     let model_id = normalized_model_id(protocol, model_id.trim());
@@ -665,6 +702,7 @@ fn stored_profile(
             protocol,
             base_url: base_url.into(),
             model_id,
+            translation_prompt,
             reasoning_effort,
             credential: None,
             timeout_ms,
@@ -684,6 +722,7 @@ fn profile_view(profile: &StoredAiProfile) -> AiProfileView {
         protocol: profile.protocol,
         base_url: profile.base_url.clone(),
         model_id: profile.model_id.clone(),
+        translation_prompt: profile.translation_prompt.clone(),
         reasoning_effort: profile.reasoning_effort,
         timeout_ms: profile.timeout_ms,
         max_items_per_request: profile.max_items_per_request,
@@ -805,6 +844,11 @@ fn stored_profile_from_value(value: &serde_json::Value) -> Option<StoredAiProfil
         protocol,
         base_url: base_url.into(),
         model_id: model_id.into(),
+        translation_prompt: object
+            .get("translationPrompt")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty() && value.chars().count() <= 16_000)
+            .map(Into::into),
         reasoning_effort,
         credential: object
             .get("credential")
@@ -828,6 +872,10 @@ fn preserve_invalid_profile_artifact(path: &Path) {
 
 fn stored_profile_is_valid(profile: &StoredAiProfile) -> bool {
     safe_identifier(&profile.id)
+        && profile
+            .translation_prompt
+            .as_ref()
+            .is_none_or(|value| value.chars().count() <= 16_000)
         && !profile.name.trim().is_empty()
         && !profile.model_id.trim().is_empty()
         && profile

@@ -61,6 +61,7 @@ impl RuntimeFactory for InMemoryRuntimeFactory {
             captured_target_ids: None,
             acquisition_instance_id: 0,
             acquisition_calls: None,
+            live_instance: None,
         }))
     }
 }
@@ -86,6 +87,7 @@ impl RuntimeFactory for AcquisitionRuntimeFactory {
             captured_target_ids: None,
             acquisition_instance_id: instance_id,
             acquisition_calls: Some(Arc::clone(&self.calls)),
+            live_instance: None,
         }))
     }
 }
@@ -99,6 +101,7 @@ struct InMemoryRuntime {
     captured_target_ids: Option<Arc<Mutex<Vec<u64>>>>,
     acquisition_instance_id: usize,
     acquisition_calls: Option<AcquisitionCalls>,
+    live_instance: Option<(Arc<AtomicUsize>, usize)>,
 }
 
 struct FamilyCaptureFactory {
@@ -120,6 +123,7 @@ impl RuntimeFactory for FamilyCaptureFactory {
             captured_target_ids: Some(self.captured_target_ids.clone()),
             acquisition_instance_id: 0,
             acquisition_calls: None,
+            live_instance: None,
         }))
     }
 }
@@ -148,6 +152,7 @@ impl RuntimeFactory for OfflineThenRunningRuntimeFactory {
             captured_target_ids: None,
             acquisition_instance_id: 0,
             acquisition_calls: None,
+            live_instance: None,
         }))
     }
 }
@@ -169,6 +174,7 @@ impl RuntimeFactory for RetryRuntimeFactory {
                 captured_target_ids: None,
                 acquisition_instance_id: 0,
                 acquisition_calls: None,
+            live_instance: None,
             },
             reject_capture,
         }))
@@ -262,6 +268,13 @@ impl ManagedRuntime for RetryRuntime {
 }
 
 impl ManagedRuntime for InMemoryRuntime {
+    fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
+        let alive = self.live_instance.as_ref().is_none_or(|(current, previous)| current.load(Ordering::SeqCst) == *previous)
+            && !self.target_ids.is_empty();
+        if !alive { self.active_features.clear(); }
+        Ok(alive)
+    }
+
     fn application_id(&self) -> &str {
         &self.application_id
     }
@@ -454,3 +467,17 @@ mod acquisition;
 mod bundle;
 mod contract;
 mod pool;
+
+struct RestartingRuntimeFactory { instance: Arc<AtomicUsize>, discoveries: Arc<AtomicUsize> }
+impl RuntimeFactory for RestartingRuntimeFactory {
+    fn discover(&mut self, application_id: Box<str>, spec: &DesktopRuntimeSpec) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+        self.discoveries.fetch_add(1, Ordering::SeqCst);
+        let instance = self.instance.load(Ordering::SeqCst);
+        Ok(Box::new(InMemoryRuntime {
+            application_id, active_features: BTreeSet::new(), generation: spec.publication().generation(),
+            stop_fails: false, target_ids: if instance == 0 { vec![] } else { vec![instance as u64] },
+            captured_target_ids: None, acquisition_instance_id: 0, acquisition_calls: None,
+            live_instance: Some((self.instance.clone(), instance)),
+        }))
+    }
+}

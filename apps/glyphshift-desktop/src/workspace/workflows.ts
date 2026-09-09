@@ -164,7 +164,7 @@ export function useWorkflowWorkspace() {
         ? await invoke<DesktopSnapshot>('desktop_create_workflow', { create: { id, name, description, targets, globalShortcut } })
         : localCreateWorkflow({ id, name, description, revision: 1, targets, globalShortcut })
       applyDesktopSnapshot(snapshot)
-      return true
+      return id
     }
     catch (error) {
       setMessage('workflows', errorMessage(error))

@@ -31,6 +31,7 @@ pub enum Feature {
     TextObserve,
     TextReplace,
     FontSubstitute,
+    FontScale,
     LayoutAdjust,
     ResourceReplace,
 }
@@ -352,6 +353,10 @@ pub enum TextDecision {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FontDecision {
+    Scaled {
+        family: Option<Arc<str>>,
+        percent: u16,
+    },
     Keep,
     Substitute(Arc<str>),
 }

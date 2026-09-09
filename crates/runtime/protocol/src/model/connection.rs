@@ -190,6 +190,16 @@ impl<T: ControllerTransport> ControllerConnection<T> {
         self.health
     }
 
+    /// Inspect current process instances without remapping opaque IDs used by active sessions.
+    pub fn running_targets(&mut self, ids: &[OpaqueTargetId]) -> Result<BTreeSet<OpaqueTargetId>, ControllerProtocolError> {
+        for id in ids {
+            if !self.target_tokens.contains_key(id) { return Err(ControllerProtocolError::UnknownTarget(*id)); }
+        }
+        let inventory = self.transport.inventory().map_err(|failure| self.handle_transport_failure(failure))?;
+        let tokens = inventory.targets.into_iter().map(|target| target.token).collect::<BTreeSet<_>>();
+        Ok(ids.iter().copied().filter(|id| self.target_tokens.get(id).is_some_and(|token| tokens.contains(token))).collect())
+    }
+
     pub fn inventory(&mut self) -> Result<InventoryView, ControllerProtocolError> {
         if std::mem::take(&mut self.cancelled_inventory) {
             return Err(ControllerProtocolError::Transport(

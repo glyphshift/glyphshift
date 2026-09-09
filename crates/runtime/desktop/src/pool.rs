@@ -147,6 +147,8 @@ pub struct DesktopRuntimePool {
     requested_features: BTreeMap<Box<str>, BTreeSet<Feature>>,
     workflow_targets: BTreeMap<Box<str>, BTreeSet<Box<str>>>,
     capture_targets: BTreeSet<Box<str>>,
+    workflow_collections: BTreeMap<Box<str>, BTreeMap<Box<str>, CaptureConfiguration>>,
+    active_collections: BTreeMap<Box<str>, CaptureConfiguration>,
 }
 
 impl DesktopRuntimePool {
@@ -162,6 +164,8 @@ impl DesktopRuntimePool {
             requested_features: BTreeMap::new(),
             workflow_targets: BTreeMap::new(),
             capture_targets: BTreeSet::new(),
+            workflow_collections: BTreeMap::new(),
+            active_collections: BTreeMap::new(),
         }
     }
 
@@ -318,17 +322,37 @@ impl DesktopRuntimePool {
         target_id: Option<u64>,
         requested_features: impl IntoIterator<Item = Feature>,
     ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
-        let application_id = application_id.into();
-        let requested_features = requested_features.into_iter().collect::<BTreeSet<_>>();
+        self.set_features_with_collection(application_id.into(), spec, target_id, requested_features.into_iter().collect(), None)
+    }
+
+    fn set_features_with_collection(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+        target_id: Option<u64>,
+        mut requested_features: BTreeSet<Feature>,
+        collection: Option<CaptureConfiguration>,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        if collection.is_some() { requested_features.insert(Feature::TextObserve); }
         if requested_features.is_empty() {
             return self.stop_application(application_id);
+        }
+
+        let expired = if let Some(runtime) = self.sessions.get_mut(application_id.as_ref()) {
+            !runtime.refresh_liveness()?
+        } else { false };
+        if expired {
+            self.sessions.remove(application_id.as_ref());
+            self.active_collections.remove(application_id.as_ref());
+            self.requested_features.remove(application_id.as_ref());
         }
 
         let must_replace = self
             .sessions
             .get(application_id.as_ref())
             .is_some_and(|runtime| {
-                runtime.is_active() && runtime.active_features() != requested_features
+                runtime.is_active() && (runtime.active_features() != requested_features
+                    || self.active_collections.get(application_id.as_ref()) != collection.as_ref())
             });
         if must_replace {
             let mut runtime = self
@@ -357,10 +381,33 @@ impl DesktopRuntimePool {
                 .insert(application_id.clone(), requested_features.clone());
             return Ok(runtime_status(runtime.as_ref(), requested_features));
         }
-        let target_id = target_id
-            .or_else(|| runtime.targets().first().map(RuntimeTarget::id))
-            .ok_or(DesktopRuntimeError::UnknownTarget)?;
-        runtime.start(target_id, &requested_features)?;
+        let Some(target_id) = target_id.or_else(|| runtime.targets().first().map(RuntimeTarget::id)) else {
+            self.sessions.remove(application_id.as_ref());
+            return Err(DesktopRuntimeError::UnknownTarget);
+        };
+        if let Some(configuration) = collection {
+            let target_ids = runtime.targets().iter().map(RuntimeTarget::id).collect::<Vec<_>>();
+            if let Err(error) = runtime.start_capture(&target_ids, &requested_features, configuration.clone()) {
+                // Failed activation may consume the controller connection. Retry from discovery.
+                if !runtime.is_active() {
+                    self.sessions.remove(application_id.as_ref());
+                    self.active_collections.remove(application_id.as_ref());
+                    self.requested_features.remove(application_id.as_ref());
+                }
+                return Err(error);
+            }
+            self.active_collections.insert(application_id.clone(), configuration);
+        } else {
+            if let Err(error) = runtime.start(target_id, &requested_features) {
+                if !runtime.is_active() {
+                    self.sessions.remove(application_id.as_ref());
+                    self.active_collections.remove(application_id.as_ref());
+                    self.requested_features.remove(application_id.as_ref());
+                }
+                return Err(error);
+            }
+            self.active_collections.remove(application_id.as_ref());
+        }
         self.requested_features
             .insert(application_id.clone(), runtime.active_features());
         Ok(runtime_status(
@@ -370,6 +417,21 @@ impl DesktopRuntimePool {
                 .cloned()
                 .unwrap_or_default(),
         ))
+    }
+
+    /// Collection shares the workflow session and never acquires a second target owner.
+    pub fn control_workflow_collection(&mut self, workflow_id: &str, software_id: &str, paused: bool) -> Result<(), DesktopRuntimeError> {
+        if !self.workflow_targets.get(workflow_id).is_some_and(|targets| targets.contains(software_id))
+            || !self.active_collections.contains_key(software_id) { return Err(DesktopRuntimeError::InvalidState); }
+        self.sessions.get_mut(software_id).ok_or(DesktopRuntimeError::InvalidState)?.control_capture(paused)
+    }
+
+    pub fn configure_workflow_collection(
+        &mut self,
+        workflow_id: impl Into<Box<str>>,
+        collections: BTreeMap<Box<str>, CaptureConfiguration>,
+    ) {
+        self.workflow_collections.insert(workflow_id.into(), collections);
     }
 
     pub fn reconcile_workflow(
@@ -423,11 +485,14 @@ impl DesktopRuntimePool {
                 .collect::<BTreeSet<_>>();
             self.requested_features
                 .insert(target.software_id().into(), requested_features.clone());
-            match self.set_features(
-                target.software_id(),
+            let collection = self.workflow_collections.get(intent.workflow_id())
+                .and_then(|collections| collections.get(target.software_id())).cloned();
+            match self.set_features_with_collection(
+                target.software_id().into(),
                 target.runtime_spec(),
                 None,
                 requested_features,
+                collection,
             ) {
                 Ok(status) => statuses.push(status),
                 Err(error) => {
@@ -510,12 +575,14 @@ impl DesktopRuntimePool {
         &mut self,
         application_id: Box<str>,
     ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        let previous_collection = self.active_collections.remove(application_id.as_ref());
         let Some(mut runtime) = self.sessions.remove(application_id.as_ref()) else {
             self.requested_features.remove(application_id.as_ref());
             return Ok(DesktopRuntimeStatus::inactive(application_id));
         };
         if runtime.is_active() {
             if let Err(error) = runtime.stop() {
+                if let Some(configuration) = previous_collection { self.active_collections.insert(application_id.clone(), configuration); }
                 self.sessions.insert(application_id, runtime);
                 return Err(error);
             }
@@ -695,21 +762,9 @@ impl DesktopRuntimePool {
         {
             return Err(DesktopRuntimeError::InvalidState);
         }
-        let mut statuses = Vec::new();
-        let mut errors = BTreeMap::new();
-        for target in intent.targets() {
-            match self.refresh(target.software_id(), target.runtime_spec()) {
-                Ok(status) => statuses.push(status),
-                Err(error) => {
-                    errors.insert(target.software_id().into(), error);
-                }
-            }
-        }
-        Ok(WorkflowReconcileReport {
-            workflow_id: intent.workflow_id().into(),
-            statuses,
-            errors,
-        })
+        // Polling must preserve live translation and capture sessions. Reconcile only
+        // applies changed configuration/publications or starts an inactive session.
+        self.reconcile_workflow(intent)
     }
 
     pub fn publish(

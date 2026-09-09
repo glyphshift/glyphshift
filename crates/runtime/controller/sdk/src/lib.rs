@@ -11,6 +11,7 @@ pub enum WireFeature {
     TextObserve,
     TextReplace,
     FontSubstitute,
+    FontScale,
     LayoutAdjust,
     ResourceReplace,
 }

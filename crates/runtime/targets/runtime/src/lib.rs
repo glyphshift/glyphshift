@@ -645,7 +645,9 @@ fn decide_source(
         TextDecision::Keep => None,
         TextDecision::Replace(text) => Some(text.encode_utf16().collect::<Vec<_>>()),
     };
+    let scale_percent = match &decision.font { FontDecision::Scaled { percent, .. } => *percent, _ => 100 };
     let font = match decision.font {
+        FontDecision::Scaled { family, .. } => family.map(|font| font.encode_utf16().collect::<Vec<_>>()),
         FontDecision::Keep => None,
         FontDecision::Substitute(font) => Some(font.encode_utf16().collect::<Vec<_>>()),
     };
@@ -677,7 +679,7 @@ fn decide_source(
             DECISION_TEXT_REPLACE
         } else {
             0
-        } | if font.is_some() {
+        } | glyphshift_adapter_native_abi::font_scale_bits(scale_percent) | if font.is_some() {
             DECISION_FONT_SUBSTITUTE
         } else {
             0

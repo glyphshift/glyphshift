@@ -5,7 +5,7 @@ use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const RUNTIME_SCHEMA: &str = "glyphshift.runtime/2";
+const RUNTIME_SCHEMA: &str = "glyphshift.runtime/3";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeWireError {
@@ -71,6 +71,17 @@ struct WireTranslation {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WireFont {
+    AdapterEntry {
+        location: Box<str>,
+        source: Box<str>,
+        adapter: Box<str>,
+        rule: WireFontRule,
+    },
+    Style {
+        location: Box<str>,
+        rule: WireFontRule,
+        adapter_ids: Vec<Box<str>>,
+    },
     Default {
         location: Box<str>,
         family: Box<str>,
@@ -93,8 +104,14 @@ enum WireFont {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum WireFontRule {
+    Scaled {
+        family: Option<Box<str>>,
+        percent: u16,
+    },
     Unchanged,
-    Substitute { family: Box<str> },
+    Substitute {
+        family: Box<str>,
+    },
 }
 
 /// Complete decision input for one runtime generation.
@@ -206,12 +223,29 @@ impl RuntimePublication {
         );
         let mut fonts = Vec::new();
         self.font_policy
-            .visit_locations_with_adapters(|location, family, adapter_ids| {
-                fonts.push(WireFont::Default {
+            .visit_adapter_entries(|location, source, adapter, rule| {
+                fonts.push(WireFont::AdapterEntry {
                     location: location.into(),
-                    family: family.into(),
-                    adapter_ids: adapter_ids.iter().cloned().collect(),
+                    source: source.into(),
+                    adapter: adapter.into(),
+                    rule: encode_font_rule(rule),
                 });
+            });
+        self.font_policy
+            .visit_location_rules_with_adapters(|location, rule, adapter_ids| {
+                if let FontRule::Substitute(family) = rule {
+                    fonts.push(WireFont::Default {
+                        location: location.into(),
+                        family: family.as_ref().into(),
+                        adapter_ids: adapter_ids.iter().cloned().collect(),
+                    });
+                } else {
+                    fonts.push(WireFont::Style {
+                        location: location.into(),
+                        rule: encode_font_rule(rule),
+                        adapter_ids: adapter_ids.iter().cloned().collect(),
+                    });
+                }
             });
         self.font_policy
             .visit_entries_with_adapters(|location, source, rule, adapter_ids| {
@@ -309,7 +343,7 @@ impl RuntimePublication {
                 } => font_policy.with_entry_for_adapters(
                     location,
                     source,
-                    decode_font_rule(rule),
+                    decode_font_rule(rule)?,
                     adapter_ids,
                 ),
                 WireFont::Entry {
@@ -324,7 +358,27 @@ impl RuntimePublication {
                     context_kind,
                     context_key,
                     source,
-                    decode_font_rule(rule),
+                    decode_font_rule(rule)?,
+                    adapter_ids,
+                ),
+                WireFont::AdapterEntry {
+                    location,
+                    source,
+                    adapter,
+                    rule,
+                } => font_policy.with_entry_for_adapter(
+                    location,
+                    source,
+                    adapter,
+                    decode_font_rule(rule)?,
+                ),
+                WireFont::Style {
+                    location,
+                    rule,
+                    adapter_ids,
+                } => font_policy.with_location_rule_for_adapters(
+                    location,
+                    decode_font_rule(rule)?,
                     adapter_ids,
                 ),
                 WireFont::Entry { .. } => return Err(RuntimeWireError::InvalidJson),
@@ -336,6 +390,10 @@ impl RuntimePublication {
 
 fn encode_font_rule(rule: &FontRule) -> WireFontRule {
     match rule {
+        FontRule::Scaled { family, percent } => WireFontRule::Scaled {
+            family: family.as_ref().map(|f| f.as_ref().into()),
+            percent: *percent,
+        },
         FontRule::Unchanged => WireFontRule::Unchanged,
         FontRule::Substitute(family) => WireFontRule::Substitute {
             family: family.as_ref().into(),
@@ -343,9 +401,22 @@ fn encode_font_rule(rule: &FontRule) -> WireFontRule {
     }
 }
 
-fn decode_font_rule(rule: WireFontRule) -> FontRule {
-    match rule {
+fn decode_font_rule(rule: WireFontRule) -> Result<FontRule, RuntimeWireError> {
+    Ok(match rule {
+        WireFontRule::Scaled { family, percent } => {
+            if !(50..=200).contains(&percent)
+                || family.as_ref().is_some_and(|f| {
+                    f.trim().is_empty() || f.contains('\0') || f.chars().count() > 128
+                })
+            {
+                return Err(RuntimeWireError::InvalidJson);
+            }
+            FontRule::Scaled {
+                family: family.map(Into::into),
+                percent,
+            }
+        }
         WireFontRule::Unchanged => FontRule::Unchanged,
         WireFontRule::Substitute { family } => FontRule::Substitute(family.into()),
-    }
+    })
 }

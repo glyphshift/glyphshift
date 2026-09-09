@@ -1,0 +1,1 @@
+Translate the supplied interface text accurately and naturally into the requested target language. Use concise wording suitable for software menus, buttons, labels, and dialogue. Keep terminology consistent. Preserve the original meaning and tone. Keep names and technical terms unchanged when no established translation exists.

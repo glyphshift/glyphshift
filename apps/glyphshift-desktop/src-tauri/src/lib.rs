@@ -1,3 +1,5 @@
+mod updates;
+mod data;
 mod ai;
 mod command_error;
 mod dictionary;
@@ -9,6 +11,7 @@ mod settings;
 mod shortcut;
 mod software;
 mod workflow;
+mod workflow_collection;
 mod workflow_shortcut;
 
 use command_error::CommandError;
@@ -79,7 +82,7 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 32;
+const DESKTOP_API_VERSION: u16 = 35;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -210,6 +213,16 @@ struct DesktopProductSnapshot {
 }
 
 trait WorkflowRuntimeService: Send {
+    fn control_workflow_collection(&mut self, _workflow_id: &str, _software_id: &str, _paused: bool) -> Result<(), DesktopRuntimeError> {
+        Err(DesktopRuntimeError::InvalidState)
+    }
+
+    fn configure_workflow_collection(
+        &mut self,
+        _workflow_id: &str,
+        _collections: BTreeMap<Box<str>, CaptureConfiguration>,
+    ) {}
+
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -258,6 +271,18 @@ trait WorkflowRuntimeService: Send {
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
+    fn control_workflow_collection(&mut self, workflow_id: &str, software_id: &str, paused: bool) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::control_workflow_collection(self, workflow_id, software_id, paused)
+    }
+
+    fn configure_workflow_collection(
+        &mut self,
+        workflow_id: &str,
+        collections: BTreeMap<Box<str>, CaptureConfiguration>,
+    ) {
+        DesktopRuntimePool::configure_workflow_collection(self, workflow_id, collections);
+    }
+
     fn activate_workflow(
         &mut self,
         intent: &EffectiveWorkflowIntent,
@@ -354,7 +379,7 @@ struct DesktopApplication {
 
 impl DesktopApplication {
     fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
-        let mut probe_runs = ProbeRunStore::open(data_root.join("probe-runs"))
+        let mut probe_runs = ProbeRunStore::open(data_root.join("workflow-records"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
@@ -448,9 +473,6 @@ impl DesktopApplication {
             ai_locked_dictionary_id: None,
         };
         application
-            .recover_quick_probe_sessions()
-            .map_err(|error| format!("quick probe recovery: {error:?}"))?;
-        application
             .restore_enabled_workflows()
             .map_err(|error| format!("{error:?}"))?;
         Ok(application)
@@ -522,6 +544,7 @@ fn adapter_feature_id(feature: Feature) -> &'static str {
         Feature::TextObserve => "textObserve",
         Feature::TextReplace => "textReplace",
         Feature::FontSubstitute => "fontSubstitute",
+        Feature::FontScale => "fontScale",
         Feature::LayoutAdjust => "layoutAdjust",
         Feature::ResourceReplace => "resourceReplace",
     }
@@ -715,17 +738,20 @@ pub fn run() {
             workflow_shortcut::desktop_workflow_shortcut_errors,
             desktop_status,
             desktop_settings,
+            updates::desktop_check_update,
             desktop_update_settings,
             desktop_update_software_capture_shortcut,
             desktop_privilege_status,
             desktop_restart_elevated,
             desktop_snapshot,
             desktop_refresh_font_families,
+            data::desktop_open_dictionary_directory,
             ai::desktop_ai_profiles,
             ai::desktop_save_ai_profile,
             ai::desktop_set_default_ai_profile,
             ai::desktop_delete_ai_profile,
             ai::desktop_plan_ai_translation,
+            ai::desktop_filter_dictionary_sources,
             ai::desktop_plan_probe_ai_translation,
             ai::desktop_apply_probe_ai_results,
             ai::desktop_start_ai_translation,
@@ -734,9 +760,6 @@ pub fn run() {
             ai::desktop_cancel_ai_translation,
             probe::desktop_probe_runs,
             probe::desktop_compatible_probe_adapters,
-            probe::desktop_create_probe_run,
-            probe::desktop_delete_probe_runs,
-            probe::desktop_update_probe_run,
             probe::desktop_clear_probe_run_entries,
             probe::desktop_resume_probe_run,
             probe::desktop_set_probe_run_paused,
@@ -750,9 +773,6 @@ pub fn run() {
             probe::desktop_export_probe_run,
             probe_transfer::desktop_import_probe_entries,
             probe_transfer::desktop_preview_dictionary_import,
-            quick_probe::desktop_create_probe_from_sources,
-            quick_probe::desktop_retain_quick_probe,
-            quick_probe::desktop_cleanup_quick_probe,
             dictionary::desktop_dictionary,
             dictionary::desktop_query_dictionary_catalog,
             dictionary::desktop_install_dictionary_release,
@@ -762,6 +782,7 @@ pub fn run() {
             dictionary::desktop_update_dictionary,
             dictionary::desktop_delete_dictionaries,
             workflow::desktop_workflow,
+            workflow_collection::desktop_workflow_collection,
             workflow::desktop_create_workflow,
             workflow::desktop_update_workflow,
             workflow::desktop_copy_workflow,

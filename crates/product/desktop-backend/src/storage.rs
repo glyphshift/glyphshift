@@ -22,7 +22,7 @@ pub(super) fn workflow_path(root: &Path, workflow_id: &str) -> Result<PathBuf, B
     if !safe_identifier(workflow_id) {
         return Err(BackendError::InvalidArtifact("unsafe-artifact-id"));
     }
-    Ok(root.join("workflows").join(format!("{workflow_id}.json")))
+    Ok(root.join("workflows-v4").join(format!("{workflow_id}.json")))
 }
 
 pub(super) fn read_json<T: for<'de> Deserialize<'de>>(

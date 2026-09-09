@@ -346,14 +346,19 @@ impl TranslationSnapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FontRule {
+    Scaled {
+        family: Option<Arc<str>>,
+        percent: u16,
+    },
     Unchanged,
     Substitute(Arc<str>),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FontPolicy {
-    by_location: BTreeMap<Box<str>, Arc<str>>,
-    by_location_adapter: BTreeMap<(Box<str>, Box<str>), Arc<str>>,
+    scoped_entries: BTreeMap<(Box<str>, Box<str>, Box<str>), FontRule>,
+    by_location: BTreeMap<Box<str>, FontRule>,
+    by_location_adapter: BTreeMap<(Box<str>, Box<str>), FontRule>,
     entries: BTreeMap<(Box<str>, Box<str>), FontRule>,
     entry_adapter_scopes: TranslationScopes,
     contextual_entries: BTreeMap<ContextualTranslationKey, FontRule>,
@@ -361,6 +366,24 @@ pub struct FontPolicy {
 }
 
 impl FontPolicy {
+    #[must_use]
+    pub fn with_entry_for_adapter(
+        mut self,
+        location: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+        adapter: impl Into<Box<str>>,
+        rule: FontRule,
+    ) -> Self {
+        self.scoped_entries
+            .insert((location.into(), source.into(), adapter.into()), rule);
+        self
+    }
+    pub fn visit_adapter_entries(&self, mut visitor: impl FnMut(&str, &str, &str, &FontRule)) {
+        for ((location, source, adapter), rule) in &self.scoped_entries {
+            visitor(location, source, adapter, rule);
+        }
+    }
+
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
@@ -372,30 +395,45 @@ impl FontPolicy {
         location: impl Into<Box<str>>,
         family: impl Into<Box<str>>,
     ) -> Self {
-        self.by_location
-            .insert(location.into(), Arc::from(family.into()));
+        self.by_location.insert(
+            location.into(),
+            FontRule::Substitute(Arc::from(family.into())),
+        );
         self
     }
 
     #[must_use]
     pub fn with_location_for_adapters(
-        mut self,
+        self,
         location: impl Into<Box<str>>,
         family: impl Into<Box<str>>,
         adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
     ) -> Self {
+        self.with_location_rule_for_adapters(
+            location,
+            FontRule::Substitute(Arc::from(family.into())),
+            adapter_ids,
+        )
+    }
+
+    #[must_use]
+    pub fn with_location_rule_for_adapters(
+        mut self,
+        location: impl Into<Box<str>>,
+        rule: FontRule,
+        adapter_ids: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
         let location = location.into();
-        let family = Arc::from(family.into());
         let adapters = adapter_ids
             .into_iter()
             .map(Into::into)
             .collect::<BTreeSet<_>>();
         if adapters.is_empty() {
-            self.by_location.insert(location, family);
+            self.by_location.insert(location, rule);
         } else {
-            for adapter_id in adapters {
+            for adapter in adapters {
                 self.by_location_adapter
-                    .insert((location.clone(), adapter_id), Arc::clone(&family));
+                    .insert((location.clone(), adapter), rule.clone());
             }
         }
         self
@@ -487,7 +525,14 @@ impl FontPolicy {
 
     #[must_use]
     pub fn lookup(&self, location: &str) -> Option<Arc<str>> {
-        self.by_location.get(location).cloned()
+        match self.by_location.get(location) {
+            Some(FontRule::Substitute(family))
+            | Some(FontRule::Scaled {
+                family: Some(family),
+                ..
+            }) => Some(family.clone()),
+            _ => None,
+        }
     }
 
     #[must_use]
@@ -502,6 +547,12 @@ impl FontPolicy {
         adapter_id: &str,
         source: &str,
     ) -> Option<FontRule> {
+        if let Some(rule) =
+            self.scoped_entries
+                .get(&(location.into(), source.into(), adapter_id.into()))
+        {
+            return Some(rule.clone());
+        }
         let key = (location.into(), source.into());
         let entry = self
             .entry_adapter_scopes
@@ -513,8 +564,7 @@ impl FontPolicy {
             self.by_location_adapter
                 .get(&(location.into(), adapter_id.into()))
                 .cloned()
-                .or_else(|| self.lookup(location))
-                .map(FontRule::Substitute)
+                .or_else(|| self.by_location.get(location).cloned())
         })
     }
 
@@ -543,20 +593,26 @@ impl FontPolicy {
             self.by_location_adapter
                 .get(&(location.into(), adapter_id.into()))
                 .cloned()
-                .or_else(|| self.lookup(location))
-                .map(FontRule::Substitute)
+                .or_else(|| self.by_location.get(location).cloned())
         })
     }
 
     pub fn visit_locations(&self, mut visitor: impl FnMut(&str, &str)) {
         for (location, family) in &self.by_location {
-            visitor(location, family);
+            if let FontRule::Substitute(family)
+            | FontRule::Scaled {
+                family: Some(family),
+                ..
+            } = family
+            {
+                visitor(location, family);
+            }
         }
     }
 
-    pub fn visit_locations_with_adapters(
+    pub fn visit_location_rules_with_adapters(
         &self,
-        mut visitor: impl FnMut(&str, &str, &BTreeSet<Box<str>>),
+        mut visitor: impl FnMut(&str, &FontRule, &BTreeSet<Box<str>>),
     ) {
         let empty = BTreeSet::new();
         for (location, family) in &self.by_location {
@@ -610,25 +666,23 @@ impl FontPolicyDigest {
             0x9e37_79b9_7f4a_7c15_u64,
             0x517c_c1b7_2722_0a95_u64,
         ];
-        for (location, family) in &policy.by_location {
-            SnapshotDigest::digest_fields(
+        for ((location, source, adapter), rule) in &policy.scoped_entries {
+            digest_font_rule(
                 &mut lanes,
-                [
-                    b"default".as_slice(),
-                    location.as_bytes(),
-                    family.as_bytes(),
-                ],
+                b"scoped-entry",
+                [location.as_ref(), source.as_ref(), adapter.as_ref()],
+                rule,
             );
         }
-        for ((location, adapter), family) in &policy.by_location_adapter {
-            SnapshotDigest::digest_fields(
+        for (location, rule) in &policy.by_location {
+            digest_font_rule(&mut lanes, b"default", [location.as_ref()], rule);
+        }
+        for ((location, adapter), rule) in &policy.by_location_adapter {
+            digest_font_rule(
                 &mut lanes,
-                [
-                    b"default-adapter".as_slice(),
-                    location.as_bytes(),
-                    adapter.as_bytes(),
-                    family.as_bytes(),
-                ],
+                b"default-adapter",
+                [location.as_ref(), adapter.as_ref()],
+                rule,
             );
         }
         for ((location, source), rule) in &policy.entries {
@@ -705,7 +759,14 @@ fn digest_font_rule<'a, const N: usize>(
     let mut fields = Vec::with_capacity(N + 3);
     fields.push(prefix);
     fields.extend(key.into_iter().map(str::as_bytes));
+    let percent_bytes;
     match rule {
+        FontRule::Scaled { family, percent } => {
+            percent_bytes = percent.to_le_bytes();
+            fields.push(b"scaled");
+            fields.push(family.as_deref().unwrap_or("").as_bytes());
+            fields.push(&percent_bytes);
+        }
         FontRule::Unchanged => fields.push(b"unchanged"),
         FontRule::Substitute(family) => {
             fields.push(b"substitute");

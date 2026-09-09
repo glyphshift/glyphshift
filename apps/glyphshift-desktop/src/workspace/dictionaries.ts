@@ -62,7 +62,11 @@ export function useDictionaryWorkspace() {
   }
 
   async function createDictionary(metadata: Omit<DictionaryMetadata, 'id'>, entries: DictionaryEntry[] = []) {
-    if (workspaceBusy.value) return false
+    return Boolean(await createDictionaryWithId(metadata, entries))
+  }
+
+  async function createDictionaryWithId(metadata: Omit<DictionaryMetadata, 'id'>, entries: DictionaryEntry[] = []) {
+    if (workspaceBusy.value) return null
     workspaceBusy.value = true
     setMessage('dictionaries', '')
     const id = `dictionary-${crypto.randomUUID()}`
@@ -83,11 +87,11 @@ export function useDictionaryWorkspace() {
           installation: unmanagedInstallation(),
         }].sort((left, right) => left.metadata.name.localeCompare(right.metadata.name))
       }
-      return true
+      return id
     }
     catch (error) {
       setMessage('dictionaries', errorMessage(error))
-      return false
+      return null
     }
     finally {
       workspaceBusy.value = false
@@ -221,6 +225,7 @@ export function useDictionaryWorkspace() {
   }
 
   return {
+    createDictionaryWithId,
     loadDictionary,
     saveDictionary,
     createDictionary,

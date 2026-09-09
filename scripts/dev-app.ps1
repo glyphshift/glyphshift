@@ -11,8 +11,8 @@ $desktopRoot = Join-Path $repoRoot 'apps\glyphshift-desktop'
 $localTaskRoot = Join-Path $repoRoot 'local-test\evidence\desktop-dev'
 . (Join-Path $PSScriptRoot 'cargo-target.ps1')
 $cargoTargetDir = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
-$runtimeBundleRoot = Join-Path $repoRoot 'local-test\runtime-bundle'
-$desktopDataRoot = Join-Path $repoRoot 'local-test\desktop-data'
+$runtimeBundleRoot = Join-Path $localTaskRoot 'runtime-bundle'
+$desktopDataRoot = Join-Path $localTaskRoot 'workspace'
 $env:GLYPHSHIFT_DATA_ROOT = $desktopDataRoot
 
 if ($Detached) {

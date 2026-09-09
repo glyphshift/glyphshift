@@ -59,3 +59,12 @@ fn native_descriptor_can_declare_retained_target_replacement() {
         [Feature::TextObserve, Feature::TextReplace]
     );
 }
+
+#[test]
+fn native_font_scale_bits_are_bounded_and_preserve_other_decisions() {
+    use glyphshift_adapter_native_abi::{font_scale_bits, font_scale_percent, DECISION_TEXT_REPLACE};
+    for percent in [50, 75, 100, 125, 150, 200] {
+        assert_eq!(font_scale_percent(font_scale_bits(percent) | DECISION_TEXT_REPLACE), percent);
+    }
+    for percent in [0, 49, 201, u16::MAX] { assert_eq!(font_scale_percent(font_scale_bits(percent)), 100); }
+}

@@ -1,6 +1,12 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
+import { useAppSettings } from '../appSettings'
+import { skipReason } from '../textFilters'
+
+import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import DictionaryImportDialog from './DictionaryImportDialog.vue'
 import { mergeDictionaryEntries, type DictionaryImportData } from '../dictionaryImport'
+import { mergeDictionaryDraft } from '../dictionaryDraft'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -8,7 +14,6 @@ import { useI18n } from 'vue-i18n'
 import type { DictionaryDetail, DictionaryEntry, DictionaryMetadata } from '../model'
 import { useAiTranslation, type AiTranslationPlan } from '../useAiTranslation'
 import { usePageEscape } from '../usePageEscape'
-import { useWorkspace } from '../useWorkspace'
 import AiTranslationPreflight from './AiTranslationPreflight.vue'
 import AiTranslationProgress from './AiTranslationProgress.vue'
 
@@ -28,7 +33,7 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const ai = useAiTranslation()
-const workspace = useWorkspace()
+const exportDialog = ref<InstanceType<typeof DictionaryExportDialog>>()
 const importDialog = ref<InstanceType<typeof DictionaryImportDialog>>()
 async function applyImport(data: DictionaryImportData) {
   if (dictionaryLocked.value || props.busy || !commitNewEntry()) return false
@@ -37,6 +42,16 @@ async function applyImport(data: DictionaryImportData) {
   query.value = ''
   return true
 }
+
+const dictionaryActions = computed<DropdownMenuItem[][]>(() => [[
+  { label: t('dictionaryEditor.settings'), icon: 'i-tabler-settings', disabled: dictionaryLocked.value, onSelect: openMetadata },
+], [
+  ...(['json', 'csv', 'srt'] as const).map(format => ({ label: t(format === 'json' ? 'capture.importJson' : format === 'csv' ? 'capture.importCsv' : 'capture.importSrt'), icon: 'i-tabler-file-import', disabled: dictionaryLocked.value || props.busy, onSelect: () => void importDialog.value?.choose(format) })),
+], [
+  ...(['json', 'csv'] as const).map(format => ({ label: t(format === 'json' ? 'capture.exportJson' : 'capture.exportCsv'), icon: 'i-tabler-file-export', disabled: props.busy || hasUnsavedChanges.value, onSelect: () => void exportDialog.value?.exportOne(props.detail.metadata.id, format) })),
+], [
+  { label: t('dictionaryEditor.clearDictionary'), icon: 'i-tabler-trash', color: 'error', disabled: dictionaryLocked.value || props.busy || !draft.value.entries.length, onSelect: () => { clearOpen.value = true } },
+]])
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -48,12 +63,54 @@ function emptyEntry(): DictionaryEntry {
 
 const saved = ref<DictionaryDetail>(clone(props.detail))
 const draft = ref<DictionaryDetail>(clone(props.detail))
+const externalConflicts = ref<string[]>([])
+const aiSaveRequired = ref(false)
+const selected = ref(new Set<number>())
+const textSettings = useAppSettings()
+const hideSkipped = ref(localStorage.getItem('glyphshift.dictionary.hide-skipped') === 'true')
+const hiddenSources = ref(new Set<string>())
+const filterError = ref('')
+let filterRequest = 0
+const sourceTexts = computed(() => hideSkipped.value ? draft.value.entries.map(entry => entry.source) : [])
+watch([sourceTexts, () => textSettings.settings.value.textFilterPolicy, hideSkipped], async ([sources, policy, hidden]) => {
+  const request = ++filterRequest
+  selected.value = new Set()
+  filterError.value = ''
+  localStorage.setItem('glyphshift.dictionary.hide-skipped', String(hidden))
+  if (!hidden) { hiddenSources.value = new Set(); return }
+  try {
+    const mask = '__TAURI_INTERNALS__' in window
+      ? await invoke<boolean[]>('desktop_filter_dictionary_sources', { sources })
+      : sources.map(source => Boolean(skipReason({ itemId: '', source, translation: null, ignored: false }, policy)))
+    if (request === filterRequest) hiddenSources.value = new Set(sources.filter((_, index) => mask[index]))
+  } catch { if (request === filterRequest) { hiddenSources.value = new Set(); filterError.value = t('textFilters.failed') } }
+}, { deep: true, immediate: true })
 const query = ref('')
+const page = ref(1)
+const pageSize = ref(50)
 const metadataOpen = ref(false)
 const metadataDraft = ref<DictionaryMetadata>(clone(props.detail.metadata))
 const newEntry = ref<DictionaryEntry>(emptyEntry())
 const pendingRemoval = ref<number[]>([])
-const selected = ref(new Set<number>())
+const clearOpen = ref(false)
+function clearDictionary() {
+  if (dictionaryLocked.value || props.busy) return
+  draft.value.entries = []
+  newEntry.value = emptyEntry()
+  selected.value = new Set()
+  clearOpen.value = false
+}
+const allSelected = computed(() => filtered.value.length > 0 && filtered.value.every(row => selected.value.has(row.index)))
+const selectionState = computed(() => allSelected.value ? true : filtered.value.some(row => selected.value.has(row.index)) ? 'indeterminate' as const : false)
+function toggleAllEntries() {
+  if (dictionaryLocked.value || props.busy) return
+  const next = new Set(selected.value)
+  for (const row of filtered.value) {
+    if (allSelected.value) next.delete(row.index)
+    else next.add(row.index)
+  }
+  selected.value = next
+}
 const selectedProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
 const aiPreflightOpen = ref(false)
@@ -74,10 +131,19 @@ const displayedAiJob = computed(() => {
 const dictionaryLocked = computed(() => ai.lockedDictionaryId.value === draft.value.metadata.id)
 
 watch(() => props.detail, (value) => {
+  const sameDictionary = value.metadata.id === saved.value.metadata.id
+  if (sameDictionary && hasUnsavedChanges.value) {
+    const merged = mergeDictionaryDraft(saved.value, draft.value, value)
+    draft.value = clone(merged.detail)
+    externalConflicts.value = [...new Set([...externalConflicts.value, ...merged.conflicts])]
+  } else {
+    draft.value = clone(value)
+    externalConflicts.value = []
+    newEntry.value = emptyEntry()
+  }
   saved.value = clone(value)
-  draft.value = clone(value)
-  metadataDraft.value = clone(value.metadata)
-  newEntry.value = emptyEntry()
+  if (!metadataOpen.value) metadataDraft.value = clone(draft.value.metadata)
+  aiPlan.value = null
   selected.value = new Set()
 }, { deep: true })
 
@@ -85,13 +151,20 @@ const filtered = computed<DictionaryTableRow[]>(() => {
   const needle = query.value.trim().toLocaleLowerCase()
   return draft.value.entries
     .map((entry, index) => ({ entry, index, kind: 'entry' as const }))
+    .filter(({ entry }) => !hideSkipped.value || !hiddenSources.value.has(entry.source))
     .filter(({ entry }) => !needle || `${entry.source} ${entry.translation}`.toLocaleLowerCase().includes(needle))
 })
 
 const tableRows = computed<DictionaryTableRow[]>(() => [
-  ...filtered.value,
+  ...filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value),
   { entry: newEntry.value, index: -1, kind: 'new' },
 ])
+
+watch([query, pageSize], () => { page.value = 1 })
+watch(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)), count => {
+  page.value = Math.min(page.value, count)
+})
+watch(() => props.detail.metadata.id, () => { page.value = 1 })
 
 const columns = computed<TableColumn<DictionaryTableRow>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
@@ -107,11 +180,19 @@ function normalizedEntry(value: DictionaryEntry): DictionaryEntry {
   }
 }
 
+const sourceCounts = computed(() => {
+  const counts = new Map<string, number>()
+  for (const entry of draft.value.entries) {
+    const source = entry.source.trim()
+    counts.set(source, (counts.get(source) ?? 0) + 1)
+  }
+  return counts
+})
+
 function sourceIsDuplicate(source: string, excludingIndex: number | null = null) {
   const normalized = source.trim()
-  return Boolean(normalized) && draft.value.entries.some((candidate, index) => (
-    index !== excludingIndex && candidate.source.trim() === normalized
-  ))
+  const excluded = excludingIndex !== null && draft.value.entries[excludingIndex]?.source.trim() === normalized ? 1 : 0
+  return Boolean(normalized) && (sourceCounts.value.get(normalized) ?? 0) > excluded
 }
 
 function entrySourceError(index: number) {
@@ -144,6 +225,7 @@ const hasUnsavedChanges = computed(() => (
 ))
 const canSave = computed(() => (
   hasUnsavedChanges.value
+  && !externalConflicts.value.length
   && metadataValid.value
   && entriesValid.value
   && (!newEntryTouched.value || newEntryValid.value)
@@ -170,7 +252,10 @@ const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
   }],
 ])
 
-watch(hasUnsavedChanges, value => emit('dirty-change', value), { immediate: true })
+watch(hasUnsavedChanges, value => {
+  if (!value) aiSaveRequired.value = false
+  emit('dirty-change', value)
+}, { immediate: true })
 
 function openMetadata() {
   metadataDraft.value = clone(draft.value.metadata)
@@ -209,6 +294,7 @@ function confirmRemoval() {
 }
 
 function saveDraft() {
+  if (externalConflicts.value.length || dictionaryLocked.value || props.busy) return
   if (!commitNewEntry() || !metadataValid.value || !entriesValid.value) return
   const next = clone(draft.value)
   next.entries = next.entries.map(normalizedEntry)
@@ -225,14 +311,6 @@ async function prepareAiPlan() {
     return null
   }
   if (!commitNewEntry()) return null
-  if (hasUnsavedChanges.value) {
-    if (!await workspace.saveDictionary(clone(draft.value))) return null
-    const persisted = workspace.dictionaryDetail.value
-    if (!persisted) return null
-    saved.value = clone(persisted)
-    draft.value = clone(persisted)
-    metadataDraft.value = clone(persisted.metadata)
-  }
   try {
     const plan = await ai.planDictionary(draft.value, selectedProfile.value.id)
     aiPlan.value = plan
@@ -255,7 +333,13 @@ function dismissAiOutcome() {
   ai.dismissCurrentJob()
 }
 
+function requireSavedAiDraft() {
+  aiSaveRequired.value = hasUnsavedChanges.value || externalConflicts.value.length > 0
+  return !aiSaveRequired.value
+}
+
 async function runAiTranslation(plan?: AiTranslationPlan | null) {
+  if (!requireSavedAiDraft()) return
   const nextPlan = plan ?? await prepareAiPlan()
   if (!nextPlan || !selectedProfile.value) return
   if (!nextPlan.candidates.length) {
@@ -267,6 +351,7 @@ async function runAiTranslation(plan?: AiTranslationPlan | null) {
 }
 
 async function executeAiTranslation() {
+  if (!requireSavedAiDraft()) { aiPreflightOpen.value = false; return }
   const nextPlan = aiPlan.value
   if (!nextPlan || !selectedProfile.value) return
   aiPreflightOpen.value = false
@@ -317,7 +402,6 @@ async function executeAiTranslation() {
     }
     await ai.startBackgroundPlan(nextPlan, selectedProfile.value.id)
     aiPlan.value = null
-    emit('open-ai-tasks')
   }
   catch {
     // The composable exposes the localized error below the header.
@@ -345,8 +429,9 @@ usePageEscape(() => true, () => emit('back'))
         </div>
       </template>
       <template #actions>
-        <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-file-import" :label="t('dictionaries.importFile')" :title="t('dictionaries.importFile')" :disabled="dictionaryLocked || busy" @click="importDialog?.choose()" />
-        <UButton color="neutral" variant="ghost" size="sm" icon="i-tabler-settings" :label="t('dictionaryEditor.settings')" :disabled="dictionaryLocked" @click="openMetadata" />
+        <UDropdownMenu :items="dictionaryActions" :content="{ align: 'end' }">
+          <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="t('dictionaryExport.actions')" />
+        </UDropdownMenu>
         <div class="inline-flex">
           <UButton
             color="primary"
@@ -367,6 +452,13 @@ usePageEscape(() => true, () => emit('back'))
       </template>
     </ManagementDetailHeader>
 
+    <UAlert v-if="aiSaveRequired" role="status" color="warning" :title="t('ai.saveDraftFirst')" class="mb-3" />
+    <UAlert v-if="externalConflicts.length" role="alert" color="warning" :title="t('dictionaryEditor.externalConflictTitle')" :description="t('dictionaryEditor.externalConflictDescription', { items: externalConflicts.join('、') })" class="mb-3">
+      <template #actions>
+        <UButton :label="t('dictionaryEditor.keepDraftChanges')" @click="externalConflicts = []" />
+        <UButton color="neutral" :label="t('dictionaryEditor.useSavedVersion')" @click="draft = clone(saved); metadataDraft = clone(saved.metadata); newEntry = emptyEntry(); externalConflicts = []" />
+      </template>
+    </UAlert>
     <UAlert v-if="dictionaryLocked" role="status" color="warning" variant="soft" icon="i-tabler-lock" :title="t('ai.tasks.dictionaryLocked')" :description="t('ai.tasks.dictionaryLockedDescription')" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.tasks.viewCurrent')" @click="emit('open-ai-tasks')" /></template>
     </UAlert>
@@ -389,10 +481,12 @@ usePageEscape(() => true, () => emit('back'))
       @dismiss="ai.dismissCurrentJob"
     />
 
+    <p v-if="filterError" role="alert" class="text-error">{{ filterError }}</p>
     <ManagementTableFrame
       v-model:query="query"
-      :page="1"
-      :page-size="Math.max(20, tableRows.length)"
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      :page-sizes="[50, 100, 200]"
       :search-placeholder="t('dictionaryEditor.searchPlaceholder')"
       :search-label="t('dictionaryEditor.searchLabel')"
       :selected-count="selected.size"
@@ -400,6 +494,10 @@ usePageEscape(() => true, () => emit('back'))
       :total="filtered.length"
       :item-label="t('dictionaryEditor.itemLabel')"
     >
+      <template #toolbar-actions>
+        <UCheckbox v-model="hideSkipped" :label="t('textFilters.hide')" />
+        <FieldHelp :label="t('textFilters.hide')" :text="t('textFilters.hideHint')" />
+      </template>
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaryEditor.deleteSelected')" @click="pendingRemoval = [...selected]" />
       </template>
@@ -408,9 +506,9 @@ usePageEscape(() => true, () => emit('back'))
         :columns="columns"
         sticky
         :meta="{ class: { tr: (row: TableRow<DictionaryTableRow>) => row.original.kind === 'new' ? 'bg-[var(--surface-subtle)]' : '' } }"
-        :ui="{ base: 'min-w-[620px]' }"
+        :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[620px]' }"
       >
-        <template #select-header></template>
+        <template #select-header><UCheckbox :model-value="selectionState" :disabled="dictionaryLocked || busy || !filtered.length" :aria-label="t('dictionaryEditor.selectAllMatches')" :title="t('dictionaryEditor.selectAllHint')" @update:model-value="toggleAllEntries" /></template>
         <template #select-cell="{ row }">
           <UIcon v-if="row.original.kind === 'new'" name="i-tabler-plus" class="mx-auto block size-4 text-[var(--text-muted)]" />
           <UCheckbox
@@ -548,6 +646,15 @@ usePageEscape(() => true, () => emit('back'))
       @update:open="$event || (pendingRemoval = [])"
       @confirm="confirmRemoval"
     />
+    <ConfirmDialog
+      v-model:open="clearOpen"
+      :title="t('dictionaryEditor.clearDictionary')"
+      :description="t('dictionaryEditor.clearDescription', { count: draft.entries.length })"
+      :confirm-label="t('dictionaryEditor.clearConfirm')"
+      :busy="dictionaryLocked || busy"
+      @confirm="clearDictionary"
+    />
+    <DictionaryExportDialog ref="exportDialog" />
     <DictionaryImportDialog ref="importDialog" existing :apply="applyImport" />
   </section>
 </template>

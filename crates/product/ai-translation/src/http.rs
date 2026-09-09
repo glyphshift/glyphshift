@@ -4,7 +4,7 @@ use crate::{
     TranslationProvider,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -265,6 +265,7 @@ fn build_request(
         request.target_locale(),
         request.items().len()
     );
+    let system_text = format!("{}\n\n{}", profile.translation_prompt(), system_text);
     let (endpoint, mut body) = match protocol {
         AiProviderProtocol::CodexSubscription => {
             return Err(invalid_request(

@@ -41,6 +41,7 @@ fn descriptor_for(adapter_id: &'static str) -> AdapterDescriptor {
             Feature::TextObserve,
             Feature::TextReplace,
             Feature::FontSubstitute,
+            Feature::FontScale,
         ],
     )
     .with_platforms(["windows"])
@@ -234,6 +235,7 @@ impl PreparedGdiCall {
 pub struct GdiInlineAdapter {
     text_replace: bool,
     font_substitute: bool,
+    font_scale: bool,
 }
 
 impl GdiInlineAdapter {
@@ -242,6 +244,7 @@ impl GdiInlineAdapter {
         Self {
             text_replace: true,
             font_substitute: true,
+            font_scale: true,
         }
     }
 
@@ -253,6 +256,7 @@ impl GdiInlineAdapter {
         Ok(Self {
             text_replace: active.contains(&Feature::TextReplace),
             font_substitute: active.contains(&Feature::FontSubstitute),
+            font_scale: active.contains(&Feature::FontScale),
         })
     }
 
@@ -307,6 +311,26 @@ impl GdiInlineAdapter {
             TextDecision::Keep | TextDecision::Replace(_) => {}
         }
         match decision.font {
+            FontDecision::Scaled { family, percent } => {
+                if self.font_substitute {
+                    if let Some(family) = family {
+                        prepared.font.family = family.as_ref().into();
+                        prepared.original = false;
+                    }
+                }
+                if self.font_scale
+                    && (50..=200).contains(&percent)
+                    && percent != 100
+                    && prepared.font.height != 0
+                {
+                    let value = i64::from(prepared.font.height);
+                    prepared.font.height = (((value.abs() * i64::from(percent) + 50) / 100)
+                        .clamp(1, i64::from(i32::MAX))
+                        * value.signum()) as i32;
+                    prepared.original = false;
+                    prepared.spacing = None;
+                }
+            }
             FontDecision::Substitute(family) if self.font_substitute => {
                 prepared.font.family = family.as_ref().into();
                 prepared.spacing = None;

@@ -3,11 +3,12 @@
 use glyphshift_adapter_gdi::EXT_TEXT_OUT_ADAPTER_ID;
 use glyphshift_adapter_gdi_native_support::allows_font_substitution;
 use glyphshift_adapter_native_abi::{
-    DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
-    NativeNegotiationV1, NativeRuntimeHostV1, SourceCharactersUtf16V1, ARCH_X86, ARCH_X86_64,
-    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE,
-    FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST,
-    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
+    font_scale_percent, DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1,
+    NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1, SourceCharactersUtf16V1, ARCH_X86,
+    ARCH_X86_64, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SCALE,
+    FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS,
+    STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
+    STATUS_UNSUPPORTED_FEATURE,
 };
 use retour::GenericDetour;
 use std::cell::Cell;
@@ -24,7 +25,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
 const SUPPORTED_FEATURES: u64 =
-    FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE;
+    FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE | FEATURE_FONT_SCALE;
 const ETO_GLYPH_INDEX: u32 = 0x0010;
 const MAX_TEXT_UNITS: usize = 16 * 1024;
 const MAX_FONT_UNITS: usize = 63;
@@ -52,7 +53,7 @@ struct CallbackGuard;
 
 impl CallbackGuard {
     fn enter() -> Option<Self> {
-        IN_CALLBACK.with(|active| (!active.replace(true)).then_some(Self))
+        IN_CALLBACK.with(|active| (!active.replace(true)).then(|| Self))
     }
 }
 
@@ -238,8 +239,13 @@ unsafe fn call_with_decision(
         && decision.decision.decision_bits & DECISION_TEXT_REPLACE != 0;
     let replace_font = active & FEATURE_FONT_SUBSTITUTE != 0
         && decision.decision.decision_bits & DECISION_FONT_SUBSTITUTE != 0;
+    let percent = if active & FEATURE_FONT_SCALE != 0 {
+        font_scale_percent(decision.decision.decision_bits)
+    } else {
+        100
+    };
     let mut created_font = None;
-    if replace_font && !decision.font.is_empty() {
+    if (replace_font && !decision.font.is_empty()) || percent != 100 {
         let current = GetCurrentObject(hdc, OBJ_FONT);
         let mut logical_font: LOGFONTW = std::mem::zeroed();
         if GetObjectW(
@@ -249,11 +255,14 @@ unsafe fn call_with_decision(
         ) != 0
             && allows_font_substitution(logical_font.lfCharSet)
         {
-            logical_font.lfCharSet = DEFAULT_CHARSET;
-            logical_font.lfFaceName.fill(0);
-            for (index, unit) in decision.font.iter().copied().take(31).enumerate() {
-                logical_font.lfFaceName[index] = unit;
+            if replace_font && !decision.font.is_empty() {
+                logical_font.lfCharSet = DEFAULT_CHARSET;
+                logical_font.lfFaceName.fill(0);
+                for (index, unit) in decision.font.iter().copied().take(31).enumerate() {
+                    logical_font.lfFaceName[index] = unit;
+                }
             }
+            glyphshift_adapter_gdi_native_support::scale_logfont(hdc, &mut logical_font, percent);
             let font = CreateFontIndirectW(&logical_font);
             if !font.is_invalid() {
                 let previous = SelectObject(hdc, HGDIOBJ(font.0));
@@ -281,7 +290,16 @@ unsafe fn call_with_decision(
             ptr::null(),
         )
     } else {
-        (original_text, original_count, options, spacing)
+        (
+            original_text,
+            original_count,
+            options,
+            if font_substituted && percent != 100 {
+                ptr::null()
+            } else {
+                spacing
+            },
+        )
     };
     let result = original.call(hdc, x, y, options, rect, text, count, spacing);
     if let Some((font, previous)) = created_font {
@@ -367,5 +385,18 @@ pub extern "C" fn glyphshift_adapter_entry_v1() -> NativeAdapterApiV1 {
         activate,
         deactivate,
         request_refresh: glyphshift_adapter_native_abi::request_refresh_noop,
+    }
+}
+
+#[cfg(test)]
+mod reentry_regression {
+    use super::CallbackGuard;
+    #[test]
+    fn rejected_nested_entry_keeps_outer_callback_guarded() {
+        let outer = CallbackGuard::enter().unwrap();
+        assert!(CallbackGuard::enter().is_none());
+        assert!(CallbackGuard::enter().is_none(), "a rejected nested entry must not unlock the outer callback");
+        drop(outer);
+        assert!(CallbackGuard::enter().is_some());
     }
 }

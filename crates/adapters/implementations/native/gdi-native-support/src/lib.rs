@@ -1,10 +1,10 @@
 //! Shared fail-open host bridge and font substitution for Win32 GDI text seams.
 
 use glyphshift_adapter_native_abi::{
-    DecideUtf16V1, NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1,
-    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE,
-    FEATURE_TEXT_REPLACE, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK,
-    STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
+    font_scale_percent, DecideUtf16V1, NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1,
+    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SCALE, FEATURE_FONT_SUBSTITUTE,
+    FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST,
+    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 
 pub const SUPPORTED_FEATURES: u64 =
-    FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE;
+    FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE | FEATURE_FONT_SCALE;
 pub const MAX_TEXT_UNITS: usize = 16 * 1024;
 const MAX_FONT_UNITS: usize = 63;
 
@@ -49,7 +49,7 @@ pub struct CallbackGuard;
 impl CallbackGuard {
     #[must_use]
     pub fn enter() -> Option<Self> {
-        IN_CALLBACK.with(|active| (!active.replace(true)).then_some(Self))
+        IN_CALLBACK.with(|active| (!active.replace(true)).then(|| Self))
     }
 }
 
@@ -204,7 +204,13 @@ pub unsafe fn with_replacement_font<R>(
     original: impl FnOnce() -> R,
 ) -> R {
     let mut created_font = None;
-    if let Some(family) = decision.replacement_font() {
+    let family = decision.replacement_font();
+    let percent = if ACTIVE_FEATURES.load(Ordering::Acquire) & FEATURE_FONT_SCALE != 0 {
+        font_scale_percent(decision.decision.decision_bits)
+    } else {
+        100
+    };
+    if family.is_some() || percent != 100 {
         let current = GetCurrentObject(hdc, OBJ_FONT);
         let mut logical_font: LOGFONTW = std::mem::zeroed();
         if GetObjectW(
@@ -214,11 +220,14 @@ pub unsafe fn with_replacement_font<R>(
         ) != 0
             && allows_font_substitution(logical_font.lfCharSet)
         {
-            logical_font.lfCharSet = DEFAULT_CHARSET;
-            logical_font.lfFaceName.fill(0);
-            for (index, unit) in family.iter().copied().take(31).enumerate() {
-                logical_font.lfFaceName[index] = unit;
+            if let Some(family) = family {
+                logical_font.lfCharSet = DEFAULT_CHARSET;
+                logical_font.lfFaceName.fill(0);
+                for (index, unit) in family.iter().copied().take(31).enumerate() {
+                    logical_font.lfFaceName[index] = unit;
+                }
             }
+            scale_logfont(hdc, &mut logical_font, percent);
             let font = CreateFontIndirectW(&logical_font);
             if !font.is_invalid() {
                 let previous = SelectObject(hdc, HGDIOBJ(font.0));
@@ -243,4 +252,31 @@ const fn negotiation_error(status: i32) -> NativeNegotiationV1 {
         status,
         active_feature_bits: 0,
     }
+}
+
+/// Adjusts a copied LOGFONT, retaining its height sign and automatic width.
+/// # Safety
+/// `hdc` must remain valid while metrics for a default-height font are queried.
+pub unsafe fn scale_logfont(hdc: HDC, font: &mut LOGFONTW, percent: u16) {
+    if !(50..=200).contains(&percent) || percent == 100 {
+        return;
+    }
+    if font.lfHeight == 0 {
+        let mut metrics = windows::Win32::Graphics::Gdi::TEXTMETRICW::default();
+        if windows::Win32::Graphics::Gdi::GetTextMetricsW(hdc, &mut metrics).as_bool() {
+            font.lfHeight = -(metrics.tmHeight - metrics.tmInternalLeading).max(1);
+        } else {
+            return;
+        }
+    }
+    let scale = |value: i32| {
+        if value == 0 {
+            return 0;
+        }
+        let magnitude = ((i64::from(value).abs() * i64::from(percent) + 50) / 100)
+            .clamp(1, i64::from(i32::MAX));
+        (magnitude * i64::from(value.signum())) as i32
+    };
+    font.lfHeight = scale(font.lfHeight);
+    font.lfWidth = scale(font.lfWidth);
 }

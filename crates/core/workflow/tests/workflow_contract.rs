@@ -352,3 +352,180 @@ fn wf_009_rejects_a_plan_without_font_substitution_capability() {
         })
     );
 }
+
+#[test]
+fn dictionary_fonts_follow_translation_precedence_and_workflow_mode() {
+    let dictionaries = [
+        Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")])
+            .with_font_families(["Dictionary Sans"]),
+        Dictionary::new(
+            "second",
+            "zh-CN",
+            [
+                DictionaryEntry::new("File", "Shadowed"),
+                DictionaryEntry::new("Edit", "Default"),
+            ],
+        ),
+    ];
+    let environment = CompositionEnvironment::new(
+        [
+            AdapterInput::new("font", [Feature::TextReplace, Feature::FontSubstitute]),
+            AdapterInput::new("text", [Feature::TextReplace]),
+        ],
+        ["Dictionary Sans", "Workflow Sans"],
+    );
+    for prefer in [false, true] {
+        let result = resolve(
+            &Workflow::new(
+                "workflow",
+                [WorkflowTarget::new(
+                    "software-editor",
+                    AdapterPlan::parallel(["font", "text"]),
+                    ["first", "second"],
+                )
+                .with_font_policy(
+                    TargetFontPolicy::new(["Workflow Sans"], FontCoverage::AllObservations)
+                        .with_dictionary_fonts(prefer),
+                )],
+            ),
+            &[software(1)],
+            &dictionaries,
+            &environment,
+        )
+        .unwrap();
+        let policy = result.targets()[0].font_policy();
+        assert_eq!(
+            policy.lookup_entry_for_adapter("internal-default", "font", "File"),
+            Some(FontRule::Substitute(
+                if prefer {
+                    "Dictionary Sans"
+                } else {
+                    "Workflow Sans"
+                }
+                .into()
+            ))
+        );
+        assert_eq!(
+            policy.lookup_entry_for_adapter("internal-default", "font", "Edit"),
+            Some(FontRule::Substitute("Workflow Sans".into()))
+        );
+        assert_eq!(
+            policy.lookup_entry_for_adapter("internal-default", "text", "File"),
+            None
+        );
+    }
+    let result = resolve(
+        &Workflow::new(
+            "workflow",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["font"]),
+                ["first", "second"],
+            )],
+        ),
+        &[software(1)],
+        &dictionaries,
+        &environment,
+    )
+    .unwrap();
+    assert_eq!(
+        result.targets()[0].font_policy().lookup_entry_for_adapter(
+            "internal-default",
+            "font",
+            "File"
+        ),
+        None
+    );
+}
+
+#[test]
+fn dictionary_fonts_can_be_used_without_a_workflow_default() {
+    let result = resolve(
+        &Workflow::new(
+            "workflow",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["font"]),
+                ["first"],
+            )
+            .with_font_policy(
+                TargetFontPolicy::new(Vec::<Box<str>>::new(), FontCoverage::DictionaryMatches)
+                    .with_dictionary_fonts(true),
+            )],
+        ),
+        &[software(1)],
+        &[
+            Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")])
+                .with_font_families(["Dictionary Sans"]),
+        ],
+        &CompositionEnvironment::new(
+            [AdapterInput::new(
+                "font",
+                [Feature::TextReplace, Feature::FontSubstitute],
+            )],
+            ["Dictionary Sans"],
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        result.targets()[0].font_policy().lookup_entry_for_adapter(
+            "internal-default",
+            "font",
+            "File"
+        ),
+        Some(FontRule::Substitute("Dictionary Sans".into()))
+    );
+}
+
+#[test]
+fn font_scaling_inherits_independently_and_is_scoped_to_capable_adapters() {
+    let compiled = resolve(
+        &Workflow::new(
+            "workflow",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["scale", "family"]),
+                ["dictionary"],
+            )
+            .with_font_policy(
+                TargetFontPolicy::new(["Sans"], FontCoverage::AllObservations)
+                    .with_dictionary_fonts(true)
+                    .with_scale_percent(150),
+            )],
+        ),
+        &[software(1)],
+        &[Dictionary::new(
+            "dictionary",
+            "zh-CN",
+            [DictionaryEntry::new("File", "文件")],
+        )
+        .with_font_scale_percent(Some(100))],
+        &CompositionEnvironment::new(
+            [
+                AdapterInput::new("scale", [Feature::TextReplace, Feature::FontScale]),
+                AdapterInput::new("family", [Feature::TextReplace, Feature::FontSubstitute]),
+            ],
+            ["Sans"],
+        ),
+    )
+    .unwrap();
+    let policy = compiled.targets()[0].font_policy();
+    assert_eq!(
+        policy.lookup_entry_for_adapter("internal-default", "scale", "Unmatched"),
+        Some(FontRule::Scaled {
+            family: None,
+            percent: 150
+        })
+    );
+    assert_eq!(
+        policy.lookup_entry_for_adapter("internal-default", "scale", "File"),
+        Some(FontRule::Unchanged)
+    );
+    assert_eq!(
+        policy.lookup_entry_for_adapter("internal-default", "family", "File"),
+        Some(FontRule::Substitute("Sans".into()))
+    );
+    assert!(compiled.targets()[0]
+        .requested_features()
+        .contains(&Feature::FontScale));
+}

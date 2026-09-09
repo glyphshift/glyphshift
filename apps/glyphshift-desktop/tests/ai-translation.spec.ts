@@ -177,7 +177,7 @@ test('DeepSeek profile defaults reasoning off and exposes only truthful effort l
   await deleteDialog.getByRole('button', { name: '取消' }).click()
 })
 
-test('AI profile connection test reports model invocation separately from optional discovery', async ({ page }) => {
+test('AI profile connection test reports model invocation separately from optional discovery', async ({ page }, testInfo) => {
   const profiles = {
     defaultProfileId: 'profile.local',
     profiles: [{
@@ -197,6 +197,27 @@ test('AI profile connection test reports model invocation separately from option
 
   await expect(page.getByText('连接成功，可以开始翻译')).toBeVisible()
   await expect(page.getByText(/模型发现|结构化输出/)).toHaveCount(0)
+  const testButton = page.getByRole('button', { name: '测试 AI 配置“本地 Ollama”' })
+  await expect(testButton).toBeEnabled()
+  await testButton.click()
+  await expect(testButton).toBeEnabled()
+  await page.getByRole('button', { name: '编辑 AI 配置：本地 Ollama' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await editor.getByRole('textbox', { name: '模型', exact: true }).fill('synthetic-new-model')
+  await editor.getByRole('button', { name: '保存配置', exact: true }).click()
+  await expect(page.getByText('连接成功，可以开始翻译')).toHaveCount(0)
+  await expect(testButton).toBeEnabled()
+  await testButton.click()
+  await expect(page.getByText('连接成功，可以开始翻译')).toBeVisible()
+  await expect(testButton).toBeEnabled()
+  const interval = page.getByRole('spinbutton', { name: '自动补全间隔（秒）' })
+  const folder = page.getByRole('button', { name: '打开字典文件夹', exact: true })
+  const intervalBox = await interval.boundingBox()
+  const folderBox = await folder.boundingBox()
+  expect(Math.abs(intervalBox!.x - folderBox!.x)).toBeLessThan(4)
+  await interval.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('settings-auto-interval.png') })
+
 })
 
 test('settings keeps AI profiles without a translation confirmation toggle', async ({ page }) => {
@@ -263,7 +284,7 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
     }))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles, settingsKey: appSettingsStorageKey })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
@@ -321,7 +342,7 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails['dictionary-proof']
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -346,7 +367,7 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
     ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
   }, { snapshot, profile })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
   await page.getByRole('button', { name: 'AI 补全' }).click()
   await startFromAiPreflight(page)
@@ -366,15 +387,15 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await page.getByRole('button', { name: '批次详情 0/6' }).click()
   await expect(page.getByTestId('ai-batch-1')).toContainText('请求中')
   await expect(page.getByTestId('ai-batch-4')).toContainText('排队')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await expect(page.getByText('任务期间该词典保持只读；其他词典和功能不受影响。停止或完成后自动解锁。')).toBeVisible()
+  await expect(page.getByText('AI 正在写这个字典，暂时不能手动修改。任务结束或停止后就能改，其他字典照常使用。')).toBeVisible()
   await expect(page.getByRole('textbox', { name: '编辑译文：Pending source' })).toBeDisabled()
   await page.getByRole('button', { name: '查看任务' }).first().click()
   await page.getByRole('button', { name: '停止翻译' }).click()
   await expect(page.getByRole('button', { name: '停止翻译' })).toHaveCount(0, { timeout: 1_000 })
   await expect(page.getByText('已停止', { exact: true })).toBeVisible()
-  await expect(page.getByText('词典正在翻译')).toHaveCount(0)
+  await expect(page.getByText('字典正在翻译')).toHaveCount(0)
 })
 
 test('dictionary AI fill translates only eligible blank entries', async ({ page }) => {
@@ -404,7 +425,7 @@ test('dictionary AI fill translates only eligible blank entries', async ({ page 
     localStorage.setItem(profileKey, JSON.stringify(profileValue))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   await page.getByRole('button', { name: 'AI 翻译选项' }).click()
@@ -419,7 +440,7 @@ test('dictionary AI fill translates only eligible blank entries', async ({ page 
   await expect(page.getByRole('textbox', { name: '编辑译文：Open' })).toHaveValue('打开')
   await expect(page.getByRole('textbox', { name: '编辑译文：1920 x 1080' })).toHaveValue('')
   await expect(page.getByText(/已补全全部 1 条译文，自动完成 1 批；用时 \d+:\d{2}。/)).toBeVisible()
-  await expect(page.getByRole('button', { name: '保存词典' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '保存字典' })).toBeEnabled()
 })
 
 test('dictionary AI fill reports all candidates completed across automatic batches', async ({ page }) => {
@@ -449,7 +470,7 @@ test('dictionary AI fill reports all candidates completed across automatic batch
     }))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles, settingsKey: appSettingsStorageKey })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
@@ -467,6 +488,7 @@ test('dictionary AI fill reports all candidates completed across automatic batch
   await expect(page.getByTestId('ai-batch-3')).toHaveCount(0)
   await page.getByRole('button', { name: '关闭批次详情' }).click()
   await expect(page.getByRole('region', { name: 'AI 翻译实时进度' })).toHaveCount(0)
+  await page.getByRole('button', { name: '下一页', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Source 51' })).toHaveValue('AI · Source 51')
 })
 
@@ -495,7 +517,7 @@ test('closing a terminal batch report survives desktop task polling for the same
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails[args?.dictionaryId as string]
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -507,7 +529,7 @@ test('closing a terminal batch report survives desktop task polling for the same
     ;(window as unknown as { showNextTerminalJob: () => void }).showNextTerminalJob = () => { jobId = 'job-terminal-next' }
   }, { snapshot, profile })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
@@ -547,7 +569,7 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
     }))
   }, { modelKey: storageKey, modelValue: snapshot, profileKey: aiStorageKey, profileValue: profiles, settingsKey: appSettingsStorageKey })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
@@ -602,7 +624,7 @@ test('background translation task reports partial batches, writeback, usage, and
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails[args?.dictionaryId as string]
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -624,12 +646,15 @@ test('background translation task reports partial batches, writeback, usage, and
     ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
   }, { snapshot, profile })
   await page.goto('/')
-  await page.getByRole('button', { name: '词典', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
   await page.getByRole('button', { name: 'AI 补全' }).click()
   await startFromAiPreflight(page)
 
+  await expect(page.getByRole('heading', { name: '界面基础词典', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译任务' })).toHaveCount(0)
+  await page.getByRole('button', { name: '翻译任务', exact: true }).click()
   await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
   await expect(page.getByText('部分完成', { exact: true })).toBeVisible()
   await expect(page.getByTestId('ai-batch-2')).toContainText('失败')
@@ -717,7 +742,7 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -829,7 +854,7 @@ test('probe shows only compact AI task status and links to full task details', a
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [run]
         if (command === 'desktop_probe_run_summary') return run
@@ -864,4 +889,102 @@ test('probe shows only compact AI task status and links to full task details', a
 
   await status.getByRole('button', { name: '查看任务' }).click()
   await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
+})
+
+
+test('service presets fill editable drafts, clear keys between services and preserve saved edits', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '添加 AI 配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const choose = async (name: string) => {
+    await dialog.getByRole('combobox', { name: '服务预设' }).click()
+    await page.getByRole('option', { name, exact: true }).click()
+  }
+  await choose('DeepSeek')
+  await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('DeepSeek')
+  await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
+  await expect(dialog.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('deepseek-v4-flash')
+  await expect(dialog.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
+  await expect(dialog.getByRole('button', { name: '保存配置' })).toBeDisabled()
+  await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-preset-key')
+  await choose('通义千问（北京）')
+  await expect(dialog.getByRole('textbox', { name: 'API Key（密钥）' })).toHaveValue('')
+  await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://dashscope.aliyuncs.com/compatible-mode/v1')
+  await expect(dialog.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('qwen-plus')
+  await choose('硅基流动')
+  await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.siliconflow.cn/v1')
+  await expect(dialog.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('Qwen/Qwen2.5-72B-Instruct')
+  await choose('DeepSeek')
+  await dialog.getByRole('textbox', { name: '模型', exact: true }).fill('deepseek-custom-model')
+  await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-preset-key')
+  if (process.env.GLYPHSHIFT_PRESET_SCREENSHOT) await page.screenshot({ path: process.env.GLYPHSHIFT_PRESET_SCREENSHOT, fullPage: true })
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await page.reload()
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
+  const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await expect(edit.getByRole('combobox', { name: '服务预设' })).toHaveCount(0)
+  await expect(edit.getByRole('textbox', { name: '模型', exact: true })).toHaveValue('deepseek-custom-model')
+  await expect(edit.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
+})
+
+
+test('AI setup guide and custom translation prompt support saving and restoring defaults', async ({ page }) => {
+  await page.addInitScript(() => { window.open = ((url: string) => { (window as unknown as { openedGuide: string }).openedGuide = url; return null }) as typeof window.open })
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: '添加 AI 配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  await dialog.getByRole('combobox', { name: '服务预设' }).click()
+  await page.getByRole('option', { name: 'DeepSeek', exact: true }).click()
+  await dialog.getByRole('button', { name: '查看配置文档' }).click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { openedGuide: string }).openedGuide)).toBe('https://api-docs.deepseek.com/zh-cn/')
+  await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-prompt-key')
+  await dialog.getByRole('button', { name: '高级设置' }).click()
+  const prompt = dialog.getByRole('textbox', { name: '翻译提示词' })
+  const systemDefault = await prompt.inputValue()
+  expect(systemDefault.length).toBeGreaterThan(50)
+  await prompt.fill('使用简洁的航海术语。')
+  if (process.env.GLYPHSHIFT_PROMPT_SCREENSHOT) {
+    await prompt.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: process.env.GLYPHSHIFT_PROMPT_SCREENSHOT, fullPage: true })
+  }
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await page.reload()
+  await page.getByRole('button', { name: '设置' }).click()
+  await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
+  const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await expect(edit.getByRole('button', { name: '查看配置文档' })).toBeVisible()
+  await edit.getByRole('button', { name: '高级设置' }).click()
+  await expect(edit.getByRole('textbox', { name: '翻译提示词' })).toHaveValue('使用简洁的航海术语。')
+  await edit.getByRole('button', { name: '恢复系统默认' }).click()
+  await expect(edit.getByRole('textbox', { name: '翻译提示词' })).toHaveValue(systemDefault)
+  await edit.getByRole('button', { name: '保存配置' }).click()
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('glyphshift.ai-profiles.v2')!).profiles[0].translationPrompt)).toBeNull()
+})
+
+
+test('late task poll cannot disable connection testing after completion', async ({ page }) => {
+  await page.goto('/')
+  const running = await page.evaluate(async () => {
+    const modulePath = '/src/useAiTranslation.ts'
+    const ai = (await import(/* @vite-ignore */ modulePath)).useAiTranslation()
+    let release: (value: unknown) => void = () => {}
+    const task = { jobId: 'connection-test-race', scopeId: 'connection:synthetic', status: 'completed', elapsedMs: 1 }
+    let count = 0
+    const previous = (window as any).__TAURI_INTERNALS__
+    ;(window as any).__TAURI_INTERNALS__ = { invoke: async () => {
+      if (++count === 1) return new Promise(resolve => { release = resolve })
+      return { current: task, history: [] }
+    } }
+    try {
+      const oldPoll = ai.refreshTaskCenter()
+      await ai.refreshTaskCenter()
+      release({ current: { ...task, status: 'running' }, history: [] })
+      await oldPoll
+      return ai.taskRunning.value
+    } finally { (window as any).__TAURI_INTERNALS__ = previous }
+  })
+  expect(running).toBe(false)
 })

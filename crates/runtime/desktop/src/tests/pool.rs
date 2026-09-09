@@ -256,7 +256,7 @@ fn cancelled_point_acquisition_does_not_discover_a_runtime() {
 }
 
 #[test]
-fn workflow_reconcile_runs_two_targets_and_stops_only_its_owned_software() {
+fn single_workflows_stop_only_their_owned_software() {
     let root = tempdir().expect("workflow Runtime data");
     let mut backend = open_test_backend(root.path().join("data"));
     let mut software_ids = Vec::new();
@@ -279,63 +279,24 @@ fn workflow_reconcile_runs_two_targets_and_stops_only_its_owned_software() {
                 .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
         )
         .expect("shared dictionary");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.group", "双目标工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[0].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.shared"],
-                ),
-                WorkflowTargetCreate::new(
-                    software_ids[1].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.shared"],
-                ),
-            ]),
-        )
-        .expect("group workflow");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.other", "独立工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[2].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.shared"],
-                ),
-            ]),
-        )
-        .expect("other workflow");
-    let group = backend
-        .effective_workflow_intent("workflow.group")
-        .expect("compiled group intent");
-    let other = backend
-        .effective_workflow_intent("workflow.other")
-        .expect("compiled other intent");
     let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
-
-    pool.reconcile_workflow(&other)
-        .expect("reconcile unrelated workflow");
-    let activated = pool
-        .reconcile_workflow(&group)
-        .expect("reconcile two targets");
-    assert!(activated.errors().is_empty());
-    for software_id in &software_ids[..2] {
-        let status = pool.status(software_id).expect("owned Runtime status");
-        assert!(status.is_feature_requested(Feature::TextReplace));
-        assert!(status.is_feature_active(Feature::TextReplace));
+    for (index, software) in software_ids.iter().enumerate() {
+        let id = format!("workflow.single-{index}");
+        create_single_workflow(&mut backend, &id, software, "dictionary.shared");
+        assert!(pool
+            .reconcile_workflow(&backend.effective_workflow_intent(&id).unwrap())
+            .unwrap()
+            .errors()
+            .is_empty());
     }
-
-    let stopped = pool
-        .stop_workflow("workflow.group")
-        .expect("stop only the group workflow");
-    assert!(stopped.errors().is_empty());
-    assert!(software_ids[..2]
-        .iter()
-        .all(|software_id| pool.status(software_id).is_none()));
-    assert!(pool
-        .status(&software_ids[2])
-        .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
+    pool.stop_workflow("workflow.single-0").unwrap();
+    assert!(pool.status(&software_ids[0]).is_none());
+    for software in &software_ids[1..] {
+        assert!(pool
+            .status(software)
+            .unwrap()
+            .is_feature_active(Feature::TextReplace));
+    }
 }
 
 #[test]
@@ -592,7 +553,7 @@ fn offline_probe_start_is_discarded_so_reopened_target_can_reconnect() {
 }
 
 #[test]
-fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target() {
+fn single_workflows_publish_shared_dictionary_updates_to_each_software() {
     let root = tempdir().expect("workflow Runtime data");
     let mut backend = open_test_backend(root.path().join("data"));
     let mut software_ids = Vec::new();
@@ -615,29 +576,13 @@ fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target()
                 .with_entries([DictionaryEntryCreate::new("Open", "第一次")]),
         )
         .expect("shared dictionary");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.hot", "热更新工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[0].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.hot"],
-                ),
-                WorkflowTargetCreate::new(
-                    software_ids[1].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.hot"],
-                ),
-            ]),
-        )
-        .expect("shared workflow");
     let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
-    let initial = backend
-        .effective_workflow_intent("workflow.hot")
-        .expect("initial intent");
-    pool.reconcile_workflow(&initial)
-        .expect("initial reconcile");
-
+    for (index, software) in software_ids.iter().enumerate() {
+        let id = format!("workflow.hot-{index}");
+        create_single_workflow(&mut backend, &id, software, "dictionary.hot");
+        pool.reconcile_workflow(&backend.effective_workflow_intent(&id).unwrap())
+            .unwrap();
+    }
     backend
         .update_dictionary(
             DictionaryEdit::new(
@@ -649,18 +594,21 @@ fn workflow_reconcile_publishes_a_shared_dictionary_generation_to_every_target()
             )
             .with_entries([DictionaryEntryCreate::new("Open", "第二次")]),
         )
-        .expect("update shared dictionary");
-    let next = backend
-        .effective_workflow_intent("workflow.hot")
-        .expect("next intent");
-    let updated = pool
-        .reconcile_workflow(&next)
-        .expect("publish next generation");
-
-    assert_eq!(updated.statuses().len(), 2);
-    assert!(updated.statuses().iter().all(|status| {
-        status.applied_generation() == Some(glyphshift_domain::Generation::new(3))
-    }));
+        .unwrap();
+    for index in 0..software_ids.len() {
+        let updated = pool
+            .reconcile_workflow(
+                &backend
+                    .effective_workflow_intent(&format!("workflow.hot-{index}"))
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(updated.statuses().len(), 1);
+        assert_eq!(
+            updated.statuses()[0].applied_generation(),
+            Some(glyphshift_domain::Generation::new(3))
+        );
+    }
 }
 
 #[test]
@@ -687,56 +635,47 @@ fn explicit_workflow_replacement_removes_the_entire_old_intent() {
                 .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
         )
         .expect("replacement dictionary");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.old", "旧工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[0].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.replace"],
-                ),
-                WorkflowTargetCreate::new(
-                    software_ids[1].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.replace"],
-                ),
-            ]),
-        )
-        .expect("old workflow");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.new", "新工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[0].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.replace"],
-                ),
-            ]),
-        )
-        .expect("new workflow");
-    let old = backend
-        .effective_workflow_intent("workflow.old")
-        .expect("old intent");
-    let new = backend
-        .effective_workflow_intent("workflow.new")
-        .expect("new intent");
+    create_single_workflow(
+        &mut backend,
+        "workflow.old",
+        &software_ids[0],
+        "dictionary.replace",
+    );
+    create_single_workflow(
+        &mut backend,
+        "workflow.other",
+        &software_ids[1],
+        "dictionary.replace",
+    );
+    create_single_workflow(
+        &mut backend,
+        "workflow.new",
+        &software_ids[0],
+        "dictionary.replace",
+    );
     let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
-    pool.reconcile_workflow(&old).expect("start old workflow");
-
+    for id in ["workflow.old", "workflow.other"] {
+        pool.reconcile_workflow(&backend.effective_workflow_intent(id).unwrap())
+            .unwrap();
+    }
     let replaced = pool
-        .replace_workflow(&new)
-        .expect("replace the complete old intent");
-
+        .replace_workflow(&backend.effective_workflow_intent("workflow.new").unwrap())
+        .unwrap();
     assert!(replaced.errors().is_empty());
-    assert!(pool
-        .status(&software_ids[0])
-        .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
-    assert!(pool.status(&software_ids[1]).is_none());
+    for software in &software_ids {
+        assert!(pool
+            .status(software)
+            .unwrap()
+            .is_feature_active(Feature::TextReplace));
+    }
     assert!(pool.stop_workflow("workflow.old").is_err());
+    pool.stop_workflow("workflow.new").unwrap();
+    assert!(pool.status(&software_ids[0]).is_none());
+    assert!(pool.status(&software_ids[1]).is_some());
 }
 
 #[test]
-fn workflow_refresh_reapplies_requested_features_after_target_restart() {
+fn workflow_status_refresh_preserves_requested_features() {
     let root = tempdir().expect("workflow Runtime data");
     let executable = root.path().join("Restarted.exe");
     fs::write(&executable, b"synthetic executable").expect("selected executable");
@@ -806,38 +745,250 @@ fn workflow_stop_failure_keeps_one_last_applied_target_without_rolling_back_othe
                 .with_entries([DictionaryEntryCreate::new("Open", "停止")]),
         )
         .expect("stop dictionary");
-    backend
-        .create_workflow(
-            WorkflowCreate::new("workflow.stop", "停止工作流").with_targets([
-                WorkflowTargetCreate::new(
-                    software_ids[0].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.stop"],
-                ),
-                WorkflowTargetCreate::new(
-                    software_ids[1].as_str(),
-                    [TEST_ADAPTER_ID],
-                    ["dictionary.stop"],
-                ),
-            ]),
-        )
-        .expect("stop workflow");
-    let intent = backend
-        .effective_workflow_intent("workflow.stop")
-        .expect("stop intent");
     let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
-    pool.reconcile_workflow(&intent).expect("initial reconcile");
-
-    let stopped = pool
-        .stop_workflow("workflow.stop")
-        .expect("bounded stop report");
-
+    for (index, software) in software_ids.iter().enumerate() {
+        let id = format!("workflow.stop-{index}");
+        create_single_workflow(&mut backend, &id, software, "dictionary.stop");
+        pool.reconcile_workflow(&backend.effective_workflow_intent(&id).unwrap())
+            .unwrap();
+    }
+    let stopped = pool.stop_workflow("workflow.stop-0").unwrap();
     assert_eq!(
         stopped.errors().get(software_ids[0].as_str()),
         Some(&DesktopRuntimeError::SessionRejected)
     );
     assert!(pool
-        .status(&software_ids[0])
-        .is_some_and(|status| status.is_feature_active(Feature::TextReplace)));
+        .status(&software_ids[1])
+        .unwrap()
+        .is_feature_active(Feature::TextReplace));
+    assert!(pool
+        .stop_workflow("workflow.stop-1")
+        .unwrap()
+        .errors()
+        .is_empty());
     assert!(pool.status(&software_ids[1]).is_none());
+    assert!(pool
+        .status(&software_ids[0])
+        .unwrap()
+        .is_feature_active(Feature::TextReplace));
+}
+
+#[test]
+fn workflow_collection_shares_translation_session_and_can_be_disabled() {
+    let root = tempdir().unwrap();
+    let executable = root.path().join("SyntheticCollectionHost.exe");
+    fs::write(&executable, b"synthetic").unwrap();
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .unwrap()
+        .selected_software_id()
+        .unwrap()
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.collection", "Collection", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "Translation")]),
+        )
+        .unwrap();
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.collection", "Collection").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.clone(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.collection"],
+                ),
+            ]),
+        )
+        .unwrap();
+    let intent = backend
+        .effective_workflow_intent("workflow.collection")
+        .unwrap();
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(InMemoryRuntimeFactory));
+    let capture = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("collection").unwrap(),
+        root.path().join("entries.json"),
+        100,
+    )
+    .unwrap();
+    pool.configure_workflow_collection(
+        "workflow.collection",
+        [(software_id.clone().into(), capture)].into(),
+    );
+    assert!(pool
+        .reconcile_workflow(&intent)
+        .unwrap()
+        .errors()
+        .is_empty());
+    let status = pool.status(&software_id).unwrap();
+    assert!(status.is_feature_active(Feature::TextObserve));
+    assert!(status.is_feature_active(Feature::TextReplace));
+    assert!(pool
+        .reconcile_workflow(&intent)
+        .unwrap()
+        .errors()
+        .is_empty());
+    pool.configure_workflow_collection("workflow.collection", BTreeMap::new());
+    assert!(pool
+        .reconcile_workflow(&intent)
+        .unwrap()
+        .errors()
+        .is_empty());
+    assert!(pool
+        .status(&software_id)
+        .unwrap()
+        .is_feature_active(Feature::TextReplace));
+    assert!(!pool
+        .status(&software_id)
+        .unwrap()
+        .is_feature_active(Feature::TextObserve));
+    assert!(pool
+        .stop_workflow("workflow.collection")
+        .unwrap()
+        .errors()
+        .is_empty());
+    assert!(!pool
+        .status(&software_id)
+        .is_some_and(|status| status.is_active()));
+}
+
+fn create_single_workflow(
+    backend: &mut DesktopBackend,
+    id: &str,
+    software: &str,
+    dictionary: &str,
+) {
+    backend
+        .create_workflow(
+            WorkflowCreate::new(id, id).with_targets([WorkflowTargetCreate::new(
+                software,
+                [TEST_ADAPTER_ID],
+                [dictionary],
+            )]),
+        )
+        .unwrap();
+}
+
+#[test]
+fn failed_workflow_collection_start_is_discarded_before_retry() {
+    let root = tempdir().expect("capture retry Runtime data");
+    let executable = root.path().join("RetryCaptureHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend.create_dictionary(DictionaryCreate::new("dictionary.retry", "Retry", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Open", "Translated")])).unwrap();
+    create_single_workflow(&mut backend, "workflow.retry", &software_id, "dictionary.retry");
+    let intent = backend.effective_workflow_intent("workflow.retry").unwrap();
+    let configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("capture-retry").expect("session id"),
+        root.path().join("capture.json"),
+        100,
+    )
+    .expect("capture configuration");
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RetryRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+    }));
+
+    pool.configure_workflow_collection("workflow.retry", BTreeMap::from([(software_id.clone().into(), configuration)]));
+    let failed = pool.reconcile_workflow(&intent).unwrap();
+    assert_eq!(failed.errors().get(software_id.as_str()), Some(&DesktopRuntimeError::ProtocolRejected));
+    let connected = pool.reconcile_workflow(&intent).unwrap();
+    assert!(connected.errors().is_empty(), "retry must rediscover after failed collection activation");
+    assert!(pool.status(&software_id).unwrap().is_feature_active(Feature::TextObserve));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn workflow_status_poll_keeps_the_active_connection() {
+    let root = tempdir().expect("workflow Runtime data");
+    let executable = root.path().join("Restarted.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let snapshot = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable");
+    let software_id = snapshot
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.restart", "重启词典", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "重连")]),
+        )
+        .expect("restart dictionary");
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.restart", "重启工作流").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.as_str(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.restart"],
+                ),
+            ]),
+        )
+        .expect("restart workflow");
+    let intent = backend
+        .effective_workflow_intent("workflow.restart")
+        .expect("restart intent");
+    let discoveries = Arc::new(AtomicUsize::new(1));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RetryRuntimeFactory { discoveries: Arc::clone(&discoveries) }));
+    let configuration = CaptureConfiguration::new(
+        glyphshift_capture::CaptureSessionId::new("poll-capture").unwrap(),
+        root.path().join("observations.json"), 100,
+    ).unwrap();
+    pool.configure_workflow_collection("workflow.restart", BTreeMap::from([(software_id.clone().into(), configuration)]));
+    pool.reconcile_workflow(&intent).expect("initial reconcile");
+
+    let before = discoveries.load(Ordering::SeqCst);
+    let refreshed = pool
+        .refresh_workflow(&intent)
+        .expect("refresh restarted target");
+
+    assert!(refreshed.errors().is_empty());
+    for _ in 0..3 {
+        assert!(pool.refresh_workflow(&intent).unwrap().errors().is_empty());
+        assert!(pool.status(&software_id).unwrap().is_feature_active(Feature::TextObserve));
+        pool.control_workflow_collection("workflow.restart", &software_id, true).unwrap();
+    }
+
+    assert_eq!(discoveries.load(Ordering::SeqCst), before, "status polling must not stop and rediscover the running target");
+    let status = pool.status(&software_id).expect("refreshed status");
+    assert!(status.is_feature_requested(Feature::TextReplace));
+    assert!(status.is_feature_active(Feature::TextReplace));
+    assert_eq!(status.applied_generation(), Some(Generation::new(2)));
+}
+
+#[test]
+fn workflow_refresh_discards_exited_instance_and_finds_restart_without_restarting_live_target() {
+    let root = tempdir().unwrap();
+    let exe = root.path().join("SyntheticLifetime.exe");
+    fs::write(&exe, b"synthetic").unwrap();
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software = backend.add_software(ExecutableSelection::new(exe)).unwrap().selected_software_id().unwrap().to_owned();
+    backend.create_dictionary(DictionaryCreate::new("lifetime", "Lifetime", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Open", "Translation")])).unwrap();
+    create_single_workflow(&mut backend, "lifetime", &software, "lifetime");
+    let intent = backend.effective_workflow_intent("lifetime").unwrap();
+    let instance = Arc::new(AtomicUsize::new(1));
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RestartingRuntimeFactory { instance: instance.clone(), discoveries: discoveries.clone() }));
+    pool.reconcile_workflow(&intent).unwrap();
+    pool.refresh_workflow(&intent).unwrap();
+    assert_eq!(discoveries.load(Ordering::SeqCst), 1, "live targets must not restart");
+    instance.store(0, Ordering::SeqCst);
+    let stopped = pool.refresh_workflow(&intent).unwrap();
+    assert_eq!(stopped.errors().get(software.as_str()), Some(&DesktopRuntimeError::UnknownTarget));
+    assert!(!pool.status(&software).is_some_and(|status| status.is_active()));
+    instance.store(2, Ordering::SeqCst);
+    assert!(pool.refresh_workflow(&intent).unwrap().errors().is_empty());
+    assert_eq!(pool.status(&software).unwrap().active_target_id(), Some(2));
 }

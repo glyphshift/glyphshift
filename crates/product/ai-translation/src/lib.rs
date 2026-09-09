@@ -73,6 +73,17 @@ impl Default for FilterPolicy {
 }
 
 impl FilterPolicy {
+    /// Source-only classification shared by dictionary visibility and translation planning.
+    pub fn hidden_sources(&self, sources: &[String]) -> Result<Vec<bool>, PlanError> {
+        let patterns = self.excluded_patterns.iter().enumerate().map(|(index, pattern)|
+            Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
+        ).collect::<Result<Vec<_>, _>>()?;
+        Ok(sources.iter().map(|source| {
+            let item = TranslationItem::untranslated("visibility", source.as_str());
+            skip_reason(&item, source.trim(), self, &patterns).is_some()
+        }).collect())
+    }
+
     pub(crate) fn from_persisted_value(value: Option<&serde_json::Value>) -> Self {
         let mut policy = Self::default();
         let Some(object) = value.and_then(serde_json::Value::as_object) else {
@@ -308,10 +319,13 @@ impl TranslationPlan {
     }
 }
 
+const MAX_RETAINED_PLANS: usize = 32;
+
 #[derive(Default)]
 pub struct AiTranslation {
     next_plan_id: u64,
     plans: BTreeMap<Box<str>, TranslationPlan>,
+    plan_order: std::collections::VecDeque<Box<str>>,
     next_job_id: u64,
     jobs: BTreeMap<Box<str>, std::sync::Arc<job::JobCell>>,
     providers: BTreeMap<AiProviderProtocol, std::sync::Arc<dyn TranslationProvider>>,
@@ -373,7 +387,13 @@ impl AiTranslation {
             candidates,
             skipped,
         };
+        self.plan_order.push_back(token.clone());
         self.plans.insert(token, plan.clone());
+        while self.plan_order.len() > MAX_RETAINED_PLANS {
+            if let Some(expired) = self.plan_order.pop_front() {
+                self.plans.remove(&expired);
+            }
+        }
         Ok(plan)
     }
 }
@@ -557,4 +577,51 @@ fn protected_tokens(source: &str) -> Vec<Box<str>> {
         index += 1;
     }
     tokens
+}
+
+#[cfg(test)]
+mod plan_cache_tests {
+    use super::*;
+
+    #[test]
+    fn empty_candidate_plans_evict_old_snapshots_in_creation_order() {
+        let mut service = AiTranslation::new();
+        let mut first = None;
+        let mut last = None;
+        for _ in 0..100 {
+            let plan = service
+                .plan_translation(TranslationPlanRequest::new(
+                    "probe:synthetic",
+                    1,
+                    "en-US",
+                    "zh-CN",
+                    [TranslationItem::translated("row-1", "Already translated", "Translated")],
+                ))
+                .expect("synthetic plan");
+            assert_eq!(plan.candidates.len(), 0);
+            first.get_or_insert_with(|| plan.token.clone());
+            last = Some(plan.token);
+        }
+        assert_eq!(service.plans.len(), MAX_RETAINED_PLANS);
+        assert_eq!(service.plan_order.len(), MAX_RETAINED_PLANS);
+        assert!(!service.plans.contains_key(first.as_ref().unwrap()));
+        assert!(service.plans.contains_key(last.as_ref().unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod dictionary_filter_contract {
+    use super::*;
+    #[test]
+    fn visibility_uses_the_same_source_rules_without_requiring_an_ai_profile() {
+        let sources = ["123", "Open menu", "https://example.com", "1920x1080", "Chapter 2"].map(String::from);
+        let policy = FilterPolicy::default();
+        assert_eq!(policy.hidden_sources(&sources).unwrap(), vec![true, false, true, true, false]);
+        let mut ai = AiTranslation::default();
+        let plan = ai.plan_translation(TranslationPlanRequest::new("view", 1, "en-US", "zh-CN",
+            sources.iter().enumerate().map(|(index, source)| TranslationItem::untranslated(index.to_string(), source.as_str())))
+            .with_filter_policy(policy)).unwrap();
+        assert_eq!(plan.skipped_count(), 3);
+        assert!(FilterPolicy::default().with_excluded_patterns(["["]).hidden_sources(&sources).is_err());
+    }
 }

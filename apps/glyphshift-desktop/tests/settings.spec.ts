@@ -147,7 +147,7 @@ test('help teaches the workflow and progressively exposes AI, recovery, and adap
   await expect(page.getByRole('heading', { name: '保存并启用工作流' })).toBeVisible()
   await expect(page.getByRole('button', { name: '添加软件' })).toBeVisible()
   await expect(page.getByRole('button', { name: '新建探针' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '打开词典' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '打开字典' })).toBeVisible()
   await expect(page.getByRole('button', { name: '创建工作流' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '翻译生效后怎么维护' })).toBeVisible()
   await expect(page.getByRole('button', { name: '查看任务' })).toBeVisible()
@@ -346,7 +346,7 @@ test('administrator launch preference persists before elevation and disables wit
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {
@@ -406,4 +406,87 @@ test('compact viewport keeps the application shell bounded', async ({ page }) =>
   }))
   expect(metrics.bodyHeight).toBeLessThanOrEqual(metrics.viewportHeight)
   expect(metrics.bodyWidth).toBeLessThanOrEqual(metrics.viewportWidth)
+})
+
+
+test('AI add action shares its section header', async ({ page }) => {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const section = page.getByTestId('settings-section-ai')
+  await expect(section.locator('header').getByRole('button', { name: '添加 AI 配置' })).toBeVisible()
+  const heading = await section.getByRole('heading').boundingBox()
+  const button = await section.getByRole('button', { name: '添加 AI 配置' }).boundingBox()
+  expect(Math.abs(heading!.y + heading!.height / 2 - button!.y - button!.height / 2)).toBeLessThan(3)
+  if (process.env.GLYPHSHIFT_HEADER_SCREENSHOT) await page.screenshot({ path: process.env.GLYPHSHIFT_HEADER_SCREENSHOT })
+})
+
+
+test('auto fill interval is configured in settings and survives reload', async ({ page }) => {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const input = page.getByRole('spinbutton', { name: '自动补全间隔（秒）' })
+  await expect(input).toHaveValue('10')
+  await input.fill('25')
+  await input.press('Tab')
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(input).toHaveValue('25')
+  await input.fill('0')
+  await input.press('Tab')
+  await expect(input).toHaveValue('0')
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await expect(input).toHaveValue('0')
+  await input.fill('60')
+  await input.press('Tab')
+  await expect(input).toHaveValue('60')
+  await input.fill('61')
+  await input.press('Tab')
+  await expect(input).toHaveValue('60')
+  if (process.env.GLYPHSHIFT_AUTO_SETTINGS_SCREENSHOT) await page.screenshot({ path: process.env.GLYPHSHIFT_AUTO_SETTINGS_SCREENSHOT })
+})
+
+test('help groups current features into cards at desktop and compact sizes', async ({ page }, testInfo) => {
+  await page.getByRole('button', { name: '帮助', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '字典导入、导出与分页' })).toBeVisible()
+  await page.getByRole('tab', { name: 'AI 翻译', exact: true }).click()
+  for (const width of [1280, 800]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(page.getByRole('region', { name: '边玩边自动补全' })).toHaveClass(/help-card/)
+    await expect(page.getByRole('heading', { name: '服务预设与翻译提示词' })).toBeVisible()
+    await expect(page.getByTestId('help-layout')).toBeVisible()
+    expect(await page.getByTestId('help-layout').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`help-${width}.png`) })
+  }
+  await page.getByRole('tab', { name: '故障排查', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '已有译文，界面却没变' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '实验适配器怎么理解' })).toBeVisible()
+})
+
+
+test('data settings open the native dictionary directory and allow retry', async ({ page }, testInfo) => {
+  await page.addInitScript(({ snapshot }) => {
+    let attempts = 0
+    ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
+      if (command === 'desktop_snapshot') return snapshot
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_probe_runs') return []
+      if (command === 'desktop_ai_profiles') return { defaultProfileId: null, profiles: [] }
+      if (command === 'desktop_ai_translation_tasks') return { current: null, history: [] }
+      if (command === 'desktop_open_dictionary_directory') {
+        ;(window as any).__directoryOpenAttempts = ++attempts
+        if (attempts === 1) throw { code: 'data.open_dictionary_failed' }
+      }
+      return null
+    } }
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const section = page.getByTestId('settings-section-data')
+  await section.getByRole('button', { name: '打开字典文件夹', exact: true }).click()
+  await expect(section.getByRole('alert')).toContainText('无法打开字典文件夹')
+  await section.getByRole('button', { name: '打开字典文件夹', exact: true }).click()
+  await expect(section.getByRole('alert')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as any).__directoryOpenAttempts)).toBe(2)
+  await section.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('settings-data.png') })
 })

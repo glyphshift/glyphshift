@@ -24,7 +24,7 @@ test('running workflow opens a bounded local decision diagnostics table', async 
     const internals = {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 32 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_control_workflow_diagnostics') {
           controls.push(Boolean(args?.enabled))
@@ -87,8 +87,8 @@ test('workflow target independently selects adapters dictionaries and one font p
   await expect(dialog.getByText('UI Automation 观察器', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('gdi32.dll!ExtTextOutW')).toHaveCount(0)
 
-  await dialog.getByRole('tab', { name: '翻译词典' }).click()
-  await expect(dialog.getByText('以下词典只应用于 Vector Studio')).toBeVisible()
+  await dialog.getByRole('tab', { name: '翻译字典' }).click()
+  await expect(dialog.getByText('以下字典只应用于 Vector Studio')).toBeVisible()
   await expect(dialog.getByText('界面基础词典', { exact: true })).toBeVisible()
   await expect(dialog.getByRole('button', { name: '提高 界面基础词典 的优先级' })).toBeDisabled()
 
@@ -147,8 +147,8 @@ test('new workflow selects a searched font by clicking its visible row', async (
 
   await dialog.getByRole('tab', { name: '软件与兼容方式' }).click()
   await dialog.getByRole('checkbox', { name: '选择兼容方式 传统 Windows 文字（高级）' }).click()
-  await dialog.getByRole('tab', { name: '翻译词典' }).click()
-  await dialog.getByRole('checkbox', { name: '选择词典 界面基础词典' }).click()
+  await dialog.getByRole('tab', { name: '翻译字典' }).click()
+  await dialog.getByRole('checkbox', { name: '选择字典 界面基础词典' }).click()
   await dialog.getByRole('tab', { name: '基础配置' }).click()
   await dialog.getByTestId('workflow-basic-tab').locator('input').fill('字体选择工作流')
   await dialog.getByRole('button', { name: '创建工作流' }).click()
@@ -245,7 +245,7 @@ test('workflow editor uses a left section rail for four focused large-catalog vi
   await expect(softwareCatalog.getByText('Batch Studio 10', { exact: true })).toBeVisible()
   await expect(dialog.getByTestId('workflow-adapter-config')).toBeVisible()
 
-  await dialog.getByRole('tab', { name: '翻译词典' }).click()
+  await dialog.getByRole('tab', { name: '翻译字典' }).click()
   await expect.poll(() => dialog.evaluate(element => Math.round(element.getBoundingClientRect().height))).toBe(initialEditorHeight)
   const targetSelect = dialog.getByRole('button', { name: '当前软件目标' })
   await targetSelect.click()
@@ -253,7 +253,7 @@ test('workflow editor uses a left section rail for four focused large-catalog vi
   await page.keyboard.press('Escape')
   const dictionaryCatalog = dialog.getByTestId('workflow-dictionary-catalog')
   await expect.poll(() => dictionaryCatalog.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
-  await dialog.getByPlaceholder('搜索词典').fill('批量词典 100')
+  await dialog.getByPlaceholder('搜索字典').fill('批量词典 100')
   await expect(dialog.getByText('批量词典 100', { exact: true })).toBeVisible()
 
   await dialog.getByRole('tab', { name: '字体策略' }).click()
@@ -269,12 +269,12 @@ test('workflow saves reordered dictionaries in explicit priority order', async (
   await replaceModel(page, expandedModel())
   await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
   let dialog = workflowEditor(page)
-  await dialog.getByRole('tab', { name: '翻译词典' }).click()
-  await dialog.getByRole('checkbox', { name: '选择词典 效果词典' }).click()
+  await dialog.getByRole('tab', { name: '翻译字典' }).click()
+  await dialog.getByRole('checkbox', { name: '选择字典 效果词典' }).click()
   await dialog.getByRole('button', { name: '提高 效果词典 的优先级' }).click()
   await dialog.getByRole('button', { name: '保存工作流' }).click()
 
-  await expect(dialog.getByRole('tab', { name: '翻译词典' })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog.getByRole('tab', { name: '翻译字典' })).toHaveAttribute('aria-selected', 'true')
   const priorityItems = dialog.getByTestId('workflow-dictionary-catalog').locator('[data-dictionary-id]')
   await expect(priorityItems.nth(0)).toHaveAttribute('data-dictionary-id', 'dictionary-effects')
   await expect(priorityItems.nth(0)).toContainText('优先级 1')

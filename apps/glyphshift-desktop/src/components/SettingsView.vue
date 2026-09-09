@@ -1,17 +1,42 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { invoke } from '@tauri-apps/api/core'
 import {
   useAppSettings,
   type CloseBehavior,
   type LocalePreference,
   type ThemePreference,
 } from '../appSettings'
+import TextFilterSettings from './TextFilterSettings.vue'
 import AiProfilesPanel from './AiProfilesPanel.vue'
+import { useAppUpdate } from '../useAppUpdate'
+import { version as appVersion } from '../../package.json'
 import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
 
+const aiProfilesPanel = ref<InstanceType<typeof AiProfilesPanel>>()
 const { t } = useI18n()
 const appSettings = useAppSettings()
+const appUpdate = useAppUpdate()
+const openingDictionaryDirectory = ref(false)
+const dictionaryDirectoryError = ref('')
+async function openDictionaryDirectory() {
+  if (openingDictionaryDirectory.value) return
+  openingDictionaryDirectory.value = true
+  dictionaryDirectoryError.value = ''
+  try {
+    await invoke('desktop_open_dictionary_directory')
+  } catch {
+    dictionaryDirectoryError.value = t('settings.data.openFailed')
+  } finally {
+    openingDictionaryDirectory.value = false
+  }
+}
+async function updateAutoInterval(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.value.trim()) await appSettings.setAutoCompleteIntervalSeconds(Number(input.value))
+  input.value = String(appSettings.settings.value.autoCompleteIntervalSeconds)
+}
 
 type ShortcutTarget = 'softwareCapture'
 type ShortcutStatus = 'idle' | 'checking' | 'conflict' | 'invalid' | 'failed' | 'saved'
@@ -65,7 +90,7 @@ function visibleShortcutParts(target: ShortcutTarget) {
 
 function shortcutStatusMessage(target: ShortcutTarget) {
   if (shortcutStatusTarget.value !== target) {
-    return t('settings.shortcutCurrent', { shortcut: currentShortcutDisplay(target) })
+    return ''
   }
   const candidate = displayShortcut(shortcutPreview.value)
   switch (shortcutStatus.value) {
@@ -76,7 +101,7 @@ function shortcutStatusMessage(target: ShortcutTarget) {
     case 'saved': return t('settings.shortcutSaved', { shortcut: currentShortcutDisplay(target) })
     default: return shortcutRecording.value === target
       ? t('settings.shortcutCancelHint')
-      : t('settings.shortcutCurrent', { shortcut: currentShortcutDisplay(target) })
+      : ''
   }
 }
 
@@ -249,13 +274,32 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
+        <ManagementFormSection :title="t('updates.title')">
+          <ManagementFormRow :label="t('updates.autoCheck')" :description="t('updates.autoHint')" icon="i-tabler-refresh" control-width="compact">
+            <USwitch :model-value="appSettings.settings.value.checkUpdatesOnStartup" :aria-label="t('updates.autoCheck')" :disabled="appSettings.settingsBusy.value" @update:model-value="appSettings.setCheckUpdatesOnStartup" />
+          </ManagementFormRow>
+          <ManagementFormRow :label="t('updates.current', { version: appVersion })" icon="i-tabler-info-circle" control-width="compact">
+            <div class="space-y-2">
+              <UButton color="neutral" variant="outline" :label="t('updates.check')" :loading="appUpdate.checking.value" @click="appUpdate.check(true)" />
+              <p v-if="appUpdate.status.value !== 'idle'" role="status" class="type-metadata m-0">{{ t('updates.' + appUpdate.status.value + 'Status') }}</p>
+            </div>
+          </ManagementFormRow>
+        </ManagementFormSection>
+
         <ManagementFormSection
           data-testid="settings-section-ai"
           :title="t('settings.aiTranslation.title')"
         >
-          <AiProfilesPanel />
+          <template #actions>
+            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" @click="aiProfilesPanel?.openCreate()" />
+          </template>
+          <AiProfilesPanel ref="aiProfilesPanel" :show-create="false" />
+          <ManagementFormRow :label="t('ai.autoInterval')" :help="t('ai.autoIntervalHint')" icon="i-tabler-clock" control-width="compact">
+            <UInput :model-value="appSettings.settings.value.autoCompleteIntervalSeconds" type="number" min="0" max="60" step="1" :aria-label="t('ai.autoInterval')" :disabled="appSettings.settingsBusy.value" class="w-full" @change="updateAutoInterval" />
+          </ManagementFormRow>
         </ManagementFormSection>
 
+        <TextFilterSettings />
         <ManagementFormSection :title="t('settings.shortcuts')" :description="t('settings.shortcutsDescription')">
           <ManagementFormRow
             v-for="row in shortcutRows"
@@ -297,11 +341,18 @@ onBeforeUnmount(() => {
                   aria-hidden="true"
                 />
               </UButton>
-              <p class="type-metadata m-0 leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
+              <p v-if="shortcutStatusMessage(row.target)" class="type-metadata m-0 leading-4" :class="shortcutStatusClass(row.target)" aria-live="polite">
                 {{ shortcutStatusMessage(row.target) }}
               </p>
             </div>
           </ManagementFormRow>
+        </ManagementFormSection>
+
+        <ManagementFormSection data-testid="settings-section-data" :title="t('settings.data.title')">
+          <ManagementFormRow :label="t('settings.data.dictionaries')" :description="t('settings.data.description')" icon="i-tabler-folder" control-width="compact">
+            <UButton color="neutral" variant="outline" icon="i-tabler-folder-open" :label="t('settings.data.open')" :title="t('settings.data.open')" :loading="openingDictionaryDirectory" @click="openDictionaryDirectory" />
+          </ManagementFormRow>
+          <p v-if="dictionaryDirectoryError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ dictionaryDirectoryError }}</p>
         </ManagementFormSection>
 
         <ManagementFormSection

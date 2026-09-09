@@ -49,6 +49,8 @@ export type SoftwareQuickCaptureEvent
     | { state: 'failed'; shortcut: string; errorCode: string }
 
 export interface DictionaryMetadata {
+  fontFamilies?: string[]
+  fontScalePercent?: number | null
   id: string
   releaseVersion: string
   name: string
@@ -141,6 +143,7 @@ export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
 export type ProbeRuntimeCapability = 'direct_replace' | 'collection_only' | 'no_signal'
 
 export interface ProbeRunSummary {
+  workflowId?: string | null
   excludedDictionaryIds?: string[]
   exclusionRevisions?: number[]
   id: string
@@ -198,6 +201,8 @@ export interface WorkflowAdapterPlan {
 export type FontCoverage = 'dictionary_matches' | 'all_observations'
 
 export interface WorkflowFontPolicy {
+  preferDictionary?: boolean
+  scalePercent?: number
   families: string[]
   coverage: FontCoverage
 }
@@ -206,6 +211,7 @@ export interface WorkflowTarget {
   softwareId: string
   adapterPlan: WorkflowAdapterPlan
   dictionaryIds: string[]
+  writeDictionaryId?: string | null
   fontPolicy: WorkflowFontPolicy | null
 }
 
@@ -283,7 +289,7 @@ export interface WorkflowRuntimeDiagnostics {
 export interface ArtifactWarning {
   artifactKind: 'dictionary' | 'workflow'
   artifactId: string
-  issue: 'invalid' | 'unreadable' | 'invalid_identity' | 'migration_write_failed' | 'duplicate_identity' | 'disabled_invalid_dependency'
+  issue: 'invalid_runtime' | 'invalid' | 'unreadable' | 'invalid_identity' | 'migration_write_failed' | 'duplicate_identity' | 'disabled_invalid_dependency'
 }
 
 export interface DesktopSnapshot {

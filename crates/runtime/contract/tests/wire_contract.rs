@@ -28,7 +28,7 @@ fn rtp_001_round_trips_route_translations_context_and_font_without_machine_data(
         .expect("an encoded runtime publication should decode");
 
     assert_eq!(decoded, publication);
-    assert!(encoded.contains("glyphshift.runtime/2"));
+    assert!(encoded.contains("glyphshift.runtime/3"));
     assert!(encoded.contains("adapter_ids"));
     assert!(!encoded.contains("local-test"));
     assert!(!encoded.contains("process_id"));
@@ -125,4 +125,43 @@ fn runtime_publication_identity_covers_route_translation_and_font_content() {
     assert_ne!(changed_translation.identity(), Ok(identity));
     assert_ne!(changed_font.identity(), Ok(identity));
     assert_ne!(identity.as_bytes(), [0; 32]);
+}
+
+#[test]
+fn font_scaling_round_trips_and_invalid_percentages_are_rejected() {
+    let publication = RuntimePublication::new(
+        RouteProgram::direct("menu"),
+        TranslationSnapshot::empty(Generation::new(1)),
+        FontPolicy::empty()
+            .with_location_rule_for_adapters(
+                "menu",
+                FontRule::Scaled {
+                    family: None,
+                    percent: 150,
+                },
+                ["scale"],
+            )
+            .with_entry_for_adapter(
+                "menu",
+                "Open",
+                "family",
+                FontRule::Scaled {
+                    family: Some("Sans".into()),
+                    percent: 75,
+                },
+            ),
+    );
+    let json = publication.encode_json().unwrap();
+    let restored = RuntimePublication::decode_json(&json).unwrap();
+    assert_eq!(publication, restored);
+    assert!(RuntimePublication::decode_json(&json.replace("150", "0")).is_err());
+    assert_ne!(
+        publication.identity(),
+        RuntimePublication::new(
+            RouteProgram::direct("menu"),
+            TranslationSnapshot::empty(Generation::new(1)),
+            FontPolicy::empty()
+        )
+        .identity()
+    );
 }

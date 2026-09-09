@@ -241,7 +241,7 @@ impl GdiPlusInlineAdapter {
                 prepared.font.family = family.as_ref().into();
                 prepared.original = false;
             }
-            FontDecision::Keep | FontDecision::Substitute(_) => {}
+            FontDecision::Keep | FontDecision::Substitute(_) | FontDecision::Scaled { .. } => {}
         }
         original(prepared)
     }

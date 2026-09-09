@@ -13,3 +13,15 @@ export function mergeDictionaryEntries(existing: DictionaryEntry[], incoming: Di
   }
   return [...entries.values()]
 }
+
+// File order decides conflicting non-empty translations; empty values never erase them.
+export function combineImportEntries(files: DictionaryEntry[][], priority: 'first' | 'last'): DictionaryEntry[] {
+  const entries = new Map<string, DictionaryEntry>()
+  for (const file of files) for (const entry of file) {
+    const old = entries.get(entry.source)
+    if (!old || (!old.translation.trim() && entry.translation.trim()) || (priority === 'last' && entry.translation.trim())) {
+      entries.set(entry.source, { ...entry })
+    }
+  }
+  return [...entries.values()]
+}

@@ -1859,6 +1859,8 @@ dependencies = [
  "glyphshift-runtime-contract",
  "glyphshift-translation",
  "glyphshift-workflow",
+ "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

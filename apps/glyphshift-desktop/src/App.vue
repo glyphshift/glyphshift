@@ -10,7 +10,7 @@ import DictionaryProof from './components/DictionaryProof.vue'
 import CaptureView from './components/CaptureView.vue'
 import HelpView from './components/HelpView.vue'
 import SettingsView from './components/SettingsView.vue'
-import SoftwareTable from './components/SoftwareTable.vue'
+import AppUpdateNotice from './components/AppUpdateNotice.vue'
 import TitleBar from './components/TitleBar.vue'
 import TranslationTasksView from './components/TranslationTasksView.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
@@ -23,7 +23,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 32
+const desktopApiVersion = 35
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -31,6 +31,8 @@ const workspace = useWorkspace()
 const probe = useProbeRuns()
 const ai = useAiTranslation()
 const view = ref<View>('workflows')
+const collectionWorkflowId = ref<string | null>(null)
+const returnToCollectionId = ref<string | null>(null)
 const editorDirty = ref(false)
 const pendingExit = ref<NavigableView | 'close' | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
@@ -47,9 +49,46 @@ const translationTaskProgress = computed(() => {
 let unlistenSoftwareCapture: UnlistenFn | null = null
 let unlistenWorkflowShortcut: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
+let workflowMonitor: ReturnType<typeof setInterval> | undefined
+
+async function openWorkflowCollection(id: string) {
+  if (probe.busy.value) return
+  const workflow = workspace.model.value.workflows.find(item => item.id === id)
+  workspace.messages.value = { ...workspace.messages.value, [id]: '' }
+  if (!workflow?.targets[0]?.writeDictionaryId) {
+    await openWorkflow(id)
+    returnToCollectionId.value = id
+    workspace.messages.value = { ...workspace.messages.value, [id]: t('workflows.collectionNeedsWriter') }
+    return
+  }
+  if (await probe.openWorkflow(id)) {
+    workspace.workflowDetail.value = null
+    returnToCollectionId.value = null
+    editorDirty.value = false
+    collectionWorkflowId.value = id
+    view.value = 'capture'
+    focusMainContent()
+  }
+  else {
+    workspace.messages.value = { ...workspace.messages.value, [id]: probe.message.value || t('workflows.collectionOpenFailed') }
+  }
+}
 
 async function openWorkflow(id: string) {
   await workspace.loadWorkflow(id)
+  if (workspace.workflowDetail.value?.id === id) {
+    returnToCollectionId.value = view.value === 'capture' ? id : null
+    view.value = 'workflows'
+  }
+}
+
+async function closeWorkflowSettings() {
+  const id = returnToCollectionId.value
+  workspace.workflowDetail.value = null
+  returnToCollectionId.value = null
+  if (id && workspace.model.value.workflows.find(item => item.id === id)?.targets[0]?.writeDictionaryId) {
+    await openWorkflowCollection(id)
+  }
 }
 
 async function openDictionary(id: string) {
@@ -60,12 +99,14 @@ async function openDictionary(id: string) {
 }
 
 function requestNavigation(next: NavigableView) {
+  if (next === 'capture' || next === 'software') next = 'workflows'
   if (next === view.value) return
   if (editorDirty.value) {
     pendingExit.value = next
     return
   }
   editorDirty.value = false
+  collectionWorkflowId.value = null
   view.value = next
 }
 
@@ -142,12 +183,15 @@ function handleShellShortcut(event: KeyboardEvent) {
 }
 
 async function createWorkflow(name: string, description: string, targets: WorkflowTarget[], globalShortcut: string, done: (saved: boolean) => void) {
-  done(await workspace.createWorkflow(name, description, targets, globalShortcut))
+  const id = await workspace.createWorkflow(name, description, targets, globalShortcut)
+  done(Boolean(id))
+  if (id) await openWorkflowCollection(id)
 }
 
 async function saveWorkflow(detail: WorkflowDetail, done: (saved: boolean) => void) {
   const saved = await workspace.saveWorkflow(detail)
   done(saved)
+  if (saved && returnToCollectionId.value === detail.id) await openWorkflowCollection(detail.id)
 }
 
 async function connectDesktopShell() {
@@ -177,7 +221,7 @@ function receiveSoftwareQuickCapture(event: SoftwareQuickCaptureEvent) {
     if (event.state === 'captured') quickProbeCaptureActive.value = false
     requestNavigation('capture')
   }
-  else requestNavigation('software')
+  else requestNavigation('workflows')
 }
 
 async function armQuickProbeCapture() {
@@ -232,6 +276,11 @@ async function connectWorkflowShortcuts() {
 }
 
 onMounted(() => {
+  if ('__TAURI_INTERNALS__' in window) {
+    workflowMonitor = setInterval(() => {
+      if (workspace.activationIds.value.size && !workspace.workspaceBusy.value) void workspace.refreshWorkflows()
+    }, 5000)
+  }
   window.addEventListener('beforeunload', guardBrowserExit)
   window.addEventListener('keydown', handleShellShortcut)
   void connectDesktopShell()
@@ -251,6 +300,7 @@ watch(() => ai.currentJob.value?.appliedCount, async (value, previous) => {
 })
 
 onBeforeUnmount(() => {
+  if (workflowMonitor) clearInterval(workflowMonitor)
   window.removeEventListener('beforeunload', guardBrowserExit)
   window.removeEventListener('keydown', handleShellShortcut)
   window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
@@ -274,13 +324,14 @@ onBeforeUnmount(() => {
         <span class="type-caption ml-2 font-normal text-[var(--text-muted)]" aria-hidden="true">Alt+M</span>
       </a>
       <TitleBar
-        :current="view"
+        :current="view === 'capture' && collectionWorkflowId ? 'workflows' : view"
         :probe-activity-status="probe.activityStatus.value"
         :translation-task-active="ai.taskRunning.value"
         :translation-task-progress="translationTaskProgress"
         @navigate="requestNavigation"
         @close="requestWindowClose"
       />
+      <AppUpdateNotice />
       <main id="main-content" ref="mainContent" tabindex="-1" class="flex min-h-0 flex-1 overflow-hidden outline-none" :aria-label="t('app.mainContent')">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <h1 class="sr-only">{{ t('app.desktopReloadTitle') }}</h1>
@@ -311,34 +362,17 @@ onBeforeUnmount(() => {
         @refresh="workspace.refreshWorkflows"
         @refresh-fonts="workspace.refreshFontFamilies"
         @open="openWorkflow"
+        @collect="openWorkflowCollection"
         @create="createWorkflow"
         @save="saveWorkflow"
-        @close-edit="workspace.workflowDetail.value = null"
+        @close-edit="closeWorkflowSettings"
         @copy="workspace.copyWorkflow"
         @remove="workspace.removeWorkflows"
         @toggle-many="workspace.setWorkflowsEnabled"
         @navigate="requestNavigation"
         @dirty-change="editorDirty = $event"
       />
-      <SoftwareTable
-        v-else-if="view === 'software'"
-        :items="workspace.model.value.software"
-        :busy="workspace.softwareBusy.value"
-        :messages="workspace.messages.value"
-        :preflight="workspace.softwarePreflight.value"
-        :preflight-busy="workspace.softwarePreflightBusy.value"
-        :capture-armed="workspace.softwareCaptureArmed.value"
-        :capture-shortcut="workspace.softwareCaptureShortcut.value"
-        :capture-result="workspace.softwareCaptureResult.value"
-        @add="workspace.addSoftware"
-        @validate="workspace.validateSoftware"
-        @clear-preflight="workspace.clearSoftwarePreflight"
-        @arm-capture="workspace.armSoftwareCapture"
-        @cancel-capture="workspace.cancelSoftwareCapture"
-        @update-software="workspace.updateSoftware"
-        @remove="workspace.removeSoftware"
-        @dirty-change="editorDirty = $event"
-      />
+
       <DictionaryLibrary
         v-else-if="view === 'dictionaries'"
         :items="workspace.model.value.dictionaries"
@@ -351,7 +385,6 @@ onBeforeUnmount(() => {
         :artifact-warnings="workspace.model.value.artifactWarnings"
         @open="openDictionary"
         @create="workspace.createDictionary"
-        @export-dictionary="workspace.exportDictionary"
         @remove="workspace.removeDictionaries"
         @query-catalog="workspace.queryDictionaryCatalog"
         @install-catalog="workspace.installDictionaryRelease"
@@ -367,7 +400,10 @@ onBeforeUnmount(() => {
         @dirty-change="editorDirty = $event"
       />
       <CaptureView
-        v-else-if="view === 'capture'"
+        v-else-if="view === 'capture' && collectionWorkflowId"
+        :workflow-id="collectionWorkflowId"
+          @workflow-settings="openWorkflow(collectionWorkflowId)"
+        @back-workflow="collectionWorkflowId = null; view = 'workflows'; workspace.refreshWorkflows()"
         :software="workspace.model.value.software"
         :dictionaries="workspace.model.value.dictionaries"
         :adapters="workspace.model.value.adapters"

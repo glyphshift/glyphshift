@@ -534,3 +534,90 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         vec![Box::<str>::from("workflow.product")]
     );
 }
+
+#[test]
+fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
+    let (mut app, calls, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.writer", "Writer", "en-US", "zh-CN")).unwrap();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.pending", "Pending", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Owned elsewhere", "")])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.collect", "Collect").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer", "dictionary.pending"])
+            .with_write_dictionary("dictionary.writer"),
+    ])).unwrap();
+    let ready = app.workflow_collection_view("workflow.collect").unwrap();
+    assert_eq!(ready.summary.status(), ProbeRunStatus::Ready);
+    app.resume_probe_run(ready.summary.id()).unwrap();
+    let run = app.probe_runs.summary("collection-workflow.collect-0").unwrap();
+    assert_eq!(run.dictionary_id(), "dictionary.writer");
+    assert_eq!(run.excluded_dictionary_ids(), &[Box::<str>::from("dictionary.pending")]);
+    assert_eq!(run.status(), ProbeRunStatus::Running);
+    assert!(calls.lock().unwrap().captures_started.is_empty());
+    assert_eq!(run.workflow_id(), Some("workflow.collect"));
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Owned elsewhere");
+    sink.observe(TEST_ADAPTER_ID, "New source");
+    sink.finish().unwrap();
+    app.refresh_workflows().unwrap();
+    app.probe_run_summary(run.id()).unwrap();
+    let paused = app.set_probe_run_paused(run.id(), true).unwrap();
+    assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
+    assert!(app.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == "workflow.collect"));
+    assert_eq!(app.set_probe_run_paused(run.id(), false).unwrap().summary.status(), ProbeRunStatus::Running);
+    app.refresh_probe_text(run.id()).unwrap();
+    assert_eq!(calls.lock().unwrap().capture_publications.len(), 1);
+    let writer = app.backend.dictionary("dictionary.writer").unwrap();
+    assert_eq!(writer.entries().len(), 1);
+    assert_eq!(writer.entries()[0].source(), "New source");
+    assert!(writer.entries()[0].translation().is_empty());
+    app.edit_probe_translation(ProbeTranslationEditRequest {
+        run_id: run.id().into(), source: "New source".into(), translation: "Translated source".into(),
+    }).unwrap();
+    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries()[0].translation(), "Translated source");
+    assert!(!calls.lock().unwrap().refreshed.is_empty());
+    let current = app.backend.workflow("workflow.collect").unwrap();
+    assert!(app.backend.update_workflow(WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+        WorkflowTargetCreate::new(run.software_id(), [TEST_ADAPTER_ID], ["dictionary.writer", "dictionary.pending"])
+            .with_write_dictionary("dictionary.pending"),
+    ])).is_err());
+    assert_eq!(app.backend.workflow("workflow.collect").unwrap().targets()[0].write_dictionary_id(), Some("dictionary.writer"));
+    app.disconnect_probe_run(run.id()).unwrap();
+    assert_eq!(app.probe_runs.summary(run.id()).unwrap().status(), ProbeRunStatus::Ready);
+    assert!(app.refresh_probe_text(run.id()).is_err());
+    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries().len(), 1);
+    let current = app.backend.workflow("workflow.collect").unwrap();
+    app.backend.update_workflow(WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+        WorkflowTargetCreate::new(run.software_id(), [TEST_ADAPTER_ID], ["dictionary.pending"]).with_write_dictionary("dictionary.pending"),
+    ])).unwrap();
+    let switched = app.workflow_collection_view("workflow.collect").unwrap();
+    assert_ne!(switched.summary.id(), run.id());
+    assert_eq!(app.backend.dictionary("dictionary.pending").unwrap().entries().len(), 1);
+    assert_eq!(app.probe_runs.summary(run.id()).unwrap().dictionary_id(), "dictionary.writer");
+    app.delete_workflows(&["workflow.collect".into()]).unwrap();
+    assert!(!app.probe_runs.list().unwrap().iter().any(|record| record.workflow_id() == Some("workflow.collect")));
+    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries().len(), 1);
+}
+
+#[test]
+fn workflow_collection_start_reports_runtime_failure() {
+    let (mut app, _calls, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.writer", "Writer", "en-US", "zh-CN")).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.collect", "Collect").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer"])
+            .with_write_dictionary("dictionary.writer"),
+    ])).unwrap();
+    let ready = app.workflow_collection_view("workflow.collect").unwrap();
+    app.runtimes = None;
+    let result = app.resume_probe_run(ready.summary.id());
+    assert!(result.is_err(), "Start must report an unavailable runtime instead of returning the unchanged ready record");
+    assert_eq!(serde_json::to_value(result.err().unwrap()).unwrap()["code"], "runtime.bundle_unavailable");
+}
+
+#[test]
+fn missing_software_binding_has_a_specific_repair_message() {
+    let error = serde_json::to_value(workflow_activation_command_error(
+        BackendError::SoftwareBindingMissing("software.synthetic".into()),
+    )).unwrap();
+    assert_eq!(error["code"], "software.binding_missing");
+    assert_eq!(error["args"]["softwareId"], "software.synthetic");
+}

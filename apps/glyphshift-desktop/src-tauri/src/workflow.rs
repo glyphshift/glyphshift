@@ -1,7 +1,16 @@
 use super::*;
 
+fn workflow_update_error(error: BackendError) -> CommandError {
+    match error {
+        BackendError::InvalidArtifact("workflow-collection-active") => CommandError::new("workflow.stop_before_edit"),
+        _ => CommandError::new("workflow.invalid_update"),
+    }
+}
+
 pub(super) fn workflow_activation_command_error(error: BackendError) -> CommandError {
     match error {
+        BackendError::SoftwareBindingMissing(id) => CommandError::new("software.binding_missing")
+            .with_arg("softwareId", id.to_string()),
         BackendError::WorkflowRejected(ResolveError::NoEffectiveRules { software_id }) => {
             CommandError::new("workflow.no_effective_rules")
                 .with_arg("softwareId", software_id.to_string())
@@ -34,6 +43,8 @@ pub(super) fn workflow_activation_command_error(error: BackendError) -> CommandE
             CommandError::new("workflow.font_unavailable")
                 .with_arg("softwareId", software_id.to_string())
         }
+        BackendError::WorkflowRejected(ResolveError::FeatureUnavailable { feature: Feature::FontScale, .. }) => CommandError::new("workflow.font_scale_unavailable"),
+        BackendError::WorkflowRejected(ResolveError::InvalidFontScale { .. }) => CommandError::new("workflow.invalid_font_scale"),
         BackendError::WorkflowRejected(ResolveError::FeatureUnavailable {
             software_id,
             feature,
@@ -135,7 +146,7 @@ impl DesktopApplication {
         let workflow_id = self
             .backend
             .update_workflow(edit)
-            .map_err(|_| CommandError::new("workflow.invalid_update"))?
+            .map_err(workflow_update_error)?
             .id()
             .to_owned();
         self.reconcile_workflow_if_enabled(&workflow_id)?;
@@ -158,11 +169,18 @@ impl DesktopApplication {
         &mut self,
         workflow_ids: &[Box<str>],
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        let records = self.probe_runs.list().map_err(crate::probe::probe_run_error)?.into_iter()
+            .filter(|record| record.workflow_id().is_some_and(|owner| workflow_ids.iter().any(|id| id.as_ref() == owner)))
+            .collect::<Vec<_>>();
+        for record in &records { self.ensure_ai_dictionary_writable(record.dictionary_id())?; }
         self.backend
             .delete_workflows(workflow_ids.iter().map(AsRef::as_ref))
             .map_err(|_| CommandError::new("workflow.enabled_delete"))?;
         for workflow_id in workflow_ids {
             self.workflow_runtime_status.remove(workflow_id.as_ref());
+        }
+        for record in records {
+            self.probe_runs.delete(record.id()).map_err(crate::probe::probe_run_error)?;
         }
         Ok(self.snapshot())
     }
@@ -179,6 +197,7 @@ impl DesktopApplication {
         {
             return Ok(());
         }
+        self.prepare_workflow_collection(workflow_id)?;
         let intent = match self.backend.effective_workflow_intent(workflow_id) {
             Ok(intent) => intent,
             Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))) => {
@@ -188,7 +207,7 @@ impl DesktopApplication {
                 self.workflow_runtime_status.remove(workflow_id);
                 return Ok(());
             }
-            Err(_) => return Err(CommandError::new("workflow.reconcile_invalid")),
+            Err(error) => return Err(workflow_activation_command_error(error)),
         };
         let runtime = self.runtimes.as_mut().map_or_else(
             || unavailable_workflow_runtime_view(&intent, true),
@@ -196,6 +215,7 @@ impl DesktopApplication {
         );
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime);
+        self.update_workflow_collection_status(workflow_id, true)?;
         Ok(())
     }
 
@@ -227,13 +247,18 @@ impl DesktopApplication {
             let intent = self
                 .backend
                 .effective_workflow_intent(&workflow_id)
-                .map_err(|_| CommandError::new("workflow.refresh_invalid"))?;
+                .map_err(workflow_activation_command_error)?;
             let runtime = self.runtimes.as_mut().map_or_else(
                 || unavailable_workflow_runtime_view(&intent, true),
                 |runtimes| runtimes.refresh_workflow(&intent),
             );
             self.workflow_runtime_status
-                .insert(workflow_id.into(), runtime);
+                .insert(workflow_id.clone().into(), runtime);
+            self.update_workflow_collection_status(&workflow_id, true)?;
+            let records = self.probe_runs.list().map_err(crate::probe::probe_run_error)?;
+            for record in records.into_iter().filter(|record| record.workflow_id() == Some(workflow_id.as_str())) {
+                self.collect_workflow_sources(record.id())?;
+            }
         }
         Ok(self.snapshot())
     }
@@ -318,6 +343,7 @@ impl DesktopApplication {
         workflow_id: &str,
         replace_conflicts: bool,
     ) -> Result<WorkflowCommandResult, CommandError> {
+        self.prepare_workflow_collection(workflow_id)?;
         let intent = self
             .backend
             .effective_workflow_intent(workflow_id)
@@ -347,6 +373,7 @@ impl DesktopApplication {
         });
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
+        self.update_workflow_collection_status(workflow_id, true)?;
         Ok(WorkflowCommandResult {
             definition,
             activation: WorkflowActivationView {
@@ -378,6 +405,7 @@ impl DesktopApplication {
             .map_err(|_| CommandError::new("workflow.invalid"))?;
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
+        self.update_workflow_collection_status(workflow_id, false)?;
         Ok(WorkflowCommandResult {
             definition,
             activation: WorkflowActivationView {
@@ -637,11 +665,11 @@ fn target_runtime_view(
         discovered: runtime.is_some_and(|runtime| runtime.targets().next().is_some()),
         active: runtime.is_some_and(DesktopRuntimeStatus::is_active),
         translation_requested: requested(Feature::TextReplace),
-        font_requested: requested(Feature::FontSubstitute),
+        font_requested: requested(Feature::FontSubstitute) || requested(Feature::FontScale),
         translation_active: runtime
             .is_some_and(|runtime| runtime.is_feature_active(Feature::TextReplace)),
         font_active: runtime
-            .is_some_and(|runtime| runtime.is_feature_active(Feature::FontSubstitute)),
+            .is_some_and(|runtime| (runtime.is_feature_active(Feature::FontSubstitute) || runtime.is_feature_active(Feature::FontScale))),
         applied_generation: runtime
             .and_then(DesktopRuntimeStatus::applied_generation)
             .map(glyphshift_domain::Generation::value),
@@ -688,7 +716,7 @@ pub(super) fn desktop_update_workflow(
             .map_err(|_| workspace_unavailable())?
             .backend
             .update_workflow(edit)
-            .map_err(|_| CommandError::new("workflow.invalid_update"))
+            .map_err(workflow_update_error)
     })?;
     let mut application = application.lock().map_err(|_| workspace_unavailable())?;
     application.reconcile_workflow_if_enabled(&id)?;
