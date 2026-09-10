@@ -11,6 +11,7 @@ import {
   type DictionaryInstallationSummary,
   type SoftwarePreflight,
   type WorkflowDetail,
+  type WorkflowRuntimeStatus,
 } from '../model'
 
 export function hasDesktopRuntime() {
@@ -82,8 +83,25 @@ watch(model, (value) => {
   if (!hasDesktopRuntime()) localStorage.setItem(STORAGE_KEY, JSON.stringify(value))
 }, { deep: true })
 
+export function applyWorkflowRuntime(runtime: WorkflowRuntimeStatus) {
+  const current = model.value.workflowRuntimeStatus[runtime.workflowId]
+  if ((current?.revision ?? 0) > (runtime.revision ?? 0)) return false
+  model.value.workflowRuntimeStatus[runtime.workflowId] = runtime
+  if (runtime.lifecycle) {
+    const activations = model.value.activations.filter(item => item.workflowId !== runtime.workflowId)
+    if (runtime.lifecycle.enabled) activations.push({ workflowId: runtime.workflowId, revision: model.value.workflows.find(item => item.id === runtime.workflowId)?.revision ?? 0 })
+    model.value.activations = activations
+  }
+  return true
+}
 export function applyDesktopSnapshot(snapshot: DesktopSnapshot) {
-  model.value = normalizeDictionaryInstallations({ ...model.value, ...snapshot })
+  const previous = model.value.workflowRuntimeStatus
+  const runtimes = { ...snapshot.workflowRuntimeStatus }
+  for (const [id, runtime] of Object.entries(previous)) {
+    if (snapshot.workflows.some(item => item.id === id) && (runtime.revision ?? 0) > (runtimes[id]?.revision ?? 0)) runtimes[id] = runtime
+  }
+  model.value = normalizeDictionaryInstallations({ ...model.value, ...snapshot, workflowRuntimeStatus: runtimes })
+  for (const runtime of Object.values(runtimes)) applyWorkflowRuntime(runtime)
 }
 
 export function setMessage(id: string, message: string) {

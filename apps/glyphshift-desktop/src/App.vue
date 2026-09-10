@@ -49,6 +49,8 @@ const translationTaskProgress = computed(() => {
 let unlistenSoftwareCapture: UnlistenFn | null = null
 let unlistenWorkflowShortcut: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
+let collectionMonitor: ReturnType<typeof setInterval> | undefined
+let collecting = false
 let workflowMonitor: ReturnType<typeof setInterval> | undefined
 
 async function openWorkflowCollection(id: string) {
@@ -100,6 +102,7 @@ async function openDictionary(id: string) {
 
 function requestNavigation(next: NavigableView) {
   if (next === 'capture' || next === 'software') next = 'workflows'
+  if (next === 'workflows') void workspace.refreshWorkflows(false)
   if (next === view.value) return
   if (editorDirty.value) {
     pendingExit.value = next
@@ -275,10 +278,20 @@ async function connectWorkflowShortcuts() {
   } catch { /* Shortcuts are available only in the native desktop. */ }
 }
 
+function refreshOnFocus() { if ('__TAURI_INTERNALS__' in window) void workspace.refreshWorkflows(false) }
+
 onMounted(() => {
+  window.addEventListener('focus', refreshOnFocus)
   if ('__TAURI_INTERNALS__' in window) {
+    collectionMonitor = setInterval(async () => {
+      if (collecting) return
+      collecting = true
+      try { await invoke('desktop_collect_workflow_sources') }
+      catch (error) { probe.report(error) }
+      finally { collecting = false }
+    }, 1000)
     workflowMonitor = setInterval(() => {
-      if (workspace.activationIds.value.size && !workspace.workspaceBusy.value) void workspace.refreshWorkflows()
+      if (workspace.activationIds.value.size && !workspace.workspaceBusy.value) void workspace.refreshWorkflows(false)
     }, 5000)
   }
   window.addEventListener('beforeunload', guardBrowserExit)
@@ -300,7 +313,9 @@ watch(() => ai.currentJob.value?.appliedCount, async (value, previous) => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', refreshOnFocus)
   if (workflowMonitor) clearInterval(workflowMonitor)
+  if (collectionMonitor) clearInterval(collectionMonitor)
   window.removeEventListener('beforeunload', guardBrowserExit)
   window.removeEventListener('keydown', handleShellShortcut)
   window.removeEventListener('glyphshift:software-quick-capture', receiveBrowserSoftwareQuickCapture)
@@ -325,7 +340,6 @@ onBeforeUnmount(() => {
       </a>
       <TitleBar
         :current="view === 'capture' && collectionWorkflowId ? 'workflows' : view"
-        :probe-activity-status="probe.activityStatus.value"
         :translation-task-active="ai.taskRunning.value"
         :translation-task-progress="translationTaskProgress"
         @navigate="requestNavigation"

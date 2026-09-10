@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { projectLifecycle, workflowOperations, workflowStateColor } from "../workflowLifecycle"
+import { useAppSettings } from '../appSettings'
+import { preferredFonts } from '../settingsCatalogs'
+import { computed, nextTick, ref, watch } from 'vue'
 import WorkflowSoftwarePicker from './WorkflowSoftwarePicker.vue'
 import WorkflowDictionarySelection from './WorkflowDictionarySelection.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -91,8 +94,19 @@ function selectWorkflowSoftware(id: string) {
   lastSuggestedName.value = suggested
 }
 const fontQuery = ref('')
+const appSettings = useAppSettings()
 const fontFilter = ref('all')
 const activeEditorTab = ref('software')
+const dictionarySelection = ref<InstanceType<typeof WorkflowDictionarySelection> | null>(null)
+async function openEmptyTabPicker(event: Event) {
+  if (!(event.target instanceof Element) || !event.target.closest('[role="tab"]')) return
+  if (event instanceof KeyboardEvent) event.preventDefault()
+  await nextTick()
+  if (activeEditorTab.value === 'software' && !activeSoftwareId.value) openSoftwarePicker()
+  if (activeEditorTab.value === 'dictionary' && activeTarget.value && !activeTarget.value.dictionaryIds.length) {
+    dictionarySelection.value?.showPicker()
+  }
+}
 const pendingRemoval = ref<WorkflowSummary[]>([])
 const diagnosticWorkflow = ref<WorkflowSummary | null>(null)
 const formBaseline = ref('')
@@ -123,9 +137,10 @@ const activeTarget = computed(() => targets.value.find(target => target.software
 const visibleFontFamilies = computed(() => {
   const needle = fontQuery.value.trim().toLocaleLowerCase()
   const selectedFamilies = activeTarget.value?.fontPolicy?.families ?? []
-  return props.installedFamilies
+  return preferredFonts(props.installedFamilies, appSettings.settings.value.favoriteFonts)
     .filter(family => (!needle || family.toLocaleLowerCase().includes(needle))
-      && (fontFilter.value !== 'selected' || selectedFamilies.includes(family)))
+      && (fontFilter.value !== 'selected' || selectedFamilies.includes(family))
+      && (fontFilter.value !== 'favorites' || appSettings.settings.value.favoriteFonts.includes(family)))
 })
 const formOpen = computed(() => creating.value || Boolean(props.editing))
 const editingWorkflow = computed(() => Boolean(props.editing))
@@ -156,7 +171,9 @@ const fontProblems = computed(() => {
   for (const target of targets.value) {
     const label = softwareName(target.softwareId)
     if (!target.fontPolicy) continue
-    if (!target.fontPolicy.families.length && !target.fontPolicy.preferDictionary && (target.fontPolicy.scalePercent ?? 100) === 100) problems.push(t('workflows.problems.fontFamily', { name: label }))
+    for (const font of Object.values(target.fontPolicy.dictionaryOverrides ?? {})) {
+      if (font.scalePercent != null && (!Number.isInteger(font.scalePercent) || font.scalePercent < 50 || font.scalePercent > 200)) problems.push(t('workflows.fontScaleRange'))
+    }
     const scale = target.fontPolicy.scalePercent ?? 100
     if (!Number.isInteger(scale) || scale < 50 || scale > 200) problems.push(t('workflows.fontScaleRange'))
     if (target.fontPolicy.coverage === 'dictionary_matches' && !target.dictionaryIds.length) {
@@ -179,6 +196,7 @@ const editorTabs = computed(() => [
   { value: 'font', slot: 'font', label: t('workflows.tabs.font'), icon: 'i-tabler-typography', badge: problemBadge(fontProblems.value) },
 ])
 const catalogFilterOptions = computed(() => [
+  { value: 'favorites', label: t('settingsManager.favoriteTitle') },
   { value: 'all', label: t('workflows.catalogFilters.all') },
   { value: 'selected', label: t('workflows.catalogFilters.selected') },
 ])
@@ -193,7 +211,6 @@ const columnOptions = computed(() => [
   { key: 'software', label: t('workflows.columns.software'), visible: visibleColumns.value.software },
   { key: 'assets', label: t('workflows.columns.assets'), visible: visibleColumns.value.assets },
   { key: 'status', label: t('workflows.columns.status'), visible: visibleColumns.value.status },
-  { key: 'enabled', label: t('workflows.columns.enabled'), visible: visibleColumns.value.enabled },
 ])
 const tableColumns = computed<TableColumn<WorkflowSummary>[]>(() => [
   { id: 'select', header: '', meta: managementSelectionColumnMeta() },
@@ -201,8 +218,7 @@ const tableColumns = computed<TableColumn<WorkflowSummary>[]>(() => [
   ...(visibleColumns.value.software ? [{ id: 'software', header: t('workflows.columns.software'), meta: { class: { th: 'w-28 min-w-28 whitespace-nowrap', td: 'w-28 min-w-28' } } } satisfies TableColumn<WorkflowSummary>] : []),
   ...(visibleColumns.value.assets ? [{ id: 'assets', header: t('workflows.columns.assets'), meta: { class: { th: 'w-36 whitespace-nowrap', td: 'w-36 max-w-36' } } } satisfies TableColumn<WorkflowSummary>] : []),
   ...(visibleColumns.value.status ? [{ id: 'status', header: t('workflows.columns.status'), meta: { class: { th: 'w-24 text-center', td: 'w-24 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
-  ...(visibleColumns.value.enabled ? [{ id: 'enabled', header: t('workflows.columns.enabled'), meta: { class: { th: 'w-16 text-center', td: 'w-16 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
-  { id: 'actions', header: t('workflows.columns.actions'), meta: managementActionsColumnMeta('w-48') },
+  { id: 'actions', header: t('workflows.columns.actions'), meta: managementActionsColumnMeta('w-60') },
 ])
 function workflowOverflowItems(item: WorkflowSummary): DropdownMenuItem[][] {
   return [[{
@@ -285,15 +301,17 @@ function targetIsConfigured(target: WorkflowTarget) {
   if (!target.adapterPlan.adapterIds.length) return false
   if (!target.dictionaryIds.length && !target.fontPolicy) return false
   if (!target.fontPolicy) return true
-  if (!target.fontPolicy.families.length && !target.fontPolicy.preferDictionary && (target.fontPolicy.scalePercent ?? 100) === 100) return false
   return target.fontPolicy.coverage !== 'dictionary_matches' || Boolean(target.dictionaryIds.length)
 }
-function actualStatus(item: WorkflowSummary): 'disabled' | 'running' | 'failed' | 'waiting' {
-  const status = props.runtimeStatus[item.id]
-  if (!props.activationIds.has(item.id)) return 'disabled'
-  if (status && status.targets.length > 0 && status.targets.every(target => target.active)) return 'running'
-  if (status && Object.keys(status.errors).length) return 'failed'
-  return 'waiting'
+function actualStatus(item: WorkflowSummary) {
+  return workflowOperations.value[item.id] ?? projectLifecycle(props.runtimeStatus[item.id], props.activationIds.has(item.id)).phase
+}
+function stopAction(item: WorkflowSummary) {
+  return props.activationIds.has(item.id) || actualStatus(item) === 'stop_failed'
+}
+function lastChecked(item: WorkflowSummary) {
+  const timestamp = props.runtimeStatus[item.id]?.checkedAtMs ?? props.runtimeStatus[item.id]?.lifecycle?.checkedAtMs
+  return timestamp ? `${t('workflowLifecycle.checked')}: ${new Date(timestamp).toLocaleTimeString()}` : ''
 }
 function runtimeIssues(item: WorkflowSummary) {
   return Object.entries(props.runtimeStatus[item.id]?.errors ?? {}).map(([softwareId, error]) => ({
@@ -324,16 +342,10 @@ function runtimeIssueKind(item: WorkflowSummary) {
   }
   return knownKinds[code] ?? 'failed'
 }
-function actualLabel(item: WorkflowSummary) {
-  return actualStatus(item) === 'failed'
-    ? t(`workflows.runtimeIssue.status.${runtimeIssueKind(item)}`)
-    : t(`workflows.status.${actualStatus(item)}`)
-}
+function actualLabel(item: WorkflowSummary) { return t(`workflowLifecycle.${actualStatus(item)}`) }
 function actualColor(item: WorkflowSummary): 'success' | 'warning' | 'error' | 'neutral' {
   const status = actualStatus(item)
-  if (status === 'running') return 'success'
-  if (status === 'failed') return runtimeIssueKind(item) === 'softwareStopped' ? 'warning' : 'error'
-  return 'neutral'
+  return workflowStateColor(status)
 }
 
 function toggleSelection(id: string) {
@@ -363,6 +375,7 @@ function startCreate() {
   resetForm()
   formBaseline.value = serializeForm()
   creating.value = true
+  openSoftwarePicker()
 }
 function closeForm() {
   discardFormOpen.value = false
@@ -387,15 +400,15 @@ function toggleSoftware(id: string) {
   const previous = targets.value[0]
   targets.value = [{
     softwareId: id,
-    adapterPlan: { strategy: 'parallel', adapterIds: [] },
+    adapterPlan: { strategy: 'parallel', adapterIds: workflowAdapters.value.map(adapter => adapter.id) },
     dictionaryIds: previous?.dictionaryIds ?? [],
     writeDictionaryId: previous?.writeDictionaryId ?? null,
+    collectNewSources: previous?.collectNewSources ?? true,
     fontPolicy: previous?.fontPolicy ?? null,
   }]
   activeSoftwareId.value = id
 }
 const fontModeOptions = computed(() => [
-  { value: 'dictionary', label: t('workflows.fontModes.dictionary') },
   { value: 'workflow', label: t('workflows.fontModes.workflow') },
   { value: 'original', label: t('workflows.fontModes.original') },
 ])
@@ -404,7 +417,7 @@ function setFontMode(mode: string) {
   activeTarget.value.fontPolicy = mode === 'original' ? null : {
     families: activeTarget.value.fontPolicy?.families ?? [],
     coverage: activeTarget.value.fontPolicy?.coverage ?? 'dictionary_matches',
-    preferDictionary: mode === 'dictionary',
+    dictionaryOverrides: activeTarget.value.fontPolicy?.dictionaryOverrides ?? {},
     scalePercent: activeTarget.value.fontPolicy?.scalePercent ?? 100,
   }
 }
@@ -477,7 +490,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <template #assets-cell="{ row }"><UTooltip :text="dictionaryNames(row.original) || t('workflows.none')"><span tabindex="0" class="inline-block">{{ t('workflows.dictionaryCount', { count: row.original.dictionaryIds.length }) }}</span></UTooltip><div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]" :title="fontNames(row.original)">{{ t('workflows.fonts', { names: fontNames(row.original) || t('workflows.none') }) }}</div></template>
         <template #status-cell="{ row }">
           <UPopover v-if="runtimeIssues(row.original).length" :ui="{ content: 'z-[80]' }">
-            <UButton :color="actualColor(row.original)" variant="soft" size="xs" :label="actualLabel(row.original)" />
+            <UButton :color="actualColor(row.original)" variant="soft" size="xs" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
             <template #content>
               <section data-testid="workflow-runtime-issues" class="w-80 p-3" :aria-label="t('workflows.runtimeIssue.title')">
                 <h2 class="m-0 text-[11px] font-semibold">{{ t('workflows.runtimeIssue.title') }}</h2>
@@ -494,10 +507,9 @@ usePageEscape(() => formOpen.value, requestCloseForm)
               </section>
             </template>
           </UPopover>
-          <UBadge v-else :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" />
+          <UBadge v-else :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
         </template>
-        <template #enabled-cell="{ row }"><USwitch :model-value="activationIds.has(row.original.id)" :disabled="busy" :aria-label="t('workflows.enableNamed', { name: row.original.name })" @update:model-value="emit('toggle', row.original.id, Boolean($event))" /></template>
-        <template #actions-cell="{ row }"><div class="flex items-center justify-center gap-1 whitespace-nowrap"><UButton color="primary" variant="ghost" size="xs" icon="i-tabler-language" :label="t('workflows.collectAndTranslate')" :disabled="busy" @click="emit('collect', row.original.id)" /><UButton :title="t('workflows.settings')" color="neutral" variant="ghost" size="xs" icon="i-tabler-settings" :aria-label="t('common.editNamed', { name: row.original.name })" @click="emit('open', row.original.id)" /><UDropdownMenu :items="workflowOverflowItems(row.original)" :content="{ align: 'end' }"><UButton :title="t('common.moreActionsNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-dots" :aria-label="t('common.moreActionsNamed', { name: row.original.name })" /></UDropdownMenu></div></template>
+        <template #actions-cell="{ row }"><div class="flex items-center justify-center gap-1 whitespace-nowrap"><UButton :color="stopAction(row.original) ? 'neutral' : 'primary'" variant="ghost" size="xs" :icon="stopAction(row.original) ? 'i-tabler-player-stop' : 'i-tabler-player-play'" :label="t(stopAction(row.original) ? 'workflowLifecycle.stop' : 'workflows.start')" :loading="['connecting', 'stopping'].includes(actualStatus(row.original))" @click="emit('toggle', row.original.id, !stopAction(row.original))" /><UButton color="primary" variant="ghost" size="xs" icon="i-tabler-language" :label="t('workflows.collectAndTranslate')" :disabled="busy" @click="emit('collect', row.original.id)" /><UButton :title="t('workflows.settings')" color="neutral" variant="ghost" size="xs" icon="i-tabler-settings" :aria-label="t('common.editNamed', { name: row.original.name })" @click="emit('open', row.original.id)" /><UDropdownMenu :items="workflowOverflowItems(row.original)" :content="{ align: 'end' }"><UButton :title="t('common.moreActionsNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-dots" :aria-label="t('common.moreActionsNamed', { name: row.original.name })" /></UDropdownMenu></div></template>
         <template #empty><UEmpty icon="i-tabler-git-branch" :title="items.length ? t('workflows.noMatch') : t('workflows.empty')" :description="t('workflows.emptyDescription')" /></template>
       </UTable>
     </ManagementTableFrame>
@@ -519,7 +531,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       </ManagementDetailHeader>
       <UAlert v-if="workflowMessage" role="alert" color="warning" variant="soft" :title="t('workflows.settings')" :description="workflowMessage" class="mb-3" />
       <ManagementWorkspaceSurface variant="canvas">
-      <UTabs v-model="activeEditorTab" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'type-label relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'type-caption ml-auto min-w-4 justify-center px-1', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--app-bg)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
+      <UTabs v-model="activeEditorTab" @click="openEmptyTabPicker" @keydown.enter="openEmptyTabPicker" @keydown.space="openEmptyTabPicker" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'type-label relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'type-caption ml-auto min-w-4 justify-center px-1', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--app-bg)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
         <template #basic>
           <ManagementFormSection
             data-testid="workflow-basic-tab"
@@ -565,7 +577,11 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <template #dictionary>
           <section data-testid="workflow-dictionary-tab" class="space-y-4" :aria-label="t('workflows.tabs.dictionary')">
             <template v-if="activeTarget">
-              <WorkflowDictionarySelection v-model:dictionary-ids="activeTarget.dictionaryIds" v-model:write-dictionary-id="activeTarget.writeDictionaryId" :dictionaries="dictionaries" :workflow-name="name" />
+              <WorkflowDictionarySelection ref="dictionarySelection" v-model:dictionary-ids="activeTarget.dictionaryIds" v-model:write-dictionary-id="activeTarget.writeDictionaryId" v-model:font-policy="activeTarget.fontPolicy" :dictionaries="dictionaries" :workflow-name="name" />
+              <div class="mt-4 flex items-center gap-2">
+                <USwitch :model-value="Boolean(activeTarget.writeDictionaryId) && activeTarget.collectNewSources !== false" :disabled="!activeTarget.writeDictionaryId" :label="t('workflowLifecycle.collect')" @update:model-value="activeTarget.collectNewSources = Boolean($event)" />
+                <FieldHelp :label="t('workflowLifecycle.collect')" :text="t('workflowLifecycle.collectHint')" />
+              </div>
               <UAlert v-if="dictionaryProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(dictionaryProblems)" />
             </template>
             <UEmpty v-else icon="i-tabler-app-window" :title="t('workflows.chooseTarget')" :description="t('workflows.chooseTargetDescription')" size="sm"><template #actions><UButton color="neutral" variant="outline" size="sm" :label="t('workflows.goSoftwareTab')" @click="activeEditorTab = 'software'" /></template></UEmpty>
@@ -577,7 +593,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
             <template v-if="activeTarget">
               <div class="border-y border-[var(--border)] bg-[var(--surface-inset)] px-3 py-3"><strong class="type-label">{{ softwareName(activeTarget.softwareId) }}</strong><p class="type-metadata m-0 mt-2 leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
               <UFormField :label="t('workflows.fontPolicy')" :hint="t('workflows.fontInheritanceHint')">
-                <USelect :model-value="!activeTarget.fontPolicy ? 'original' : activeTarget.fontPolicy.preferDictionary ? 'dictionary' : 'workflow'" :items="fontModeOptions" :aria-label="t('workflows.fontPolicy')" class="w-full" @update:model-value="setFontMode(String($event))" />
+                <USelect :model-value="!activeTarget.fontPolicy ? 'original' : 'workflow'" :items="fontModeOptions" :aria-label="t('workflows.fontPolicy')" class="w-full" @update:model-value="setFontMode(String($event))" />
               </UFormField>
               <div v-if="activeTarget.fontPolicy" class="space-y-3">
                 <UFormField :label="t('workflows.fontScale')" :hint="t('workflows.fontScaleHint')">

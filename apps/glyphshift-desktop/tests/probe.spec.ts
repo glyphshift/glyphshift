@@ -428,7 +428,7 @@ test('probe run uses the shared searchable selectable paginated table flow', asy
   await expect(dialog).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Vector Studio 探针', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '返回探针管理' })).toBeVisible()
-  await expect(page.getByPlaceholder('搜索原文、译文或兼容方式')).toBeVisible()
+  await expect(page.getByPlaceholder('搜索原文、译文或适配器')).toBeVisible()
   await expect(page.getByText(/技术目录|字典草稿/)).toHaveCount(0)
   await expect(page.getByText('还没有捕获到文字')).toBeVisible()
   await expect(page.getByText('每页')).toBeVisible()
@@ -478,7 +478,7 @@ test('probe list hides technical detail behind one accessible hover target and u
   await details.hover()
   await expect(page.getByText('程序位置', { exact: true })).toBeVisible()
   await expect(page.getByText('X:\\SyntheticFixtures\\VectorStudio.exe', { exact: true })).toBeVisible()
-  await expect(page.getByText('兼容方式', { exact: true })).toBeVisible()
+  await expect(page.getByText('适配器', { exact: true })).toBeVisible()
   await expect(page.getByText(/支持字距、裁剪和部分特殊文字.*传统 Windows 文字（高级）/)).toBeVisible()
   await expect(page.getByText(/适合传统自绘面板和图形界面.*Windows 自绘图形界面/)).toBeVisible()
 })
@@ -889,7 +889,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toBe('untranslated')
 
   const adapterFilter = page.getByTestId('capture-adapter-filter')
-  await expect(adapterFilter).toContainText('全部兼容方式')
+  await expect(adapterFilter).toContainText('全部适配器')
   await adapterFilter.click()
   await page.getByRole('menuitemcheckbox', { name: 'Windows 按钮与标签' }).click()
   await expect(adapterFilter).toContainText('Windows 按钮与标签')
@@ -900,7 +900,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toEqual(['synthetic.draw-text'])
 
   await page.keyboard.press('Escape')
-  const search = page.getByPlaceholder('搜索原文、译文或兼容方式')
+  const search = page.getByPlaceholder('搜索原文、译文或适配器')
   await search.fill('Source 00')
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __captureQueryRequests?: Array<{ search: string }> }).__captureQueryRequests?.at(-1)?.search
@@ -929,7 +929,7 @@ test('probe run keeps backend paging while adapter filters and view state recove
 
   await page.reload()
   await page.getByRole('button', { name: '探针', exact: true }).click()
-  await expect(page.getByPlaceholder('搜索原文、译文或兼容方式')).toHaveValue('Source 00')
+  await expect(page.getByPlaceholder('搜索原文、译文或适配器')).toHaveValue('Source 00')
   await expect(page.getByRole('button', { name: '按翻译状态筛选' })).toContainText('未翻译')
   await expect(page.getByTestId('capture-adapter-filter')).toContainText('Windows 按钮与标签')
   await expect.poll(() => page.evaluate(() => (
@@ -976,7 +976,7 @@ test('elevated probe rejection explains the protected target without observer re
 
   await page.getByRole('button', { name: '连接并继续' }).click()
 
-  await expect(page.getByText('Glyphshift 已有管理员权限，但这个软件仍拒绝连接。请尝试其他兼容方式；受保护的软件可能不支持实时替换。')).toBeVisible()
+  await expect(page.getByText('Glyphshift 已有管理员权限，但这个软件仍拒绝连接。请尝试其他适配器；受保护的软件可能不支持实时替换。')).toBeVisible()
   await expect(page.getByText(/开启“始终以管理员身份启动”/)).toHaveCount(0)
   await expect(page.getByRole('button', { name: '切换为仅采集并重试' })).toHaveCount(0)
 })
@@ -1016,7 +1016,7 @@ test('probe reconnect explains a desktop and Runtime Bundle build mismatch', asy
 
   await expect(page.getByRole('alert')).toContainText('Glyphshift 的运行组件版本不一致')
   await expect(page.getByRole('alert')).toContainText('只重启目标软件无法解决')
-  await expect(page.getByRole('alert')).not.toContainText('选择的兼容方式当前不可用')
+  await expect(page.getByRole('alert')).not.toContainText('选择的适配器当前不可用')
 })
 
 test('probe operation error closes when switching to another probe', async ({ page }) => {

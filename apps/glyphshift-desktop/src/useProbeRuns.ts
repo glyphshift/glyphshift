@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { applyWorkflowRuntime } from './workspace/state'
 import { invoke } from '@tauri-apps/api/core'
 import { isCommandError, translateCommandError, type CommandError } from './commandError'
 import { i18n } from './i18n'
@@ -8,6 +9,7 @@ export interface ProbeRunQueryInput {
   runId: string
   search: string
   adapterIds: string[]
+  hideSkipped?: boolean
   translationFilter: ProbeTranslationFilter
   page: number
   pageSize: number
@@ -63,6 +65,7 @@ const activityStatus = computed<ProbeActivityStatus>(() => {
 const selectedRunId = ref(localStorage.getItem('glyphshift.workflow.selectedRecord') ?? '')
 const busy = ref(false)
 const polling = ref(false)
+const summaryRequests = new Map<string, Promise<ProbeRunSummary | null>>()
 const message = ref('')
 const lastError = ref<CommandError | null>(null)
 let connected = false
@@ -72,6 +75,7 @@ function hasDesktopRuntime() {
 }
 
 function upsert(summary: ProbeRunSummary) {
+  if (summary.workflowRuntime) applyWorkflowRuntime(summary.workflowRuntime)
   const index = runs.value.findIndex(item => item.id === summary.id)
   if (index >= 0) runs.value.splice(index, 1, summary)
   else runs.value.push(summary)
@@ -305,20 +309,24 @@ export function useProbeRuns() {
   }
 
   async function refreshSummary(runId: string) {
-    if (polling.value || !hasDesktopRuntime()) return selectedRun.value
+    if (!hasDesktopRuntime()) return runs.value.find(run => run.id === runId) ?? null
+    const existing = summaryRequests.get(runId)
+    if (existing) return existing
     polling.value = true
-    try {
-      const summary = await invoke<ProbeRunSummary>('desktop_probe_run_summary', { runId })
-      upsert(summary)
-      return summary
-    }
-    catch (error) {
-      reportError(error, runId)
-      return null
-    }
-    finally {
-      polling.value = false
-    }
+    const request = (async () => {
+      try {
+        const summary = await invoke<ProbeRunSummary>('desktop_probe_run_summary', { runId })
+        upsert(summary)
+        return summary
+      }
+      catch (error) { reportError(error, runId); return null }
+      finally {
+        summaryRequests.delete(runId)
+        polling.value = summaryRequests.size > 0
+      }
+    })()
+    summaryRequests.set(runId, request)
+    return request
   }
 
   async function queryEntries(input: ProbeRunQueryInput): Promise<ProbeEntryPage> {
@@ -332,7 +340,7 @@ export function useProbeRuns() {
         rows: [],
       }
     }
-    return invoke<ProbeEntryPage>('desktop_probe_run_entries', { request: input })
+    return invoke<ProbeEntryPage>('desktop_probe_run_entries', { request: input, hideSkipped: input.hideSkipped ?? false })
   }
 
   async function editTranslation(runId: string, source: string, translation: string) {

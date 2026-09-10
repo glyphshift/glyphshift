@@ -91,7 +91,7 @@ test('workflow sections and Help keep a continuous visible heading outline', asy
   await expect(page.getByTestId('workflow-editor')).toBeVisible()
   expectNoHeadingJumps(await visibleHeadingLevels(page))
 
-  for (const tab of ['软件与兼容方式', '翻译字典', '字体策略']) {
+  for (const tab of ['软件与适配器', '翻译字典', '字体策略']) {
     await page.getByRole('tab', { name: tab }).click()
     expectNoHeadingJumps(await visibleHeadingLevels(page))
   }
@@ -122,7 +122,7 @@ test('functional copy follows the semantic desktop type ramp', async ({ page }) 
     pageTitle: '20px',
   })
 
-  await expect(page.getByText('为每个软件组合兼容方式、有序词典和字体设置，并持续应用翻译。')).toHaveCount(0)
+  await expect(page.getByText('为每个软件组合适配器、有序词典和字体设置，并持续应用翻译。')).toHaveCount(0)
   const metadata = page.getByText('1 个目标', { exact: true }).first()
   await expect(metadata).toBeVisible()
   await expect.poll(() => metadata.evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
@@ -210,9 +210,9 @@ test('management tables share independent persisted column controls', async ({ p
 
   await expect(columnsButton).toBeVisible()
   await columnsButton.click()
-  await page.getByRole('menuitemcheckbox', { name: '兼容方式', exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: '适配器', exact: true }).click()
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('columnheader', { name: '兼容方式', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '适配器', exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: '软件', exact: true }).click()
   await expect(columnsButton).toBeVisible()
@@ -231,7 +231,7 @@ test('management tables share independent persisted column controls', async ({ p
   await expect(page.getByRole('columnheader', { name: '更新时间', exact: true })).toHaveCount(0)
 
   await page.reload()
-  await expect(page.getByRole('columnheader', { name: '兼容方式', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '适配器', exact: true })).toHaveCount(0)
 })
 
 test('software direct and batch delete remove unreferenced records', async ({ page }) => {

@@ -417,6 +417,7 @@ impl DesktopApplication {
         &mut self,
         run_id: &str,
     ) -> Result<TranslationPlanRequest, CommandError> {
+        self.collect_workflow_sources(run_id)?;
         let summary = self
             .probe_runs
             .summary(run_id)
@@ -427,40 +428,24 @@ impl DesktopApplication {
             .cloned()
             .map_err(|_| CommandError::new("dictionary.not_found"))?;
         let snapshot = self.probe_entries_snapshot(&summary)?;
-        let mut page_number = 1;
+        let rows = self.probe_runs.entries_snapshot(run_id, &snapshot).map_err(probe::probe_run_error)?;
         let mut row_number = 0_usize;
-        let mut items = Vec::new();
-        loop {
-            let query = ProbeQuery::new(
-                "",
-                page_number,
-                glyphshift_capture::MAX_PROBE_QUERY_PAGE_SIZE,
-            )
-            .map_err(probe::probe_run_error)?;
-            let page = self
-                .probe_runs
-                .query_entries(run_id, &query, &snapshot)
-                .map_err(probe::probe_run_error)?;
-            for row in page.rows() {
-                row_number = row_number.saturating_add(1);
-                let item_id = format!("probe-row-{row_number}");
-                let item = if row.translation().trim().is_empty() {
-                    TranslationItem::untranslated(item_id, row.source())
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows.iter() {
+            row_number = row_number.saturating_add(1);
+            let item_id = format!("probe-row-{row_number}");
+            let item = if row.translation().trim().is_empty() {
+                TranslationItem::untranslated(item_id, row.source())
+            } else {
+                TranslationItem::translated(item_id, row.source(), row.translation())
+            };
+            items.push(
+                if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() {
+                    item.ignored()
                 } else {
-                    TranslationItem::translated(item_id, row.source(), row.translation())
-                };
-                items.push(
-                    if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() {
-                        item.ignored()
-                    } else {
-                        item
-                    },
-                );
-            }
-            if items.len() >= page.total() {
-                break;
-            }
-            page_number = page_number.saturating_add(1);
+                    item
+                },
+            );
         }
         Ok(TranslationPlanRequest::new(
             format!("probe:{run_id}"),
@@ -700,7 +685,7 @@ fn ai_profile_error(error: AiProfileError) -> CommandError {
     }
 }
 
-fn ai_plan_error(error: PlanError) -> CommandError {
+pub(super) fn ai_plan_error(error: PlanError) -> CommandError {
     match error {
         PlanError::InvalidExcludedPattern { index } => {
             CommandError::new("ai.filter_pattern_invalid")
@@ -888,9 +873,17 @@ pub(super) fn desktop_ai_translation_tasks(
     })
 }
 
+pub(super) fn source_filter_cache() -> &'static Mutex<glyphshift_ai_translation::SourceFilterCache> {
+    static CACHE: std::sync::OnceLock<Mutex<glyphshift_ai_translation::SourceFilterCache>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Default::default()))
+}
+
 #[tauri::command]
 pub(super) async fn desktop_filter_dictionary_sources(sources: Vec<String>, settings: State<'_, Mutex<AppSettingsStore>>) -> Result<Vec<bool>, CommandError> {
     let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
-    tauri::async_runtime::spawn_blocking(move || policy.hidden_sources(&sources))
-        .await.map_err(|_| ai_state_unavailable())?.map_err(ai_plan_error)
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cache = source_filter_cache().lock().map_err(|_| ai_state_unavailable())?;
+        cache.configure(&policy).map_err(ai_plan_error)?;
+        Ok(sources.iter().map(|source| cache.hidden(source)).collect())
+    }).await.map_err(|_| ai_state_unavailable())?
 }

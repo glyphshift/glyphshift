@@ -9,11 +9,17 @@ import {
   type ThemePreference,
 } from '../appSettings'
 import TextFilterSettings from './TextFilterSettings.vue'
+import FontFallbackSettings from './FontFallbackSettings.vue'
+import FavoriteFontSettings from './FavoriteFontSettings.vue'
+import RecentSoftwareSettings from './RecentSoftwareSettings.vue'
+import LanguageSettings from './LanguageSettings.vue'
 import AiProfilesPanel from './AiProfilesPanel.vue'
 import { useAppUpdate } from '../useAppUpdate'
 import { version as appVersion } from '../../package.json'
 import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
 
+const section = ref('general')
+const sections = ['general', 'software', 'fonts', 'languages'] as const
 const aiProfilesPanel = ref<InstanceType<typeof AiProfilesPanel>>()
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -225,6 +231,13 @@ onBeforeUnmount(() => {
       content-test-id="settings-layout"
   >
     <div class="space-y-4">
+      <nav :aria-label="t('settingsManager.navigation')" class="flex flex-wrap gap-1 border-b border-[var(--border)] pb-3">
+        <UButton v-for="item in sections" :key="item" :label="t('settingsManager.' + item)" :color="section === item ? 'primary' : 'neutral'" :variant="section === item ? 'soft' : 'ghost'" size="sm" :aria-pressed="section === item" @click="section = item" />
+      </nav>
+      <RecentSoftwareSettings v-if="section === 'software'" />
+      <div v-if="section === 'fonts'" class="space-y-4"><FavoriteFontSettings /><FontFallbackSettings /></div>
+      <LanguageSettings v-if="section === 'languages'" />
+      <div v-show="section === 'general'" class="space-y-4">
         <UAlert
           v-if="appSettings.settingsError.value"
           role="alert"
@@ -421,6 +434,7 @@ onBeforeUnmount(() => {
             </div>
           </ManagementFormRow>
         </ManagementFormSection>
+      </div>
     </div>
   </UtilityPageShell>
 </template>

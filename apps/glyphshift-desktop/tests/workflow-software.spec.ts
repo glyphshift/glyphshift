@@ -9,8 +9,7 @@ test.beforeEach(async ({ page }) => {
 test('software is configured first, names follow selection but preserve manual edits, and history clears independently', async ({ page }, testInfo) => {
   await expect(page.getByRole('button', { name: '软件', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '新建工作流', exact: true }).click()
-  await expect(page.getByRole('tab', { name: /设置软件/ })).toHaveAttribute('data-state', 'active')
-  await page.getByTestId('workflow-current-software').click()
+  await expect(page.getByTestId('workflow-editor-tabs').getByRole('tab', { name: /设置软件/, includeHidden: true })).toHaveAttribute('data-state', 'active')
   let picker = page.getByRole('dialog', { name: '设置软件', exact: true })
   await picker.getByRole('button', { name: /Vector Studio/ }).click()
   await picker.getByRole('button', { name: '确认', exact: true }).click()
@@ -36,20 +35,28 @@ test('software is configured first, names follow selection but preserve manual e
   await page.reload()
   await expect(page.getByRole('button', { name: '默认创作工作流', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '新建工作流', exact: true }).click()
-  await page.getByTestId('workflow-current-software').click()
   await expect(picker.getByTestId('workflow-software-catalog').getByRole('button')).toHaveCount(0)
 })
 
 test('create dictionary is first and selected by default; existing dictionaries remain available', async ({ page }, testInfo) => {
   await page.getByRole('button', { name: '新建工作流', exact: true }).click()
-  await page.getByTestId('workflow-current-software').click()
+  const softwareTab = page.getByRole('tab', { name: /设置软件/ })
   const picker = page.getByRole('dialog', { name: '设置软件', exact: true })
+  await expect(picker).toBeVisible()
+  await picker.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(picker).toBeHidden()
+  await softwareTab.focus()
+  await softwareTab.press('Enter')
+  await expect(picker).toBeVisible()
   await picker.getByRole('textbox', { name: '程序路径' }).fill('X:/SyntheticFixtures/FreshEditor.exe')
   await picker.getByRole('button', { name: '确认', exact: true }).click()
   await expect(page.getByTestId('workflow-current-software')).toContainText('FreshEditor')
   await page.getByRole('tab', { name: /字典/ }).click()
-  await page.getByRole('button', { name: '添加字典', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '添加字典', exact: true })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole('tab', { name: /字典/ }).click()
   await expect(dialog.getByRole('tab').first()).toHaveText('创建新字典')
   await expect(dialog.getByRole('tab').first()).toHaveAttribute('data-state', 'active')
   await expect(dialog.getByRole('textbox', { name: '字典名称' })).toHaveValue('FreshEditor 字典')
@@ -65,6 +72,10 @@ test('create dictionary is first and selected by default; existing dictionaries 
   await expect(dialog.getByRole('tab', { name: '已有字典', exact: true })).toHaveAttribute('data-state', 'active')
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
   await page.getByRole('tab', { name: /设置软件/ }).click()
+  await expect(picker).toBeHidden()
+  await page.getByRole('tab', { name: /字典/ }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole('tab', { name: /设置软件/ }).click()
   await page.getByTestId('workflow-adapter-config').getByRole('checkbox').nth(1).click()
   await page.getByRole('button', { name: '创建工作流', exact: true }).click()
   await expect(page.getByRole('button', { name: 'FreshEditor', exact: true })).toBeVisible()
@@ -79,10 +90,11 @@ test('running application and shortcut capture reuse the same binding without le
     const preflight = { executablePath: selected.executablePath, executableName: selected.executableName, suggestedName: selected.name, architecture: 'x86_64', running: true, canAdd: false, state: 'already_added', existingName: selected.name }
     const calls: string[] = []
     ;(window as any).__softwareCalls = calls
-    ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
+    ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args?: any) => {
       calls.push(command)
       if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_update_settings') return { settingsSchemaVersion: 1, ...args.update }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot
       if (command === 'desktop_running_software_targets') return [preflight]
       if (command === 'desktop_preflight_software') return preflight
@@ -96,7 +108,6 @@ test('running application and shortcut capture reuse the same binding without le
   }, { snapshot: model })
   await page.reload()
   await page.getByRole('button', { name: '新建工作流', exact: true }).click()
-  await page.getByTestId('workflow-current-software').click()
   const picker = page.getByRole('dialog', { name: '设置软件', exact: true })
   await picker.getByRole('tab', { name: '运行中软件', exact: true }).click()
   await picker.getByRole('button', { name: /Vector Studio/ }).click()
@@ -108,4 +119,23 @@ test('running application and shortcut capture reuse the same binding without le
   await expect(picker.getByRole('textbox', { name: '程序路径' })).toHaveValue(model.software[0].executablePath)
   await picker.getByRole('button', { name: '确认', exact: true }).click()
   expect(await page.evaluate(() => (window as any).__softwareCalls.includes('desktop_add_software'))).toBe(false)
+})
+
+
+test('new software defaults to all adapters and reselecting it preserves manual choices', async ({ page }) => {
+  await page.getByRole('button', { name: '新建工作流', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: '设置软件', exact: true })
+  await picker.getByRole('button', { name: /Vector Studio/ }).click()
+  await picker.getByRole('button', { name: '确认', exact: true }).click()
+  const table = page.getByTestId('workflow-adapter-table')
+  const choices = table.getByRole('checkbox', { name: /^选择适配器 / })
+  await expect(choices.first()).toBeVisible()
+  const count = await choices.count()
+  expect(count).toBeGreaterThan(1)
+  await expect(table.getByRole('checkbox', { name: /^选择适配器 /, checked: true })).toHaveCount(count)
+  await choices.first().uncheck()
+  await page.getByTestId('workflow-current-software').click()
+  await picker.getByRole('button', { name: /Vector Studio/ }).click()
+  await picker.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(table.getByRole('checkbox', { name: /^选择适配器 /, checked: true })).toHaveCount(count - 1)
 })

@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { computed, ref } from 'vue'
 import { setI18nLocale, type AppLocale } from './i18n'
 import { translateCommandError } from './commandError'
+import { normalizeFontFallbacks, type LanguageFallbackFont } from './fontFallbacks'
+import { defaultTranslationLanguages, normalizeCatalog, normalizeTranslationLanguages } from './settingsCatalogs'
 
 export type LocalePreference = 'system' | AppLocale
 export type ThemePreference = 'system' | 'dark' | 'light'
@@ -25,6 +27,10 @@ export interface AppSettings {
   checkUpdatesOnStartup: boolean
   textFilterPolicy: AiFilterPolicy
   autoCompleteIntervalSeconds: number
+  languageFallbackFonts: LanguageFallbackFont[]
+  favoriteFonts: string[]
+  translationLanguages: string[]
+  recentSoftwareIds: string[] | null
 }
 
 interface AppSettingsUpdate {
@@ -37,6 +43,10 @@ interface AppSettingsUpdate {
   checkUpdatesOnStartup: boolean
   textFilterPolicy: AiFilterPolicy
   autoCompleteIntervalSeconds: number
+  languageFallbackFonts: LanguageFallbackFont[]
+  favoriteFonts: string[]
+  translationLanguages: string[]
+  recentSoftwareIds: string[] | null
 }
 
 interface DesktopPrivilegeStatus {
@@ -55,6 +65,10 @@ const fallbackSettings: AppSettings = {
   textFilterPolicy: defaultAiFilterPolicy(),
   autoCompleteIntervalSeconds: 10,
   checkUpdatesOnStartup: true,
+  languageFallbackFonts: [],
+  favoriteFonts: [],
+  translationLanguages: defaultTranslationLanguages(),
+  recentSoftwareIds: null,
 }
 
 const settings = ref<AppSettings>({ ...fallbackSettings })
@@ -88,6 +102,10 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     : fallbackSettings.softwareCaptureShortcut
   return {
     textFilterPolicy: { ...defaultAiFilterPolicy(), ...(candidate.textFilterPolicy ?? {}) },
+    languageFallbackFonts: normalizeFontFallbacks(candidate.languageFallbackFonts),
+    favoriteFonts: normalizeCatalog(candidate.favoriteFonts, 64, 128),
+    translationLanguages: normalizeTranslationLanguages(candidate.translationLanguages),
+    recentSoftwareIds: Array.isArray(candidate.recentSoftwareIds) ? normalizeCatalog(candidate.recentSoftwareIds, 20, 128) : null,
     settingsSchemaVersion: 1,
     localePreference,
     themePreference,
@@ -227,12 +245,20 @@ export function useAppSettings() {
       autoCompleteIntervalSeconds: settings.value.autoCompleteIntervalSeconds,
       checkUpdatesOnStartup: settings.value.checkUpdatesOnStartup,
       textFilterPolicy: settings.value.textFilterPolicy,
+      languageFallbackFonts: settings.value.languageFallbackFonts,
+      favoriteFonts: settings.value.favoriteFonts,
+      translationLanguages: settings.value.translationLanguages,
+      recentSoftwareIds: settings.value.recentSoftwareIds,
       ...patch,
     })
   }
 
   return {
     settings,
+    async setLanguageFallbackFonts(value: LanguageFallbackFont[]) { await update({ languageFallbackFonts: value }) },
+    async setFavoriteFonts(value: string[]) { await update({ favoriteFonts: value }) },
+    async setTranslationLanguages(value: string[]) { await update({ translationLanguages: value }) },
+    async setRecentSoftwareIds(value: string[]) { await update({ recentSoftwareIds: value }) },
     async setTextFilterPolicy(value: AiFilterPolicy) { await update({ textFilterPolicy: value }) },
     async setCheckUpdatesOnStartup(value: boolean) { await update({ checkUpdatesOnStartup: value }) },
     async setAutoCompleteIntervalSeconds(value: number) {

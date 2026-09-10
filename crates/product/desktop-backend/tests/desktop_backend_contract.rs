@@ -406,10 +406,10 @@ fn desktop_workflow_v4_persists_adapter_plan_and_inline_font_policy_outside_the_
         .create_workflow(
             WorkflowCreate::new("workflow-ui", "UI Workflow").with_targets([
                 WorkflowTargetCreate::new(software_id.clone(), ["adapter-gdi"], ["dictionary-ui"])
-                    .with_font_policy(WorkflowFontPolicy::new(
-                        ["Available Sans"],
-                        FontCoverage::DictionaryMatches,
-                    )),
+                    .with_font_policy(serde_json::from_value(serde_json::json!({
+                        "families": ["Available Sans"], "coverage": "dictionary_matches",
+                        "dictionaryOverrides": {"dictionary-ui": {"families": ["Available Sans"], "scalePercent": 100}}
+                    })).unwrap()),
             ]),
         )
         .expect("create composed workflow");
@@ -428,7 +428,7 @@ fn desktop_workflow_v4_persists_adapter_plan_and_inline_font_policy_outside_the_
     assert!(!workflow_json.contains("fontBindings"));
     assert!(!workflow_json.contains("location"));
 
-    let reopened = DesktopBackend::open_with_environment(root.path(), environment())
+    let mut reopened = DesktopBackend::open_with_environment(root.path(), environment())
         .expect("reopen composed product data");
     let workflow = reopened.workflow("workflow-ui").expect("workflow detail");
     assert_eq!(
@@ -457,6 +457,21 @@ fn desktop_workflow_v4_persists_adapter_plan_and_inline_font_policy_outside_the_
             .requested_features(),
         &[Feature::TextReplace, Feature::FontSubstitute]
     );
+    let policy = serde_json::to_value(workflow.targets()[0].font_policy()).unwrap();
+    assert_eq!(policy["dictionaryOverrides"]["dictionary-ui"]["scalePercent"], 100);
+    let copied = reopened.copy_workflow("workflow-ui", "copy-ui", "Copy").unwrap();
+    assert_eq!(serde_json::to_value(copied.targets()[0].font_policy()).unwrap(), policy);
+    assert!(!dictionary_json.contains("dictionaryOverrides"));
+    for overrides in [
+        serde_json::json!({"dictionary-ui": {"families": [], "scalePercent": 201}}),
+        serde_json::json!({"not-selected": {"families": ["Available Sans"]}}),
+    ] {
+        let policy = serde_json::from_value(serde_json::json!({"families": [], "coverage": "dictionary_matches", "dictionaryOverrides": overrides})).unwrap();
+        assert!(reopened.create_workflow(WorkflowCreate::new("invalid-overrides", "Invalid").with_targets([
+            WorkflowTargetCreate::new(software_id.clone(), ["adapter-gdi"], ["dictionary-ui"]).with_font_policy(policy)
+        ])).is_err());
+    }
+
 }
 
 #[test]

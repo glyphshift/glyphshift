@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { workflowLifecycle, workflowOperations, workflowStateColor } from '../workflowLifecycle'
+import { useWorkflowWorkspace } from '../workspace/workflows'
+import { model as workspaceModel, messages as workspaceMessages } from '../workspace/state'
+import { translateCommandError } from '../commandError'
+import { useAppSettings } from '../appSettings'
+import { latestRequestQueue } from '../latestRequestQueue'
 import { useProbeAutoComplete } from '../useProbeAutoComplete'
 import { invoke } from '@tauri-apps/api/core'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -58,6 +64,21 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 const probe = useProbeRuns()
+const workflowWorkspace = useWorkflowWorkspace()
+const lifecycle = computed(() => props.workflowId ? workflowLifecycle(props.workflowId) : null)
+const stopRequested = computed(() => lifecycle.value?.enabled || lifecycle.value?.phase === 'stop_failed')
+const workflowCommandBusy = computed(() => props.workflowId && ['connecting', 'stopping'].includes(workflowOperations.value[props.workflowId] ?? ''))
+const lifecycleMessage = computed(() => {
+  if (!props.workflowId) return ''
+  return workspaceMessages.value[props.workflowId] || Object.values(workspaceModel.value.workflowRuntimeStatus[props.workflowId]?.errors ?? {})
+    .filter(error => error.code !== 'runtime.target_not_found').map(translateCommandError).join('；')
+})
+const collectionEnabled = computed(() => lifecycle.value?.collectNewSources ?? true)
+const hasWriter = computed(() => workspaceModel.value.workflows.find(item => item.id === props.workflowId)?.targets.some(target => target.writeDictionaryId))
+async function setCollection(enabled: boolean) {
+  if (props.workflowId) await workflowWorkspace.setWorkflowCollection(props.workflowId, enabled)
+}
+
 const ai = useAiTranslation()
 const autoComplete = useProbeAutoComplete()
 const query = ref('')
@@ -80,6 +101,8 @@ const entryPage = ref({
   rows: [] as ProbeEntryRow[],
 })
 const loading = ref(false)
+const textSettings = useAppSettings()
+const hideSkipped = ref(localStorage.getItem('glyphshift.capture.hide-skipped') === 'true')
 const selected = ref(new Set<string>())
 const listQuery = ref('')
 const listPage = ref(1)
@@ -147,6 +170,9 @@ const editTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let queryTimer: ReturnType<typeof setTimeout> | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let pageRequest = 0
+let disposed = false
+let pollingPage = false
+const pageQueue = latestRequestQueue(async () => loadPageNow(pageRequest))
 let settingsCompatibilityRequest = 0
 let translationSaveQueue = Promise.resolve()
 
@@ -219,11 +245,11 @@ const selectedAiProfile = computed(() => ai.profiles.value.find(profile => (
   profile.id === (selectedAiProfileId.value ?? ai.catalog.value.defaultProfileId)
 )) ?? ai.defaultProfile.value)
 const autoCompleteEnabled = computed(() => Boolean(selectedRun.value && autoComplete.runs.value[selectedRun.value.id]))
-const autoCompleteDisabled = computed(() => !selectedRun.value || (!autoCompleteEnabled.value && (!selectedAiProfile.value || selectedRun.value.status !== 'running')))
+const autoCompleteDisabled = computed(() => !selectedRun.value || (!autoCompleteEnabled.value && (!selectedAiProfile.value || (lifecycle.value ? lifecycle.value.phase !== 'running' : selectedRun.value.status !== 'running'))))
 function toggleAutoComplete(checked: boolean) {
   const run = selectedRun.value
   if (!run) return
-  if (checked && selectedAiProfile.value) autoComplete.start(run.id, selectedAiProfile.value.id)
+  if (checked && selectedAiProfile.value) autoComplete.start(run.id, selectedAiProfile.value.id, props.workflowId ?? undefined)
   else autoComplete.stop(run.id)
 }
 const aiMenuItems = computed<DropdownMenuItem[][]>(() => [
@@ -328,7 +354,7 @@ const taskActionItems = computed<DropdownMenuItem[][]>(() => selectedRun.value ?
   label: t('capture.launchSoftware'), icon: 'i-tabler-app-window', disabled: launchingSoftware.value || !selectedSoftware.value?.executablePath, onSelect: () => void launchSelectedSoftware(),
 }, {
   label: t('capture.refreshText'), icon: 'i-tabler-refresh', disabled: refreshingText.value || probe.busy.value || !selectedRun.value.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.value.status), onSelect: () => void refreshTargetText(),
-}], ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
+}], ...(props.workflowId ? [[{ type: 'checkbox' as const, label: t('workflowLifecycle.collect'), description: t('workflowLifecycle.collectHint'), checked: collectionEnabled.value, disabled: !hasWriter.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setCollection(checked) }]] : []), ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
     type: 'checkbox' as const,
@@ -383,6 +409,13 @@ watch(adapterFilterIds, async () => {
   await loadPage()
 }, { deep: true })
 
+watch([hideSkipped, () => textSettings.settings.value.textFilterPolicy], async () => {
+  page.value = 1
+  selected.value = new Set()
+  localStorage.setItem('glyphshift.capture.hide-skipped', String(hideSkipped.value))
+  await loadPage()
+}, { deep: true })
+
 watch(translationFilter, async () => {
   page.value = 1
   selected.value = new Set()
@@ -410,6 +443,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  pageRequest += 1
+  pageQueue.dispose()
   if (queryTimer) clearTimeout(queryTimer)
   if (pollTimer) clearInterval(pollTimer)
   stopScrollTracking()
@@ -421,7 +457,11 @@ onBeforeUnmount(() => {
 })
 
 async function loadPage() {
-  const request = ++pageRequest
+  pageRequest += 1
+  return pageQueue.request()
+}
+
+async function loadPageNow(request: number) {
   const runId = probe.selectedRunId.value
   if (!runId) {
     entryPage.value = {
@@ -441,11 +481,12 @@ async function loadPage() {
       search: query.value,
       adapterIds: [...adapterFilterIds.value],
       translationFilter: translationFilter.value,
+      hideSkipped: hideSkipped.value,
       page: page.value,
       pageSize: pageSize.value,
     })
     if (request !== pageRequest || runId !== probe.selectedRunId.value) return
-    entryPage.value = nextPage
+    if (JSON.stringify(entryPage.value) !== JSON.stringify(nextPage)) entryPage.value = nextPage
     synchronizeTranslationValues(entryPage.value.rows)
     const maxPage = Math.max(1, Math.ceil(entryPage.value.total / pageSize.value))
     if (page.value > maxPage) page.value = maxPage
@@ -535,16 +576,19 @@ async function executeAiTranslation() {
 
 async function poll() {
   const run = selectedRun.value
-  if (!run) return
-  const previousObservation = run.observationRevision
-  const previousDictionary = run.dictionaryRevision
-  const previousExclusions = JSON.stringify([run.excludedDictionaryIds, run.exclusionRevisions])
-  const summary = await probe.refreshSummary(run.id)
-  if (summary && (
-    summary.observationRevision !== previousObservation
-    || summary.dictionaryRevision !== previousDictionary
-    || JSON.stringify([summary.excludedDictionaryIds, summary.exclusionRevisions]) !== previousExclusions
-  )) await loadPage()
+  if (!run || pollingPage || disposed) return
+  pollingPage = true
+  try {
+    const previousObservation = run.observationRevision
+    const previousDictionary = run.dictionaryRevision
+    const previousExclusions = JSON.stringify([run.excludedDictionaryIds, run.exclusionRevisions])
+    const summary = await probe.refreshSummary(run.id)
+    if (summary && (
+      summary.observationRevision !== previousObservation
+      || summary.dictionaryRevision !== previousDictionary
+      || JSON.stringify([summary.excludedDictionaryIds, summary.exclusionRevisions]) !== previousExclusions
+    )) await loadPage()
+  } finally { pollingPage = false }
 }
 
 async function openSettings() {
@@ -1015,9 +1059,9 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     >
       <template #status>
         <div class="flex items-center gap-1.5">
-          <UBadge :color="statusColor(selectedRun.status)" variant="soft" size="sm" :label="statusLabel(selectedRun.status)" />
+          <UBadge :color="lifecycle ? workflowStateColor(lifecycle.phase) : statusColor(selectedRun.status)" variant="soft" size="sm" :label="lifecycle ? t(`workflowLifecycle.${lifecycle.phase}`) : statusLabel(selectedRun.status)" />
           <UBadge
-            v-if="selectedRun.runtimeCapability"
+            v-if="selectedRun.runtimeCapability && (!lifecycle || lifecycle.phase === 'running')"
             data-testid="probe-runtime-capability"
             :color="runtimeCapabilityColor(selectedRun.runtimeCapability)"
             variant="soft"
@@ -1037,9 +1081,12 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
       <template #actions>
         <div data-testid="probe-detail-actions" class="flex items-center gap-2">
+          <UButton v-if="workflowId" :color="stopRequested ? 'neutral' : 'primary'" variant="outline" size="sm" :icon="stopRequested ? 'i-tabler-player-stop' : 'i-tabler-player-play'" :label="t(stopRequested ? 'workflowLifecycle.stop' : 'workflows.start')" :loading="Boolean(workflowCommandBusy)" @click="workflowWorkspace.setWorkflowEnabled(workflowId, !stopRequested)" />
+          <template v-else>
           <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="probe.setPaused(selectedRun.id, true)" />
           <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : (workflowId ? t('workflows.start') : t('capture.resume'))" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
           <UButton v-if="['running', 'paused'].includes(selectedRun.status)" data-testid="probe-disconnect" color="neutral" variant="outline" size="sm" icon="i-tabler-plug-off" :label="t('capture.disconnect')" :loading="disconnectingRunId === selectedRun.id" :disabled="probe.busy.value && disconnectingRunId !== selectedRun.id" @click="disconnectRun(selectedRun)" />
+          </template>
           <UButton v-if="workflowId" color="neutral" variant="outline" size="sm" icon="i-tabler-settings" :label="t('workflows.settings')" :disabled="probe.busy.value" @click="openWorkflowSettings" />
           <UDropdownMenu :items="taskActionItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-60' }">
             <UButton data-testid="probe-task-actions" color="neutral" variant="outline" size="sm" icon="i-tabler-dots-vertical" trailing-icon="i-tabler-chevron-down" :label="taskActionLabel" :aria-label="taskActionLabel" :title="taskActionLabel" :ui="{ label: 'hidden min-[1080px]:inline' }" />
@@ -1053,6 +1100,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
     </ManagementPageHeader>
 
+    <UAlert v-if="lifecycleMessage" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="lifecycleMessage" class="mb-3" />
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="probe.clearMessage()" /></template>
     </UAlert>
@@ -1104,6 +1152,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <template v-if="selectedRun">
       <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :page-sizes="[50, 100, 200]" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
+          <UCheckbox v-model="hideSkipped" :label="t('textFilters.hide')" />
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton :title="t('capture.adapterFilterLabel')" data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
           </UDropdownMenu>
@@ -1155,7 +1204,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             </template>
             <template #count-cell="{ row }"><div class="text-right tabular-nums">{{ row.original.count || '—' }}</div></template>
             <template #lastSeenMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.lastSeenMs) }}</span></template>
-            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
+            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length || translationFilter !== 'all' || hideSkipped ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length || translationFilter !== 'all' || hideSkipped ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
           </UTable>
 
           <div v-if="scrollThumbHeight" data-testid="capture-scrollbar" aria-hidden="true" class="absolute inset-y-2 right-1 z-20 w-2 cursor-pointer rounded-full bg-[var(--surface-subtle)] ring-1 ring-inset ring-[var(--border)]" @pointerdown="jumpScrollbar">

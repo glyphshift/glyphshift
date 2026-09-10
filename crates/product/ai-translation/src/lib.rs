@@ -72,6 +72,41 @@ impl Default for FilterPolicy {
     }
 }
 
+/// Bounded source-only classifier shared by visibility queries. Rule changes replace the cache.
+#[derive(Default)]
+pub struct SourceFilterCache {
+    policy: Option<FilterPolicy>,
+    patterns: Vec<Regex>,
+    results: BTreeMap<String, bool>,
+    source_bytes: usize,
+}
+impl SourceFilterCache {
+    pub fn configure(&mut self, policy: &FilterPolicy) -> Result<(), PlanError> {
+        if self.policy.as_ref() == Some(policy) { return Ok(()); }
+        let patterns = policy.excluded_patterns.iter().enumerate().map(|(index, pattern)|
+            Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
+        ).collect::<Result<Vec<_>, _>>()?;
+        self.patterns = patterns;
+        self.policy = Some(policy.clone());
+        self.results.clear();
+        self.source_bytes = 0;
+        Ok(())
+    }
+
+    pub fn hidden(&mut self, source: &str) -> bool {
+        if let Some(result) = self.results.get(source) { return *result; }
+        let Some(policy) = self.policy.as_ref() else { return false; };
+        let item = TranslationItem::untranslated("visibility", source);
+        let hidden = skip_reason(&item, source.trim(), policy, &self.patterns).is_some();
+        // Keep memory bounded even with long game dialogue or many historical dictionaries.
+        if self.results.len() < 50_000 && self.source_bytes + source.len() <= 8 * 1024 * 1024 {
+            self.source_bytes += source.len();
+            self.results.insert(source.to_owned(), hidden);
+        }
+        hidden
+    }
+}
+
 impl FilterPolicy {
     /// Source-only classification shared by dictionary visibility and translation planning.
     pub fn hidden_sources(&self, sources: &[String]) -> Result<Vec<bool>, PlanError> {
@@ -623,5 +658,27 @@ mod dictionary_filter_contract {
             .with_filter_policy(policy)).unwrap();
         assert_eq!(plan.skipped_count(), 3);
         assert!(FilterPolicy::default().with_excluded_patterns(["["]).hidden_sources(&sources).is_err());
+    }
+}
+
+#[cfg(test)]
+mod source_filter_cache_tests {
+    use super::*;
+    #[test]
+    fn classification_cache_matches_batch_and_invalidates_on_rule_changes() {
+        let sources: Vec<String> = vec!["123".into(), "Open menu".into(), "Ctrl+S".into(), "Scene 42".into()];
+        let mut policy = FilterPolicy::default();
+        let mut cache = SourceFilterCache::default();
+        cache.configure(&policy).unwrap();
+        assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
+        cache.configure(&policy).unwrap();
+        assert_eq!(cache.results.len(), 4);
+        policy.skip_text_containing_digits = true;
+        policy.excluded_patterns.push("^Open".into());
+        cache.configure(&policy).unwrap();
+        assert!(cache.results.is_empty());
+        assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
+        policy.excluded_patterns.push("[".into());
+        assert!(cache.configure(&policy).is_err());
     }
 }

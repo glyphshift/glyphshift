@@ -845,7 +845,7 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
         dictionary.id(),
         dictionary.metadata.target_locale.clone(),
         entries,
-    ).with_font_families(dictionary.metadata.font_families.iter().cloned()).with_font_scale_percent(dictionary.metadata.font_scale_percent)
+    )
 }
 
 pub(super) struct DictionaryLoad {

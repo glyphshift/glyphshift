@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LanguageSelect from './LanguageSelect.vue'
 import { computed, ref } from 'vue'
 import DictionaryImportMetadata from './DictionaryImportMetadata.vue'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -102,8 +103,8 @@ defineExpose({ choose })
       </template>
       <template v-if="separate">
         <div class="grid grid-cols-2 gap-3">
-          <UFormField :label="t('dictionaryEditor.sourceLocale')"><UInput v-model="sourceLocale" class="w-full" /></UFormField>
-          <UFormField :label="t('dictionaryEditor.targetLocale')"><UInput v-model="targetLocale" class="w-full" /></UFormField>
+          <UFormField :label="t('dictionaryEditor.sourceLocale')"><LanguageSelect v-model="sourceLocale" allow-auto :aria-label="t('dictionaryEditor.sourceLocale')" /></UFormField>
+          <UFormField :label="t('dictionaryEditor.targetLocale')"><LanguageSelect v-model="targetLocale" :aria-label="t('dictionaryEditor.targetLocale')" /></UFormField>
         </div>
         <UButton :label="t('dictionaryImport.applyLanguages')" @click="applyLanguages" />
         <fieldset v-for="(file, index) in files" :key="index" :disabled="index < completed" class="rounded border border-[var(--border)] p-3">

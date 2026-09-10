@@ -18,21 +18,23 @@ test('bilingual READMEs lead with user problems and product use instead of repos
   expect(english).not.toContain('src="preview/探针.png"')
 
   for (const heading of [
-    '## Glyphshift 解决什么问题',
-    '## 它如何工作',
-    '## 核心能力',
     '## 开始使用',
-    '## AI 翻译与隐私',
-    '## 适用范围与边界',
+    '## 工作流怎么运行',
+    '## 字典怎么搭配',
+    '## AI 补全',
+    '## 字体和设置',
+    '## 哪些软件能用',
+    '## 文档与发布',
   ]) expect(chinese).toContain(heading)
 
   for (const heading of [
-    '## What problem does Glyphshift solve?',
-    '## How it works',
-    '## Core capabilities',
     '## Get started',
-    '## AI translation and privacy',
-    '## Scope and limitations',
+    '## Workflow behavior',
+    '## Combining dictionaries',
+    '## AI completion',
+    '## Fonts and settings',
+    '## Application support',
+    '## Documentation and releases',
   ]) expect(english).toContain(heading)
 
   expect(chinese).not.toContain('## 仓库结构')
@@ -87,15 +89,15 @@ test('desktop copy uses novice task language and keeps implementation terms out 
   for (const jargon of ['AI profile', 'Provider', 'Runtime Bundle', 'Profile files', 'Local revision']) {
     expect(englishValues).not.toContain(jargon)
   }
-  expect(chineseValues.match(/Adapter/g) ?? []).toHaveLength(1)
-  expect(englishValues.match(/\(adapter\)/g) ?? []).toHaveLength(1)
+  expect(chineseValues).toContain('适配器')
+  expect(englishValues).toContain('Adapters')
   expect(chinese).toContain("profilesTitle: 'AI 配置'")
   expect(english).toContain("profilesTitle: 'AI connections'")
   for (const redundant of [
     '这些偏好会立即应用，并保存在当前设备上',
     '设置翻译前确认，以及翻译时要使用的 AI 服务和模型',
     '控制 Windows 登录启动、关闭窗口行为',
-    '为每个软件组合兼容方式、有序词典和字体设置',
+    '为每个软件组合适配器、有序词典和字体设置',
   ]) expect(chineseValues).not.toContain(redundant)
   expect(aiPanel).not.toContain('credentialStorageHint')
   expect(aiPanel).not.toContain('modelDiscoveryNotTested')
@@ -123,7 +125,7 @@ test('root documents separate domain language, product truth, and the implemente
   expect(agents).toContain('after a privacy review')
 
   expect(context).toContain('## 用户资产')
-  expect(context).toContain('## 探针')
+  expect(context).toContain('## 工作流收集')
   expect(context).toContain('## Runtime')
   expect(context).not.toContain('## 不变量')
   expect(context).not.toContain('SHA-256')
@@ -138,8 +140,8 @@ test('root documents separate domain language, product truth, and the implemente
     '## 产品承诺',
     '## 适用范围与边界',
   ]) expect(product).toContain(heading)
-  expect(product).toContain('设置页包含外观、AI 翻译、快捷键、应用与权限四个分区')
-  expect(product).toContain('收集原文 → 填写译文 → 验证效果 → 启用工作流')
+  expect(product).toContain('内置 20 种常用语言')
+  expect(product).toContain('开始运行 → 收集原文 → 填写译文 → 验证效果')
   expect(product).not.toContain('SHA-256')
   expect(product).not.toContain('ownership ledger')
   expect(product).not.toContain('跨 IPC')
@@ -158,7 +160,7 @@ test('root documents separate domain language, product truth, and the implemente
   expect(positions.every(position => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((left, right) => left - right))
   expect(design).toContain('Windows Translation Workbench')
-  expect(design).toContain('Settings 只有四个大分区')
+  expect(design).toContain('Settings 使用通用、软件、字体、语言四个局部导航')
   expect(design).toContain('使用指南 / AI 翻译 / 故障排查 / 技术与兼容')
   expect(design).not.toContain('AI 翻译执行')
 })

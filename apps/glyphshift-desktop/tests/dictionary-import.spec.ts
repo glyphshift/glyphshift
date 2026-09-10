@@ -1,3 +1,4 @@
+import { selectLanguage } from './fixtures/languageSelect'
 import { expect, test } from '@playwright/test'
 import { model, storageKey } from './fixtures/productModel'
 
@@ -38,8 +39,8 @@ test('CSV is validated before metadata confirmation and invalid CSV creates noth
   await page.getByRole('button', { name: '导入', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '导入字典' })
   await expect(dialog.getByRole('button', { name: '导入', exact: true })).toBeDisabled()
-  await dialog.getByRole('textbox', { name: '源语言*', exact: true }).fill('ja-JP')
-  await dialog.getByRole('textbox', { name: '目标语言*', exact: true }).fill('zh-CN')
+  await selectLanguage(page, dialog.getByRole('button', { name: '源语言', exact: true }), 'ja-JP')
+  await selectLanguage(page, dialog.getByRole('button', { name: '目标语言', exact: true }), 'zh-CN')
   await dialog.getByRole('button', { name: '导入', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).__createdDictionary)).toMatchObject({ metadata: { name: 'entries', sourceLocale: 'ja-JP', targetLocale: 'zh-CN' }, entries: [{ source: 'Same', translation: 'Imported' }, { source: 'New', translation: '' }] })
 })

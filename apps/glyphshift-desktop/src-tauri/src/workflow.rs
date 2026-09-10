@@ -77,6 +77,13 @@ pub(super) struct WorkflowTargetRuntimeView {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WorkflowRuntimeView {
+    pub(super) lifecycle: Option<crate::workflow_lifecycle::WorkflowLifecycle>,
+    pub(super) checked_at_ms: u64,
+    pub(super) revision: u64,
+    #[serde(skip)]
+    pub(super) retry_attempt: u8,
+    #[serde(skip)]
+    pub(super) retry_after_ms: u64,
     pub(super) workflow_id: Box<str>,
     pub(super) targets: Vec<WorkflowTargetRuntimeView>,
     pub(super) errors: BTreeMap<Box<str>, CommandError>,
@@ -173,6 +180,10 @@ impl DesktopApplication {
             .filter(|record| record.workflow_id().is_some_and(|owner| workflow_ids.iter().any(|id| id.as_ref() == owner)))
             .collect::<Vec<_>>();
         for record in &records { self.ensure_ai_dictionary_writable(record.dictionary_id())?; }
+        if workflow_ids.iter().any(|id| self.workflow_runtime_status.get(id.as_ref())
+            .is_some_and(|runtime| runtime.targets.iter().any(|target| target.active))) {
+            return Err(CommandError::new("workflow.enabled_delete"));
+        }
         self.backend
             .delete_workflows(workflow_ids.iter().map(AsRef::as_ref))
             .map_err(|_| CommandError::new("workflow.enabled_delete"))?;
@@ -180,6 +191,8 @@ impl DesktopApplication {
             self.workflow_runtime_status.remove(workflow_id.as_ref());
         }
         for record in records {
+            self.collection_versions.remove(record.id());
+            self.pending_collection_runs.remove(record.id());
             self.probe_runs.delete(record.id()).map_err(crate::probe::probe_run_error)?;
         }
         Ok(self.snapshot())
@@ -237,6 +250,10 @@ impl DesktopApplication {
     }
 
     pub(super) fn refresh_workflows(&mut self) -> Result<DesktopProductSnapshot, CommandError> {
+        self.refresh_workflows_with_retry(true)
+    }
+
+    pub(super) fn refresh_workflows_with_retry(&mut self, retry: bool) -> Result<DesktopProductSnapshot, CommandError> {
         let workflow_ids = self
             .backend
             .enabled_workflow_ids()
@@ -244,14 +261,22 @@ impl DesktopApplication {
             .map(|workflow_id| workflow_id.to_string())
             .collect::<Vec<_>>();
         for workflow_id in workflow_ids {
+            let previous = self.workflow_runtime_status.get(workflow_id.as_str());
+            let now = glyphshift_capture::unix_time_millis();
+            if !retry && previous.is_some_and(|runtime| !crate::workflow_lifecycle::automatic_retry_allowed(runtime, now)) { continue; }
+            let attempt = if retry { 0 } else { previous.map_or(0, |runtime| runtime.retry_attempt) };
             let intent = self
                 .backend
                 .effective_workflow_intent(&workflow_id)
                 .map_err(workflow_activation_command_error)?;
-            let runtime = self.runtimes.as_mut().map_or_else(
+            let mut runtime = self.runtimes.as_mut().map_or_else(
                 || unavailable_workflow_runtime_view(&intent, true),
                 |runtimes| runtimes.refresh_workflow(&intent),
             );
+            if runtime.errors.values().any(|error| error.code() != "runtime.target_not_found") {
+                runtime.retry_attempt = attempt.saturating_add(1);
+                runtime.retry_after_ms = now.saturating_add(5_000 * (1_u64 << attempt.min(3)));
+            }
             self.workflow_runtime_status
                 .insert(workflow_id.clone().into(), runtime);
             self.update_workflow_collection_status(&workflow_id, true)?;
@@ -259,6 +284,12 @@ impl DesktopApplication {
             for record in records.into_iter().filter(|record| record.workflow_id() == Some(workflow_id.as_str())) {
                 self.collect_workflow_sources(record.id())?;
             }
+        }
+        if retry {
+            let pending = self.workflow_runtime_status.iter().filter(|(id, runtime)|
+                !self.backend.enabled_workflow_ids().contains(id) && (runtime.targets.iter().any(|target| target.active) || !runtime.errors.is_empty()))
+                .map(|(id, _)| id.clone()).collect::<Vec<_>>();
+            for id in pending { self.disable_workflow(&id)?; }
         }
         Ok(self.snapshot())
     }
@@ -349,6 +380,12 @@ impl DesktopApplication {
             .effective_workflow_intent(workflow_id)
             .map_err(workflow_activation_command_error)?;
         if replace_conflicts {
+            let desired_software = intent.targets().iter().map(|target| target.software_id()).collect::<BTreeSet<_>>();
+            let conflicts = self.backend.enabled_workflow_ids().iter().filter(|id| id.as_ref() != workflow_id)
+                .filter(|id| self.backend.workflow(id).ok().is_some_and(|workflow|
+                    workflow.targets().iter().any(|target| desired_software.contains(target.software_id()))))
+                .cloned().collect::<Vec<_>>();
+            for id in conflicts { self.disable_workflow(&id)?; }
             self.backend
                 .replace_workflow_activation(workflow_id)
                 .map_err(workflow_activation_command_error)?;
@@ -365,12 +402,7 @@ impl DesktopApplication {
             .backend
             .workflow(workflow_id)
             .map_err(|_| CommandError::new("workflow.invalid"))?;
-        self.workflow_runtime_status.retain(|candidate, _| {
-            self.backend
-                .enabled_workflow_ids()
-                .iter()
-                .any(|enabled| enabled == candidate)
-        });
+
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
         self.update_workflow_collection_status(workflow_id, true)?;
@@ -380,7 +412,7 @@ impl DesktopApplication {
                 workflow_id: workflow_id.into(),
                 enabled: true,
             },
-            runtime,
+            runtime: self.project_workflow_runtime(self.workflow_runtime_status.get(workflow_id).cloned().unwrap_or(runtime)),
         })
     }
 
@@ -396,7 +428,7 @@ impl DesktopApplication {
             .disable_workflow(workflow_id)
             .map_err(|_| CommandError::new("workflow.disable_failed"))?;
         let runtime = self.runtimes.as_mut().map_or_else(
-            || unavailable_workflow_runtime_view(&intent, false),
+            || idle_workflow_runtime_view(&intent, false),
             |runtimes| runtimes.stop_workflow(&intent),
         );
         let definition = self
@@ -406,13 +438,17 @@ impl DesktopApplication {
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
         self.update_workflow_collection_status(workflow_id, false)?;
+        let records = self.probe_runs.list().map_err(crate::probe::probe_run_error)?;
+        for record in records.iter().filter(|record| record.workflow_id() == Some(workflow_id)) {
+            self.collect_workflow_sources(record.id())?;
+        }
         Ok(WorkflowCommandResult {
             definition,
             activation: WorkflowActivationView {
                 workflow_id: workflow_id.into(),
                 enabled: false,
             },
-            runtime,
+            runtime: self.project_workflow_runtime(self.workflow_runtime_status.get(workflow_id).cloned().unwrap_or(runtime)),
         })
     }
 }
@@ -575,8 +611,8 @@ pub(super) fn workflow_runtime_view(
         .iter()
         .map(|target| {
             let software_id = target.software_id();
-            let status = runtimes
-                .status(software_id)
+            let status = runtimes.workflow_owns_target(intent.workflow_id(), software_id)
+                .then(|| runtimes.status(software_id)).flatten()
                 .or_else(|| reported_statuses.get(software_id).cloned());
             if let Some(error) = reported_errors
                 .get(software_id)
@@ -593,6 +629,11 @@ pub(super) fn workflow_runtime_view(
         })
         .collect();
     WorkflowRuntimeView {
+        lifecycle: None,
+        checked_at_ms: glyphshift_capture::unix_time_millis(),
+        revision: crate::workflow_lifecycle::next_revision(),
+            retry_attempt: 0,
+            retry_after_ms: 0,
         workflow_id: intent.workflow_id().into(),
         targets,
         errors,
@@ -604,6 +645,11 @@ fn unavailable_workflow_runtime_view(
     enabling: bool,
 ) -> WorkflowRuntimeView {
     WorkflowRuntimeView {
+        lifecycle: None,
+        checked_at_ms: glyphshift_capture::unix_time_millis(),
+        revision: crate::workflow_lifecycle::next_revision(),
+            retry_attempt: 0,
+            retry_after_ms: 0,
         workflow_id: intent.workflow_id().into(),
         targets: intent
             .targets()
@@ -634,6 +680,11 @@ pub(super) fn idle_workflow_runtime_view(
     enabled: bool,
 ) -> WorkflowRuntimeView {
     WorkflowRuntimeView {
+        lifecycle: None,
+        checked_at_ms: glyphshift_capture::unix_time_millis(),
+        revision: crate::workflow_lifecycle::next_revision(),
+            retry_attempt: 0,
+            retry_after_ms: 0,
         workflow_id: intent.workflow_id().into(),
         targets: intent
             .targets()
@@ -785,11 +836,12 @@ pub(super) fn desktop_disable_workflow(
 #[tauri::command]
 pub(super) fn desktop_refresh_workflows(
     application: State<'_, Mutex<DesktopApplication>>,
+    retry: Option<bool>,
 ) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
         .map_err(|_| runtime_unavailable())?
-        .refresh_workflows()
+        .refresh_workflows_with_retry(retry.unwrap_or(true))
 }
 
 #[tauri::command]

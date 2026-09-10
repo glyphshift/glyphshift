@@ -53,6 +53,8 @@ pub(crate) struct CommandError {
 }
 
 impl CommandError {
+    pub(crate) fn code(&self) -> &str { &self.code }
+
     pub(crate) fn new(code: impl Into<Box<str>>) -> Self {
         Self {
             schema_version: COMMAND_ERROR_SCHEMA_VERSION,

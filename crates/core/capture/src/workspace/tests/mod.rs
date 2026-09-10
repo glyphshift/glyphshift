@@ -28,3 +28,5 @@ mod join;
 mod query;
 mod settings;
 mod normalization;
+
+mod performance;

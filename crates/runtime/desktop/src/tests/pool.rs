@@ -668,7 +668,7 @@ fn explicit_workflow_replacement_removes_the_entire_old_intent() {
             .unwrap()
             .is_feature_active(Feature::TextReplace));
     }
-    assert!(pool.stop_workflow("workflow.old").is_err());
+    assert!(pool.stop_workflow("workflow.old").unwrap().errors().is_empty());
     pool.stop_workflow("workflow.new").unwrap();
     assert!(pool.status(&software_ids[0]).is_none());
     assert!(pool.status(&software_ids[1]).is_some());
@@ -757,6 +757,10 @@ fn workflow_stop_failure_keeps_one_last_applied_target_without_rolling_back_othe
         stopped.errors().get(software_ids[0].as_str()),
         Some(&DesktopRuntimeError::SessionRejected)
     );
+    assert!(pool.workflow_owns_target("workflow.stop-0", &software_ids[0]));
+    assert!(!pool.workflow_owns_target("workflow.stop-1", &software_ids[0]));
+    let retried = pool.stop_workflow("workflow.stop-0").unwrap();
+    assert_eq!(retried.errors().get(software_ids[0].as_str()), Some(&DesktopRuntimeError::SessionRejected));
     assert!(pool
         .status(&software_ids[1])
         .unwrap()

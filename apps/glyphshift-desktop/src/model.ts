@@ -143,6 +143,7 @@ export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'
 export type ProbeRuntimeCapability = 'direct_replace' | 'collection_only' | 'no_signal'
 
 export interface ProbeRunSummary {
+  workflowRuntime?: WorkflowRuntimeStatus | null
   workflowId?: string | null
   excludedDictionaryIds?: string[]
   exclusionRevisions?: number[]
@@ -200,14 +201,19 @@ export interface WorkflowAdapterPlan {
 
 export type FontCoverage = 'dictionary_matches' | 'all_observations'
 
+export interface WorkflowDictionaryFont {
+  families: string[]
+  scalePercent?: number | null
+}
 export interface WorkflowFontPolicy {
-  preferDictionary?: boolean
+  dictionaryOverrides?: Record<string, WorkflowDictionaryFont>
   scalePercent?: number
   families: string[]
   coverage: FontCoverage
 }
 
 export interface WorkflowTarget {
+  collectNewSources?: boolean | null
   softwareId: string
   adapterPlan: WorkflowAdapterPlan
   dictionaryIds: string[]
@@ -251,7 +257,18 @@ export interface WorkflowTargetRuntime {
   appliedGeneration: number | null
 }
 
+export interface WorkflowLifecycle {
+  phase: "stopped" | "waiting" | "connecting" | "running" | "stopping" | "failed" | "stop_failed" | "unknown"
+  enabled: boolean
+  collectNewSources: boolean
+  checkedAtMs: number
+  revision: number
+}
+
 export interface WorkflowRuntimeStatus {
+  lifecycle?: WorkflowLifecycle | null
+  checkedAtMs?: number
+  revision?: number
   workflowId: string
   targets: WorkflowTargetRuntime[]
   errors: Record<string, CommandError>

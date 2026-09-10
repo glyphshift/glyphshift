@@ -4,6 +4,8 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::cell::RefCell;
+use std::sync::Arc;
 use std::fs;
 use std::path::PathBuf;
 
@@ -213,7 +215,7 @@ impl ProbeRunSummary {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct ProbeRunDocument {
     schema: Box<str>,
@@ -242,12 +244,12 @@ impl ProbeDictionaryEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProbeDictionarySnapshot {
     revision: u64,
-    excluded_sources: BTreeSet<String>,
-    entries: Vec<ProbeDictionaryEntry>,
+    excluded_sources: Arc<BTreeSet<String>>,
+    entries: Arc<Vec<ProbeDictionaryEntry>>,
 }
 
 impl ProbeDictionarySnapshot {
-    pub fn with_excluded_sources(mut self, sources: BTreeSet<String>) -> Self { self.excluded_sources = sources; self }
+    pub fn with_excluded_sources(mut self, sources: BTreeSet<String>) -> Self { self.excluded_sources = Arc::new(sources); self }
 
     pub fn new(
         revision: u64,
@@ -267,7 +269,7 @@ impl ProbeDictionarySnapshot {
         if revision == 0 || !valid || !unique {
             return Err(ProbeRunError::InvalidInput);
         }
-        Ok(Self { revision, entries, excluded_sources: BTreeSet::new() })
+        Ok(Self { revision, entries: Arc::new(entries), excluded_sources: Arc::default() })
     }
 
     #[must_use]
@@ -442,6 +444,25 @@ pub enum ProbeExportFormat {
 pub struct ProbeRunStore {
     root: PathBuf,
     source_policies: BTreeMap<Box<str>, glyphshift_domain::SourceTextPolicy>,
+    cache: RefCell<ReadCache>,
+}
+
+// One active run is retained so browsing historical runs cannot grow this cache indefinitely.
+#[derive(Default)]
+struct ReadCache {
+    run_id: String,
+    sources: [Option<String>; 2],
+    catalog: Option<Arc<CaptureCatalog>>,
+    synchronized: Option<ProbeRunDocument>,
+    rows: Option<RowCache>,
+    decodes: usize,
+    row_builds: usize,
+}
+struct RowCache {
+    document: ProbeRunDocument,
+    dictionary: ProbeDictionarySnapshot,
+    rows: Arc<Vec<ProbeEntryRow>>,
+    search_texts: Arc<Vec<Vec<String>>>,
 }
 
 struct ProbeSourceKeys {
@@ -468,13 +489,14 @@ impl ProbeRunStore {
             return Err(ProbeRunError::InvalidInput);
         }
         fs::create_dir_all(&root).map_err(|_| ProbeRunError::Storage)?;
-        let mut store = Self { root, source_policies: BTreeMap::new() };
+        let mut store = Self { root, source_policies: BTreeMap::new(), cache: RefCell::new(ReadCache::default()) };
         store.recover_disconnected()?;
         Ok(store)
     }
 
     pub fn set_source_policy(&mut self, adapter_id: impl Into<Box<str>>, policy: glyphshift_domain::SourceTextPolicy) {
         self.source_policies.insert(adapter_id.into(), policy);
+        *self.cache.get_mut() = ReadCache::default();
     }
 
     fn run_policy(&self, document: &ProbeRunDocument) -> glyphshift_domain::SourceTextPolicy {
@@ -700,7 +722,7 @@ impl ProbeRunStore {
     ) -> Result<BTreeSet<Box<str>>, ProbeRunError> {
         let document = self.read_document(run_id)?;
         let observations = self.read_observations(run_id).ok();
-        let keys = self.source_keys(&document, observations.as_ref());
+        let keys = self.source_keys(&document, observations.as_deref());
         let excluded = dictionary.excluded_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
         Ok(sources.iter().filter(|source| excluded.contains(&keys.key(source))).cloned().collect())
     }
@@ -710,11 +732,14 @@ impl ProbeRunStore {
     ) -> Result<Vec<Box<str>>, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         let observations = self.read_observations(run_id).ok();
-        let keys = self.source_keys(&document, observations.as_ref());
+        let keys = self.source_keys(&document, observations.as_deref());
         let existing = dictionary.entries.iter().map(|entry| keys.key(&entry.source)).collect::<BTreeSet<_>>();
-        Ok(self.combined_rows(&document, dictionary)?.into_iter()
-            .filter(|row| row.state == ProbeEntryState::Pending && !existing.contains(&keys.key(&row.source)))
-            .map(|row| row.source).collect())
+        let excluded = dictionary.excluded_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
+        let ignored = document.ignored_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
+        // Collection needs source membership only; don't build display rows, translations or adapter lists.
+        Ok(observations.iter().flat_map(|catalog| catalog.entries()).map(|entry| keys.key(entry.source()))
+            .filter(|source| !existing.contains(source) && !excluded.contains(source) && !ignored.contains(source))
+            .collect::<BTreeSet<_>>().into_iter().map(Into::into).collect())
     }
 
     pub fn query_entries(
@@ -722,6 +747,13 @@ impl ProbeRunStore {
         run_id: &str,
         query: &ProbeQuery,
         dictionary: &ProbeDictionarySnapshot,
+    ) -> Result<ProbeEntryPage, ProbeRunError> {
+        self.query_entries_visible(run_id, query, dictionary, |_| true)
+    }
+
+    pub fn query_entries_visible(
+        &mut self, run_id: &str, query: &ProbeQuery, dictionary: &ProbeDictionarySnapshot,
+        mut visible: impl FnMut(&str) -> bool,
     ) -> Result<ProbeEntryPage, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         if query
@@ -733,38 +765,28 @@ impl ProbeRunStore {
         }
         let needle = query.search.trim().to_lowercase();
         let adapter_filter = query.adapter_ids.iter().collect::<BTreeSet<_>>();
-        let mut rows = self
-            .combined_rows(&document, dictionary)?
-            .into_iter()
-            .filter(|row| {
+        let rows = self.cached_rows(&document, dictionary)?;
+        let search_texts = self.cache.borrow().rows.as_ref().expect("rows populated by cached_rows").search_texts.clone();
+        let matching = rows.iter().zip(search_texts.iter())
+            .filter(|(row, search)| {
                 let matches_adapter = adapter_filter.is_empty()
                     || row
                         .adapter_ids
                         .iter()
                         .any(|adapter| adapter_filter.contains(adapter));
-                let matches_search = needle.is_empty()
-                    || row.source.to_lowercase().contains(&needle)
-                    || row.translation.to_lowercase().contains(&needle)
-                    || row
-                        .adapter_ids
-                        .iter()
-                        .any(|adapter| adapter.to_lowercase().contains(&needle));
+                let matches_search = needle.is_empty() || search.iter().any(|text| text.contains(&needle));
                 let matches_translation = match query.translation_filter {
                     ProbeTranslationFilter::All => true,
                     ProbeTranslationFilter::Untranslated => row.translation.trim().is_empty(),
                     ProbeTranslationFilter::Translated => !row.translation.trim().is_empty(),
                 };
-                matches_adapter && matches_search && matches_translation
+                matches_adapter && matches_search && matches_translation && visible(&row.source)
             })
+            .map(|(row, _)| row)
             .collect::<Vec<_>>();
-        rows.sort_by(|left, right| {
-            right
-                .last_seen_ms
-                .cmp(&left.last_seen_ms)
-                .then_with(|| left.source.cmp(&right.source))
-        });
-        let total = rows.len();
-        let rows = paged(rows, query);
+        let total = matching.len();
+        let rows = matching.into_iter().skip(query.page.saturating_sub(1).saturating_mul(query.page_size))
+            .take(query.page_size).cloned().collect();
         Ok(ProbeEntryPage {
             observation_revision: document.summary.observation_revision,
             dictionary_revision: dictionary.revision(),
@@ -829,7 +851,7 @@ impl ProbeRunStore {
     ) -> Result<Vec<PreviewEntry>, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         let observations = self.read_observations(run_id).ok();
-        let keys = self.source_keys(&document, observations.as_ref());
+        let keys = self.source_keys(&document, observations.as_deref());
         let ignored = document
             .ignored_sources
             .into_iter()
@@ -850,7 +872,7 @@ impl ProbeRunStore {
     pub fn dictionary_sources_for_rows(&self, run_id: &str, sources: &[Box<str>], dictionary: &ProbeDictionarySnapshot) -> Result<Vec<Box<str>>, ProbeRunError> {
         let document = self.read_document(run_id)?;
         let observations = self.read_observations(run_id).ok();
-        let keys = self.source_keys(&document, observations.as_ref());
+        let keys = self.source_keys(&document, observations.as_deref());
         let selected = sources.iter().map(AsRef::as_ref).collect::<BTreeSet<&str>>();
         Ok(dictionary.entries.iter().filter(|entry| selected.contains(keys.key(&entry.source).as_str())).map(|entry| entry.source.clone()).collect())
     }
@@ -913,6 +935,31 @@ impl ProbeRunStore {
             }
             ProbeExportFormat::DictionaryJson => Err(ProbeRunError::InvalidInput),
         }
+    }
+
+    /// One immutable view for bulk consumers such as AI planning; no repeated page reads.
+    pub fn entries_snapshot(&mut self, run_id: &str, dictionary: &ProbeDictionarySnapshot) -> Result<Arc<Vec<ProbeEntryRow>>, ProbeRunError> {
+        let document = self.synchronized_document(run_id)?;
+        self.cached_rows(&document, dictionary)
+    }
+
+    fn cached_rows(&self, document: &ProbeRunDocument, dictionary: &ProbeDictionarySnapshot) -> Result<Arc<Vec<ProbeEntryRow>>, ProbeRunError> {
+        let cached = self.cache.borrow().rows.as_ref().filter(|cached|
+            cached.document == *document && cached.dictionary == *dictionary).map(|cached| cached.rows.clone());
+        let rows = if let Some(rows) = cached { rows } else {
+            let mut rows = self.combined_rows(document, dictionary)?;
+            rows.sort_by(|left, right| right.last_seen_ms.cmp(&left.last_seen_ms)
+                .then_with(|| left.source.cmp(&right.source)));
+            let rows = Arc::new(rows);
+            let mut cache = self.cache.borrow_mut();
+            cache.row_builds += 1;
+            let search_texts = Arc::new(rows.iter().map(|row| std::iter::once(row.source.to_lowercase())
+                .chain(std::iter::once(row.translation.to_lowercase()))
+                .chain(row.adapter_ids.iter().map(|adapter| adapter.to_lowercase())).collect()).collect());
+            cache.rows = Some(RowCache { document: document.clone(), dictionary: dictionary.clone(), rows: rows.clone(), search_texts });
+            rows
+        };
+        Ok(rows)
     }
 
     fn combined_rows(
@@ -987,7 +1034,7 @@ impl ProbeRunStore {
                     translation_variants: Vec::new(),
                 });
         }
-        let keys = self.source_keys(document, observations.as_ref());
+        let keys = self.source_keys(document, observations.as_deref());
         let excluded = dictionary.excluded_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
         aggregate.retain(|source, _| !excluded.contains(&keys.key(source)));
         if keys.common == glyphshift_domain::SourceTextPolicy::Exact && keys.normalized.is_empty() { return Ok(aggregate.into_values().collect()); }
@@ -1006,7 +1053,7 @@ impl ProbeRunStore {
             }).or_insert(row);
         }
         let mut dictionary_groups = BTreeMap::<String, Vec<&ProbeDictionaryEntry>>::new();
-        for entry in &dictionary.entries { dictionary_groups.entry(keys.key(&entry.source)).or_default().push(entry); }
+        for entry in dictionary.entries.iter() { dictionary_groups.entry(keys.key(&entry.source)).or_default().push(entry); }
         let ignored = ignored.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
         for row in grouped.values_mut() {
             let candidates = dictionary_groups.get(row.source.as_ref()).cloned().unwrap_or_default();
@@ -1057,10 +1104,12 @@ impl ProbeRunStore {
         let Ok(observations) = self.read_observations(run_id) else {
             return Ok(document);
         };
+        if self.cache.borrow().synchronized.as_ref() == Some(&document) { return Ok(document); }
         let keys = self.source_keys(&document, Some(&observations));
         document.ignored_sources = document.ignored_sources.iter().map(|source| keys.key(source).into()).collect::<BTreeSet<Box<str>>>().into_iter().collect();
         let observed_count = observations.entries().iter().map(|entry| entry.source()).collect::<BTreeSet<_>>().len();
         if observations.revision() <= document.catalog_revision && observed_count == document.summary.observed_count && document.ignored_sources.len() == document.summary.ignored_count {
+            self.cache.borrow_mut().synchronized = Some(document.clone());
             return Ok(document);
         }
         document.catalog_revision = observations.revision();
@@ -1084,6 +1133,7 @@ impl ProbeRunStore {
         document.summary.ignored_count = document.ignored_sources.len();
         self.touch(&mut document);
         self.write_document(&document)?;
+        self.cache.borrow_mut().synchronized = Some(document.clone());
         Ok(document)
     }
 
@@ -1105,10 +1155,28 @@ impl ProbeRunStore {
         [directory.join("run.a.json"), directory.join("run.b.json")]
     }
 
-    fn read_observations(&self, run_id: &str) -> Result<CaptureCatalog, ProbeRunError> {
-        CaptureCatalog::read_current(&self.observation_path(run_id))
-            .map(|catalog| catalog.map_sources(|adapter, source| self.source_policies.get(adapter).copied().unwrap_or_default().key(source)))
-            .map_err(|_| ProbeRunError::Observation)
+    fn read_observations(&self, run_id: &str) -> Result<Arc<CaptureCatalog>, ProbeRunError> {
+        if !safe_identifier(run_id) { return Err(ProbeRunError::InvalidInput); }
+        let path = self.observation_path(run_id);
+        // Compare actual bytes, not mtime/size: rapid equal-length rewrites must be visible.
+        let sources = [path.with_extension("a.json"), path.with_extension("b.json")]
+            .map(|path| fs::read_to_string(path).ok());
+        let mut cache = self.cache.borrow_mut();
+        if cache.run_id != run_id {
+            *cache = ReadCache { run_id: run_id.to_owned(), ..ReadCache::default() };
+        }
+        if cache.sources != sources {
+            cache.catalog = sources.iter().flatten()
+                .filter_map(|source| CaptureCatalog::decode_json(source).ok())
+                .max_by_key(CaptureCatalog::revision)
+                .map(|catalog| Arc::new(catalog.map_sources(|adapter, source|
+                    self.source_policies.get(adapter).copied().unwrap_or_default().key(source))));
+            cache.sources = sources;
+            cache.synchronized = None;
+            cache.rows = None;
+            cache.decodes += 1;
+        }
+        cache.catalog.clone().ok_or(ProbeRunError::Observation)
     }
 
     fn read_document(&self, run_id: &str) -> Result<ProbeRunDocument, ProbeRunError> {
@@ -1213,11 +1281,6 @@ fn probe_document_from_value(value: &serde_json::Value) -> Option<ProbeRunDocume
             .filter_map(|source| source.as_str().map(Into::into))
             .collect(),
     })
-}
-
-fn paged<T>(rows: Vec<T>, query: &ProbeQuery) -> Vec<T> {
-    let start = (query.page - 1).saturating_mul(query.page_size);
-    rows.into_iter().skip(start).take(query.page_size).collect()
 }
 
 fn state_name(state: ProbeEntryState) -> &'static str {

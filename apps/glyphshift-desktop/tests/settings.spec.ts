@@ -54,6 +54,7 @@ test('settings shares the full-width primary page axis across wide and compact w
       appearance: box('[data-testid="settings-section-appearance"]'),
       headerBottom: document.querySelector<HTMLElement>('[data-testid="management-page-header"]')!.getBoundingClientRect().bottom,
       appearanceTop: document.querySelector<HTMLElement>('[data-testid="settings-section-appearance"]')!.getBoundingClientRect().top,
+      navigationBottom: document.querySelector<HTMLElement>('[aria-label="设置分区"]')!.getBoundingClientRect().bottom,
     }
   })
   expect(geometry.header.width).toBeGreaterThan(1400)
@@ -64,8 +65,8 @@ test('settings shares the full-width primary page axis across wide and compact w
   expect(geometry.header.right - geometry.layout.right).toBeLessThanOrEqual(12)
   expect(Math.abs(geometry.header.left - geometry.appearance.left)).toBeLessThanOrEqual(1)
   expect(Math.abs(geometry.layout.right - geometry.appearance.right)).toBeLessThanOrEqual(1)
-  expect(geometry.appearanceTop - geometry.headerBottom).toBeGreaterThanOrEqual(15)
-  expect(geometry.appearanceTop - geometry.headerBottom).toBeLessThanOrEqual(17)
+  expect(geometry.appearanceTop - geometry.navigationBottom).toBeGreaterThanOrEqual(15)
+  expect(geometry.appearanceTop - geometry.navigationBottom).toBeLessThanOrEqual(17)
 
   await page.setViewportSize({ width: 960, height: 640 })
   const compactGeometry = await page.evaluate(() => {
@@ -168,7 +169,7 @@ test('help teaches the workflow and progressively exposes AI, recovery, and adap
   await expect(page.getByRole('heading', { name: 'Glyphshift 如何组织工作' })).toHaveCount(0)
 
   await page.getByRole('tab', { name: '技术与兼容' }).click()
-  const adapterHeading = page.getByRole('heading', { name: '当前兼容方式' })
+  const adapterHeading = page.getByRole('heading', { name: '当前适配器' })
   await expect(adapterHeading).toBeVisible()
   await expect(page.getByText('ExtTextOutW', { exact: true })).toBeVisible()
   await expect(page.getByText(/适合传统 Windows 软件，支持字距、裁剪和部分特殊文字/)).toBeVisible()

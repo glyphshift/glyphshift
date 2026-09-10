@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import LanguageSelect from './LanguageSelect.vue'
+import FontFamilySelect from './FontFamilySelect.vue'
 import { useI18n } from 'vue-i18n'
-import type { DictionarySummary } from '../model'
+import type { DictionarySummary, WorkflowFontPolicy, WorkflowDictionaryFont } from '../model'
 import { useWorkspace } from '../useWorkspace'
 
 const props = defineProps<{ dictionaries: DictionarySummary[]; workflowName: string }>()
 const ids = defineModel<string[]>('dictionaryIds', { required: true })
 const writer = defineModel<string | null>('writeDictionaryId')
+const fontPolicy = defineModel<WorkflowFontPolicy | null>('fontPolicy', { default: null })
+function updateFont(id: string, patch: Partial<WorkflowDictionaryFont>) {
+  const policy = fontPolicy.value ?? { families: [], scalePercent: 100, coverage: 'dictionary_matches' as const }
+  const overrides = { ...policy.dictionaryOverrides }
+  const font = { ...(overrides[id] ?? { families: [] }), ...patch }
+  if (!font.families.length && font.scalePercent == null) delete overrides[id]
+  else overrides[id] = font
+  fontPolicy.value = { ...policy, dictionaryOverrides: overrides }
+}
 const { t } = useI18n()
 const workspace = useWorkspace()
 const open = ref(false)
@@ -46,7 +57,14 @@ function move(id: string, offset: number) {
   ;[reordered[index], reordered[next]] = [reordered[next], reordered[index]]
   ids.value = reordered
 }
-function remove(id: string) { ids.value = ids.value.filter(item => item !== id) }
+function remove(id: string) {
+  if (fontPolicy.value?.dictionaryOverrides?.[id]) {
+    const overrides = { ...fontPolicy.value.dictionaryOverrides }
+    delete overrides[id]
+    fontPolicy.value = { ...fontPolicy.value, dictionaryOverrides: overrides }
+  }
+  ids.value = ids.value.filter(item => item !== id)
+}
 async function confirm() {
   if (creating.value) return
   if (mode.value === 'existing') {
@@ -68,21 +86,30 @@ async function confirm() {
     open.value = false
   } finally { creating.value = false }
 }
+defineExpose({ showPicker })
 </script>
 
 <template>
-  <div class="space-y-4">
+  <div class="@container space-y-4">
     <div class="flex items-center justify-between gap-4">
       <h2 class="type-body m-0 flex items-center gap-1 font-semibold">{{ t('workflows.selectedDictionaries', { count: ids.length }) }}<UPopover mode="hover"><UButton class="shrink-0" icon="i-tabler-help-circle" color="neutral" variant="ghost" size="xs" :aria-label="t('workflows.dictionaryHelpTitle')" /><template #content><div class="max-w-80 space-y-2 p-3 text-xs leading-5"><p>{{ t('workflows.dictionaryWriteHelp') }}</p><p>{{ t('workflows.dictionaryOtherHelp') }}</p><p>{{ t('workflows.dictionaryPriorityHelp') }}</p></div></template></UPopover></h2>
       <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('workflows.addDictionaries')" @click="showPicker" />
     </div>
     <div data-testid="workflow-selected-dictionaries" class="overflow-hidden rounded-md border border-[var(--border)]">
-      <div v-for="(item, index) in selected" :key="item.id" :data-dictionary-id="item.id" class="flex min-h-16 items-center gap-3 border-b border-[var(--border)] px-3 py-2 last:border-b-0">
+      <div v-for="(item, index) in selected" :key="item.id" :data-dictionary-id="item.id" class="grid min-h-16 grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-3 border-b @min-[800px]:grid-cols-[20px_minmax(120px,1fr)_minmax(0,360px)_auto] border-[var(--border)] px-3 py-2 last:border-b-0">
         <span class="type-metadata w-5 shrink-0 text-center tabular-nums text-[var(--text-muted)]">{{ index + 1 }}</span>
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0">
           <strong class="type-label block truncate" :title="item.dictionary?.metadata.name ?? item.id">{{ item.dictionary?.metadata.name ?? item.id }}</strong>
           <span v-if="item.dictionary" class="type-metadata text-[var(--text-muted)]">{{ item.dictionary.metadata.sourceLocale }} → {{ item.dictionary.metadata.targetLocale }}</span>
         </div>
+        <div class="col-span-2 col-start-2 row-start-2 flex min-w-0 flex-wrap items-center gap-3 @min-[800px]:col-span-1 @min-[800px]:col-start-3 @min-[800px]:row-start-1">
+          <FontFamilySelect :model-value="fontPolicy?.dictionaryOverrides?.[item.id]?.families ?? []" :aria-label="t('workflowTypography.fontFor', { name: item.dictionary?.metadata.name ?? item.id })" class="w-52" @update:model-value="updateFont(item.id, { families: $event })" />
+          <div class="flex items-center gap-1">
+            <UInput :model-value="fontPolicy?.dictionaryOverrides?.[item.id]?.scalePercent ?? ''" type="number" :min="50" :max="200" :step="5" :placeholder="t('workflowTypography.inheritScale')" :aria-label="t('workflowTypography.scaleFor', { name: item.dictionary?.metadata.name ?? item.id })" class="w-28" @update:model-value="updateFont(item.id, { scalePercent: $event === '' ? null : Number($event) })" />
+            <span class="type-metadata">%</span>
+          </div>
+        </div>
+        <div class="col-start-3 row-start-1 flex items-center gap-3 @min-[800px]:col-start-4">
         <label class="type-label flex shrink-0 cursor-pointer items-center gap-2" :title="t('workflows.writerRadioHint')">
           <input type="radio" name="workflow-write-dictionary" class="size-4 accent-[var(--accent)]" :checked="writer === item.id" :aria-label="t('workflows.writeToDictionary', { name: item.dictionary?.metadata.name ?? item.id })" @change="writer = item.id">
           <span>{{ t('workflows.writerLabel') }}</span>
@@ -91,6 +118,7 @@ async function confirm() {
           <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-up" :disabled="index === 0" :aria-label="t('workflows.raiseDictionary', { name: item.dictionary?.metadata.name ?? item.id })" :title="t('workflows.raiseDictionary', { name: item.dictionary?.metadata.name ?? item.id })" @click="move(item.id, -1)" />
           <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-chevron-down" :disabled="index === ids.length - 1" :aria-label="t('workflows.lowerDictionary', { name: item.dictionary?.metadata.name ?? item.id })" :title="t('workflows.lowerDictionary', { name: item.dictionary?.metadata.name ?? item.id })" @click="move(item.id, 1)" />
           <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :aria-label="t('workflows.removeDictionary', { name: item.dictionary?.metadata.name ?? item.id })" :title="t('workflows.removeDictionary', { name: item.dictionary?.metadata.name ?? item.id })" @click="remove(item.id)" />
+        </div>
         </div>
       </div>
       <p v-if="!selected.length" class="type-metadata m-0 px-4 py-8 text-center text-[var(--text-muted)]">{{ t('workflows.addDictionaryHint') }}</p>
@@ -114,8 +142,8 @@ async function confirm() {
         <template v-else>
           <UFormField :label="t('workflows.dictionaryName')"><UInput v-model="dictionaryName" class="w-full" :aria-label="t('workflows.dictionaryName')" /></UFormField>
           <div class="grid grid-cols-2 gap-3">
-            <UFormField :label="t('workflows.sourceLocale')"><UInput v-model="sourceLocale" class="w-full" :aria-label="t('workflows.sourceLocale')" /></UFormField>
-            <UFormField :label="t('workflows.targetLocale')"><UInput v-model="targetLocale" class="w-full" :aria-label="t('workflows.targetLocale')" /></UFormField>
+            <UFormField :label="t('workflows.sourceLocale')"><LanguageSelect v-model="sourceLocale" allow-auto class="w-full" :aria-label="t('workflows.sourceLocale')" /></UFormField>
+            <UFormField :label="t('workflows.targetLocale')"><LanguageSelect v-model="targetLocale" class="w-full" :aria-label="t('workflows.targetLocale')" /></UFormField>
           </div>
         </template>
         <p v-if="error" role="alert" class="type-metadata text-error">{{ error }}</p>

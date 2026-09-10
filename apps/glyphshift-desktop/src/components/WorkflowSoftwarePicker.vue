@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openFile } from '@tauri-apps/plugin-dialog'
 import { useI18n } from 'vue-i18n'
 import { useWorkspace } from '../useWorkspace'
+import { useRecentSoftware } from '../useRecentSoftware'
 import { translateCommandError } from '../commandError'
 import type { SoftwareRecord, SoftwarePreflight } from '../model'
 
@@ -19,17 +20,19 @@ const busy = ref(false)
 const loading = ref(false)
 const error = ref('')
 const running = ref<SoftwarePreflight[]>([])
-const recentIds = ref<string[]>([])
-const storageKey = 'glyphshift.recent-software.v1'
+const history = useRecentSoftware(computed(() => props.software))
+const recentIds = history.ids
 let request = 0
 const normalize = (value: string) => value.trim().replace(/\//g, '\\').toLocaleLowerCase()
 const recent = computed(() => recentIds.value.map(id => props.software.find(item => item.id === id))
   .filter((item): item is SoftwareRecord => Boolean(item))
   .filter(item => `${item.name} ${item.executablePath ?? ''}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())))
-function storeRecent() {
-  try { localStorage.setItem(storageKey, JSON.stringify(recentIds.value)) } catch { /* Session history remains available. */ }
+async function clearRecent() {
+  if (busy.value) return
+  busy.value = true; error.value = ''
+  try { await history.clear() } catch (cause) { error.value = translateCommandError(cause) }
+  finally { busy.value = false }
 }
-function clearRecent() { recentIds.value = []; storeRecent() }
 async function loadRunning() {
   const ticket = ++request
   loading.value = true
@@ -44,12 +47,6 @@ watch(visible, (value) => {
   if (value) {
     path.value = ''; query.value = ''; error.value = ''; mode.value = 'recent'
     workspace.clearSoftwarePreflight()
-    try {
-      const stored = localStorage.getItem(storageKey)
-      const ids: unknown = stored === null ? props.software.map(item => item.id) : JSON.parse(stored)
-      recentIds.value = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string').slice(0, 20) : []
-    } catch { recentIds.value = [] }
-    storeRecent()
   } else {
     ++request
     if (workspace.softwareCaptureArmed.value) void workspace.cancelSoftwareCapture()
@@ -84,12 +81,12 @@ async function confirm() {
       record = workspace.model.value.software.find(item => normalize(item.executablePath ?? '') === normalize(chosen))
     }
     if (!record) { error.value = t('workspace.softwareResultMissing'); return }
-    recentIds.value = [record.id, ...recentIds.value.filter(id => id !== record.id)].slice(0, 20)
-    storeRecent()
+    await history.remember(record.id)
     await nextTick()
     emit('select', record.id)
     visible.value = false
-  } finally { busy.value = false }
+  } catch (cause) { error.value = translateCommandError(cause) }
+  finally { busy.value = false }
 }
 </script>
 

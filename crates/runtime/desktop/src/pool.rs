@@ -509,14 +509,18 @@ impl DesktopRuntimePool {
         })
     }
 
+    pub fn workflow_owns_target(&self, workflow_id: &str, software_id: &str) -> bool {
+        self.workflow_targets.get(workflow_id).is_some_and(|targets| targets.contains(software_id))
+    }
+
     pub fn stop_workflow(
         &mut self,
         workflow_id: &str,
     ) -> Result<WorkflowReconcileReport, DesktopRuntimeError> {
         let target_ids = self
             .workflow_targets
-            .remove(workflow_id)
-            .ok_or(DesktopRuntimeError::InvalidState)?;
+            .get(workflow_id).cloned()
+            .unwrap_or_default();
         let mut statuses = Vec::new();
         let mut errors = BTreeMap::new();
         for software_id in target_ids {
@@ -527,6 +531,7 @@ impl DesktopRuntimePool {
                 }
             }
         }
+        if errors.is_empty() { self.workflow_targets.remove(workflow_id); }
         Ok(WorkflowReconcileReport {
             workflow_id: workflow_id.into(),
             statuses,

@@ -119,11 +119,20 @@ pub enum FontCoverage {
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowFontPolicy {
     #[serde(default)]
-    prefer_dictionary: bool,
+    dictionary_overrides: BTreeMap<Box<str>, WorkflowDictionaryFont>,
     #[serde(default = "default_font_scale")]
     scale_percent: u16,
     families: Vec<Box<str>>,
     coverage: FontCoverage,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDictionaryFont {
+    #[serde(default)]
+    families: Vec<Box<str>>,
+    #[serde(default)]
+    scale_percent: Option<u16>,
 }
 
 fn default_font_scale() -> u16 { 100 }
@@ -131,8 +140,6 @@ fn default_font_scale() -> u16 { 100 }
 impl WorkflowFontPolicy {
     #[must_use]
     pub fn with_scale_percent(mut self, percent: u16) -> Self { self.scale_percent = percent; self }
-    #[must_use]
-    pub fn with_dictionary_fonts(mut self, enabled: bool) -> Self { self.prefer_dictionary = enabled; self }
 
     #[must_use]
     pub fn new(
@@ -140,7 +147,7 @@ impl WorkflowFontPolicy {
         coverage: FontCoverage,
     ) -> Self {
         Self {
-            prefer_dictionary: false,
+            dictionary_overrides: BTreeMap::new(),
             scale_percent: 100,
             families: families.into_iter().map(Into::into).collect(),
             coverage,
@@ -167,6 +174,8 @@ pub struct WorkflowTargetCreate {
     #[serde(default)]
     write_dictionary_id: Option<Box<str>>,
     #[serde(default)]
+    collect_new_sources: Option<bool>,
+    #[serde(default)]
     font_policy: Option<WorkflowFontPolicy>,
 }
 
@@ -182,6 +191,7 @@ impl WorkflowTargetCreate {
             adapter_plan: WorkflowAdapterPlan::parallel(adapter_ids),
             dictionary_ids: dictionary_ids.into_iter().map(Into::into).collect(),
             write_dictionary_id: None,
+            collect_new_sources: None,
             font_policy: None,
         }
     }
@@ -195,6 +205,11 @@ impl WorkflowTargetCreate {
     #[must_use]
     pub fn with_optional_write_dictionary(mut self, dictionary_id: Option<Box<str>>) -> Self {
         self.write_dictionary_id = dictionary_id;
+        self
+    }
+
+    pub fn with_collection_enabled(mut self, enabled: Option<bool>) -> Self {
+        self.collect_new_sources = enabled;
         self
     }
 
@@ -318,6 +333,8 @@ pub struct WorkflowTargetView {
     pub(super) adapter_plan: WorkflowAdapterPlan,
     pub(super) dictionary_ids: Vec<Box<str>>,
     pub(super) write_dictionary_id: Option<Box<str>>,
+    #[serde(default)]
+    pub(super) collect_new_sources: Option<bool>,
     pub(super) font_policy: Option<WorkflowFontPolicy>,
 }
 
@@ -341,6 +358,9 @@ impl WorkflowTargetView {
     pub const fn adapter_plan(&self) -> &WorkflowAdapterPlan {
         &self.adapter_plan
     }
+
+    pub fn collection_preference(&self) -> Option<bool> { self.collect_new_sources }
+    pub fn collection_enabled(&self) -> bool { self.write_dictionary_id.is_some() && self.collect_new_sources.unwrap_or(true) }
 
     #[must_use]
     pub const fn font_policy(&self) -> Option<&WorkflowFontPolicy> {
@@ -411,6 +431,8 @@ pub(super) struct WorkflowTargetArtifact {
     pub(super) dictionary_ids: Vec<Box<str>>,
     #[serde(default)]
     pub(super) write_dictionary_id: Option<Box<str>>,
+    #[serde(default)]
+    pub(super) collect_new_sources: Option<bool>,
     #[serde(default)]
     pub(super) font_policy: Option<WorkflowFontPolicy>,
 }
@@ -497,6 +519,7 @@ impl DesktopBackend {
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
                     write_dictionary_id: target.write_dictionary_id,
+                    collect_new_sources: Some(target.collect_new_sources.unwrap_or(true)),
                     font_policy: target.font_policy,
                 })
                 .collect(),
@@ -535,6 +558,7 @@ impl DesktopBackend {
                     adapter_plan: target.adapter_plan,
                     dictionary_ids: target.dictionary_ids,
                     write_dictionary_id: target.write_dictionary_id,
+                    collect_new_sources: Some(target.collect_new_sources.unwrap_or(true)),
                     font_policy: target.font_policy,
                 })
                 .collect(),
@@ -568,6 +592,20 @@ impl DesktopBackend {
         Ok(view)
     }
 
+    pub fn set_workflow_collection_enabled(&mut self, workflow_id: &str, enabled: bool) -> Result<WorkflowView, BackendError> {
+        let source = self.workflows.get(workflow_id).cloned()
+            .ok_or_else(|| BackendError::UnknownWorkflow(workflow_id.into()))?;
+        if enabled && source.targets.iter().any(|target| target.write_dictionary_id.is_none()) {
+            return Err(BackendError::InvalidArtifact("workflow-collection-writer"));
+        }
+        let targets = source.targets.iter().map(|target| WorkflowTargetCreate::new(
+            target.software_id.clone(), target.adapter_plan.adapter_ids.iter().cloned(), target.dictionary_ids.iter().cloned())
+            .with_optional_write_dictionary(target.write_dictionary_id.clone())
+            .with_collection_enabled(Some(enabled)).with_optional_font_policy(target.font_policy.clone())).collect();
+        self.update_workflow(WorkflowEdit { id: source.id, name: source.name, description: source.description,
+            global_shortcut: source.global_shortcut, base_revision: source.revision, targets })
+    }
+
     pub fn copy_workflow(
         &mut self,
         source_workflow_id: &str,
@@ -588,6 +626,7 @@ impl DesktopBackend {
                     target.dictionary_ids.iter().cloned(),
                 )
                 .with_optional_write_dictionary(target.write_dictionary_id.clone())
+                .with_collection_enabled(target.collect_new_sources)
                 .with_optional_font_policy(target.font_policy.clone())
             })
             .collect::<Vec<_>>();
@@ -705,7 +744,7 @@ impl DesktopBackend {
                     .font_policy
                     .as_ref()
                     .map_or(definition_target.clone(), |policy| {
-                        definition_target.with_font_policy(CompiledTargetFontPolicy::new(
+                        let mut compiled = CompiledTargetFontPolicy::new(
                             policy.families.iter().cloned(),
                             match policy.coverage {
                                 FontCoverage::DictionaryMatches => {
@@ -715,7 +754,11 @@ impl DesktopBackend {
                                     CompiledFontCoverage::AllObservations
                                 }
                             },
-                        ).with_dictionary_fonts(policy.prefer_dictionary).with_scale_percent(policy.scale_percent))
+                        ).with_scale_percent(policy.scale_percent);
+                        for (id, font) in &policy.dictionary_overrides {
+                            compiled = compiled.with_dictionary_override(id.clone(), font.families.iter().cloned(), font.scale_percent);
+                        }
+                        definition_target.with_font_policy(compiled)
                     })
             }),
         );
@@ -909,6 +952,7 @@ fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
                 adapter_plan: target.adapter_plan.clone(),
                 dictionary_ids: target.dictionary_ids.clone(),
                 write_dictionary_id: target.write_dictionary_id.clone(),
+                    collect_new_sources: target.collect_new_sources,
                 font_policy: target.font_policy.clone(),
             })
             .collect(),
@@ -960,7 +1004,14 @@ pub(super) fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>
                 || target.write_dictionary_id.as_ref().is_some_and(|id| !target.dictionary_ids.contains(id))
                 || target.font_policy.as_ref().is_some_and(|policy| {
                     (!(50..=200).contains(&policy.scale_percent))
-                        || (policy.families.is_empty() && !policy.prefer_dictionary && policy.scale_percent == 100)
+                        || policy.dictionary_overrides.len() > target.dictionary_ids.len()
+                        || policy.dictionary_overrides.iter().any(|(id, font)| {
+                            !target.dictionary_ids.contains(id)
+                                || font.scale_percent.is_some_and(|scale| !(50..=200).contains(&scale))
+                                || font.families.len() > 16
+                                || font.families.iter().any(|family| family.trim().is_empty() || family.len() > 512 || family.chars().any(char::is_control))
+                                || font.families.iter().collect::<BTreeSet<_>>().len() != font.families.len()
+                        })
                         || policy
                             .families
                             .iter()

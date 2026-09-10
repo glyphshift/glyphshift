@@ -6,11 +6,10 @@ import { useI18n } from 'vue-i18n'
 import { version as appVersion } from '../../package.json'
 import glyphshiftIconUrl from '../../src-tauri/icons/icon.svg?url'
 import { useAppSettings } from '../appSettings'
-import type { ProbeActivityStatus } from '../useProbeRuns'
+import { workflowActivity } from '../workflowLifecycle'
 
 const props = defineProps<{
   current: 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
-  probeActivityStatus: ProbeActivityStatus
   translationTaskActive: boolean
   translationTaskProgress: string
 }>()
@@ -22,9 +21,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const toast = useToast()
 const appSettings = useAppSettings()
-const probeActivityLabel = computed(() => props.probeActivityStatus
-  ? t(`titleBar.probeActivity.${props.probeActivityStatus}`)
-  : '')
+const activityLabel = computed(() => workflowActivity.value.map(([phase, count]) => `${t(`workflowLifecycle.${phase}`)} ${count}`).join(' · '))
 const nav = computed(() => [
   { id: 'workflows' as const, label: t('titleBar.workflows'), icon: 'i-tabler-git-branch' },
   { id: 'dictionaries' as const, label: t('titleBar.dictionaries'), icon: 'i-tabler-book-2' },
@@ -85,19 +82,19 @@ async function native(action: 'minimize' | 'maximize') {
             : 'text-[var(--text-secondary)]',
         ]"
         :aria-label="item.label"
-        :aria-describedby="item.id === 'workflows' && probeActivityStatus ? 'probe-activity-status' : undefined"
+        :aria-describedby="item.id === 'workflows' && activityLabel ? 'probe-activity-status' : undefined"
         :aria-current="current === item.id || (item.id === 'dictionaries' && current === 'dictionary-editor') ? 'page' : undefined"
         @click="emit('navigate', item.id)"
       >
         <UIcon :name="item.icon" class="size-4 shrink-0" />
         <span>{{ item.label }}</span>
         <UBadge
-          v-if="item.id === 'workflows' && probeActivityStatus"
+          v-if="item.id === 'workflows' && activityLabel"
           id="probe-activity-status"
-          :color="probeActivityStatus === 'running' ? 'success' : 'warning'"
+          :color="workflowActivity.some(([phase]) => ['failed', 'stop_failed'].includes(phase)) ? 'error' : workflowActivity.some(([phase]) => phase !== 'running') ? 'warning' : 'success'"
           variant="soft"
           size="sm"
-          :label="probeActivityLabel"
+          :label="activityLabel"
           class="type-caption h-4 shrink-0 px-1.5 font-semibold leading-none"
           aria-live="polite"
         />

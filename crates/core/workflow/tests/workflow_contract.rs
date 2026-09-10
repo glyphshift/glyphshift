@@ -251,7 +251,7 @@ fn wf_006_rejects_duplicate_adapter_bindings_before_compilation() {
 }
 
 #[test]
-fn wf_007_rejects_an_empty_font_family_chain() {
+fn wf_007_empty_default_font_preserves_the_original_font() {
     let result = resolve(
         &Workflow::new(
             "workflow-empty-fonts",
@@ -276,12 +276,8 @@ fn wf_007_rejects_an_empty_font_family_chain() {
         ),
     );
 
-    assert_eq!(
-        result,
-        Err(ResolveError::EmptyFontFamilies {
-            software_id: "software-editor".into(),
-        })
-    );
+    let compiled = result.expect("empty default means keep the original font");
+    assert_eq!(compiled.targets()[0].font_policy().lookup_entry_for_adapter("internal-default", "adapter-gdi", "File"), Some(FontRule::Unchanged));
 }
 
 #[test]
@@ -356,8 +352,7 @@ fn wf_009_rejects_a_plan_without_font_substitution_capability() {
 #[test]
 fn dictionary_fonts_follow_translation_precedence_and_workflow_mode() {
     let dictionaries = [
-        Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")])
-            .with_font_families(["Dictionary Sans"]),
+        Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")]),
         Dictionary::new(
             "second",
             "zh-CN",
@@ -385,7 +380,7 @@ fn dictionary_fonts_follow_translation_precedence_and_workflow_mode() {
                 )
                 .with_font_policy(
                     TargetFontPolicy::new(["Workflow Sans"], FontCoverage::AllObservations)
-                        .with_dictionary_fonts(prefer),
+                        .with_dictionary_override("first", if prefer { vec!["Dictionary Sans"] } else { vec![] }, None),
                 )],
             ),
             &[software(1)],
@@ -450,13 +445,12 @@ fn dictionary_fonts_can_be_used_without_a_workflow_default() {
             )
             .with_font_policy(
                 TargetFontPolicy::new(Vec::<Box<str>>::new(), FontCoverage::DictionaryMatches)
-                    .with_dictionary_fonts(true),
+                    .with_dictionary_override("first", ["Dictionary Sans"], None),
             )],
         ),
         &[software(1)],
         &[
-            Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")])
-                .with_font_families(["Dictionary Sans"]),
+            Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")]),
         ],
         &CompositionEnvironment::new(
             [AdapterInput::new(
@@ -489,7 +483,7 @@ fn font_scaling_inherits_independently_and_is_scoped_to_capable_adapters() {
             )
             .with_font_policy(
                 TargetFontPolicy::new(["Sans"], FontCoverage::AllObservations)
-                    .with_dictionary_fonts(true)
+                    .with_dictionary_override("dictionary", Vec::<Box<str>>::new(), Some(100))
                     .with_scale_percent(150),
             )],
         ),
@@ -498,8 +492,7 @@ fn font_scaling_inherits_independently_and_is_scoped_to_capable_adapters() {
             "dictionary",
             "zh-CN",
             [DictionaryEntry::new("File", "文件")],
-        )
-        .with_font_scale_percent(Some(100))],
+        )],
         &CompositionEnvironment::new(
             [
                 AdapterInput::new("scale", [Feature::TextReplace, Feature::FontScale]),

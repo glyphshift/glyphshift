@@ -126,6 +126,11 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             software_ids.clone(),
         ));
         WorkflowRuntimeView {
+            lifecycle: None,
+            checked_at_ms: glyphshift_capture::unix_time_millis(),
+            revision: crate::workflow_lifecycle::next_revision(),
+            retry_attempt: 0,
+            retry_after_ms: 0,
             workflow_id: intent.workflow_id().into(),
             targets: intent
                 .targets()
@@ -157,6 +162,11 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .disabled
             .push(intent.workflow_id().into());
         WorkflowRuntimeView {
+            lifecycle: None,
+            checked_at_ms: glyphshift_capture::unix_time_millis(),
+            revision: crate::workflow_lifecycle::next_revision(),
+            retry_attempt: 0,
+            retry_after_ms: 0,
             workflow_id: intent.workflow_id().into(),
             targets: intent
                 .targets()
@@ -407,6 +417,9 @@ fn test_desktop_application(
         )]),
         font_families: Vec::new(),
         font_cache_root: data_root.to_path_buf(),
+        probe_snapshot_cache: Default::default(),
+        collection_versions: Default::default(),
+        pending_collection_runs: Default::default(),
         probe_runs: ProbeRunStore::open(data_root.join("probe-runs")).expect("probe run store"),
         quick_probe_sessions: QuickProbeSessionStore::open(data_root)
             .expect("quick probe session store"),

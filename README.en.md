@@ -1,55 +1,98 @@
 # Glyphshift
 
-[User guide (Chinese)](docs/index.md)
+**Translate Windows applications and games with your own dictionaries, with optional AI help.**
 
-[简体中文](README.md) · English
+[Download](https://www.yuelili.com/apps/glyphshift) · [Online guide (Chinese)](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/Yuelioi/glyphshift/releases) · [简体中文](README.md)
 
-Glyphshift is a runtime interface translation tool for Windows desktop applications and games. While an application is running,
-it captures source UI text and replaces it with the target language selected by a dictionary.
-Dictionaries can use any source and target language pair. Glyphshift never modifies the target application's installed
-files.
+Glyphshift reads text while an application is running, looks up translations in a dictionary, and passes them back to the application for display. Collect text, edit translations, and configure fonts in one workflow, without changing the application's installed files.
 
-## How to use it
+Use it to maintain translations for everyday tools or try translating game menus and dialogue. Coverage depends on how the target displays text and what its adapters support.
 
-1. Create a workflow and set its application: browse an executable, select a running or recent application, or capture it with the shortcut. The workflow name is filled automatically.
-2. Select compatibility methods and dictionaries. Recent history can be cleared without changing existing workflows.
-3. To collect new source text, choose one selected dictionary as the write destination, or create a new dictionary. Sources already present in any other selected dictionary are excluded even when their translations are blank.
-4. Start the workflow and open Collect and translate. Enter translations or use AI completion.
-5. Check the result in the application. Pause collection or stop the workflow when needed; dictionaries are retained.
+## Get started
 
-Each workflow serves one application. Copy it to configure another application. Collection and translation share the workflow; there is no separate probe task.
+1. **Install and open Glyphshift.** Download the Windows installer from the links above.
+2. **Create a workflow and select an application.** Choose a running application, browse for its executable, or use recent history. The workflow name fills automatically. Adapters are selected by default; keep the defaults if unsure.
+3. **Add dictionaries.** Create a dictionary or select existing ones, then confirm the source and target languages. Choose one write dictionary to collect new text.
+4. **Click Start.** If the target is closed, the workflow waits for it to open, then attempts to connect.
+5. **Open View text and translate as you use the application.** Open menus, panels, or dialogue to collect source text. Enter translations yourself or use AI completion, then check the result in the target.
 
-Dictionaries and workflow entries support JSON and CSV import/export. JSON retains metadata; CSV requires language settings. Imports support keeping existing entries, overwriting matching sources, and replacing all entries.
+Each workflow targets one application. Create or copy workflows for other applications; workflows for different applications can run together. There is no separate software library or probe task to maintain.
 
-This workflow update does not load old workflows, activation state, or probe tasks. Application records, dictionaries, and AI profiles are retained.
+## Workflow behavior
 
-## AI translation and privacy
+| Action | Result |
+| --- | --- |
+| Start while the target is closed | Waits for the application to open |
+| Close the target application | Returns to waiting; attempts to reconnect when it opens again |
+| Turn off Collect new text | Stops collecting new text; existing translations and font replacement continue |
+| Stop workflow | Stops the workflow; opening the target again will not reconnect it until you start the workflow again |
+| A stop cannot be confirmed | Shows Stop failed and lets you retry |
 
-Each AI connection stores its service URL, model, reasoning mode, batching, simultaneous requests, timeout, retries, and
-local skip rules. Extra reasoning is off by default to avoid unnecessary wait time and cost for routine interface text.
-API keys are stored as plain text with the local AI connection. Settings masks them by default and can reveal them on
-demand; use this only on a computer you trust.
+The header, workflow list, and detail view share the same runtime status. Returning to the workflow page or bringing Glyphshift to the foreground refreshes it, alongside periodic background checks. Previously collected text does not prove the target is still running.
 
-A Codex subscription uses Codex already signed in on this computer, and translations use its subscription allowance.
-Only the target dictionary is read-only while a task runs; the rest of the app remains available. Quitting interrupts
-the task and never resends it automatically.
+Saving a translation does not always repaint the target immediately. Refresh target text from Task actions, or reopen a menu or advance the dialogue. Restoration after stopping also depends on the adapter; some components remain loaded until the target exits.
 
-Only candidate source text selected by the current plan is sent to the AI service you choose. Existing translations and
-locally filtered numbers, paths, URLs, shortcuts, and similar content are skipped before the request. Review the
-AI service's own data-handling and billing terms before using a cloud model.
+## Combining dictionaries
 
-## Scope and limitations
+Dictionaries store source text, translations, languages, and other metadata. Edit, share, and reuse them across workflows. A dictionary can use any source and target language pair.
 
-- The current release targets Windows desktop applications and games.
-- Compatibility methods cover native Windows text, Qt, and selected game-engine text paths. VGUI and CatSystem2 remain experimental: capture, replacement, and restoration have worked in real applications, but validation across games is incomplete. Coverage does not extend to every surface using the same engine.
-- Coverage depends on the rendering technology used by the target. Glyphshift cannot guarantee every application,
-  window, or piece of text.
-- Glyphshift is not an installer patch and is not a whole-screen OCR translation overlay.
-- Process discovery, text observation, and a replacement decision do not by themselves prove that the final pixels are
-  visible. Verify the result in the target application.
-- Application updates can change rendering paths and may require another probe pass.
+A workflow can select multiple dictionaries:
 
-Export backups of important dictionaries and verify capture, replacement, refresh, and restoration after stopping in the target application.
+- **Write dictionary:** receives newly collected sources and the workflow's AI completion results.
+- **Other dictionaries:** if any already contains the same source, that source is not appended to the write dictionary—even if its translation is blank.
+- **Priority:** translations are looked up from top to bottom. If several dictionaries translate the same source, the earlier dictionary takes priority. Use the arrows to reorder them.
+
+Both dictionary and workflow text lists can filter translated or untranslated entries and hide entries matched by skip rules. Manage those rules centrally in Settings.
+
+### Import and export
+
+- **Import JSON, UTF-8 CSV, or SRT.** Select multiple files, create separate dictionaries or merge them, and confirm names and languages.
+- **Extract SRT subtitle text.** Prepare and translate a dictionary before using it in a workflow. This does not rewrite the subtitle file.
+- **Import into an existing dictionary.** Append new entries, overwrite matching sources, or replace all entries after confirmation.
+- **Export JSON or CSV.** JSON preserves dictionary metadata; CSV is useful for spreadsheet editing. SRT is currently import-only.
+
+CSV needs `source` and `translation` columns. Translations may be blank; sources must be nonempty and unique within the file. Import errors include the filename, reason, and a row number where available.
+
+## AI completion
+
+Supported connections include OpenAI, Anthropic, Gemini, OpenAI-compatible services, Ollama, and a locally signed-in Codex subscription.
+
+Add an AI connection in Settings, enter the service URL and model, and test it before translating. Configure batch size, maximum simultaneous requests, timeout, and retries. Speed depends on the model, hardware, and service; automatic completion does not guarantee real-time translation.
+
+- Only untranslated candidates are completed; entries matched by skip rules are skipped.
+- Tasks run in the background while you browse other pages. Inspect batches, progress, elapsed time, and token usage reported by the service.
+- One translation task runs at a time, with requests using the connection's concurrency setting. Automatic completion from multiple workflows queues fairly.
+- Automatic completion supports intervals from 0 to 60 seconds. Zero means processing new content as soon as possible, with a minimum background check interval of 250ms.
+- Closing the target stops new rounds while allowing the current round to finish. Explicitly stopping a workflow cancels its own automatic task, without cancelling manually started dictionary tasks or other workflows.
+- Restarting Glyphshift does not resume AI requests automatically.
+
+**Cloud AI receives the text selected for translation. API keys are currently stored in plain text in local configuration.** A local Codex subscription connection uses its subscription allowance. You can also maintain dictionaries entirely by hand without AI.
+
+## Fonts and settings
+
+Font and size settings belong to workflows. Set a default font and size scale, with optional overrides for individual dictionaries, so reusing a dictionary does not carry those display settings with it.
+
+Settings also manages recent applications, favorite fonts, per-language missing-glyph fallback fonts, and the language list. Font replacement, scaling, and missing-glyph support depend on the adapter and are not available in every application.
+
+On first use, installed recommendations such as Microsoft YaHei, SimSun, SimHei, and Segoe UI are added to favorites. Existing users can choose Add recommended fonts in font settings without replacing their favorites.
+
+Glyphshift's interface supports Simplified Chinese and English, with light, dark, and system themes. These interface choices do not restrict the languages a dictionary can translate. Update notifications can be turned off in Settings.
+
+## Application support
+
+Adapters cover traditional Windows text, GDI+, selected DirectWrite paths, Qt Widgets, Qt Quick, GTK 3 / Pango, raylib, MonoGame, Unity Mono, and other supported text paths. VGUI localization and CatSystem2 dialogue adapters remain experimental and need testing across more games.
+
+Support for a framework does not mean every application built with it can be fully translated. Unity Mono support does not include IL2CPP, for example. Text in images, custom glyph rendering, or cached textures may not be replaceable. Check each adapter's in-app description for supported versions and limitations.
+
+If translation does not work, check that the target is open and both applications have matching privilege levels, then check whether source text was collected. If text was collected but the display did not change, try reopening that surface. Changing resident adapters or Runtime versions may require fully closing and reopening the target.
+
+## Documentation and releases
+
+Read the [online guide](https://docs.yuelili.com/glyphshift) or browse [docs/index.md](docs/index.md) in the repository. The user guide is currently maintained in Simplified Chinese.
+
+The [Release Action](.github/workflows/release.yml) runs when a `vMAJOR.MINOR.PATCH` tag is pushed. It checks application versions, builds the Windows installer, and packages `docs/` from the same checkout into `docs.zip`. Release assets include the installer, candidate manifest, documentation archive, and SHA-256 checksums.
+
+The documentation site can subscribe to the Release's `docs.zip` attachment. The Action packages and uploads the archive; site synchronization requires a separate binding. See [documentation publishing](scripts/docs-publishing.md) for setup and maintenance.
 
 ## License
 

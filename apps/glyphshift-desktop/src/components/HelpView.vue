@@ -8,7 +8,7 @@ import { adapterSummary } from '../adapterPresentation'
 
 type HelpTab = 'guide' | 'ai' | 'recovery' | 'compatibility' | 'about'
 type HelpTarget = 'workflows' | 'software' | 'dictionaries' | 'capture' | 'translation-tasks' | 'settings'
-type AboutLinkId = 'github' | 'bilibili'
+type AboutLinkId = 'github' | 'bilibili' | 'docs' | 'release'
 
 defineProps<{ adapters: AdapterOption[] }>()
 const emit = defineEmits<{ navigate: [view: HelpTarget] }>()
@@ -29,6 +29,8 @@ const helpTabs = computed(() => [
   { value: 'about' as const, slot: 'about', label: t('help.tabs.about'), icon: 'i-tabler-info-circle' },
 ])
 const aboutLinks = computed(() => [
+  { id: 'docs' as const, label: t('help.about.docs'), icon: 'i-tabler-book', url: 'https://docs.yuelili.com/glyphshift' },
+  { id: 'release' as const, label: t('help.about.release'), icon: 'i-tabler-download', url: 'https://www.yuelili.com/apps/glyphshift' },
   { id: 'github' as const, label: t('help.about.github'), icon: 'i-tabler-brand-github', url: 'https://github.com/Yuelioi/glyphshift' },
   { id: 'bilibili' as const, label: t('help.about.bilibili'), icon: 'i-tabler-brand-bilibili', url: 'https://space.bilibili.com/4279370' },
 ])

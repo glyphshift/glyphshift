@@ -28,7 +28,16 @@ impl DesktopApplication {
         let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
         if !workflow.targets().iter().any(|target| target.software_id() == summary.software_id()
             && target.write_dictionary_id() == Some(summary.dictionary_id())) { return Ok(()) }
-        if self.ensure_ai_dictionary_writable(summary.dictionary_id()).is_err() { return Ok(()) }
+        if self.ensure_ai_dictionary_writable(summary.dictionary_id()).is_err() {
+            self.pending_collection_runs.insert(run_id.to_owned());
+            return Ok(());
+        }
+        self.pending_collection_runs.insert(run_id.to_owned());
+        let version = (summary.observation_revision(), self.probe_snapshot_key(&summary)?);
+        if self.collection_versions.get(run_id) == Some(&version) {
+            self.pending_collection_runs.remove(run_id);
+            return Ok(());
+        }
         let snapshot = self.probe_entries_snapshot(&summary)?;
         let sources = self.probe_runs.uncollected_sources(run_id, &snapshot).map_err(probe_run_error)?;
         if !sources.is_empty() {
@@ -38,6 +47,11 @@ impl DesktopApplication {
             self.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries(entries))
                 .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
         }
+        // Mark only successful checks. A dictionary locked by AI is retried after unlock.
+        let version = (summary.observation_revision(), self.probe_snapshot_key(&summary)?);
+        if self.collection_versions.len() >= 128 { self.collection_versions.clear(); }
+        self.collection_versions.insert(run_id.to_owned(), version);
+        self.pending_collection_runs.remove(run_id);
         Ok(())
     }
 
@@ -52,6 +66,12 @@ impl DesktopApplication {
     }
 
     pub(super) fn prepare_workflow_collection(&mut self, workflow_id: &str) -> Result<(), CommandError> {
+        let legacy = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
+        if legacy.targets().iter().any(|target| target.collection_preference().is_none() && target.write_dictionary_id().is_some()) {
+            let paused = self.probe_runs.list().map_err(probe_run_error)?.iter()
+                .any(|record| record.workflow_id() == Some(workflow_id) && record.status() == ProbeRunStatus::Paused);
+            self.backend.set_workflow_collection_enabled(workflow_id, !paused).map_err(|_| CommandError::new("workflow.invalid_update"))?;
+        }
         let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
         let mut collections = BTreeMap::new();
         for (index, target) in workflow.targets().iter().enumerate() {
@@ -94,8 +114,18 @@ impl DesktopApplication {
                 runtime.targets.iter().any(|state| state.software_id.as_ref() == target.software_id() && state.active));
             let id = self.collection_record_id(workflow_id, target.software_id(), dictionary_id, index)?;
             if let Ok(summary) = self.probe_runs.summary(&id) {
-                let next = if running && summary.status() == ProbeRunStatus::Paused { ProbeRunStatus::Paused }
+                let next = if running && !target.collection_enabled() { ProbeRunStatus::Paused }
                     else if running { ProbeRunStatus::Running } else { ProbeRunStatus::Ready };
+                if running && (summary.status() != next || !target.collection_enabled()) {
+                    if let Some(runtimes) = self.runtimes.as_mut() {
+                        if let Err(error) = runtimes.control_workflow_collection(workflow_id, target.software_id(), !target.collection_enabled()) {
+                            if let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id) {
+                                runtime.errors.insert(target.software_id().into(), crate::workflow::runtime_command_error(error, true));
+                            }
+                            continue;
+                        }
+                    }
+                }
                 if summary.status() != next { self.probe_runs.set_status(&id, next).map_err(probe_run_error)?; }
             }
         }
@@ -108,4 +138,34 @@ pub(super) fn desktop_workflow_collection(
     application: State<'_, Mutex<DesktopApplication>>, workflow_id: String,
 ) -> Result<crate::probe::ProbeRunView, CommandError> {
     application.lock().map_err(|_| workspace_unavailable())?.workflow_collection_view(&workflow_id)
+}
+
+/// Drain persisted capture checkpoints independently of UI summary and target refresh requests.
+#[tauri::command]
+pub(super) fn desktop_collect_workflow_sources(application: State<'_, Mutex<DesktopApplication>>) -> Result<(), CommandError> {
+    let mut application = application.lock().map_err(|_| workspace_unavailable())?;
+    let records = application.probe_runs.list().map_err(probe_run_error)?;
+    for record in records {
+        if record.workflow_id().is_some() && (matches!(record.status(), ProbeRunStatus::Running | ProbeRunStatus::Paused)
+            || application.pending_collection_runs.contains(record.id())) {
+            application.collect_workflow_sources(record.id())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(super) fn desktop_set_workflow_collection(
+    application: State<'_, Mutex<DesktopApplication>>, workflow_id: String, enabled: bool,
+) -> Result<DesktopProductSnapshot, CommandError> {
+    let mut application = application.lock().map_err(|_| workspace_unavailable())?;
+    application.backend.set_workflow_collection_enabled(&workflow_id, enabled)
+        .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
+    let running = application.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == workflow_id);
+    application.update_workflow_collection_status(&workflow_id, running)?;
+    if let Some(runtime) = application.workflow_runtime_status.get_mut(workflow_id.as_str()) {
+        runtime.revision = crate::workflow_lifecycle::next_revision();
+        runtime.checked_at_ms = glyphshift_capture::unix_time_millis();
+    }
+    Ok(application.snapshot())
 }

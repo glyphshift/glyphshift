@@ -44,7 +44,7 @@ impl DesktopApplication {
         let existing_sources = dictionary.entries().iter().map(|entry| entry.source()).collect::<BTreeSet<_>>();
         let new_sources = incoming.iter().filter(|entry| !existing_sources.contains(entry.source.as_str()))
             .map(|entry| Box::<str>::from(entry.source.as_str())).collect::<Vec<_>>();
-        if !self.probe_runs.excluded_sources_for(&request.run_id, &self.probe_entries_snapshot(&summary)?, &new_sources)
+        if !self.probe_runs.excluded_sources_for(&request.run_id, self.probe_entries_snapshot(&summary)?.as_ref(), &new_sources)
             .map_err(probe_run_error)?.is_empty() {
             return Err(CommandError::new("capture.source_owned_by_dictionary"));
         }

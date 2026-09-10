@@ -12,6 +12,7 @@ mod shortcut;
 mod software;
 mod workflow;
 mod workflow_collection;
+mod workflow_lifecycle;
 mod workflow_shortcut;
 
 use command_error::CommandError;
@@ -371,6 +372,9 @@ struct DesktopApplication {
     font_families: Vec<Box<str>>,
     font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
+    probe_snapshot_cache: std::cell::RefCell<Option<(Vec<(Box<str>, u64)>, std::sync::Arc<ProbeDictionarySnapshot>)>>,
+    collection_versions: BTreeMap<String, (u64, Vec<(Box<str>, u64)>)>,
+    pending_collection_runs: BTreeSet<String>,
     quick_probe_sessions: QuickProbeSessionStore,
     active_probe_run_id: Option<Box<str>>,
     active_probe_capability: Option<ProbeRuntimeCapability>,
@@ -467,6 +471,9 @@ impl DesktopApplication {
             font_families,
             font_cache_root: data_root.clone(),
             probe_runs,
+            probe_snapshot_cache: Default::default(),
+            collection_versions: Default::default(),
+            pending_collection_runs: Default::default(),
             quick_probe_sessions,
             active_probe_run_id: None,
             active_probe_capability: None,
@@ -512,7 +519,7 @@ impl DesktopApplication {
                                 )
                             })
                     })
-                    .map(|runtime| (Box::<str>::from(workflow.id()), runtime))
+                    .map(|runtime| (Box::<str>::from(workflow.id()), self.project_workflow_runtime(runtime)))
             })
             .collect();
         DesktopProductSnapshot {
@@ -714,7 +721,7 @@ pub fn run() {
             let runtime_root = launch_context
                 .runtime_root
                 .unwrap_or(app.path().resource_dir()?.join("runtime"));
-            let settings = AppSettingsStore::open(&data_root)
+            let mut settings = AppSettingsStore::open(&data_root)
                 .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
             if settings.current().is_ok_and(|current| {
                 current.should_request_elevation(current_process_is_elevated().ok())
@@ -726,6 +733,8 @@ pub fn run() {
             let ai_state = ai::DesktopAiState::open(&data_root).map_err(std::io::Error::other)?;
             let application =
                 DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
+            settings.initialize_favorite_fonts(&application.font_families)
+                .map_err(|error| std::io::Error::other(format!("favorite fonts startup: {error:?}")))?;
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(ai_state));
             app.manage(Mutex::new(application));
@@ -799,6 +808,8 @@ pub fn run() {
             workflow::desktop_enable_workflow,
             workflow::desktop_disable_workflow,
             workflow::desktop_refresh_workflows,
+            workflow_collection::desktop_collect_workflow_sources,
+            workflow_collection::desktop_set_workflow_collection,
             workflow::desktop_control_workflow_diagnostics,
             workflow::desktop_workflow_diagnostics,
             software::desktop_remove_software

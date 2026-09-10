@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { latestRequestQueue } from '../latestRequestQueue'
 import { invoke } from '@tauri-apps/api/core'
 import { useAppSettings } from '../appSettings'
 import { skipReason } from '../textFilters'
@@ -7,7 +8,7 @@ import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import DictionaryImportDialog from './DictionaryImportDialog.vue'
 import { mergeDictionaryEntries, type DictionaryImportData } from '../dictionaryImport'
 import { mergeDictionaryDraft } from '../dictionaryDraft'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
@@ -40,6 +41,7 @@ async function applyImport(data: DictionaryImportData) {
   draft.value.entries = mergeDictionaryEntries(draft.value.entries, data.entries, data.mode)
   selected.value = new Set()
   query.value = ''
+  translationFilter.value = 'all'
   return true
 }
 
@@ -72,20 +74,33 @@ const hiddenSources = ref(new Set<string>())
 const filterError = ref('')
 let filterRequest = 0
 const sourceTexts = computed(() => hideSkipped.value ? draft.value.entries.map(entry => entry.source) : [])
-watch([sourceTexts, () => textSettings.settings.value.textFilterPolicy, hideSkipped], async ([sources, policy, hidden]) => {
-  const request = ++filterRequest
-  selected.value = new Set()
-  filterError.value = ''
-  localStorage.setItem('glyphshift.dictionary.hide-skipped', String(hidden))
-  if (!hidden) { hiddenSources.value = new Set(); return }
+const filterQueue = latestRequestQueue(async () => {
+  const request = filterRequest
+  const sources = [...sourceTexts.value]
+  const policy = textSettings.settings.value.textFilterPolicy
+  if (!hideSkipped.value) return
   try {
     const mask = '__TAURI_INTERNALS__' in window
       ? await invoke<boolean[]>('desktop_filter_dictionary_sources', { sources })
       : sources.map(source => Boolean(skipReason({ itemId: '', source, translation: null, ignored: false }, policy)))
     if (request === filterRequest) hiddenSources.value = new Set(sources.filter((_, index) => mask[index]))
   } catch { if (request === filterRequest) { hiddenSources.value = new Set(); filterError.value = t('textFilters.failed') } }
+})
+watch([sourceTexts, () => textSettings.settings.value.textFilterPolicy, hideSkipped], () => {
+  filterRequest += 1
+  selected.value = new Set()
+  filterError.value = ''
+  localStorage.setItem('glyphshift.dictionary.hide-skipped', String(hideSkipped.value))
+  if (!hideSkipped.value) { hiddenSources.value = new Set(); return }
+  void filterQueue.request()
 }, { deep: true, immediate: true })
+onBeforeUnmount(() => { filterRequest += 1; filterQueue.dispose() })
 const query = ref('')
+const translationFilter = ref('all')
+const translationFilterOptions = computed(() => (['all', 'translated', 'untranslated'] as const).map(value => ({
+  value, label: t(`dictionaryEditor.translationFilter.${value}`),
+})))
+const translationFilterLabel = computed(() => translationFilterOptions.value.find(option => option.value === translationFilter.value)?.label ?? '')
 const page = ref(1)
 const pageSize = ref(50)
 const metadataOpen = ref(false)
@@ -152,6 +167,7 @@ const filtered = computed<DictionaryTableRow[]>(() => {
   return draft.value.entries
     .map((entry, index) => ({ entry, index, kind: 'entry' as const }))
     .filter(({ entry }) => !hideSkipped.value || !hiddenSources.value.has(entry.source))
+    .filter(({ entry }) => translationFilter.value === 'all' || (translationFilter.value === 'translated' ? Boolean(entry.translation.trim()) : !entry.translation.trim()))
     .filter(({ entry }) => !needle || `${entry.source} ${entry.translation}`.toLocaleLowerCase().includes(needle))
 })
 
@@ -160,11 +176,12 @@ const tableRows = computed<DictionaryTableRow[]>(() => [
   { entry: newEntry.value, index: -1, kind: 'new' },
 ])
 
-watch([query, pageSize], () => { page.value = 1 })
+watch([query, pageSize, translationFilter], () => { page.value = 1 })
+watch(translationFilter, () => { selected.value = new Set() })
 watch(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)), count => {
   page.value = Math.min(page.value, count)
 })
-watch(() => props.detail.metadata.id, () => { page.value = 1 })
+watch(() => props.detail.metadata.id, () => { page.value = 1; translationFilter.value = 'all' })
 
 const columns = computed<TableColumn<DictionaryTableRow>[]>(() => [
   { id: 'select', header: '', meta: { class: { th: 'w-11', td: 'w-11' } } },
@@ -459,13 +476,10 @@ usePageEscape(() => true, () => emit('back'))
         <UButton color="neutral" :label="t('dictionaryEditor.useSavedVersion')" @click="draft = clone(saved); metadataDraft = clone(saved.metadata); newEntry = emptyEntry(); externalConflicts = []" />
       </template>
     </UAlert>
-    <UAlert v-if="dictionaryLocked" role="status" color="warning" variant="soft" icon="i-tabler-lock" :title="t('ai.tasks.dictionaryLocked')" :description="t('ai.tasks.dictionaryLockedDescription')" class="mb-3">
-      <template #actions><UButton color="neutral" variant="ghost" size="xs" :label="t('ai.tasks.viewCurrent')" @click="emit('open-ai-tasks')" /></template>
-    </UAlert>
-    <UAlert v-else-if="ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
+    <UAlert v-if="!dictionaryLocked && ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" /></template>
     </UAlert>
-    <UAlert v-else-if="aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
+    <UAlert v-else-if="!dictionaryLocked && aiNotice" role="status" :color="aiNoticeTone" variant="soft" icon="i-tabler-sparkles" :title="aiNoticeTitle" :description="aiNotice" class="mb-3">
       <template #actions>
         <div class="flex items-center gap-1.5">
           <UButton v-if="aiRetryAvailable" color="primary" variant="soft" size="xs" :label="t('ai.retryRemaining')" @click="runAiTranslation()" />
@@ -484,6 +498,10 @@ usePageEscape(() => true, () => emit('back'))
     <p v-if="filterError" role="alert" class="text-error">{{ filterError }}</p>
     <ManagementTableFrame
       v-model:query="query"
+      v-model:filter-value="translationFilter"
+      :filter-options="translationFilterOptions"
+      :filter-label="translationFilterLabel"
+      :filter-aria-label="t('dictionaryEditor.translationFilterLabel')"
       v-model:page="page"
       v-model:page-size="pageSize"
       :page-sizes="[50, 100, 200]"

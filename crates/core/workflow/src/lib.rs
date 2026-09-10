@@ -105,25 +105,9 @@ pub struct Dictionary {
     id: Box<str>,
     locale: Box<str>,
     entries: Vec<DictionaryEntry>,
-    font_families: Vec<Box<str>>,
-    font_scale_percent: Option<u16>,
 }
 
 impl Dictionary {
-    #[must_use]
-    pub fn with_font_scale_percent(mut self, percent: Option<u16>) -> Self {
-        self.font_scale_percent = percent;
-        self
-    }
-    #[must_use]
-    pub fn with_font_families(
-        mut self,
-        families: impl IntoIterator<Item = impl Into<Box<str>>>,
-    ) -> Self {
-        self.font_families = families.into_iter().map(Into::into).collect();
-        self
-    }
-
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -134,8 +118,6 @@ impl Dictionary {
             id: id.into(),
             locale: locale.into(),
             entries: entries.into_iter().collect(),
-            font_families: Vec::new(),
-            font_scale_percent: None,
         }
     }
 }
@@ -166,22 +148,22 @@ pub enum FontCoverage {
 pub struct TargetFontPolicy {
     families: Vec<Box<str>>,
     coverage: FontCoverage,
-    prefer_dictionary: bool,
     scale_percent: u16,
+    dictionary_overrides: BTreeMap<Box<str>, (Vec<Box<str>>, Option<u16>)>,
 }
 
 impl TargetFontPolicy {
+    #[must_use]
+    pub fn with_dictionary_override(mut self, id: impl Into<Box<str>>, families: impl IntoIterator<Item = impl Into<Box<str>>>, percent: Option<u16>) -> Self {
+        self.dictionary_overrides.insert(id.into(), (families.into_iter().map(Into::into).collect(), percent));
+        self
+    }
+
     #[must_use]
     pub fn with_scale_percent(mut self, percent: u16) -> Self {
         self.scale_percent = percent;
         self
     }
-    #[must_use]
-    pub fn with_dictionary_fonts(mut self, enabled: bool) -> Self {
-        self.prefer_dictionary = enabled;
-        self
-    }
-
     #[must_use]
     pub fn new(
         families: impl IntoIterator<Item = impl Into<Box<str>>>,
@@ -190,8 +172,8 @@ impl TargetFontPolicy {
         Self {
             families: families.into_iter().map(Into::into).collect(),
             coverage,
-            prefer_dictionary: false,
             scale_percent: 100,
+            dictionary_overrides: BTreeMap::new(),
         }
     }
 
@@ -463,14 +445,6 @@ pub fn resolve(
                         software_id: software.id.clone(),
                     })
             };
-            if policy.families.is_empty()
-                && !policy.prefer_dictionary
-                && policy.scale_percent == 100
-            {
-                return Err(ResolveError::EmptyFontFamilies {
-                    software_id: software.id.clone(),
-                });
-            }
             let default_family = select_family(&policy.families)?;
             let mut add_rule = |source: Option<&Box<str>>,
                                 family: Option<Box<str>>,
@@ -547,19 +521,9 @@ pub fn resolve(
                 add_rule(None, default_family.clone(), policy.scale_percent)?;
             }
             for (source, dictionary_id) in &winning_dictionaries {
-                let dictionary = dictionaries_by_id[dictionary_id.as_ref()];
-                let family = if policy.prefer_dictionary && !dictionary.font_families.is_empty() {
-                    select_family(&dictionary.font_families)?
-                } else {
-                    default_family.clone()
-                };
-                let percent = if policy.prefer_dictionary {
-                    dictionary
-                        .font_scale_percent
-                        .unwrap_or(policy.scale_percent)
-                } else {
-                    policy.scale_percent
-                };
+                let (family, percent) = if let Some((families, scale)) = policy.dictionary_overrides.get(dictionary_id) {
+                    (if families.is_empty() { default_family.clone() } else { select_family(families)? }, scale.unwrap_or(policy.scale_percent))
+                } else { (default_family.clone(), policy.scale_percent) };
                 add_rule(Some(source), family, percent)?;
             }
         }

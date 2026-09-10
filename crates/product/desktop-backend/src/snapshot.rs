@@ -99,6 +99,7 @@ impl DesktopBackend {
                             adapter_plan: target.adapter_plan.clone(),
                             dictionary_ids: target.dictionary_ids.clone(),
                             write_dictionary_id: target.write_dictionary_id.clone(),
+                            collect_new_sources: target.collect_new_sources,
                             font_policy: target.font_policy.clone(),
                         })
                         .collect(),

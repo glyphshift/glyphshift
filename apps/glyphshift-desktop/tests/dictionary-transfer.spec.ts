@@ -1,3 +1,4 @@
+import { selectLanguage } from './fixtures/languageSelect'
 import { expect, test } from '@playwright/test'
 import { model, replaceModel } from './fixtures/productModel'
 import { combineImportEntries } from '../src/dictionaryImport'
@@ -33,8 +34,8 @@ for (const merge of [false, true]) test(`batch import ${merge ? 'merged' : 'sepa
     await dialog.getByRole('combobox', { name: '创建方式' }).click()
     await page.getByRole('option', { name: '合并成一个字典' }).click()
   }
-  await dialog.getByRole('textbox', { name: '源语言' }).first().fill('en-US')
-  await dialog.getByRole('textbox', { name: '目标语言' }).first().fill('zh-CN')
+  await selectLanguage(page, dialog.getByRole('button', { name: '源语言', exact: true }).first(), 'en-US')
+  await selectLanguage(page, dialog.getByRole('button', { name: '目标语言', exact: true }).first(), 'zh-CN')
   if (!merge) await dialog.getByRole('button', { name: '应用语言到所有文件' }).click()
   await expect(confirm).toBeEnabled()
   await page.screenshot({ path: testInfo.outputPath('batch-import.png') })

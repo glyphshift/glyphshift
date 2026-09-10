@@ -135,6 +135,7 @@ pub(super) struct ProbeExportRequest {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ProbeRunView {
+    pub(super) workflow_runtime: Option<WorkflowRuntimeView>,
     #[serde(flatten)]
     pub(super) summary: ProbeRunSummary,
     pub(super) dictionary_revision: u64,
@@ -227,6 +228,8 @@ impl DesktopApplication {
                     .with_arg("dictionaryId", summary.dictionary_id())
             })?;
         Ok(ProbeRunView {
+            workflow_runtime: summary.workflow_id().and_then(|id| self.workflow_runtime_status.get(id))
+                .cloned().map(|runtime| self.project_workflow_runtime(runtime)),
             runtime_capability: if let Some(owner) = summary.workflow_id() {
                 self.workflow_runtime_status.get(owner)
                     .and_then(|runtime| runtime.targets.iter().find(|target| target.software_id.as_ref() == summary.software_id() && target.active))
@@ -270,13 +273,25 @@ impl DesktopApplication {
         Ok(())
     }
 
-    pub(super) fn probe_entries_snapshot(&self, summary: &ProbeRunSummary) -> Result<ProbeDictionarySnapshot, CommandError> {
+    pub(super) fn probe_snapshot_key(&self, summary: &ProbeRunSummary) -> Result<Vec<(Box<str>, u64)>, CommandError> {
+        std::iter::once(summary.dictionary_id()).chain(summary.excluded_dictionary_ids().iter().map(|id| id.as_ref()))
+            .map(|id| self.backend.dictionary(id).map(|dictionary| (id.into(), dictionary.revision()))
+                .map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id))).collect()
+    }
+
+    pub(super) fn probe_entries_snapshot(&self, summary: &ProbeRunSummary) -> Result<std::sync::Arc<ProbeDictionarySnapshot>, CommandError> {
+        let key = self.probe_snapshot_key(summary)?;
+        if let Some((previous, snapshot)) = self.probe_snapshot_cache.borrow().as_ref() {
+            if previous == &key { return Ok(snapshot.clone()); }
+        }
         let mut excluded = BTreeSet::new();
         for id in summary.excluded_dictionary_ids() {
             let dictionary = self.backend.dictionary(id).map_err(|_| CommandError::new("dictionary.not_found").with_arg("dictionaryId", id.to_string()))?;
             excluded.extend(dictionary.entries().iter().map(|entry| entry.source().to_owned()));
         }
-        Ok(self.probe_dictionary_snapshot(summary.dictionary_id())?.with_excluded_sources(excluded))
+        let snapshot = std::sync::Arc::new(self.probe_dictionary_snapshot(summary.dictionary_id())?.with_excluded_sources(excluded));
+        *self.probe_snapshot_cache.borrow_mut() = Some((key, snapshot.clone()));
+        Ok(snapshot)
     }
 
     pub(super) fn probe_run_list(&mut self) -> Result<Vec<ProbeRunView>, CommandError> {
@@ -490,13 +505,7 @@ impl DesktopApplication {
 
     pub(super) fn resume_probe_run(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
         if let Some(owner) = self.probe_runs.summary(run_id).map_err(probe_run_error)?.workflow_id().map(str::to_owned) {
-            let result = self.enable_workflow(&owner, false)?;
-            if let Some(error) = result.runtime.errors.values().next() {
-                return Err(error.clone());
-            }
-            if !result.runtime.targets.iter().any(|target| target.active) {
-                return Err(CommandError::new("runtime.target_not_found"));
-            }
+            self.enable_workflow(&owner, false)?;
             return self.probe_run_summary(run_id);
         }
         self.start_probe_run_runtime(run_id, false)
@@ -618,9 +627,8 @@ impl DesktopApplication {
     ) -> Result<ProbeRunView, CommandError> {
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
         if let Some(owner) = summary.workflow_id() {
-            self.runtimes.as_mut().ok_or_else(runtime_unavailable)?.control_workflow_collection(owner, summary.software_id(), paused)
-                .map_err(|error| runtime_command_error(error, true))?;
-            self.probe_runs.set_status(run_id, if paused { ProbeRunStatus::Paused } else { ProbeRunStatus::Running }).map_err(probe_run_error)?;
+            self.backend.set_workflow_collection_enabled(owner, !paused).map_err(|_| CommandError::new("workflow.invalid_update"))?;
+            self.update_workflow_collection_status(owner, true)?;
             return self.probe_run_summary(run_id);
         }
         if self.active_probe_run_id.as_deref() != Some(run_id) {
@@ -701,7 +709,6 @@ impl DesktopApplication {
     }
 
     pub(super) fn probe_run_summary(&mut self, run_id: &str) -> Result<ProbeRunView, CommandError> {
-        self.collect_workflow_sources(run_id)?;
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
         self.probe_run_view(summary)
     }
@@ -710,6 +717,10 @@ impl DesktopApplication {
         &mut self,
         request: ProbeRunQueryRequest,
     ) -> Result<ProbeEntryPage, CommandError> {
+        self.probe_run_entries_visible(request, |_| true)
+    }
+
+    fn probe_run_entries_visible(&mut self, request: ProbeRunQueryRequest, visible: impl FnMut(&str) -> bool) -> Result<ProbeEntryPage, CommandError> {
         let query = ProbeQuery::new(request.search, request.page, request.page_size)
             .and_then(|query| query.with_adapter_ids(request.adapter_ids))
             .map(|query| query.with_translation_filter(request.translation_filter))
@@ -720,7 +731,7 @@ impl DesktopApplication {
             .map_err(probe_run_error)?;
         let dictionary = self.probe_entries_snapshot(&summary)?;
         self.probe_runs
-            .query_entries(&request.run_id, &query, &dictionary)
+            .query_entries_visible(&request.run_id, &query, &dictionary, visible)
             .map_err(probe_run_error)
     }
 
@@ -743,7 +754,7 @@ impl DesktopApplication {
             .iter()
             .find(|entry| entry.source() == request.source.as_ref());
         if existing.is_none() && !self.probe_runs.excluded_sources_for(
-            &request.run_id, &self.probe_entries_snapshot(&summary)?, &[request.source.clone()],
+            &request.run_id, self.probe_entries_snapshot(&summary)?.as_ref(), &[request.source.clone()],
         ).map_err(probe_run_error)?.is_empty() {
             return Err(CommandError::new("capture.source_owned_by_dictionary"));
         }
@@ -803,7 +814,7 @@ impl DesktopApplication {
             .map_err(|_| CommandError::new("dictionary.not_found"))?;
         let requested_sources = request.entries.iter().map(|entry| Box::<str>::from(entry.source.trim())).collect::<Vec<_>>();
         let excluded = self.probe_runs.excluded_sources_for(
-            &request.run_id, &self.probe_entries_snapshot(&summary)?, &requested_sources,
+            &request.run_id, self.probe_entries_snapshot(&summary)?.as_ref(), &requested_sources,
         ).map_err(probe_run_error)?;
         if excluded.iter().any(|source| !dictionary.entries().iter().any(|entry| entry.source() == source.as_ref())) {
             return Err(CommandError::new("capture.source_owned_by_dictionary"));
@@ -1165,12 +1176,19 @@ pub(super) fn desktop_probe_run_summary(
 #[tauri::command]
 pub(super) fn desktop_probe_run_entries(
     request: ProbeRunQueryRequest,
+    hide_skipped: Option<bool>,
     application: State<'_, Mutex<DesktopApplication>>,
+    settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<ProbeEntryPage, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .probe_run_entries(request)
+    if !hide_skipped.unwrap_or(false) {
+        return application.lock().map_err(|_| workspace_unavailable())?.probe_run_entries(request);
+    }
+    let policy = settings.lock().map_err(|_| workspace_unavailable())?.current()
+        .map_err(|_| workspace_unavailable())?.text_filter_policy().clone();
+    let mut cache = crate::ai::source_filter_cache().lock().map_err(|_| workspace_unavailable())?;
+    cache.configure(&policy).map_err(crate::ai::ai_plan_error)?;
+    application.lock().map_err(|_| workspace_unavailable())?
+        .probe_run_entries_visible(request, |source| !cache.hidden(source))
 }
 
 #[tauri::command]
