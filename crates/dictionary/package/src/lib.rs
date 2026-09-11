@@ -134,9 +134,12 @@ pub struct DictionaryMetadata {
     font_families: Vec<Box<str>>,
     #[serde(default)]
     font_scale_percent: Option<u16>,
+    #[serde(default)]
+    text_rules: Vec<glyphshift_translation::RegexTranslationRule>,
 }
 
 impl DictionaryMetadata {
+    pub fn text_rules(&self) -> &[glyphshift_translation::RegexTranslationRule] { &self.text_rules }
     #[must_use]
     pub fn font_scale_percent(&self) -> Option<u16> {
         self.font_scale_percent
@@ -205,6 +208,9 @@ pub struct DictionaryCreate {
 }
 
 impl DictionaryCreate {
+    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
+        self.metadata.text_rules = rules; self
+    }
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -226,6 +232,7 @@ impl DictionaryCreate {
                 tags: Vec::new(),
                 font_families: Vec::new(),
                 font_scale_percent: None,
+                text_rules: Vec::new(),
             },
             entries: Vec::new(),
         }
@@ -306,6 +313,9 @@ pub struct DictionaryEdit {
 }
 
 impl DictionaryEdit {
+    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
+        self.metadata.text_rules = rules; self
+    }
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -774,6 +784,7 @@ fn validate_dictionary(
             .collect::<BTreeSet<_>>()
             .len()
             != artifact.metadata.font_families().len()
+        || glyphshift_translation::RegexTranslationRules::compile(artifact.metadata.text_rules.clone()).is_err()
         || artifact.revision == 0
         || expected_id.is_some_and(|expected| expected != artifact.metadata.id())
         || !valid_entries
@@ -953,5 +964,22 @@ mod tests {
         );
         assert!(recovered.view().metadata().font_families().is_empty());
         assert_eq!(recovered.view().metadata().font_scale_percent(), None);
+    }
+}
+
+
+#[cfg(test)]
+mod text_rule_tests {
+    use super::*;
+    #[test]
+    fn portable_rules_round_trip_and_invalid_rules_are_rejected() {
+        let rule = glyphshift_translation::RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true };
+        let package = DictionaryPackage::at_revision(DictionaryCreate::new("counter", "Counter", "en", "zh-CN").with_text_rules(vec![rule.clone()]), 1).unwrap();
+        let encoded = package.encode_json().unwrap();
+        let restored = DictionaryPackage::decode_json(&encoded, None).unwrap();
+        assert_eq!(restored.view().metadata().text_rules(), &[rule]);
+        let mut value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        value["metadata"]["textRules"][0]["pattern"] = "[".into();
+        assert!(DictionaryPackage::decode_json(&value.to_string(), None).is_err());
     }
 }

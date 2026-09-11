@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LibrarySortMenu from './LibrarySortMenu.vue'
+import { useLibrarySort } from '../useLibrarySort'
 import { projectLifecycle, workflowOperations, workflowStateColor } from "../workflowLifecycle"
 import { useAppSettings } from '../appSettings'
 import { preferredFonts } from '../settingsCatalogs'
@@ -67,6 +69,8 @@ const emit = defineEmits<{
 }>()
 const { t, locale } = useI18n()
 const query = ref('')
+const { mode: sortMode, options: sortOptions, sort } = useLibrarySort('workflows')
+watch(sortMode, () => { page.value = 1 })
 const page = ref(1)
 const pageSize = ref(20)
 const selected = ref(new Set<string>())
@@ -123,12 +127,12 @@ const statusFilterOptions = computed(() => [
 ])
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
-  return props.items.filter((item) => {
+  return sort(props.items.filter((item) => {
     const enabled = props.activationIds.has(item.id)
     if (statusFilter.value === 'enabled' && !enabled) return false
     if (statusFilter.value === 'disabled' && enabled) return false
     return !needle || `${item.name} ${item.description} ${softwareNames(item)} ${dictionaryNames(item)} ${adapterNames(item)}`.toLocaleLowerCase().includes(needle)
-  })
+  }), item => item.id, item => item.name)
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
@@ -477,6 +481,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
 
     <UAlert v-if="workflowMessage" role="alert" color="error" variant="soft" :title="t('workflows.error')" :description="workflowMessage" class="mb-3" />
     <ManagementTableFrame v-model:query="query" v-model:filter-value="statusFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('workflows.searchPlaceholder')" :search-label="t('workflows.searchLabel')" :filter-label="statusFilterOptions.find(option => option.value === statusFilter)?.label" :filter-aria-label="t('workflows.filterLabel')" :filter-options="statusFilterOptions" :column-options="columnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('workflows.itemLabel')" :total="filtered.length" :item-label="t('workflows.itemLabel')" @toggle-column="toggleColumn">
+      <template #toolbar-actions><LibrarySortMenu v-model="sortMode" :options="sortOptions" /></template>
       <template #bulk-actions>
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-play" :label="t('workflows.bulkEnable')" :disabled="busy" @click="emit('toggleMany', [...selected], true)" />
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-stop" :label="t('workflows.bulkDisable')" :disabled="busy" @click="emit('toggleMany', [...selected], false)" />

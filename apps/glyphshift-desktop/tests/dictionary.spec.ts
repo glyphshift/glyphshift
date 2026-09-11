@@ -481,7 +481,7 @@ test('dictionary editor uses one guarded inline draft', async ({ page }) => {
   await expect(guard).toBeVisible()
   await guard.getByRole('button', { name: '继续编辑' }).click()
   await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
-  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
   await expect(page.getByRole('dialog', { name: '放弃未保存更改？' })).toBeVisible()
   await page.getByRole('dialog', { name: '放弃未保存更改？' }).getByRole('button', { name: '继续编辑' }).click()
   await page.getByRole('button', { name: '关闭窗口' }).click()

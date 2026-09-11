@@ -10,6 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 glyphshift-domain = { path = "../domain" }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true

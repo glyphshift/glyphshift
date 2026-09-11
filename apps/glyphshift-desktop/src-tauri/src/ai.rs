@@ -430,22 +430,25 @@ impl DesktopApplication {
         let snapshot = self.probe_entries_snapshot(&summary)?;
         let rows = self.probe_runs.entries_snapshot(run_id, &snapshot).map_err(probe::probe_run_error)?;
         let mut row_number = 0_usize;
+        let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
         let mut items = Vec::with_capacity(rows.len());
+        let mut seen = BTreeSet::new();
         for row in rows.iter() {
-            row_number = row_number.saturating_add(1);
-            let item_id = format!("probe-row-{row_number}");
-            let item = if row.translation().trim().is_empty() {
-                TranslationItem::untranslated(item_id, row.source())
-            } else {
-                TranslationItem::translated(item_id, row.source(), row.translation())
-            };
-            items.push(
-                if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() {
-                    item.ignored()
+            let sources = resolver.collection_sources(row.source());
+            if row.state() == glyphshift_capture::ProbeEntryState::Ignored && sources != vec![Box::<str>::from(row.source())] { continue; }
+            for source in sources {
+                if !seen.insert(source.clone()) { continue; }
+                row_number = row_number.saturating_add(1);
+                let item_id = format!("probe-row-{row_number}");
+                let translation = if source.as_ref() == row.source() { row.translation() }
+                    else { dictionary.entries().iter().find(|entry| entry.source() == source.as_ref()).map_or("", |entry| entry.translation()) };
+                let item = if translation.trim().is_empty() {
+                    TranslationItem::untranslated(item_id, source)
                 } else {
-                    item
-                },
-            );
+                    TranslationItem::translated(item_id, source, translation)
+                };
+                items.push(if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() { item.ignored() } else { item });
+            }
         }
         Ok(TranslationPlanRequest::new(
             format!("probe:{run_id}"),
@@ -477,6 +480,7 @@ impl DesktopApplication {
             &request.run_id, &dictionary_snapshot,
             &request.results.iter().map(|result| Box::<str>::from(result.source.trim())).collect::<Vec<_>>(),
         ).map_err(probe::probe_run_error)?;
+        let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
         let mut observed_sources = BTreeSet::new();
         let mut protected_sources = BTreeSet::new();
         let mut page_number = 1;
@@ -495,6 +499,7 @@ impl DesktopApplication {
                 if row.has_translation_conflict() || !row.translation().trim().is_empty() { protected_sources.insert(Box::<str>::from(row.source())); }
                 if row.state() != glyphshift_capture::ProbeEntryState::Unobserved {
                     observed_sources.insert(Box::<str>::from(row.source()));
+                    observed_sources.extend(resolver.collection_sources(row.source()));
                 }
             }
             if observed_sources.len() >= page.total()
@@ -525,7 +530,8 @@ impl DesktopApplication {
                 .entries()
                 .iter()
                 .any(|entry| entry.source() == source && !entry.translation().trim().is_empty());
-            if already_completed || protected_sources.contains(source) || excluded_sources.contains(source) {
+            if already_completed || protected_sources.contains(source) || excluded_sources.contains(source)
+                || resolver.collection_sources(source) != vec![Box::<str>::from(source)] {
                 skipped_count = skipped_count.saturating_add(1);
             } else {
                 updates.push(DictionaryEntryCreate::new(source, translation));
@@ -876,14 +882,4 @@ pub(super) fn desktop_ai_translation_tasks(
 pub(super) fn source_filter_cache() -> &'static Mutex<glyphshift_ai_translation::SourceFilterCache> {
     static CACHE: std::sync::OnceLock<Mutex<glyphshift_ai_translation::SourceFilterCache>> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Default::default()))
-}
-
-#[tauri::command]
-pub(super) async fn desktop_filter_dictionary_sources(sources: Vec<String>, settings: State<'_, Mutex<AppSettingsStore>>) -> Result<Vec<bool>, CommandError> {
-    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut cache = source_filter_cache().lock().map_err(|_| ai_state_unavailable())?;
-        cache.configure(&policy).map_err(ai_plan_error)?;
-        Ok(sources.iter().map(|source| cache.hidden(source)).collect())
-    }).await.map_err(|_| ai_state_unavailable())?
 }

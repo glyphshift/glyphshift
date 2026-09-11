@@ -285,10 +285,55 @@ impl DesktopApplication {
         &mut self,
         edit: DictionaryEdit,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        self.update_dictionary_with_capture_clear(edit, false)
+    }
+
+    pub(super) fn update_dictionary_with_capture_clear(
+        &mut self, edit: DictionaryEdit, clear_captured: bool,
+    ) -> Result<DesktopProductSnapshot, CommandError> {
         self.ensure_ai_dictionary_writable(edit.id())?;
-        self.backend
-            .update_dictionary(edit)
+        let id = edit.id().to_owned();
+        self.backend.update_dictionary(edit)
             .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+        if clear_captured {
+            let records = self.probe_runs.list().map_err(crate::probe::probe_run_error)?;
+            let result = (|| {
+                let mut stopped = BTreeSet::new();
+                for run in records.iter().filter(|run| run.dictionary_id() == id) {
+                    if let Some(owner) = run.workflow_id() {
+                        if stopped.insert(owner.to_owned()) {
+                            let intent = self.backend.effective_workflow_intent(owner)
+                                .map_err(|_| CommandError::new("workflow.invalid"))?;
+                            if let Some(runtimes) = self.runtimes.as_mut() {
+                                let runtime = runtimes.stop_workflow(&intent);
+                                let failed = !runtime.errors.is_empty() || runtime.targets.iter().any(|target| target.active);
+                                self.workflow_runtime_status.insert(owner.into(), runtime);
+                                if failed { return Err(CommandError::new("workflow.disable_failed")); }
+                            }
+                        }
+                    } else if self.active_probe_run_id.as_deref() == Some(run.id()) {
+                        self.runtimes.as_mut().ok_or_else(|| CommandError::new("runtime.unavailable"))?
+                            .stop_capture(run.software_id()).map_err(|error| crate::workflow::runtime_command_error(error, false))?;
+                        self.active_probe_run_id = None;
+                        self.active_probe_capability = None;
+                    }
+                    self.probe_runs.set_status(run.id(), glyphshift_capture::ProbeRunStatus::Ready).map_err(crate::probe::probe_run_error)?;
+                    self.probe_runs.clear_observations(run.id()).map_err(crate::probe::probe_run_error)?;
+                    self.collection_versions.remove(run.id());
+                    if run.workflow_id().is_none() && run.status() == glyphshift_capture::ProbeRunStatus::Running {
+                        self.start_probe_run_runtime(run.id(), false)?;
+                    } else {
+                        self.probe_runs.set_status(run.id(), run.status()).map_err(crate::probe::probe_run_error)?;
+                    }
+                }
+                Ok(())
+            })();
+            // Restore the enabled intent even when clearing one record fails.
+            let restored = self.reconcile_enabled_workflows();
+            result?;
+            restored?;
+            return Ok(self.snapshot());
+        }
         self.reconcile_enabled_workflows()?;
         Ok(self.snapshot())
     }
@@ -406,12 +451,13 @@ pub(super) fn desktop_export_dictionary(
 #[tauri::command]
 pub(super) fn desktop_update_dictionary(
     edit: DictionaryEdit,
+    clear_captured: Option<bool>,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<DesktopProductSnapshot, CommandError> {
     application
         .lock()
         .map_err(|_| workspace_unavailable())?
-        .update_dictionary(edit)
+        .update_dictionary_with_capture_clear(edit, clear_captured.unwrap_or(false))
 }
 
 #[tauri::command]

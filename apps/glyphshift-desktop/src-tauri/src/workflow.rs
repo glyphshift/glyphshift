@@ -202,6 +202,7 @@ impl DesktopApplication {
         &mut self,
         workflow_id: &str,
     ) -> Result<(), CommandError> {
+        if self.exiting { return Ok(()); }
         if !self
             .backend
             .enabled_workflow_ids()
@@ -254,6 +255,7 @@ impl DesktopApplication {
     }
 
     pub(super) fn refresh_workflows_with_retry(&mut self, retry: bool) -> Result<DesktopProductSnapshot, CommandError> {
+        if self.exiting { return Ok(self.snapshot()); }
         let workflow_ids = self
             .backend
             .enabled_workflow_ids()
@@ -374,6 +376,8 @@ impl DesktopApplication {
         workflow_id: &str,
         replace_conflicts: bool,
     ) -> Result<WorkflowCommandResult, CommandError> {
+        self.exiting = false;
+        self.exit_ready = false;
         self.prepare_workflow_collection(workflow_id)?;
         let intent = self
             .backend

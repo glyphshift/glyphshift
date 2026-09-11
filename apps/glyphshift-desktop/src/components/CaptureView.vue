@@ -102,7 +102,6 @@ const entryPage = ref({
 })
 const loading = ref(false)
 const textSettings = useAppSettings()
-const hideSkipped = ref(localStorage.getItem('glyphshift.capture.hide-skipped') === 'true')
 const selected = ref(new Set<string>())
 const listQuery = ref('')
 const listPage = ref(1)
@@ -135,11 +134,13 @@ const settingsLivePreview = ref(false)
 const settingsCompatibleAdapterIds = ref<string[] | null>(null)
 const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
+const mergeRules = ref(true)
 const dictionaryNotice = ref('')
 const refreshingText = ref(false)
 const launchingSoftware = ref(false)
 const disconnectingRunId = ref('')
 const translationValues = ref<Record<string, string>>({})
+const focusedTranslation = ref<string | null>(null)
 const selectedAiProfileId = ref<string | null>(null)
 const aiPreviewOpen = ref(false)
 const aiPreflightOpen = ref(false)
@@ -221,9 +222,9 @@ const adapterFilterLabel = computed(() => {
   if (adapterFilterIds.value.length === 1) return adapterName(adapterFilterIds.value[0]!)
   return t('capture.adapterFilterSelected', { count: adapterFilterIds.value.length })
 })
-const translationFilterOptions = computed(() => (['all', 'untranslated', 'translated'] as const).map(value => ({
+const translationFilterOptions = computed(() => (['all', 'untranslated', 'translated', 'rule_matched', 'other_dictionary'] as const).map(value => ({
   value,
-  label: t(`capture.translationFilter.${value}`),
+  label: ['rule_matched', 'other_dictionary'].includes(value) ? t(`captureResolution.filter_${value}`) : t(`capture.translationFilter.${value}`),
 })))
 const translationFilterLabel = computed(() => translationFilterOptions.value.find(option => (
   option.value === translationFilter.value
@@ -231,12 +232,6 @@ const translationFilterLabel = computed(() => translationFilterOptions.value.fin
 const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
 const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
 const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
-const selectedDictionaryEntries = computed(() => selectedRows.value
-  .map(row => ({
-    source: row.source,
-    translation: (translationValues.value[row.source] ?? row.translation).trim(),
-  }))
-  .filter(entry => entry.translation))
 const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
@@ -322,7 +317,7 @@ const runColumns = computed<TableColumn<ProbeRunSummary>[]>(() => [
   { id: 'run', header: t('capture.columns.run'), meta: managementIdentityColumnMeta('w-60') },
   ...(runVisibleColumns.value.software ? [{ id: 'software', header: t('capture.columns.software'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.dictionary ? [{ id: 'dictionary', header: t('capture.columns.dictionary'), meta: { class: { th: 'w-[22%]', td: 'w-[22%]' } } } satisfies TableColumn<ProbeRunSummary>] : []),
-  ...(runVisibleColumns.value.status ? [{ accessorKey: 'status', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeRunSummary>] : []),
+  ...(runVisibleColumns.value.status ? [{ accessorKey: 'status', header: t('capture.columns.status'), meta: { class: { th: 'w-56', td: 'w-56' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.progress ? [{ id: 'progress', header: t('capture.columns.progress'), meta: { class: { th: 'w-32', td: 'w-32' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   ...(runVisibleColumns.value.updated ? [{ accessorKey: 'updatedAtMs', header: t('capture.columns.updated'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeRunSummary>] : []),
   { id: 'actions', header: t('capture.columns.actions'), meta: managementActionsColumnMeta('w-20') },
@@ -337,7 +332,7 @@ const entryColumns = computed<TableColumn<ProbeEntryRow>[]>(() => [
   { id: 'select', header: '', meta: managementSelectionColumnMeta() },
   { accessorKey: 'source', header: t('capture.columns.source'), meta: managementIdentityColumnMeta('w-60') },
   { accessorKey: 'translation', header: t('capture.columns.translation'), meta: { class: { th: 'w-[30%]', td: 'w-[30%]' } } },
-  ...(entryVisibleColumns.value.status ? [{ accessorKey: 'state', header: t('capture.columns.status'), meta: { class: { th: 'w-24', td: 'w-24' } } } satisfies TableColumn<ProbeEntryRow>] : []),
+  ...(entryVisibleColumns.value.status ? [{ accessorKey: 'state', header: t('capture.columns.status'), meta: { class: { th: 'w-56', td: 'w-56' } } } satisfies TableColumn<ProbeEntryRow>] : []),
   ...(entryVisibleColumns.value.adapters ? [{ id: 'adapters', header: t('capture.columns.adapter'), meta: { class: { th: 'w-[18%]', td: 'w-[18%]' } } } satisfies TableColumn<ProbeEntryRow>] : []),
   ...(entryVisibleColumns.value.count ? [{ accessorKey: 'count', header: t('capture.columns.count'), meta: { class: { th: 'w-20 text-right', td: 'w-20 text-right' } } } satisfies TableColumn<ProbeEntryRow>] : []),
   ...(entryVisibleColumns.value.lastSeen ? [{ accessorKey: 'lastSeenMs', header: t('capture.columns.lastSeen'), meta: { class: { th: 'w-28', td: 'w-28' } } } satisfies TableColumn<ProbeEntryRow>] : []),
@@ -354,7 +349,7 @@ const taskActionItems = computed<DropdownMenuItem[][]>(() => selectedRun.value ?
   label: t('capture.launchSoftware'), icon: 'i-tabler-app-window', disabled: launchingSoftware.value || !selectedSoftware.value?.executablePath, onSelect: () => void launchSelectedSoftware(),
 }, {
   label: t('capture.refreshText'), icon: 'i-tabler-refresh', disabled: refreshingText.value || probe.busy.value || !selectedRun.value.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.value.status), onSelect: () => void refreshTargetText(),
-}], ...(props.workflowId ? [[{ type: 'checkbox' as const, label: t('workflowLifecycle.collect'), description: t('workflowLifecycle.collectHint'), checked: collectionEnabled.value, disabled: !hasWriter.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setCollection(checked) }]] : []), ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
+}], [{ type: 'checkbox' as const, label: t('capture.mergeRules'), checked: mergeRules.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setMergeRules(checked) }], ...(props.workflowId ? [[{ type: 'checkbox' as const, label: t('workflowLifecycle.collect'), description: t('workflowLifecycle.collectHint'), checked: collectionEnabled.value, disabled: !hasWriter.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setCollection(checked) }]] : []), ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
     type: 'checkbox' as const,
@@ -409,10 +404,9 @@ watch(adapterFilterIds, async () => {
   await loadPage()
 }, { deep: true })
 
-watch([hideSkipped, () => textSettings.settings.value.textFilterPolicy], async () => {
+watch(() => textSettings.settings.value.textFilterPolicy, async () => {
   page.value = 1
   selected.value = new Set()
-  localStorage.setItem('glyphshift.capture.hide-skipped', String(hideSkipped.value))
   await loadPage()
 }, { deep: true })
 
@@ -456,6 +450,16 @@ onBeforeUnmount(() => {
   }
 })
 
+async function setMergeRules(value: boolean) {
+  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  if (dirtyTranslations.size) return
+  mergeRules.value = value
+  page.value = 1
+  selected.value = new Set()
+  persistViewState()
+  await loadPage()
+}
+
 async function loadPage() {
   pageRequest += 1
   return pageQueue.request()
@@ -481,11 +485,21 @@ async function loadPageNow(request: number) {
       search: query.value,
       adapterIds: [...adapterFilterIds.value],
       translationFilter: translationFilter.value,
-      hideSkipped: hideSkipped.value,
+      mergeRules: mergeRules.value,
       page: page.value,
       pageSize: pageSize.value,
     })
     if (request !== pageRequest || runId !== probe.selectedRunId.value) return
+    const editingRow = entryPage.value.rows.find(row => row.source === focusedTranslation.value)
+    if (mergeRules.value && editingRow?.resolution?.editSource) {
+      const replacement = nextPage.rows.find(row => row.resolution?.editSource === editingRow.resolution?.editSource
+        && row.resolution?.ruleIndex === editingRow.resolution?.ruleIndex
+        && JSON.stringify(row.resolution?.dictionaryIds) === JSON.stringify(editingRow.resolution?.dictionaryIds))
+      if (replacement) {
+        replacement.source = editingRow.source
+        replacement.translation = editingRow.translation
+      }
+    }
     if (JSON.stringify(entryPage.value) !== JSON.stringify(nextPage)) entryPage.value = nextPage
     synchronizeTranslationValues(entryPage.value.rows)
     const maxPage = Math.max(1, Math.ceil(entryPage.value.total / pageSize.value))
@@ -718,6 +732,7 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
   const run = selectedRun.value
   if (!run || !selected.value.size) return
   let sources = [...selected.value]
+  if (action === 'clear_translations') sources = selectedRows.value.filter(row => row.resolution?.editable !== false).map(row => row.source)
   if (action === 'ignore') sources = selectedRows.value.filter(row => row.count > 0 && row.state !== 'ignored').map(row => row.source)
   if (action === 'restore') sources = selectedRows.value.filter(row => row.state === 'ignored').map(row => row.source)
   if (!sources.length) return
@@ -753,7 +768,26 @@ async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
   }
 }
 
+function entryRowId(row: ProbeEntryRow) {
+  if (mergeRules.value && row.resolution?.editSource) return JSON.stringify([
+    row.resolution.dictionaryIds, row.resolution.ruleIndex, row.resolution.editSource,
+  ])
+  return row.source
+}
+
+function translationInputValue(row: ProbeEntryRow) {
+  if (dirtyTranslations.has(row.source)) return translationValues.value[row.source] ?? ''
+  if (focusedTranslation.value === row.source && row.resolution?.editSource) return row.resolution.editTranslation ?? ''
+  return row.translation
+}
+
+function blurTranslation(source: string) {
+  focusedTranslation.value = null
+  void saveTranslation(source).then(() => { if (mergeRules.value) return loadPage() })
+}
+
 function updateTranslation(source: string, value: unknown) {
+  if (entryPage.value.rows.find(row => row.source === source)?.resolution?.editable === false) return
   dictionaryNotice.value = ''
   const translation = String(value ?? '')
   translationValues.value = { ...translationValues.value, [source]: translation }
@@ -772,8 +806,9 @@ function saveTranslation(source: string) {
   const task = translationSaveQueue.then(async () => {
     if (!dirtyTranslations.has(source)) return
     try {
-      await probe.editTranslation(run.id, source, translationValues.value[source] ?? '')
-      dirtyTranslations.delete(source)
+      const value = translationValues.value[source] ?? ''
+      await probe.editTranslation(run.id, source, value)
+      if (translationValues.value[source] === value) dirtyTranslations.delete(source)
       emit('workspace-changed')
       await loadPage()
     }
@@ -783,49 +818,6 @@ function saveTranslation(source: string) {
   })
   translationSaveQueue = task
   return task
-}
-
-async function syncSelectedToDictionary() {
-  const run = selectedRun.value
-  const dictionary = selectedDictionary.value
-  if (!run || !dictionary || !selectedDictionaryEntries.value.length) return
-  for (const { source } of selectedDictionaryEntries.value) {
-    const timer = editTimers.get(source)
-    if (timer) clearTimeout(timer)
-    editTimers.delete(source)
-  }
-  await translationSaveQueue
-  const entries = selectedDictionaryEntries.value
-  const updated = await probe.syncDictionaryEntries(run.id, entries)
-  if (!updated) return
-  for (const { source } of entries) dirtyTranslations.delete(source)
-  selected.value = new Set()
-  dictionaryNotice.value = t('capture.savedToDictionary', {
-    count: entries.length,
-    dictionary: dictionary.metadata.name,
-  })
-  emit('workspace-changed')
-  await loadPage()
-}
-
-async function syncRowToDictionary(row: ProbeEntryRow) {
-  const run = selectedRun.value
-  const dictionary = selectedDictionary.value
-  const translation = (translationValues.value[row.source] ?? row.translation).trim()
-  if (!run || !dictionary || !translation) return
-  const timer = editTimers.get(row.source)
-  if (timer) clearTimeout(timer)
-  editTimers.delete(row.source)
-  await translationSaveQueue
-  const updated = await probe.syncDictionaryEntries(run.id, [{ source: row.source, translation }])
-  if (!updated) return
-  dirtyTranslations.delete(row.source)
-  dictionaryNotice.value = t('capture.savedToDictionary', {
-    count: 1,
-    dictionary: dictionary.metadata.name,
-  })
-  emit('workspace-changed')
-  await loadPage()
 }
 
 async function openBoundDictionary() {
@@ -890,21 +882,24 @@ function restoreViewState(runId: string) {
       query?: string
       adapterIds?: string[]
       translationFilter?: ProbeTranslationFilter
+      mergeRules?: boolean
       page?: number
       pageSize?: number
     }
     const available = new Set(probe.runs.value.find(run => run.id === runId)?.adapterIds ?? [])
+    mergeRules.value = value.mergeRules !== false
     query.value = value.query ?? ''
     adapterFilterIds.value = Array.isArray(value.adapterIds)
       ? [...new Set(value.adapterIds.filter(id => typeof id === 'string' && available.has(id)))]
       : []
-    translationFilter.value = ['all', 'untranslated', 'translated'].includes(value.translationFilter ?? '')
+    translationFilter.value = ['all', 'untranslated', 'translated', 'rule_matched', 'other_dictionary'].includes(value.translationFilter ?? '')
       ? value.translationFilter!
       : 'all'
     page.value = Math.max(1, value.page ?? 1)
     pageSize.value = [50, 100, 200].includes(value.pageSize ?? 0) ? value.pageSize! : 50
   }
   catch {
+    mergeRules.value = true
     query.value = ''
     adapterFilterIds.value = []
     translationFilter.value = 'all'
@@ -920,6 +915,7 @@ function persistViewState() {
     query: query.value,
     adapterIds: adapterFilterIds.value,
     translationFilter: translationFilter.value,
+    mergeRules: mergeRules.value,
     page: page.value,
     pageSize: pageSize.value,
   }))
@@ -975,6 +971,31 @@ function runtimeCapabilityColor(capability: NonNullable<ProbeRunSummary['runtime
   if (capability === 'direct_replace') return 'success'
   if (capability === 'collection_only') return 'warning'
   return 'error'
+}
+
+function resolutionLabel(row: ProbeEntryRow) {
+  if (row.translationVariants?.length) return t('capture.translationConflict')
+  return row.resolution ? t(`captureResolution.${row.resolution.kind}`) : stateLabel(row.state)
+}
+function resolutionSource(row: ProbeEntryRow) {
+  const resolution = row.resolution
+  if (!resolution) return ''
+  const parts: string[] = []
+  if (resolution.ruleIndex !== null) parts.push(t('captureResolution.rule', { number: resolution.ruleIndex + 1 }))
+  const extraDictionaryIds = resolution.dictionaryIds.filter(id => id !== selectedRun.value?.dictionaryId)
+  if (extraDictionaryIds.length) parts.push(t(resolution.kind.startsWith('rule_') ? 'captureResolution.fromDictionary' : 'captureResolution.inDictionary', { names: extraDictionaryIds.map(dictionaryName).join('、') }))
+  if (resolution.kind === 'filtered') parts.push(t(resolution.skipReason ? `captureResolution.skip.${resolution.skipReason}` : 'captureResolution.textFilter'))
+  if (resolution.kind === 'ignored') parts.push(t('captureResolution.manualIgnore'))
+  if (!resolution.editable) parts.push(t('captureResolution.readOnly'))
+  return parts.join(' · ')
+}
+function resolutionColor(row: ProbeEntryRow) {
+  if (row.translationVariants?.length) return 'warning'
+  if (!row.resolution) return stateColor(row.state)
+  if (['dictionary', 'rule_translated'].includes(row.resolution.kind)) return 'success'
+  if (row.resolution.kind === 'rule_pending') return 'primary'
+  if (['pending', 'dictionary_pending'].includes(row.resolution.kind)) return 'warning'
+  return 'neutral'
 }
 
 function stateLabel(state: string) {
@@ -1152,7 +1173,6 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     <template v-if="selectedRun">
       <ManagementTableFrame v-model:query="query" v-model:filter-value="translationFilter" v-model:page="page" v-model:page-size="pageSize" :page-sizes="[50, 100, 200]" :search-placeholder="t('capture.searchEntries')" :search-label="t('capture.searchLabel')" :filter-label="translationFilterLabel" :filter-aria-label="t('capture.translationFilterLabel')" :filter-options="translationFilterOptions" :column-options="entryColumnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('capture.itemLabel')" :total="entryPage.total" :item-label="t('capture.itemLabel')" @toggle-column="toggleEntryColumn">
         <template #toolbar-actions>
-          <UCheckbox v-model="hideSkipped" :label="t('textFilters.hide')" />
           <UDropdownMenu v-if="selectedRunAdapters.length > 1" :items="adapterFilterItems" :content="{ align: 'end' }" :ui="{ content: 'min-w-48' }">
             <UButton :title="t('capture.adapterFilterLabel')" data-testid="capture-adapter-filter" color="neutral" variant="outline" size="sm" icon="i-tabler-filter" trailing-icon="i-tabler-chevron-down" :label="adapterFilterLabel" class="max-w-52 justify-between" :aria-label="t('capture.adapterFilterLabel')" />
           </UDropdownMenu>
@@ -1174,27 +1194,30 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
           <UCheckbox data-testid="probe-auto-complete" :model-value="autoCompleteEnabled" :disabled="autoCompleteDisabled" :label="t('ai.autoComplete')" @update:model-value="toggleAutoComplete(Boolean($event))" />
         </template>
         <template #bulk-actions>
-          <UButton color="primary" variant="soft" size="sm" icon="i-tabler-book-upload" :label="t('capture.saveSelectedToDictionary')" :disabled="!selectedDictionaryEntries.length || probe.busy.value" @click="syncSelectedToDictionary" />
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye-off" :label="t('capture.bulkIgnore')" :disabled="!selectedRows.some(row => row.count > 0 && row.state !== 'ignored')" @click="bulk('ignore')" />
           <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-eye" :label="t('capture.bulkRestore')" :disabled="!selectedRows.some(row => row.state === 'ignored')" @click="bulk('restore')" />
-          <UButton color="error" variant="soft" size="sm" icon="i-tabler-book-off" :label="t('capture.removeSelectedFromDictionary')" :disabled="!selectedRows.some(row => row.translation)" @click="bulk('clear_translations')" />
+          <UButton color="error" variant="soft" size="sm" icon="i-tabler-book-off" :label="t('capture.removeSelectedFromDictionary')" :disabled="!selectedRows.some(row => row.translation && row.resolution?.editable !== false)" @click="bulk('clear_translations')" />
         </template>
 
         <div ref="tableShell" class="relative h-full min-h-0 overflow-hidden">
-          <UTable data-testid="capture-table-scroll" role="region" tabindex="0" :aria-label="t('capture.tableLabel')" :data="entryPage.rows" :columns="entryColumns" sticky :loading="loading" class="capture-table-scroll management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1040px]' }" @scroll.passive="updateScrollMetrics">
+          <UTable data-testid="capture-table-scroll" role="region" tabindex="0" :aria-label="t('capture.tableLabel')" :data="entryPage.rows" :get-row-id="entryRowId" :columns="entryColumns" sticky :loading="loading" class="capture-table-scroll management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1040px]' }" @scroll.passive="updateScrollMetrics">
             <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('capture.selectPage')" @update:model-value="togglePageSelection" /></template>
             <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.source)" :aria-label="t('common.selectNamed', { name: row.original.source })" @update:model-value="toggleSelection(row.original.source)" /></template>
             <template #source-cell="{ row }"><div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div></template>
             <template #translation-cell="{ row }">
               <div class="flex min-w-0 items-center gap-1">
-                <UInput :model-value="translationValues[row.original.source] ?? row.original.translation" size="sm" class="min-w-0 flex-1" :placeholder="row.original.translationVariants?.length ? t('capture.resolveTranslation') : t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" @update:model-value="updateTranslation(row.original.source, $event)" @blur="saveTranslation(row.original.source)" />
-                <UDropdownMenu v-if="row.original.translationVariants?.length" :items="translationVariantItems(row.original)" :content="{ align: 'end' }" :ui="{ content: 'max-w-[min(32rem,90vw)]', itemLabel: 'whitespace-pre-wrap break-words' }">
+                <UInput :model-value="translationInputValue(row.original)" size="sm" class="min-w-0 flex-1" :placeholder="row.original.translationVariants?.length ? t('capture.resolveTranslation') : t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" :readonly="row.original.resolution?.editable === false" :title="row.original.resolution?.editable === false ? t(row.original.resolution?.kind.startsWith('rule_') ? 'captureResolution.ruleReadOnlyHint' : 'captureResolution.readOnlyHint') : row.original.resolution?.editSource ? t('captureResolution.editFixedHint', { source: row.original.resolution.editSource }) : undefined" @update:model-value="updateTranslation(row.original.source, $event)" @focus="focusedTranslation = row.original.source" @blur="blurTranslation(row.original.source)" />
+                <UDropdownMenu v-if="row.original.translationVariants?.length && row.original.resolution?.editable !== false" :items="translationVariantItems(row.original)" :content="{ align: 'end' }" :ui="{ content: 'max-w-[min(32rem,90vw)]', itemLabel: 'whitespace-pre-wrap break-words' }">
                   <UButton color="warning" variant="ghost" size="xs" icon="i-tabler-copy-check" :disabled="probe.busy.value" :aria-label="t('capture.chooseExistingTranslation', { count: row.original.translationVariants.length })" :title="t('capture.translationConflictHint')" />
                 </UDropdownMenu>
-                <UButton color="primary" variant="ghost" size="xs" icon="i-tabler-book-upload" :disabled="!(translationValues[row.original.source] ?? row.original.translation).trim() || probe.busy.value" :aria-label="t('capture.saveRowToDictionary', { source: row.original.source })" :title="t('capture.saveRowToDictionary', { source: row.original.source })" @click="syncRowToDictionary(row.original)" />
               </div>
             </template>
-            <template #state-cell="{ row }"><UBadge :color="row.original.translationVariants?.length ? 'warning' : stateColor(row.original.state)" variant="soft" size="sm" :label="row.original.translationVariants?.length ? t('capture.translationConflict') : stateLabel(row.original.state)" /></template>
+            <template #state-cell="{ row }">
+              <div class="flex min-w-0 flex-col items-start gap-1" :title="resolutionSource(row.original)">
+                <UBadge :color="resolutionColor(row.original)" variant="soft" size="sm" :label="resolutionLabel(row.original)" />
+                <span v-if="resolutionSource(row.original)" class="type-metadata block w-48 truncate text-[var(--text-muted)]">{{ resolutionSource(row.original) }}</span>
+              </div>
+            </template>
             <template #adapters-cell="{ row }">
               <div v-if="row.original.adapterIds.length" class="flex min-w-0 flex-wrap gap-1">
                 <UBadge v-for="adapterId in row.original.adapterIds.slice(0, 2)" :key="adapterId" color="neutral" variant="soft" size="sm" :label="adapterName(adapterId)" />
@@ -1204,7 +1227,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
             </template>
             <template #count-cell="{ row }"><div class="text-right tabular-nums">{{ row.original.count || '—' }}</div></template>
             <template #lastSeenMs-cell="{ row }"><span class="tabular-nums text-[var(--text-secondary)]">{{ formatTime(row.original.lastSeenMs) }}</span></template>
-            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length || translationFilter !== 'all' || hideSkipped ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length || translationFilter !== 'all' || hideSkipped ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
+            <template #empty><UEmpty icon="i-tabler-radar-off" :title="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.noMatch') : t('capture.noRecords')" :description="query || adapterFilterIds.length || translationFilter !== 'all' ? t('capture.adjustSearch') : t('capture.noRecordsHint')" /></template>
           </UTable>
 
           <div v-if="scrollThumbHeight" data-testid="capture-scrollbar" aria-hidden="true" class="absolute inset-y-2 right-1 z-20 w-2 cursor-pointer rounded-full bg-[var(--surface-subtle)] ring-1 ring-inset ring-[var(--border)]" @pointerdown="jumpScrollbar">

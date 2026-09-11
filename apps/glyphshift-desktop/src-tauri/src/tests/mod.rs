@@ -92,6 +92,7 @@ fn fixture_dictionary_distribution(data_root: &std::path::Path) -> DictionaryDis
 struct WorkflowRuntimeCalls {
     enabled: Vec<(Box<str>, bool, Vec<Box<str>>)>,
     disabled: Vec<Box<str>>,
+    stop_failure_ids: BTreeSet<Box<str>>,
     refreshed: Vec<Box<str>>,
     captures_started: Vec<Box<str>>,
     captures_stopped: Vec<Box<str>>,
@@ -161,7 +162,8 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .expect("runtime call log")
             .disabled
             .push(intent.workflow_id().into());
-        WorkflowRuntimeView {
+        let fail = self.calls.lock().unwrap().stop_failure_ids.contains(intent.workflow_id());
+        let mut view = WorkflowRuntimeView {
             lifecycle: None,
             checked_at_ms: glyphshift_capture::unix_time_millis(),
             revision: crate::workflow_lifecycle::next_revision(),
@@ -183,7 +185,12 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
                 })
                 .collect(),
             errors: BTreeMap::new(),
+        };
+        if fail {
+            for target in &mut view.targets { target.active = true; }
+            view.errors.insert(intent.targets()[0].software_id().into(), CommandError::new("runtime.session_rejected"));
         }
+        view
     }
 
     fn refresh_workflow(
@@ -418,6 +425,10 @@ fn test_desktop_application(
         font_families: Vec::new(),
         font_cache_root: data_root.to_path_buf(),
         probe_snapshot_cache: Default::default(),
+        exiting: false,
+        exit_ready: false,
+        collection_filter_policy: Default::default(),
+        collection_filter: Default::default(),
         collection_versions: Default::default(),
         pending_collection_runs: Default::default(),
         probe_runs: ProbeRunStore::open(data_root.join("probe-runs")).expect("probe run store"),

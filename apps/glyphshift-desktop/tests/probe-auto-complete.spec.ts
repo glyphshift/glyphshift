@@ -159,17 +159,15 @@ test('busy auto fill coalesces new text, gives the next workflow a turn, and rem
 })
 
 
-test('workflow visibility toggles are sent separately from translation filtering', async ({ page }) => {
+test('workflow status menu omits obsolete skipped controls', async ({ page }) => {
   await setup(page)
-  const toggle = page.getByRole('checkbox', { name: '隐藏跳过的条目', exact: true })
-  await toggle.click()
-  await expect.poll(() => page.evaluate(() => (window as any).__auto.lastEntryRequest?.hideSkipped)).toBe(true)
-  expect(await page.evaluate(() => (window as any).__auto.lastEntryRequest.request.translationFilter)).toBe('all')
-  await page.screenshot({ path: test.info().outputPath('workflow-visibility.png') })
-  await toggle.click()
-  await expect.poll(() => page.evaluate(() => (window as any).__auto.lastEntryRequest?.hideSkipped)).toBe(false)
+  await expect(page.getByRole('checkbox', { name: '隐藏跳过的条目', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '按翻译状态筛选', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: '已跳过', exact: true })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: '规则匹配', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.lastEntryRequest.request.translationFilter)).toBe('rule_matched')
+  expect(await page.evaluate(() => 'hideSkipped' in (window as any).__auto.lastEntryRequest)).toBe(false)
 })
-
 
 test('changing filters during a slow page read sends only the latest follow-up', async ({ page }) => {
   await setup(page)
@@ -193,12 +191,13 @@ test('changing filters during a slow page read sends only the latest follow-up',
   await expect.poll(() => page.evaluate(() => (window as any).__slowPage.calls)).toBe(1)
   await search.fill('Save')
   await page.clock.runFor(300)
-  await page.getByRole('checkbox', { name: '隐藏跳过的条目', exact: true }).click()
+  await page.getByRole('button', { name: '按翻译状态筛选', exact: true }).click()
+  await page.getByRole('menuitem', { name: '规则匹配', exact: true }).click()
   expect(await page.evaluate(() => (window as any).__slowPage.calls)).toBe(1)
   await page.evaluate(() => (window as any).__slowPage.release())
   await expect.poll(() => page.evaluate(() => (window as any).__slowPage.calls)).toBe(2)
   expect(await page.evaluate(() => (window as any).__slowPage.requests[1].request.search)).toBe('Save')
-  expect(await page.evaluate(() => (window as any).__slowPage.requests[1].hideSkipped)).toBe(true)
+  expect(await page.evaluate(() => (window as any).__slowPage.requests[1].request.translationFilter)).toBe('rule_matched')
 })
 
 

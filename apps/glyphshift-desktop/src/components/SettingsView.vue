@@ -19,7 +19,7 @@ import { version as appVersion } from '../../package.json'
 import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
 
 const section = ref('general')
-const sections = ['general', 'software', 'fonts', 'languages'] as const
+const sections = ['general', 'software', 'fonts', 'languages', 'rules'] as const
 const aiProfilesPanel = ref<InstanceType<typeof AiProfilesPanel>>()
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -64,6 +64,7 @@ const themeItems = computed(() => [
   { value: 'light' as const, label: t('settings.themeOption.light') },
 ])
 const closeBehaviorItems = computed(() => [
+  { value: 'tray' as const, label: t('settings.closeBehaviorOption.tray') },
   { value: 'minimize' as const, label: t('settings.closeBehaviorOption.minimize') },
   { value: 'quit' as const, label: t('settings.closeBehaviorOption.quit') },
 ])
@@ -231,11 +232,15 @@ onBeforeUnmount(() => {
       content-test-id="settings-layout"
   >
     <div class="space-y-4">
-      <nav :aria-label="t('settingsManager.navigation')" class="flex flex-wrap gap-1 border-b border-[var(--border)] pb-3">
-        <UButton v-for="item in sections" :key="item" :label="t('settingsManager.' + item)" :color="section === item ? 'primary' : 'neutral'" :variant="section === item ? 'soft' : 'ghost'" size="sm" :aria-pressed="section === item" @click="section = item" />
-      </nav>
+      <UTabs v-model="section" :items="sections.map((value, index) => ({ value, label: t('settingsManager.' + value), icon: ['i-tabler-settings', 'i-tabler-app-window', 'i-tabler-typography', 'i-tabler-language', 'i-tabler-filter'][index] }))"
+        :content="false" :aria-label="t('settingsManager.navigation')" data-testid="settings-tabs" color="neutral" variant="link" size="sm" activation-mode="manual"
+        class="sticky top-0 z-20 w-full bg-[var(--app-bg)]"
+        :ui="{ list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0 overflow-x-auto', indicator: 'hidden', trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0' }" />
       <RecentSoftwareSettings v-if="section === 'software'" />
       <div v-if="section === 'fonts'" class="space-y-4"><FavoriteFontSettings /><FontFallbackSettings /></div>
+      <div v-show="section === 'rules'" class="space-y-4">
+        <TextFilterSettings />
+      </div>
       <LanguageSettings v-if="section === 'languages'" />
       <div v-show="section === 'general'" class="space-y-4">
         <UAlert
@@ -312,7 +317,6 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
-        <TextFilterSettings />
         <ManagementFormSection :title="t('settings.shortcuts')" :description="t('settings.shortcutsDescription')">
           <ManagementFormRow
             v-for="row in shortcutRows"
@@ -387,6 +391,12 @@ onBeforeUnmount(() => {
             </div>
           </ManagementFormRow>
 
+          <ManagementFormRow :label="t('settings.minimizeToTray')" :description="t('settings.minimizeToTrayHint')" icon="i-tabler-layout-bottombar" control-width="compact">
+            <div class="flex justify-end"><USwitch :model-value="appSettings.minimizeToTray.value" :aria-label="t('settings.minimizeToTray')" :disabled="appSettings.settingsBusy.value" @update:model-value="appSettings.setMinimizeToTray($event).catch(() => undefined)" /></div>
+          </ManagementFormRow>
+          <ManagementFormRow :label="t('settings.alwaysOnTop')" icon="i-tabler-pin" control-width="compact">
+            <div class="flex justify-end"><USwitch :model-value="appSettings.alwaysOnTop.value" :aria-label="t('settings.alwaysOnTop')" :disabled="appSettings.settingsBusy.value" @update:model-value="appSettings.setAlwaysOnTop($event).catch(() => undefined)" /></div>
+          </ManagementFormRow>
           <ManagementFormRow
             :label="t('settings.closeBehavior')"
             icon="i-tabler-door-exit"

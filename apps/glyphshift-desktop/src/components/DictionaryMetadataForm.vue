@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import RegexRuleSettings from './RegexRuleSettings.vue'
 import LanguageSelect from './LanguageSelect.vue'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DictionaryMetadata } from '../model'
 
 const metadata = defineModel<DictionaryMetadata>({ required: true })
 const { t } = useI18n()
 const moreOpen = ref(false)
+const textRules = computed({ get: () => metadata.value.textRules ?? [], set: value => { metadata.value.textRules = value } })
 </script>
 
 <template>
@@ -35,6 +37,8 @@ const moreOpen = ref(false)
         <LanguageSelect v-model="metadata.targetLocale" :aria-label="t('dictionaryEditor.targetLocale')" />
       </UFormField>
     </div>
+
+    <RegexRuleSettings v-model="textRules" />
 
     <UCollapsible v-model:open="moreOpen" class="rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)]">
       <UButton

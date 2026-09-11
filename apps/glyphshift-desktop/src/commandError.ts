@@ -14,7 +14,9 @@ interface PresentationError {
 }
 
 const messageKeys: Record<string, string> = {
+  'runtime.exit_stop_failed': 'errors.runtime.exitStopFailed',
   'workflow.shortcut_conflict': 'errors.workflow.shortcutConflict',
+  'settings.window_failed': 'errors.settings.windowFailed',
   'settings.invalid_data': 'errors.settings.invalidData',
   'settings.unavailable': 'errors.settings.unavailable',
   'settings.write_failed': 'errors.settings.writeFailed',

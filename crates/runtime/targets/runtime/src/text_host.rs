@@ -10,7 +10,7 @@ static SCOPE_EPOCH: AtomicU64 = AtomicU64::new(1);
 struct Scopes {
     epoch: u64,
     next: u64,
-    stack: Vec<(usize, u64)>,
+    stack: Vec<(usize, u64, bool)>,
 }
 thread_local! { static SCOPES: RefCell<Scopes> = RefCell::new(Scopes::default()); }
 
@@ -42,7 +42,7 @@ pub(super) extern "C" fn enter_scope(context: *mut core::ffi::c_void) -> u64 {
             return 0;
         };
         state.next = next;
-        state.stack.push((context as usize, next));
+        state.stack.push((context as usize, next, false));
         next
     })
 }
@@ -52,7 +52,7 @@ pub(super) extern "C" fn leave_scope(context: *mut core::ffi::c_void, token: u64
         if let Some(index) = state
             .stack
             .iter()
-            .position(|entry| *entry == (context as usize, token))
+            .position(|(owner, id, _)| (*owner, *id) == (context as usize, token))
         {
             state.stack.truncate(index);
         }
@@ -63,9 +63,21 @@ pub(super) fn scope_blocks(context: &NativeDecisionContext) -> bool {
     with_scopes(|state| {
         state
             .stack
-            .first()
-            .is_some_and(|(owner, _)| *owner != std::ptr::from_ref(context) as usize)
+            .iter()
+            .any(|(owner, _, replaced)| *replaced && *owner != std::ptr::from_ref(context) as usize)
     })
+}
+
+// Entering a draw scope does not establish ownership of the underlying text.
+// Only a successful replacement protects its resulting nested draw calls.
+pub(super) fn mark_scope_replaced(context: &NativeDecisionContext) {
+    with_scopes(|state| {
+        if let Some((_, _, replaced)) = state.stack.iter_mut().rev()
+            .find(|(owner, _, _)| *owner == std::ptr::from_ref(context) as usize)
+        {
+            *replaced = true;
+        }
+    });
 }
 
 pub(super) fn invalidate_scopes() {

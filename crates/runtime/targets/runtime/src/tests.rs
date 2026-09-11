@@ -151,6 +151,28 @@ fn structured_text_resolves_before_capture_and_never_replaces_past_fragments() {
             0,
         )
     };
+    // An untranslated outer character must not hide a complete inner string.
+    let untouched = text_host::enter_scope(host.context);
+    assert_eq!(send(TEXT_EVENT_DRAW, 0, "O").0.decision_bits, 0);
+    let too_small = "Open".encode_utf16().collect::<Vec<_>>();
+    assert_ne!((host.decide_utf16)(host.context, too_small.as_ptr(),
+        too_small.len() as u32, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0).status, STATUS_OK);
+    let inner = text_host::enter_scope(child.context);
+    let source = "Open".encode_utf16().collect::<Vec<_>>();
+    let mut output = [0; 64];
+    let event = NativeTextEventV1::complete_draw(&source);
+    let decision = text_host::decide_text(
+        child.context, &event, output.as_mut_ptr(), 64, std::ptr::null_mut(), 0,
+    );
+    assert_eq!(String::from_utf16(&output[..decision.text_len as usize]).unwrap(), "打开");
+    // The inner replacement protects its descendants, even with an untouched outer scope.
+    assert_eq!(send(TEXT_EVENT_DRAW, 0, "是").0.decision_bits, 0);
+    text_host::leave_scope(child.context, inner);
+    assert_ne!(raster().decision_bits & DECISION_TEXT_REPLACE, 0,
+        "legacy callbacks also pass through an untranslated parent");
+    text_host::leave_scope(host.context, untouched);
+    let observed = query_observations().unwrap();
+    assert!(observed.records().iter().any(|record| record.source() == "Open"));
     let token = text_host::enter_scope(host.context);
     assert_ne!(token, 0);
     assert_eq!(send(TEXT_EVENT_DRAW, 0, "Open").1, "打开");

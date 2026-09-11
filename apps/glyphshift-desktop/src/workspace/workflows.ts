@@ -1,3 +1,4 @@
+import { markLibraryUsed } from '../useLibrarySort'
 import { computed } from 'vue'
 import { workflowOperations } from '../workflowLifecycle'
 import { invoke } from '@tauri-apps/api/core'
@@ -82,6 +83,12 @@ export function useWorkflowWorkspace() {
             fontActive: false,
             appliedGeneration: null,
           })),
+        }
+      }
+      if (enabled) {
+        markLibraryUsed('workflows', id)
+        for (const target of model.value.workflows.find(item => item.id === id)?.targets ?? []) {
+          for (const dictionaryId of target.dictionaryIds) markLibraryUsed('dictionaries', dictionaryId)
         }
       }
       return true

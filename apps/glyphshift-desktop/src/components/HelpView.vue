@@ -133,7 +133,7 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
       activation-mode="manual"
       class="w-full"
       :ui="{
-        list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0',
+        list: 'sticky top-0 z-20 w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-[var(--app-bg)] p-0 overflow-x-auto',
         indicator: 'hidden',
         trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block',
         leadingIcon: 'size-4 shrink-0',

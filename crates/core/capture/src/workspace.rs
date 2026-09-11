@@ -294,6 +294,9 @@ pub enum ProbeTranslationFilter {
     All,
     Untranslated,
     Translated,
+    Skipped,
+    RuleMatched,
+    OtherDictionary,
 }
 
 impl ProbeQuery {
@@ -360,6 +363,21 @@ pub struct ProbeEntryRow {
     last_seen_ms: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     translation_variants: Vec<ProbeDictionaryEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolution: Option<ProbeEntryResolution>,
+}
+
+/// Current configuration provenance; not evidence of a target pixel change.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeEntryResolution {
+    pub kind: Box<str>,
+    pub skip_reason: Option<Box<str>>,
+    pub dictionary_ids: Vec<Box<str>>,
+    pub rule_index: Option<usize>,
+    pub editable: bool,
+    pub edit_source: Option<Box<str>>,
+    pub edit_translation: Option<Box<str>>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -374,6 +392,10 @@ pub struct ProbeEntryPage {
 }
 
 impl ProbeEntryRow {
+    pub fn set_resolution(&mut self, resolution: ProbeEntryResolution, translation: Option<&str>) {
+        if let Some(translation) = translation { self.translation = translation.into(); }
+        self.resolution = Some(resolution);
+    }
     pub fn has_translation_conflict(&self) -> bool { !self.translation_variants.is_empty() }
     #[must_use]
     pub fn source(&self) -> &str {
@@ -730,6 +752,13 @@ impl ProbeRunStore {
     pub fn uncollected_sources(
         &mut self, run_id: &str, dictionary: &ProbeDictionarySnapshot,
     ) -> Result<Vec<Box<str>>, ProbeRunError> {
+        self.uncollected_sources_mapped(run_id, dictionary, |source| vec![source.into()])
+    }
+
+    pub fn uncollected_sources_mapped(
+        &mut self, run_id: &str, dictionary: &ProbeDictionarySnapshot,
+        mut map: impl FnMut(&str) -> Vec<Box<str>>,
+    ) -> Result<Vec<Box<str>>, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         let observations = self.read_observations(run_id).ok();
         let keys = self.source_keys(&document, observations.as_deref());
@@ -738,6 +767,9 @@ impl ProbeRunStore {
         let ignored = document.ignored_sources.iter().map(|source| keys.key(source)).collect::<BTreeSet<_>>();
         // Collection needs source membership only; don't build display rows, translations or adapter lists.
         Ok(observations.iter().flat_map(|catalog| catalog.entries()).map(|entry| keys.key(entry.source()))
+            .filter(|source| !ignored.contains(source))
+            .flat_map(|source| map(&source))
+            .map(|source| keys.key(&source))
             .filter(|source| !existing.contains(source) && !excluded.contains(source) && !ignored.contains(source))
             .collect::<BTreeSet<_>>().into_iter().map(Into::into).collect())
     }
@@ -753,7 +785,22 @@ impl ProbeRunStore {
 
     pub fn query_entries_visible(
         &mut self, run_id: &str, query: &ProbeQuery, dictionary: &ProbeDictionarySnapshot,
-        mut visible: impl FnMut(&str) -> bool,
+        visible: impl FnMut(&str) -> bool,
+    ) -> Result<ProbeEntryPage, ProbeRunError> {
+        self.query_entries_projected(run_id, query, dictionary, visible, |row| std::borrow::Cow::Borrowed(row))
+    }
+
+    pub fn query_entries_projected(
+        &mut self, run_id: &str, query: &ProbeQuery, dictionary: &ProbeDictionarySnapshot,
+        visible: impl FnMut(&str) -> bool, project: impl for<'a> FnMut(&'a ProbeEntryRow) -> std::borrow::Cow<'a, ProbeEntryRow>,
+    ) -> Result<ProbeEntryPage, ProbeRunError> {
+        self.query_entries_grouped(run_id, query, dictionary, visible, project, |_| None)
+    }
+
+    pub fn query_entries_grouped(
+        &mut self, run_id: &str, query: &ProbeQuery, dictionary: &ProbeDictionarySnapshot,
+        mut visible: impl FnMut(&str) -> bool, mut project: impl for<'a> FnMut(&'a ProbeEntryRow) -> std::borrow::Cow<'a, ProbeEntryRow>,
+        mut group: impl FnMut(&ProbeEntryRow) -> Option<Vec<Box<str>>>,
     ) -> Result<ProbeEntryPage, ProbeRunError> {
         let document = self.synchronized_document(run_id)?;
         if query
@@ -768,25 +815,47 @@ impl ProbeRunStore {
         let rows = self.cached_rows(&document, dictionary)?;
         let search_texts = self.cache.borrow().rows.as_ref().expect("rows populated by cached_rows").search_texts.clone();
         let matching = rows.iter().zip(search_texts.iter())
+            .map(|(row, search)| (project(row), search))
             .filter(|(row, search)| {
                 let matches_adapter = adapter_filter.is_empty()
                     || row
                         .adapter_ids
                         .iter()
                         .any(|adapter| adapter_filter.contains(adapter));
-                let matches_search = needle.is_empty() || search.iter().any(|text| text.contains(&needle));
+                let matches_search = needle.is_empty() || search.iter().any(|text| text.contains(&needle)) || row.translation.to_lowercase().contains(&needle);
                 let matches_translation = match query.translation_filter {
                     ProbeTranslationFilter::All => true,
                     ProbeTranslationFilter::Untranslated => row.translation.trim().is_empty(),
                     ProbeTranslationFilter::Translated => !row.translation.trim().is_empty(),
+                    ProbeTranslationFilter::Skipped => row.state == ProbeEntryState::Ignored || row.resolution.as_ref().is_some_and(|value| matches!(value.kind.as_ref(), "filtered" | "ignored" | "rule_skipped")),
+                    ProbeTranslationFilter::RuleMatched => row.resolution.as_ref().is_some_and(|value| value.rule_index.is_some()),
+                    ProbeTranslationFilter::OtherDictionary => row.resolution.as_ref().is_some_and(|value| value.dictionary_ids.iter().any(|id| id != &document.summary.dictionary_id)),
                 };
                 matches_adapter && matches_search && matches_translation && visible(&row.source)
             })
             .map(|(row, _)| row)
             .collect::<Vec<_>>();
-        let total = matching.len();
-        let rows = matching.into_iter().skip(query.page.saturating_sub(1).saturating_mul(query.page_size))
-            .take(query.page_size).cloned().collect();
+        // Rows arrive newest first. Keep that representative and aggregate matching observations.
+        let mut indexes = BTreeMap::<Vec<Box<str>>, usize>::new();
+        let mut merged = Vec::<std::borrow::Cow<'_, ProbeEntryRow>>::new();
+        for row in matching {
+            if let Some(key) = group(&row) {
+                if let Some(&index) = indexes.get(&key) {
+                    let previous = merged[index].to_mut();
+                    previous.count = previous.count.saturating_add(row.count);
+                    previous.first_seen_ms = previous.first_seen_ms.min(row.first_seen_ms);
+                    previous.adapter_ids.extend(row.adapter_ids.iter().cloned());
+                    previous.adapter_ids.sort();
+                    previous.adapter_ids.dedup();
+                    continue;
+                }
+                indexes.insert(key, merged.len());
+            }
+            merged.push(row);
+        }
+        let total = merged.len();
+        let rows = merged.into_iter().skip(query.page.saturating_sub(1).saturating_mul(query.page_size))
+            .take(query.page_size).map(std::borrow::Cow::into_owned).collect();
         Ok(ProbeEntryPage {
             observation_revision: document.summary.observation_revision,
             dictionary_revision: dictionary.revision(),
@@ -988,6 +1057,7 @@ impl ProbeRunStore {
                         first_seen_ms: entry.first_seen_ms(),
                         last_seen_ms: entry.last_seen_ms(),
                         translation_variants: Vec::new(),
+                    resolution: None,
                     });
                 row.adapter_ids.push(entry.adapter_id().into());
                 row.count = row.count.saturating_add(entry.count());
@@ -1032,6 +1102,7 @@ impl ProbeRunStore {
                     first_seen_ms: 0,
                     last_seen_ms: 0,
                     translation_variants: Vec::new(),
+                    resolution: None,
                 });
         }
         let keys = self.source_keys(document, observations.as_deref());
@@ -1115,12 +1186,7 @@ impl ProbeRunStore {
         document.catalog_revision = observations.revision();
         document.summary.observation_revision =
             document.summary.observation_revision.saturating_add(1);
-        document.summary.observed_count = observations
-            .entries()
-            .iter()
-            .map(|entry| entry.source())
-            .collect::<BTreeSet<_>>()
-            .len();
+        document.summary.observed_count = observed_count;
         document.summary.dropped_observations = observations.dropped_observations();
         let observed = observations
             .entries()

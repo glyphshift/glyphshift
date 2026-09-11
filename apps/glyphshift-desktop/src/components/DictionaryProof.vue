@@ -1,14 +1,10 @@
 <script setup lang="ts">
-import { latestRequestQueue } from '../latestRequestQueue'
-import { invoke } from '@tauri-apps/api/core'
-import { useAppSettings } from '../appSettings'
-import { skipReason } from '../textFilters'
 
 import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import DictionaryImportDialog from './DictionaryImportDialog.vue'
 import { mergeDictionaryEntries, type DictionaryImportData } from '../dictionaryImport'
 import { mergeDictionaryDraft } from '../dictionaryDraft'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useI18n } from 'vue-i18n'
@@ -24,10 +20,10 @@ interface DictionaryTableRow {
   kind: 'entry' | 'new'
 }
 
-const props = defineProps<{ detail: DictionaryDetail; busy: boolean }>()
+const props = defineProps<{ detail: DictionaryDetail; busy: boolean; backLabel?: string }>()
 const emit = defineEmits<{
   back: []
-  save: [detail: DictionaryDetail]
+  save: [detail: DictionaryDetail, clearCaptured: boolean]
   'configure-ai': []
   'open-ai-tasks': []
   'dirty-change': [dirty: boolean]
@@ -52,7 +48,7 @@ const dictionaryActions = computed<DropdownMenuItem[][]>(() => [[
 ], [
   ...(['json', 'csv'] as const).map(format => ({ label: t(format === 'json' ? 'capture.exportJson' : 'capture.exportCsv'), icon: 'i-tabler-file-export', disabled: props.busy || hasUnsavedChanges.value, onSelect: () => void exportDialog.value?.exportOne(props.detail.metadata.id, format) })),
 ], [
-  { label: t('dictionaryEditor.clearDictionary'), icon: 'i-tabler-trash', color: 'error', disabled: dictionaryLocked.value || props.busy || !draft.value.entries.length, onSelect: () => { clearOpen.value = true } },
+  { label: t('dictionaryEditor.clearDictionary'), icon: 'i-tabler-trash', color: 'error', disabled: dictionaryLocked.value || props.busy, onSelect: () => { clearOpen.value = true } },
 ]])
 
 function clone<T>(value: T): T {
@@ -68,33 +64,6 @@ const draft = ref<DictionaryDetail>(clone(props.detail))
 const externalConflicts = ref<string[]>([])
 const aiSaveRequired = ref(false)
 const selected = ref(new Set<number>())
-const textSettings = useAppSettings()
-const hideSkipped = ref(localStorage.getItem('glyphshift.dictionary.hide-skipped') === 'true')
-const hiddenSources = ref(new Set<string>())
-const filterError = ref('')
-let filterRequest = 0
-const sourceTexts = computed(() => hideSkipped.value ? draft.value.entries.map(entry => entry.source) : [])
-const filterQueue = latestRequestQueue(async () => {
-  const request = filterRequest
-  const sources = [...sourceTexts.value]
-  const policy = textSettings.settings.value.textFilterPolicy
-  if (!hideSkipped.value) return
-  try {
-    const mask = '__TAURI_INTERNALS__' in window
-      ? await invoke<boolean[]>('desktop_filter_dictionary_sources', { sources })
-      : sources.map(source => Boolean(skipReason({ itemId: '', source, translation: null, ignored: false }, policy)))
-    if (request === filterRequest) hiddenSources.value = new Set(sources.filter((_, index) => mask[index]))
-  } catch { if (request === filterRequest) { hiddenSources.value = new Set(); filterError.value = t('textFilters.failed') } }
-})
-watch([sourceTexts, () => textSettings.settings.value.textFilterPolicy, hideSkipped], () => {
-  filterRequest += 1
-  selected.value = new Set()
-  filterError.value = ''
-  localStorage.setItem('glyphshift.dictionary.hide-skipped', String(hideSkipped.value))
-  if (!hideSkipped.value) { hiddenSources.value = new Set(); return }
-  void filterQueue.request()
-}, { deep: true, immediate: true })
-onBeforeUnmount(() => { filterRequest += 1; filterQueue.dispose() })
 const query = ref('')
 const translationFilter = ref('all')
 const translationFilterOptions = computed(() => (['all', 'translated', 'untranslated'] as const).map(value => ({
@@ -108,8 +77,10 @@ const metadataDraft = ref<DictionaryMetadata>(clone(props.detail.metadata))
 const newEntry = ref<DictionaryEntry>(emptyEntry())
 const pendingRemoval = ref<number[]>([])
 const clearOpen = ref(false)
+const clearCaptured = ref(false)
 function clearDictionary() {
   if (dictionaryLocked.value || props.busy) return
+  clearCaptured.value = true
   draft.value.entries = []
   newEntry.value = emptyEntry()
   selected.value = new Set()
@@ -146,6 +117,7 @@ const displayedAiJob = computed(() => {
 const dictionaryLocked = computed(() => ai.lockedDictionaryId.value === draft.value.metadata.id)
 
 watch(() => props.detail, (value) => {
+  clearCaptured.value = false
   const sameDictionary = value.metadata.id === saved.value.metadata.id
   if (sameDictionary && hasUnsavedChanges.value) {
     const merged = mergeDictionaryDraft(saved.value, draft.value, value)
@@ -166,7 +138,6 @@ const filtered = computed<DictionaryTableRow[]>(() => {
   const needle = query.value.trim().toLocaleLowerCase()
   return draft.value.entries
     .map((entry, index) => ({ entry, index, kind: 'entry' as const }))
-    .filter(({ entry }) => !hideSkipped.value || !hiddenSources.value.has(entry.source))
     .filter(({ entry }) => translationFilter.value === 'all' || (translationFilter.value === 'translated' ? Boolean(entry.translation.trim()) : !entry.translation.trim()))
     .filter(({ entry }) => !needle || `${entry.source} ${entry.translation}`.toLocaleLowerCase().includes(needle))
 })
@@ -238,7 +209,7 @@ const entriesValid = computed(() => draft.value.entries.every((_, index) => (
   !entrySourceError(index)
 )))
 const hasUnsavedChanges = computed(() => (
-  JSON.stringify(draft.value) !== JSON.stringify(saved.value) || newEntryTouched.value
+  clearCaptured.value || JSON.stringify(draft.value) !== JSON.stringify(saved.value) || newEntryTouched.value
 ))
 const canSave = computed(() => (
   hasUnsavedChanges.value
@@ -316,7 +287,7 @@ function saveDraft() {
   const next = clone(draft.value)
   next.entries = next.entries.map(normalizedEntry)
   draft.value = clone(next)
-  emit('save', next)
+  emit('save', next, clearCaptured.value)
 }
 
 async function prepareAiPlan() {
@@ -436,7 +407,7 @@ usePageEscape(() => true, () => emit('back'))
       title-id="dictionary-title"
       :title="draft.metadata.name"
       :description="t('dictionaryEditor.metadataLine', { source: draft.metadata.sourceLocale, target: draft.metadata.targetLocale, version: draft.metadata.releaseVersion, count: draft.entries.length })"
-      :back-label="t('dictionaryEditor.back')"
+      :back-label="backLabel ?? t('dictionaryEditor.back')"
       @back="emit('back')"
     >
       <template #status>
@@ -495,7 +466,6 @@ usePageEscape(() => true, () => emit('back'))
       @dismiss="ai.dismissCurrentJob"
     />
 
-    <p v-if="filterError" role="alert" class="text-error">{{ filterError }}</p>
     <ManagementTableFrame
       v-model:query="query"
       v-model:filter-value="translationFilter"
@@ -512,10 +482,6 @@ usePageEscape(() => true, () => emit('back'))
       :total="filtered.length"
       :item-label="t('dictionaryEditor.itemLabel')"
     >
-      <template #toolbar-actions>
-        <UCheckbox v-model="hideSkipped" :label="t('textFilters.hide')" />
-        <FieldHelp :label="t('textFilters.hide')" :text="t('textFilters.hideHint')" />
-      </template>
       <template #bulk-actions>
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaryEditor.deleteSelected')" @click="pendingRemoval = [...selected]" />
       </template>
@@ -618,7 +584,7 @@ usePageEscape(() => true, () => emit('back'))
       :description="t('dictionaryEditor.settingsDescription')"
       :confirm-label="t('dictionaryEditor.applySettings')"
       :confirm-disabled="!metadataDraft.name.trim() || !metadataDraft.sourceLocale.trim() || !metadataDraft.targetLocale.trim() || !metadataDraft.releaseVersion.trim()"
-      width="md"
+      width="lg"
       @update:open="$event || (metadataOpen = false)"
       @confirm="applyMetadata"
     >

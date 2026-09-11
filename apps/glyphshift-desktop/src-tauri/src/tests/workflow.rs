@@ -511,6 +511,10 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         font_families: Vec::new(),
         font_cache_root: data_root.path().to_path_buf(),
         probe_snapshot_cache: Default::default(),
+        exiting: false,
+        exit_ready: false,
+        collection_filter_policy: Default::default(),
+        collection_filter: Default::default(),
         collection_versions: Default::default(),
         pending_collection_runs: Default::default(),
         probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
@@ -731,4 +735,275 @@ fn workflow_transient_retry_is_bounded_and_hard_failure_requires_manual_retry() 
     runtime.retry_attempt = 0;
     runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
     assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 200));
+}
+
+#[test]
+fn collection_filters_before_dictionary_write_and_rechecks_changed_policy() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.filtered", "Filtered", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("42", "既有数字")])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.filtered", "Filtered").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.filtered"])
+            .with_write_dictionary("dictionary.filtered"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.filtered").unwrap();
+    app.set_collection_filter_policy(glyphshift_ai_translation::FilterPolicy::default().with_excluded_patterns(["^Debug"]));
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for source in ["1234", "0.1818", "100 px", "https://example.invalid", "Ctrl+S", "Debug text", "Selected:0", "Open menu"] { sink.observe(TEST_ADAPTER_ID, source); }
+    sink.finish().unwrap();
+    app.collect_workflow_sources(run.summary.id()).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.filtered").unwrap();
+    assert_eq!(dictionary.entries().iter().map(|entry| entry.source()).collect::<Vec<_>>(), vec!["42", "Open menu", "Selected:0"]);
+    assert_eq!(dictionary.entries()[0].translation(), "既有数字");
+    let revision = dictionary.revision();
+    app.collect_workflow_sources(run.summary.id()).unwrap();
+    assert_eq!(app.backend.dictionary("dictionary.filtered").unwrap().revision(), revision);
+    let mut policy = serde_json::to_value(glyphshift_ai_translation::FilterPolicy::default()).unwrap();
+    policy["skipPureNumbersOrSymbols"] = false.into();
+    app.set_collection_filter_policy(serde_json::from_value(policy).unwrap());
+    // Policy changes recheck persisted observations even when no new observation arrives.
+    app.collect_workflow_sources(run.summary.id()).unwrap();
+    let sources = app.backend.dictionary("dictionary.filtered").unwrap().entries().iter().map(|entry| entry.source()).collect::<Vec<_>>();
+    assert!(sources.contains(&"1234"));
+    assert!(sources.contains(&"Debug text"));
+    assert!(!sources.contains(&"https://example.invalid"));
+    assert!(!sources.contains(&"100 px"));
+    app.set_collection_filter_policy(glyphshift_ai_translation::FilterPolicy::default());
+    app.collect_workflow_sources(run.summary.id()).unwrap();
+    assert!(app.backend.dictionary("dictionary.filtered").unwrap().entries().iter().any(|entry| entry.source() == "1234"));
+}
+
+#[test]
+fn exit_stops_runtime_without_erasing_saved_intent_or_restarting_on_poll() {
+    let (mut app, calls, _, _root) = workflow_application();
+    app.enable_workflow("workflow.product", false).unwrap();
+    let desired = app.backend.enabled_workflow_ids().to_vec();
+    let activations = calls.lock().unwrap().enabled.len();
+    app.prepare_exit().unwrap();
+    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.product"));
+    assert_eq!(app.backend.enabled_workflow_ids(), desired);
+    app.refresh_workflows().unwrap();
+    app.reconcile_enabled_workflows().unwrap();
+    assert_eq!(calls.lock().unwrap().enabled.len(), activations);
+    app.prepare_exit().unwrap();
+}
+
+#[test]
+fn exit_failure_still_stops_other_workflows_and_allows_retry() {
+    let (mut app, calls, software_id, _root) = workflow_application();
+    app.enable_workflow("workflow.product", false).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.second", "Second").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"]),
+    ])).unwrap();
+    let intent = app.backend.effective_workflow_intent("workflow.second").unwrap();
+    app.workflow_runtime_status.insert("workflow.second".into(), idle_workflow_runtime_view(&intent, false));
+    calls.lock().unwrap().stop_failure_ids.insert("workflow.product".into());
+    assert_eq!(serde_json::to_value(app.prepare_exit().unwrap_err()).unwrap()["code"], "runtime.exit_stop_failed");
+    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.second"));
+    assert!(app.exiting);
+    calls.lock().unwrap().stop_failure_ids.clear();
+    app.prepare_exit().unwrap();
+}
+
+
+#[test]
+fn dictionary_rules_collect_one_label_and_ai_ignores_dynamic_counts() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    let rule = glyphshift_translation::RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true };
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN")
+        .with_text_rules(vec![rule.clone()])
+        .with_entries([DictionaryEntryCreate::new("Total:18", "旧译文")])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.counter", "Counter").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"]).with_write_dictionary("dictionary.counter"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.counter").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for n in 0..101 { sink.observe(TEST_ADAPTER_ID, format!("Total:{n}")); }
+    sink.finish().unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
+    assert_eq!(dictionary.entries().len(), 2);
+    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Total" && entry.translation().is_empty()));
+    let request = app.probe_ai_plan_request(id).unwrap();
+    let plan = glyphshift_ai_translation::AiTranslation::new().plan_translation(request).unwrap();
+    assert_eq!(plan.candidates().len(), 1);
+    assert_eq!(plan.candidates()[0].source(), "Total");
+    let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
+        run_id: id.into(), snapshot_revision: dictionary.revision(), results: vec![
+            ai::ProbeAiTranslationResult { item_id: plan.candidates()[0].item_id().into(), source: "Total".into(), translation: "总计".into() },
+        ],
+    }).unwrap();
+    assert_eq!(applied.applied_count, 1);
+    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
+    let mut disabled = rule; disabled.enabled = false;
+    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled])).unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    assert_eq!(app.backend.dictionary("dictionary.counter").unwrap().entries().len(), 102);
+}
+
+#[test]
+fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    let rule = glyphshift_translation::RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true };
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN").with_text_rules(vec![rule])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.counter", "Counter").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"]).with_write_dictionary("dictionary.counter"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.counter").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for n in 0..101 { sink.observe(TEST_ADAPTER_ID, format!("Total:{n}")); }
+    sink.finish().unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    let rows = |app: &mut DesktopApplication| {
+        let request = serde_json::from_value(serde_json::json!({"runId":id,"search":"Total:18","adapterIds":[],"translationFilter":"all","page":1,"pageSize":50})).unwrap();
+        serde_json::to_value(app.probe_run_entries(request).unwrap()).unwrap()
+    };
+    let pending = rows(&mut app);
+    assert_eq!(pending["rows"][0]["resolution"]["editable"], true);
+    assert_eq!(pending["rows"][0]["resolution"]["editSource"], "Total");
+    for text in ["总计", "合计"] {
+        app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:text.into() }).unwrap();
+        let dictionary = app.backend.dictionary("dictionary.counter").unwrap();
+        assert_eq!(dictionary.entries().len(), 1);
+        assert_eq!(dictionary.entries()[0].source(), "Total");
+        assert_eq!(dictionary.entries()[0].translation(), text);
+        let page = rows(&mut app);
+        assert_eq!(page["rows"][0]["translation"], format!("{text}:18"));
+        assert_eq!(page["rows"][0]["resolution"]["editTranslation"], text);
+    }
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:0".into(), translation:"".into() }).unwrap();
+    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
+    assert_eq!(rows(&mut app)["rows"][0]["resolution"]["kind"], "rule_pending");
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:100".into(), translation:"总数".into() }).unwrap();
+    app.bulk_probe_entries(super::super::probe::ProbeBulkRequest { run_id:id.into(), sources:vec!["Total:0".into(),"Total:18".into()], action:"clear_translations".into() }).unwrap();
+    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:"总数".into() }).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
+    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
+    assert_eq!(rows(&mut app)["total"], 0);
+
+}
+
+#[test]
+fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
+    let (mut app, calls, software_id, root) = workflow_application();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.clear", "Clear").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"]).with_write_dictionary("dictionary.product"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.clear").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Captured entry");
+    sink.finish().unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.product").unwrap().clone();
+    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Captured entry"));
+    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.clear"));
+    assert!(app.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == "workflow.clear"));
+    assert!(calls.lock().unwrap().enabled.iter().filter(|(id, _, _)| id.as_ref() == "workflow.clear").count() >= 2);
+    app.workflow_collection_view("workflow.clear").unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    assert!(app.backend.dictionary("dictionary.product").unwrap().entries().is_empty());
+    let request = serde_json::from_value(serde_json::json!({"runId":id,"search":"Captured entry","page":1,"pageSize":50})).unwrap();
+    assert_eq!(app.probe_run_entries(request).unwrap().total(), 0);
+    app.probe_runs = ProbeRunStore::open(root.path().join("probe-runs")).unwrap();
+    app.collection_versions.clear();
+    app.collect_workflow_sources(id).unwrap();
+    assert!(app.backend.dictionary("dictionary.product").unwrap().entries().is_empty());
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Captured entry");
+    sink.observe(TEST_ADAPTER_ID, "Fresh entry");
+    sink.finish().unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.product").unwrap();
+    assert_eq!(dictionary.entries().len(), 2);
+    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Captured entry"));
+    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Fresh entry"));
+}
+
+#[test]
+fn clearing_dynamic_source_resets_capture_without_blocking_rule_key() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.dynamic", "Dynamic", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Total:18", "总计")])
+        .with_text_rules(vec![glyphshift_translation::RegexTranslationRule { pattern:r"^(.+?)(:[0-9]+)$".into(), replacement:"{{TR}}$2".into(), enabled:true }])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.dynamic", "Dynamic").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.dynamic"]).with_write_dictionary("dictionary.dynamic"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.dynamic").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Total:18");
+    sink.finish().unwrap();
+    let dictionary = app.backend.dictionary("dictionary.dynamic").unwrap().clone();
+    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    app.collect_workflow_sources(id).unwrap();
+    assert!(app.backend.dictionary("dictionary.dynamic").unwrap().entries().is_empty());
+}
+
+#[test]
+fn clearing_empty_dictionary_hides_uncollected_workflow_rows() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.empty", "Empty", "en-US", "zh-CN")).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.empty", "Empty").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.empty"]).with_write_dictionary("dictionary.empty"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.empty").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Uncollected entry");
+    sink.finish().unwrap();
+    let dictionary = app.backend.dictionary("dictionary.empty").unwrap().clone();
+    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    let request = serde_json::from_value(serde_json::json!({"runId":id,"search":"","page":1,"pageSize":50})).unwrap();
+    assert_eq!(app.probe_run_entries(request).unwrap().total(), 0);
+    assert_eq!(serde_json::to_value(app.probe_runs.summary(id).unwrap()).unwrap()["observedCount"], 0);
+    app.collect_workflow_sources(id).unwrap();
+    assert!(app.backend.dictionary("dictionary.empty").unwrap().entries().is_empty());
+}
+
+#[test]
+fn rule_rows_merge_by_owner_rule_and_fixed_source_before_pagination() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    let rule = glyphshift_translation::RegexTranslationRule { pattern:r"^(.+?)(:[0-9]+)$".into(), replacement:"{{TR}}$2".into(), enabled:true };
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.groups", "Groups", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Selected", "选择"), DictionaryEntryCreate::new("Total", "总计")])
+        .with_text_rules(vec![rule.clone()])).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.groups", "Groups").with_targets([
+        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.groups"]).with_write_dictionary("dictionary.groups"),
+    ])).unwrap();
+    let run = app.workflow_collection_view("workflow.groups").unwrap();
+    let id = run.summary.id();
+    app.resume_probe_run(id).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for n in 0..20 { sink.observe(TEST_ADAPTER_ID, format!("Selected:{n}")); }
+    sink.observe(TEST_ADAPTER_ID, "Total:20");
+    sink.finish().unwrap();
+    let rows = |app: &mut DesktopApplication, merge: bool, search: &str, size: usize| {
+        let request = serde_json::from_value(serde_json::json!({"runId":id,"search":search,"mergeRules":merge,"page":1,"pageSize":size})).unwrap();
+        serde_json::to_value(app.probe_run_entries(request).unwrap()).unwrap()
+    };
+    assert_eq!(rows(&mut app, false, "", 50)["total"], 21);
+    let merged = rows(&mut app, true, "", 1);
+    assert_eq!(merged["total"], 2);
+    assert_eq!(merged["rows"].as_array().unwrap().len(), 1);
+    let selected = rows(&mut app, true, "选择", 50);
+    assert_eq!(selected["total"], 1);
+    assert_eq!(selected["rows"][0]["count"], 20);
+    assert_eq!(selected["rows"][0]["resolution"]["editSource"], "Selected");
+    assert_eq!(rows(&mut app, true, "Selected:18", 50)["rows"][0]["source"], "Selected:18");
+    let dictionary = app.backend.dictionary("dictionary.groups").unwrap().clone();
+    let mut disabled = rule; disabled.enabled = false;
+    app.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled])).unwrap();
+    assert_eq!(rows(&mut app, true, "", 50)["total"], 21);
 }

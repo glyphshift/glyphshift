@@ -1,0 +1,58 @@
+import { expect, test } from '@playwright/test'
+import { model, storageKey } from './fixtures/productModel'
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
+  await page.goto('/')
+})
+test('dictionary rules persist with metadata and test without accessing dictionaries', async ({ page }, testInfo) => {
+  await page.getByRole('button', { name: '字典', exact: true }).click()
+  await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
+  await page.getByRole('button', { name: '字典操作' }).click()
+  await page.getByRole('menuitem', { name: '字典设置' }).click()
+  let dialog = page.getByRole('dialog', { name: '字典设置' })
+  const section = dialog.getByTestId('dictionary-regex-rules')
+  await section.getByRole('button', { name: '添加规则', exact: true }).click()
+  await expect(section.getByRole('textbox', { name: '替换为', exact: true })).toHaveValue('{{TR}}$2')
+  const tester = section.getByTestId('regex-rule-tester')
+  await tester.getByRole('textbox', { name: '模拟原文', exact: true }).fill('Total:18')
+  await tester.getByRole('textbox', { name: '模拟译文（可不填）', exact: true }).fill('总计')
+  await tester.getByRole('button', { name: '测试', exact: true }).click()
+  await expect(tester.locator('pre')).toHaveText('总计:18')
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), storageKey)).toEqual(model)
+  await section.screenshot({ path: testInfo.outputPath('dictionary-rule-wide.png') })
+  await page.setViewportSize({ width: 800, height: 680 })
+  await section.screenshot({ path: testInfo.outputPath('dictionary-rule-compact.png') })
+  expect(await section.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await section.getByRole('button', { name: '确认规则', exact: true }).click()
+  await dialog.getByRole('button', { name: '应用设置', exact: true }).click()
+  await page.getByRole('button', { name: '保存字典', exact: true }).click()
+  await expect(page.getByText('未保存', { exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: '返回字典列表' }).click()
+  await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
+  await page.getByRole('button', { name: '字典操作' }).click()
+  await page.getByRole('menuitem', { name: '字典设置' }).click()
+  dialog = page.getByRole('dialog', { name: '字典设置' })
+  await expect(dialog.getByTestId('regex-rule-row')).toContainText('{{TR}}$2')
+  await dialog.getByRole('button', { name: '编辑规则 1' }).click()
+  await dialog.getByRole('textbox', { name: '匹配原文（正则）', exact: true }).fill('[')
+  await dialog.getByRole('button', { name: '确认规则', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('规则无效')
+})
+for (const surface of ['设置', '帮助']) {
+  test(`${surface} tabs remain pinned while scrolling`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 900, height: 600 })
+    await page.getByRole('button', { name: surface, exact: true }).click()
+    const tabs = page.getByTestId(surface === '设置' ? 'settings-tabs' : 'help-tabs').getByRole('tablist')
+    const top = (await tabs.boundingBox())!.y
+    const scroll = page.getByTestId('utility-page-scroll')
+    await scroll.evaluate(el => { el.scrollTop = el.scrollHeight })
+    await expect.poll(async () => Math.abs((await tabs.boundingBox())!.y - top)).toBeLessThan(2)
+    expect(await scroll.evaluate(el => el.scrollTop)).toBeGreaterThan(100)
+    await page.screenshot({ path: testInfo.outputPath(surface === '设置' ? 'settings-pinned.png' : 'help-pinned.png') })
+    if (surface === '设置') {
+      await tabs.getByRole('tab', { name: '文字处理', exact: true }).click()
+      await expect(page.getByText('捕获黑名单', { exact: true })).toBeVisible()
+      await expect(page.getByTestId('dictionary-regex-rules')).toHaveCount(0)
+    }
+  })
+}

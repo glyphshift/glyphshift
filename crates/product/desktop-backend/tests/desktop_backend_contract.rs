@@ -923,3 +923,29 @@ fn malformed_legacy_runtime_is_isolated_to_its_software_record() {
         assert!(snapshot["artifactWarnings"].as_array().unwrap().iter().any(|warning| warning["artifactId"] == ids[1] && warning["issue"] == "invalid_runtime"));
     }
 }
+
+#[test]
+fn dictionary_rules_change_workflow_publication_with_dictionary_revision() {
+    use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
+    let root = tempdir().unwrap();
+    let executable = root.path().join("SyntheticRulesEditor.exe");
+    fs::write(&executable, b"synthetic executable").unwrap();
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment()).unwrap();
+    let software_id = backend.add_software(glyphshift_desktop_backend::ExecutableSelection::new(&executable)).unwrap().selected_software_id().unwrap().to_owned();
+    backend.create_dictionary(DictionaryCreate::new("rules-dictionary", "Rules dictionary", "en", "zh-CN").with_entries([DictionaryEntryCreate::new("Total", "总计")])).unwrap();
+    backend.create_workflow(WorkflowCreate::new("rules-workflow", "Rules workflow").with_targets([WorkflowTargetCreate::new(software_id.as_str(), ["adapter-gdi"], ["rules-dictionary"])] )).unwrap();
+    let old = backend.workflow_runtime_spec("rules-workflow", &software_id).unwrap();
+    let rules = RegexTranslationRules::compile(vec![RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true }]).unwrap();
+    let dictionary = backend.dictionary("rules-dictionary").unwrap().clone();
+    backend.update_dictionary(glyphshift_desktop_backend::DictionaryEdit::from_dictionary(&dictionary).with_text_rules(rules.rules().to_vec())).unwrap();
+    let new = backend.workflow_runtime_spec("rules-workflow", &software_id).unwrap();
+    assert!(new.publication().generation() > old.publication().generation());
+    assert_ne!(new.publication().identity().unwrap(), old.publication().identity().unwrap());
+    assert_eq!(new.publication(), backend.workflow_runtime_spec("rules-workflow", &software_id).unwrap().publication());
+    let dictionary = backend.dictionary("rules-dictionary").unwrap().clone();
+    backend.update_dictionary(glyphshift_desktop_backend::DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![])).unwrap();
+    let removed = backend.workflow_runtime_spec("rules-workflow", &software_id).unwrap();
+    assert!(removed.publication().generation() > new.publication().generation());
+    assert!(removed.publication().snapshot().dictionary_rules().is_empty());
+    assert_eq!(backend.workflow("rules-workflow").unwrap().revision(), 1);
+}

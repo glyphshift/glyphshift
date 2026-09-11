@@ -77,7 +77,7 @@ impl Default for FilterPolicy {
 pub struct SourceFilterCache {
     policy: Option<FilterPolicy>,
     patterns: Vec<Regex>,
-    results: BTreeMap<String, bool>,
+    results: BTreeMap<String, Option<SkipReason>>,
     source_bytes: usize,
 }
 impl SourceFilterCache {
@@ -93,11 +93,13 @@ impl SourceFilterCache {
         Ok(())
     }
 
-    pub fn hidden(&mut self, source: &str) -> bool {
+    pub fn hidden(&mut self, source: &str) -> bool { self.reason(source).is_some() }
+
+    pub fn reason(&mut self, source: &str) -> Option<SkipReason> {
         if let Some(result) = self.results.get(source) { return *result; }
-        let Some(policy) = self.policy.as_ref() else { return false; };
+        let policy = self.policy.as_ref()?;
         let item = TranslationItem::untranslated("visibility", source);
-        let hidden = skip_reason(&item, source.trim(), policy, &self.patterns).is_some();
+        let hidden = skip_reason(&item, source.trim(), policy, &self.patterns);
         // Keep memory bounded even with long game dialogue or many historical dictionaries.
         if self.results.len() < 50_000 && self.source_bytes + source.len() <= 8 * 1024 * 1024 {
             self.source_bytes += source.len();
@@ -556,6 +558,7 @@ fn is_numeric_measurement(source: &str) -> bool {
     if source
         .chars()
         .any(|character| matches!(character, '/' | ':' | '×' | '*'))
+        && source.chars().all(|character| character.is_numeric() || character.is_whitespace() || ".,+-/:×*xX".contains(character))
     {
         return true;
     }
@@ -673,10 +676,14 @@ mod source_filter_cache_tests {
         assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
         cache.configure(&policy).unwrap();
         assert_eq!(cache.results.len(), 4);
+        assert_eq!(cache.reason("123"), Some(SkipReason::PureNumberOrSymbols));
+        assert_eq!(cache.reason("Scene 42"), None);
         policy.skip_text_containing_digits = true;
         policy.excluded_patterns.push("^Open".into());
         cache.configure(&policy).unwrap();
         assert!(cache.results.is_empty());
+        assert_eq!(cache.reason("Scene 42"), Some(SkipReason::ContainsDigit));
+        assert_eq!(cache.reason("Open menu"), Some(SkipReason::CustomPattern));
         assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
         policy.excluded_patterns.push("[".into());
         assert!(cache.configure(&policy).is_err());

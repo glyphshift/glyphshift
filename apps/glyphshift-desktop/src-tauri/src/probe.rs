@@ -90,6 +90,7 @@ pub(super) struct ProbeRunQueryRequest {
     pub(super) adapter_ids: Vec<Box<str>>,
     #[serde(default)]
     pub(super) translation_filter: ProbeTranslationFilter,
+    pub(super) merge_rules: Option<bool>,
     pub(super) page: usize,
     pub(super) page_size: usize,
 }
@@ -721,6 +722,10 @@ impl DesktopApplication {
     }
 
     fn probe_run_entries_visible(&mut self, request: ProbeRunQueryRequest, visible: impl FnMut(&str) -> bool) -> Result<ProbeEntryPage, CommandError> {
+        self.probe_run_entries_resolved(request, visible, |_| None)
+    }
+
+    fn probe_run_entries_resolved(&mut self, request: ProbeRunQueryRequest, visible: impl FnMut(&str) -> bool, mut filtered: impl FnMut(&str) -> Option<glyphshift_ai_translation::SkipReason>) -> Result<ProbeEntryPage, CommandError> {
         let query = ProbeQuery::new(request.search, request.page, request.page_size)
             .and_then(|query| query.with_adapter_ids(request.adapter_ids))
             .map(|query| query.with_translation_filter(request.translation_filter))
@@ -730,19 +735,36 @@ impl DesktopApplication {
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
         let dictionary = self.probe_entries_snapshot(&summary)?;
+        let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
+        // Display observed membership across attached dictionaries; collection exclusion is unchanged.
+        let display_dictionary = dictionary.as_ref().clone().with_excluded_sources(BTreeSet::new());
         self.probe_runs
-            .query_entries_visible(&request.run_id, &query, &dictionary, visible)
+            .query_entries_grouped(&request.run_id, &query, &display_dictionary, visible, |row| {
+                let skipped = filtered(row.source());
+                let mut row = row.clone();
+                resolver.project(&mut row, skipped);
+                std::borrow::Cow::Owned(row)
+            }, |row| {
+                if request.merge_rules.unwrap_or(true) && row.state() != glyphshift_capture::ProbeEntryState::Ignored {
+                    resolver.rule_group_key(row.source())
+                } else { None }
+            })
             .map_err(probe_run_error)
     }
 
     pub(super) fn edit_probe_translation(
         &mut self,
-        request: ProbeTranslationEditRequest,
+        mut request: ProbeTranslationEditRequest,
     ) -> Result<ProbeRunView, CommandError> {
         let summary = self
             .probe_runs
             .summary(&request.run_id)
             .map_err(probe_run_error)?;
+        let rule_source = crate::entry_resolution::EntryResolver::new(&self.backend, &summary)
+            .editable_rule_source(&request.source)
+            .map_err(|_| CommandError::new("capture.source_owned_by_dictionary"))?;
+        let rule_matched = rule_source.is_some();
+        if let Some(source) = rule_source { request.source = source; }
         self.ensure_ai_dictionary_writable(summary.dictionary_id())?;
         let dictionary = self
             .backend
@@ -753,7 +775,7 @@ impl DesktopApplication {
             .entries()
             .iter()
             .find(|entry| entry.source() == request.source.as_ref());
-        if existing.is_none() && !self.probe_runs.excluded_sources_for(
+        if existing.is_none() && !rule_matched && !self.probe_runs.excluded_sources_for(
             &request.run_id, self.probe_entries_snapshot(&summary)?.as_ref(), &[request.source.clone()],
         ).map_err(probe_run_error)?.is_empty() {
             return Err(CommandError::new("capture.source_owned_by_dictionary"));
@@ -874,14 +896,24 @@ impl DesktopApplication {
                     .iter()
                     .map(|entry| entry.source())
                     .collect::<BTreeSet<_>>();
+                let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
+                let mut raw_sources = Vec::new();
+                let mut rule_sources = Vec::new();
+                for source in &request.sources {
+                    match resolver.editable_rule_source(source) {
+                        Ok(Some(key)) => { if existing.contains(key.as_ref()) { rule_sources.push(key); } },
+                        Ok(None) => raw_sources.push(source.clone()),
+                        Err(()) => return Err(CommandError::new("capture.source_owned_by_dictionary")),
+                    }
+                }
                 let snapshot = self.probe_dictionary_snapshot(dictionary.id())?;
-                let mut sources = self.probe_runs.dictionary_sources_for_rows(&request.run_id, &request.sources, &snapshot).map_err(probe_run_error)?;
-                sources.extend(request
-                    .sources
+                let mut sources = self.probe_runs.dictionary_sources_for_rows(&request.run_id, &raw_sources, &snapshot).map_err(probe_run_error)?;
+                sources.extend(raw_sources
                     .iter()
                     .filter(|source| existing.contains(source.as_ref()))
                     .cloned()
                     .collect::<Vec<_>>());
+                sources.extend(rule_sources);
                 sources.sort(); sources.dedup();
                 if !sources.is_empty() {
                     self.backend
@@ -1176,19 +1208,15 @@ pub(super) fn desktop_probe_run_summary(
 #[tauri::command]
 pub(super) fn desktop_probe_run_entries(
     request: ProbeRunQueryRequest,
-    hide_skipped: Option<bool>,
     application: State<'_, Mutex<DesktopApplication>>,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<ProbeEntryPage, CommandError> {
-    if !hide_skipped.unwrap_or(false) {
-        return application.lock().map_err(|_| workspace_unavailable())?.probe_run_entries(request);
-    }
     let policy = settings.lock().map_err(|_| workspace_unavailable())?.current()
         .map_err(|_| workspace_unavailable())?.text_filter_policy().clone();
-    let mut cache = crate::ai::source_filter_cache().lock().map_err(|_| workspace_unavailable())?;
-    cache.configure(&policy).map_err(crate::ai::ai_plan_error)?;
+    let cache = std::cell::RefCell::new(crate::ai::source_filter_cache().lock().map_err(|_| workspace_unavailable())?);
+    cache.borrow_mut().configure(&policy).map_err(crate::ai::ai_plan_error)?;
     application.lock().map_err(|_| workspace_unavailable())?
-        .probe_run_entries_visible(request, |source| !cache.hidden(source))
+        .probe_run_entries_resolved(request, |source| !cache.borrow_mut().hidden(source), |source| cache.borrow_mut().reason(source))
 }
 
 #[tauri::command]

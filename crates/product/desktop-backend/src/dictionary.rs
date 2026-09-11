@@ -121,9 +121,12 @@ pub struct DictionaryMetadata {
     font_families: Vec<Box<str>>,
     #[serde(default)]
     font_scale_percent: Option<u16>,
+    #[serde(default)]
+    text_rules: Vec<glyphshift_translation::RegexTranslationRule>,
 }
 
 impl DictionaryMetadata {
+    pub fn text_rules(&self) -> &[glyphshift_translation::RegexTranslationRule] { &self.text_rules }
     #[must_use]
     pub fn font_scale_percent(&self) -> Option<u16> { self.font_scale_percent }
     #[must_use]
@@ -179,6 +182,9 @@ pub struct DictionaryCreate {
 }
 
 impl DictionaryCreate {
+    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
+        self.metadata.text_rules = rules; self
+    }
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -200,6 +206,7 @@ impl DictionaryCreate {
                 tags: Vec::new(),
                 font_families: Vec::new(),
                 font_scale_percent: None,
+                text_rules: Vec::new(),
             },
             entries: Vec::new(),
         }
@@ -272,6 +279,9 @@ pub struct DictionaryEdit {
 }
 
 impl DictionaryEdit {
+    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
+        self.metadata.text_rules = rules; self
+    }
     #[must_use]
     pub fn from_dictionary(dictionary: &DictionaryView) -> Self {
         Self {
@@ -769,6 +779,7 @@ fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::Di
         tags,
         font_families,
         font_scale_percent,
+        text_rules,
     } = metadata;
     let mut packaged =
         dictionary_package::DictionaryCreate::new(id, name, source_locale, target_locale)
@@ -778,6 +789,7 @@ fn package_dictionary_create(create: DictionaryCreate) -> dictionary_package::Di
             .with_tags(tags)
             .with_font_families(font_families)
             .with_font_scale_percent(font_scale_percent)
+            .with_text_rules(text_rules)
             .with_entries(entries.into_iter().map(package_dictionary_entry));
     if let Some(license) = license {
         packaged = packaged.with_license(license);
@@ -815,6 +827,7 @@ fn dictionary_view(artifact: &DictionaryArtifact) -> DictionaryView {
             tags: metadata.tags().to_vec(),
             font_families: metadata.font_families().to_vec(),
             font_scale_percent: metadata.font_scale_percent(),
+            text_rules: metadata.text_rules().to_vec(),
         },
         revision: packaged.revision(),
         entries: packaged
@@ -845,7 +858,7 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
         dictionary.id(),
         dictionary.metadata.target_locale.clone(),
         entries,
-    )
+    ).with_text_rules(glyphshift_translation::RegexTranslationRules::compile(dictionary.metadata.text_rules.clone()).expect("validated dictionary rules"))
 }
 
 pub(super) struct DictionaryLoad {

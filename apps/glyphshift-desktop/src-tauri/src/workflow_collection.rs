@@ -2,6 +2,13 @@ use super::*;
 use crate::probe::probe_run_error;
 
 impl DesktopApplication {
+    pub(super) fn set_collection_filter_policy(&mut self, policy: glyphshift_ai_translation::FilterPolicy) {
+        if self.collection_filter_policy != policy {
+            self.collection_filter_policy = policy;
+            self.collection_versions.clear();
+        }
+    }
+
     fn collection_record_id(&mut self, workflow_id: &str, software_id: &str, dictionary_id: &str, index: usize) -> Result<String, CommandError> {
         let records = self.probe_runs.list().map_err(probe_run_error)?;
         let matches = records.iter().filter(|run| run.workflow_id() == Some(workflow_id)
@@ -39,7 +46,10 @@ impl DesktopApplication {
             return Ok(());
         }
         let snapshot = self.probe_entries_snapshot(&summary)?;
-        let sources = self.probe_runs.uncollected_sources(run_id, &snapshot).map_err(probe_run_error)?;
+        let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
+        let mut sources = self.probe_runs.uncollected_sources_mapped(run_id, &snapshot, |source| resolver.collection_sources(source)).map_err(probe_run_error)?;
+        self.collection_filter.configure(&self.collection_filter_policy).map_err(crate::ai::ai_plan_error)?;
+        sources.retain(|source| !self.collection_filter.hidden(source));
         if !sources.is_empty() {
             let dictionary = self.backend.dictionary(summary.dictionary_id()).cloned().map_err(|_| CommandError::new("dictionary.not_found"))?;
             let entries = dictionary.entries().iter().map(|entry| DictionaryEntryCreate::new(entry.source(), entry.translation()))

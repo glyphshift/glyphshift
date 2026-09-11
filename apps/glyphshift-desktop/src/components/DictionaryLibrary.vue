@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import LibrarySortMenu from './LibrarySortMenu.vue'
+import { useLibrarySort } from '../useLibrarySort'
 import { computed, ref, watch } from 'vue'
 import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
@@ -53,6 +55,8 @@ const dictionaryWarningDescription = computed(() => t('dictionaries.skippedArtif
 
 const mode = ref<'local' | 'catalog'>('local')
 const query = ref('')
+const { mode: sortMode, options: sortOptions, sort } = useLibrarySort('dictionaries')
+watch(sortMode, () => { page.value = 1 })
 const page = ref(1)
 const pageSize = ref(50)
 const selected = ref(new Set<string>())
@@ -95,10 +99,10 @@ const createDraft = ref<DictionaryMetadata>(emptyMetadata())
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
-  return props.items.filter((item) => {
+  return sort(props.items.filter((item) => {
     const metadata = item.metadata
     return !needle || `${metadata.name} ${metadata.description} ${metadata.sourceLocale} ${metadata.targetLocale} ${metadata.releaseVersion} ${metadata.tags.join(' ')}`.toLocaleLowerCase().includes(needle)
-  })
+  }), item => item.metadata.id, item => item.metadata.name)
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const pageItems = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
@@ -202,6 +206,7 @@ function submit() {
     license: metadata.license?.trim() || null,
     homepage: metadata.homepage?.trim() || null,
     tags: [...new Set(metadata.tags.map(value => value.trim()).filter(Boolean))],
+    textRules: metadata.textRules ?? [],
   })
   closeCreate()
 }
@@ -387,6 +392,7 @@ async function chooseImport() { await importDialog.value?.choose() }
       :item-label="t('dictionaries.itemLabel')"
       @toggle-column="toggleLocalColumn"
     >
+      <template #toolbar-actions><LibrarySortMenu v-model="sortMode" :options="sortOptions" /></template>
       <template #bulk-actions>
         <UButton color="neutral" variant="soft" size="sm" icon="i-tabler-file-export" :label="t('dictionaryExport.batchTitle')" :disabled="busy" @click="exportDialog?.openBatch(items.filter(item => selected.has(item.metadata.id)).map(item => item.metadata.id))" />
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('dictionaries.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.metadata.id))" />

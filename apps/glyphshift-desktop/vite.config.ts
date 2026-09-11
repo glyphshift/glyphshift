@@ -56,6 +56,13 @@ export default defineConfig({
             itemTrailingIcon: 'size-4',
           },
         },
+        inputMenu: {
+          slots: {
+            base: 'type-label bg-[var(--field-bg)]',
+            content: 'relative z-[90] rounded-[6px]',
+            viewport: 'overscroll-contain',
+          },
+        },
         selectMenu: {
           slots: {
             base: 'type-label bg-[var(--field-bg)]',

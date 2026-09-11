@@ -49,6 +49,7 @@ export type SoftwareQuickCaptureEvent
     | { state: 'failed'; shortcut: string; errorCode: string }
 
 export interface DictionaryMetadata {
+  textRules?: import('./regexRules').RegexRule[]
   fontFamilies?: string[]
   fontScalePercent?: number | null
   id: string
@@ -167,7 +168,18 @@ export interface ProbeRunSummary {
   quickProbe: boolean
 }
 
+export interface ProbeEntryResolution {
+  skipReason?: string | null
+  kind: 'dictionary' | 'dictionary_pending' | 'rule_translated' | 'rule_pending' | 'rule_skipped' | 'filtered' | 'ignored' | 'conflict' | 'pending'
+  dictionaryIds: string[]
+  ruleIndex: number | null
+  editable: boolean
+  editSource?: string | null
+  editTranslation?: string | null
+}
+
 export interface ProbeEntryRow {
+  resolution?: ProbeEntryResolution
   source: string
   translation: string
   state: 'pending' | 'translated' | 'unobserved' | 'ignored'

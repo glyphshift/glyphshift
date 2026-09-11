@@ -1,4 +1,5 @@
 use glyphshift_domain::Generation;
+use crate::RegexTranslationRules;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ pub struct TranslationSnapshot {
     adapter_scopes: TranslationScopes,
     contextual_adapter_scopes: ContextualTranslationScopes,
     digest: SnapshotDigest,
+    regex_rules: Vec<(Box<str>, RegexTranslationRules)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -35,6 +37,7 @@ impl SnapshotDigest {
         contextual_entries: &ContextualTranslations,
         adapter_scopes: &TranslationScopes,
         contextual_adapter_scopes: &ContextualTranslationScopes,
+        regex_rules: &Vec<(Box<str>, RegexTranslationRules)>,
     ) -> Self {
         let mut lanes = [
             0xcbf2_9ce4_8422_2325_u64,
@@ -88,6 +91,12 @@ impl SnapshotDigest {
                 );
             }
         }
+        for (location, rules) in regex_rules {
+        Self::digest_fields(&mut lanes, [b"rule-owner".as_slice(), location.as_bytes()]);
+        for rule in rules.rules() {
+            Self::digest_fields(&mut lanes, [b"regex-rule".as_slice(), rule.pattern.as_bytes(), rule.replacement.as_bytes(), if rule.enabled { b"1" } else { b"0" }]);
+        }
+        }
         let mut digest = [0_u8; 32];
         for (index, lane) in lanes.into_iter().enumerate() {
             digest[index * 8..(index + 1) * 8].copy_from_slice(&lane.to_le_bytes());
@@ -125,11 +134,13 @@ impl TranslationSnapshot {
                 &contextual_entries,
                 &adapter_scopes,
                 &contextual_adapter_scopes,
+                &Vec::new(),
             ),
             entries,
             contextual_entries,
             adapter_scopes,
             contextual_adapter_scopes,
+            regex_rules: Vec::new(),
         }
     }
 
@@ -334,12 +345,24 @@ impl TranslationSnapshot {
         }
     }
 
+    #[must_use]
+    pub fn with_dictionary_rules(mut self, location: impl Into<Box<str>>, rules: RegexTranslationRules) -> Self {
+        let location = location.into();
+        if let Some((_, existing)) = self.regex_rules.iter_mut().find(|(id, _)| id == &location) { *existing = rules; }
+        else { self.regex_rules.push((location, rules)); }
+        self.refresh_digest();
+        self
+    }
+
+    pub fn dictionary_rules(&self) -> &Vec<(Box<str>, RegexTranslationRules)> { &self.regex_rules }
+
     fn refresh_digest(&mut self) {
         self.digest = SnapshotDigest::from_entries(
             &self.entries,
             &self.contextual_entries,
             &self.adapter_scopes,
             &self.contextual_adapter_scopes,
+            &self.regex_rules,
         );
     }
 }

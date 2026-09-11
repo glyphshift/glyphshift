@@ -189,6 +189,29 @@ impl DecisionEngine {
         font_policy: &FontPolicy,
         state: &mut DecisionState,
     ) -> DecisionResult {
+        let mut result = self.decide_exact(observation, route, snapshot, font_policy, state);
+        if matches!(result.trace.status, DecisionTraceStatus::NoMatch | DecisionTraceStatus::Matched) {
+            for (location, rules) in snapshot.dictionary_rules() {
+                if rules.matching_rule_index(observation.source_text()).is_none() { continue; }
+                let text = rules.replace(observation.source_text(), |source|
+                    snapshot.lookup_for_adapter(location, observation.adapter_id(), source));
+                result.decision.text = text.map_or(TextDecision::Keep, TextDecision::Replace);
+                result.trace.text = if matches!(result.decision.text, TextDecision::Keep) { TextTrace::Unmatched } else { TextTrace::Replaced };
+                result.trace.status = DecisionTraceStatus::Matched;
+                break;
+            }
+        }
+        result
+    }
+
+    fn decide_exact(
+        &self,
+        observation: &TextObservation,
+        route: &RouteProgram,
+        snapshot: &TranslationSnapshot,
+        font_policy: &FontPolicy,
+        state: &mut DecisionState,
+    ) -> DecisionResult {
         let pass = || RenderDecision {
             text: TextDecision::Keep,
             font: FontDecision::Keep,

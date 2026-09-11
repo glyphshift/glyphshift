@@ -240,3 +240,17 @@ fn rtk_005_rejects_a_stale_publication_without_partially_switching_its_route() {
         TextDecision::Replace("当前".into())
     );
 }
+
+#[test]
+fn regex_publications_apply_next_generation_and_restore_on_removal() {
+    use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
+    let rules = RegexTranslationRules::compile(vec![RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true }]).unwrap();
+    let snap = |generation, text: &str| TranslationSnapshot::empty(Generation::new(generation)).with_entry("text", "Total", text);
+    let mut kernel = RuntimeKernel::activate(std::iter::empty(), RouteProgram::direct("text"), snap(1, "总计").with_dictionary_rules("text", rules.clone()), FontPolicy::empty()).unwrap();
+    let observation = TextObservation::new("example.synthetic.writeback", "Total:33", "surface");
+    assert_eq!(kernel.decide(&observation).text, TextDecision::Replace("总计:33".into()));
+    kernel.update(snap(2, "合计").with_dictionary_rules("text", rules), FontPolicy::empty()).unwrap();
+    assert_eq!(kernel.decide(&observation).text, TextDecision::Replace("合计:33".into()));
+    kernel.update(snap(3, "合计"), FontPolicy::empty()).unwrap();
+    assert_eq!(kernel.decide(&observation).text, TextDecision::Keep);
+}

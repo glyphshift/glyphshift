@@ -6,10 +6,12 @@ use glyphshift_adapter_native_abi::{
     STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use glyphshift_adapter_sdk::AdapterDescriptor;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 pub const ADAPTER_ID: &str = "example.synthetic.native-refresh";
 const SUPPORTED_FEATURES: u64 = FEATURE_TEXT_REPLACE;
+
+static DEACTIVATE_STATUS: AtomicI32 = AtomicI32::new(STATUS_OK);
 
 static REFRESH_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -57,7 +59,12 @@ extern "C" fn activate(
 }
 
 extern "C" fn deactivate() -> i32 {
-    STATUS_OK
+    DEACTIVATE_STATUS.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub extern "C" fn glyphshift_test_set_deactivate_status_v1(status: i32) {
+    DEACTIVATE_STATUS.store(status, Ordering::Release);
 }
 
 extern "C" fn request_refresh() {

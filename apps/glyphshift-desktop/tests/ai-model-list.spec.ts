@@ -1,0 +1,71 @@
+import { expect, test } from '@playwright/test'
+import { model, storageKey } from './fixtures/productModel'
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('button', { name: '添加 AI 配置', exact: true }).click()
+})
+
+test('model picker accepts free typing and fetched choices, with aligned key guidance', async ({ page }, info) => {
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const input = dialog.getByRole('combobox', { name: '模型', exact: true })
+  const key = dialog.getByRole('textbox', { name: 'API Key（密钥）' })
+  await input.fill('manual-model')
+  await dialog.getByRole('button', { name: '获取模型列表' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('请先填写 API Key')
+  await expect(input).toHaveValue('manual-model')
+  await key.fill('synthetic-key')
+  await page.evaluate(() => {
+    ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
+      if (command !== 'desktop_ai_models' || args.request.secret !== 'synthetic-key') throw 'unauthorized'
+      return ['alpha-chat', 'beta-chat']
+    } }
+  })
+  await dialog.getByRole('button', { name: '获取模型列表' }).click()
+  await expect(dialog.getByRole('status')).toContainText('2 个模型')
+  await expect(input).toHaveValue('manual-model')
+  await input.fill('beta')
+  await expect(page.getByRole('option', { name: 'alpha-chat', exact: true })).toHaveCount(0)
+  await page.getByRole('option', { name: 'beta-chat', exact: true }).click()
+  await expect(input).toHaveValue('beta-chat')
+  await input.locator('..').locator('[data-slot="trailing"]').click()
+  await expect(page.getByRole('option', { name: 'alpha-chat', exact: true })).toBeVisible()
+  await expect(page.getByRole('option', { name: 'beta-chat', exact: true })).toBeVisible()
+  await page.screenshot({ path: info.outputPath('all-fetched-models.png') })
+  await page.getByRole('option', { name: 'alpha-chat', exact: true }).click()
+  await expect(input).toHaveValue('alpha-chat')
+  await input.fill('another-manual-model')
+  await key.click()
+  await expect(input).toHaveValue('another-manual-model')
+  const keyBox = await key.boundingBox()
+  const reasoningBox = await dialog.getByRole('combobox', { name: '思考模式', exact: true }).boundingBox()
+  expect(Math.abs(keyBox!.y - reasoningBox!.y)).toBeLessThan(2)
+  const hintBox = await dialog.getByText('请只在你信任的电脑上使用。', { exact: true }).boundingBox()
+  expect(hintBox!.y).toBeGreaterThan(keyBox!.y + keyBox!.height)
+  expect((await input.boundingBox())!.y).toBeGreaterThan(hintBox!.y)
+  await dialog.screenshot({ path: info.outputPath('ai-model-picker.png') })
+  await page.setViewportSize({ width: 800, height: 680 })
+  await expect(input).toBeVisible()
+  expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
+})
+
+test('authentication errors preserve input and changing the service discards stale results', async ({ page }) => {
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const input = dialog.getByRole('combobox', { name: '模型', exact: true })
+  await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-key')
+  await input.fill('keep-this-model')
+  await page.evaluate(() => { (window as any).__TAURI_INTERNALS__ = { invoke: async () => { throw 'unauthorized' } } })
+  await dialog.getByRole('button', { name: '获取模型列表' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('API Key 无效或已过期')
+  await expect(input).toHaveValue('keep-this-model')
+  await page.evaluate(() => { (window as any).__TAURI_INTERNALS__ = { invoke: () => new Promise(resolve => { (window as any).resolveModels = resolve }) } })
+  await dialog.getByRole('button', { name: '获取模型列表' }).click()
+  await dialog.getByRole('textbox', { name: '服务地址', exact: true }).fill('https://other.example/v1')
+  await page.evaluate(() => (window as any).resolveModels(['wrong-provider-model']))
+  await expect(dialog.getByRole('status')).toHaveCount(0)
+  await expect(input).toHaveValue('keep-this-model')
+  await input.fill('wrong-provider')
+  await expect(page.getByRole('option', { name: 'wrong-provider-model' })).toHaveCount(0)
+})

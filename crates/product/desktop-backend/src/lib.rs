@@ -201,6 +201,8 @@ pub struct DesktopBackend {
 }
 
 impl DesktopBackend {
+
+
     /// The dictionary directory of this workspace, including custom data roots.
     pub fn dictionary_directory(&self) -> PathBuf {
         self.root.join("dictionaries")

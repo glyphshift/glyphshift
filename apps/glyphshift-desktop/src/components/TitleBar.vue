@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useToast } from '@nuxt/ui/composables'
 import { computed } from 'vue'
@@ -42,14 +43,19 @@ function toggleTheme() {
   })
 }
 
+async function toggleTopmost() {
+  try { await appSettings.setAlwaysOnTop(!appSettings.alwaysOnTop.value) }
+  catch { toast.add({ title: t('settings.saveFailed'), description: appSettings.settingsError.value, color: 'error' }) }
+}
+
 async function native(action: 'minimize' | 'maximize') {
   try {
     const window = getCurrentWindow()
-    if (action === 'minimize') await window.minimize()
+    if (action === 'minimize') await invoke('desktop_minimize_window')
     else await window.toggleMaximize()
   }
   catch {
-    // Browser previews do not expose native window controls.
+    if ('__TAURI_INTERNALS__' in window) toast.add({ title: t('errors.settings.windowFailed'), color: 'error' })
   }
 }
 </script>
@@ -124,6 +130,7 @@ async function native(action: 'minimize' | 'maximize') {
       />
       <UButton :title="t('titleBar.help')" color="neutral" variant="ghost" icon="i-tabler-help-circle" class="h-full w-10 rounded-none" :class="current === 'help' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.help')" :aria-current="current === 'help' ? 'page' : undefined" @click="emit('navigate', 'help')" />
       <UButton :title="t('titleBar.settings')" color="neutral" variant="ghost" icon="i-tabler-settings" class="h-full w-10 rounded-none" :class="current === 'settings' ? 'bg-[var(--surface-hover)] text-[var(--text)]' : ''" :aria-label="t('titleBar.settings')" :aria-current="current === 'settings' ? 'page' : undefined" @click="emit('navigate', 'settings')" />
+      <UButton :title="appSettings.alwaysOnTop.value ? t('titleBar.unpin') : t('titleBar.pin')" :aria-label="appSettings.alwaysOnTop.value ? t('titleBar.unpin') : t('titleBar.pin')" :aria-pressed="appSettings.alwaysOnTop.value" :disabled="appSettings.settingsBusy.value" color="neutral" variant="ghost" :icon="appSettings.alwaysOnTop.value ? 'i-tabler-pinned-filled' : 'i-tabler-pin'" class="h-full w-10 rounded-none" :class="appSettings.alwaysOnTop.value ? 'text-[var(--accent-strong)] bg-[var(--accent-soft)]' : ''" @click="toggleTopmost" />
       <UButton :title="t('titleBar.minimize')" color="neutral" variant="ghost" icon="i-tabler-minus" class="h-full w-10 rounded-none" :aria-label="t('titleBar.minimize')" @click="native('minimize')" />
       <UButton :title="t('titleBar.maximize')" color="neutral" variant="ghost" icon="i-tabler-square" class="h-full w-10 rounded-none" :aria-label="t('titleBar.maximize')" @click="native('maximize')" />
       <UButton :title="t('titleBar.close')" color="neutral" variant="ghost" icon="i-tabler-x" class="h-full w-10 rounded-none hover:bg-[var(--danger)] hover:text-white" :aria-label="t('titleBar.close')" @click="emit('close')" />

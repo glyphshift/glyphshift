@@ -9,13 +9,13 @@ export interface ProbeRunQueryInput {
   runId: string
   search: string
   adapterIds: string[]
-  hideSkipped?: boolean
   translationFilter: ProbeTranslationFilter
+  mergeRules?: boolean
   page: number
   pageSize: number
 }
 
-export type ProbeTranslationFilter = 'all' | 'untranslated' | 'translated'
+export type ProbeTranslationFilter = 'all' | 'untranslated' | 'translated' | 'rule_matched' | 'other_dictionary'
 
 export interface ProbeRunUpdateInput {
   excludedDictionaryIds: string[]
@@ -340,7 +340,7 @@ export function useProbeRuns() {
         rows: [],
       }
     }
-    return invoke<ProbeEntryPage>('desktop_probe_run_entries', { request: input, hideSkipped: input.hideSkipped ?? false })
+    return invoke<ProbeEntryPage>('desktop_probe_run_entries', { request: input })
   }
 
   async function editTranslation(runId: string, source: string, translation: string) {

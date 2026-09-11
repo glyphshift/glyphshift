@@ -1,6 +1,10 @@
+mod entry_resolution;
+mod exit;
 mod updates;
 mod data;
 mod ai;
+mod ai_models;
+mod window_controls;
 mod command_error;
 mod dictionary;
 mod font_catalog;
@@ -373,6 +377,10 @@ struct DesktopApplication {
     font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
     probe_snapshot_cache: std::cell::RefCell<Option<(Vec<(Box<str>, u64)>, std::sync::Arc<ProbeDictionarySnapshot>)>>,
+    exiting: bool,
+    exit_ready: bool,
+    collection_filter_policy: glyphshift_ai_translation::FilterPolicy,
+    collection_filter: glyphshift_ai_translation::SourceFilterCache,
     collection_versions: BTreeMap<String, (u64, Vec<(Box<str>, u64)>)>,
     pending_collection_runs: BTreeSet<String>,
     quick_probe_sessions: QuickProbeSessionStore,
@@ -382,7 +390,7 @@ struct DesktopApplication {
 }
 
 impl DesktopApplication {
-    fn open(data_root: PathBuf, runtime_root: PathBuf) -> Result<Self, String> {
+    fn open(data_root: PathBuf, runtime_root: PathBuf, settings: &AppSettings) -> Result<Self, String> {
         let mut probe_runs = ProbeRunStore::open(data_root.join("workflow-records"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
@@ -456,7 +464,7 @@ impl DesktopApplication {
                 .unwrap_or_default(),
             font_families.iter().cloned(),
         );
-        let backend = DesktopBackend::open_with_environment(&data_root, environment)
+        let mut backend = DesktopBackend::open_with_environment(&data_root, environment)
             .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
             backend,
@@ -472,6 +480,10 @@ impl DesktopApplication {
             font_cache_root: data_root.clone(),
             probe_runs,
             probe_snapshot_cache: Default::default(),
+            exiting: false,
+            exit_ready: false,
+            collection_filter_policy: settings.text_filter_policy().clone(),
+            collection_filter: Default::default(),
             collection_versions: Default::default(),
             pending_collection_runs: Default::default(),
             quick_probe_sessions,
@@ -591,7 +603,9 @@ fn desktop_settings(
 
 #[tauri::command]
 fn desktop_update_settings(
+    app: tauri::AppHandle,
     mut update: AppSettingsUpdate,
+    application: State<'_, Mutex<DesktopApplication>>,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<AppSettings, CommandError> {
     let software_capture_shortcut =
@@ -603,14 +617,29 @@ fn desktop_update_settings(
     if settings.software_capture_shortcut() != software_capture_shortcut.as_ref() {
         return Err(CommandError::new("settings.shortcut_update_failed"));
     }
+    let previous_topmost = settings.current().map_err(settings_command_error)?.always_on_top();
+    let next_topmost = update.always_on_top();
     let previous_launch_at_startup = settings.launch_at_startup();
     let launch_at_startup_changed = previous_launch_at_startup != update.launch_at_startup();
     if launch_at_startup_changed {
         configure_launch_at_startup(update.launch_at_startup()).map_err(settings_command_error)?;
     }
+    let mut application = application.lock().map_err(|_| workspace_unavailable())?;
+    if previous_topmost != next_topmost {
+        if window_controls::set_topmost(&app, next_topmost).is_err() {
+            if launch_at_startup_changed { let _ = configure_launch_at_startup(previous_launch_at_startup); }
+            return Err(CommandError::new("settings.window_failed"));
+        }
+    }
     match settings.update(update) {
-        Ok(saved) => Ok(saved),
+        Ok(saved) => {
+            application.set_collection_filter_policy(saved.text_filter_policy().clone());
+            window_controls::update_labels(&app, &saved);
+            // The workflow loop republishes changed decision inputs on its next reconciliation.
+            Ok(saved)
+        },
         Err(error) => {
+            if previous_topmost != next_topmost { let _ = window_controls::set_topmost(&app, previous_topmost); }
             if launch_at_startup_changed {
                 let _ = configure_launch_at_startup(previous_launch_at_startup);
             }
@@ -731,8 +760,9 @@ pub fn run() {
                 return Ok(());
             }
             let ai_state = ai::DesktopAiState::open(&data_root).map_err(std::io::Error::other)?;
+            let saved_settings = settings.current().map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
             let application =
-                DesktopApplication::open(data_root, runtime_root).map_err(std::io::Error::other)?;
+                DesktopApplication::open(data_root, runtime_root, &saved_settings).map_err(std::io::Error::other)?;
             settings.initialize_favorite_fonts(&application.font_families)
                 .map_err(|error| std::io::Error::other(format!("favorite fonts startup: {error:?}")))?;
             app.manage(Mutex::new(settings));
@@ -740,15 +770,21 @@ pub fn run() {
             app.manage(Mutex::new(application));
             software::manage_quick_capture(app);
             workflow_shortcut::manage(app);
+            window_controls::setup(app.handle(), &saved_settings)?;
             Ok(())
         })
+        .on_window_event(window_controls::window_event)
         .invoke_handler(tauri::generate_handler![
+            window_controls::desktop_hide_to_tray,
+            window_controls::desktop_minimize_window,
             workflow_shortcut::desktop_set_shortcut_recording,
             workflow_shortcut::desktop_workflow_shortcut_errors,
             desktop_status,
             desktop_settings,
             updates::desktop_check_update,
             desktop_update_settings,
+            settings::desktop_validate_regex_rule,
+            settings::desktop_test_regex_rule,
             desktop_update_software_capture_shortcut,
             desktop_privilege_status,
             desktop_restart_elevated,
@@ -756,11 +792,11 @@ pub fn run() {
             desktop_refresh_font_families,
             data::desktop_open_dictionary_directory,
             ai::desktop_ai_profiles,
+            ai_models::desktop_ai_models,
             ai::desktop_save_ai_profile,
             ai::desktop_set_default_ai_profile,
             ai::desktop_delete_ai_profile,
             ai::desktop_plan_ai_translation,
-            ai::desktop_filter_dictionary_sources,
             ai::desktop_plan_probe_ai_translation,
             ai::desktop_apply_probe_ai_results,
             ai::desktop_start_ai_translation,
@@ -805,6 +841,7 @@ pub fn run() {
             software::desktop_update_software,
             software::desktop_select_software,
             software::desktop_launch_software,
+            exit::desktop_prepare_exit,
             workflow::desktop_enable_workflow,
             workflow::desktop_disable_workflow,
             workflow::desktop_refresh_workflows,
@@ -814,8 +851,19 @@ pub fn run() {
             workflow::desktop_workflow_diagnostics,
             software::desktop_remove_software
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run Glyphshift desktop shell");
+        .build(tauri::generate_context!())
+        .expect("failed to build Glyphshift desktop shell")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if let Some(state) = app.try_state::<Mutex<DesktopApplication>>() {
+                    let result = state.lock().map_err(|_| workspace_unavailable()).and_then(|mut application| application.prepare_exit());
+                    if let Err(error) = result {
+                        api.prevent_exit();
+                        let _ = app.emit("glyphshift-exit-failed", error);
+                    }
+                }
+            }
+        });
 }
 
 #[cfg(test)]

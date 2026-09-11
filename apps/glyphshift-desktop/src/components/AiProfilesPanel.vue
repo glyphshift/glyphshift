@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import defaultTranslationPrompt from '../../../../crates/product/ai-translation/src/default-translation-prompt.txt?raw'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -95,6 +96,47 @@ function newProfileForm(): ProfileForm {
 }
 
 const form = ref<ProfileForm>(newProfileForm())
+const modelItems = ref<string[]>([])
+const modelMenuRequested = ref(false)
+const modelFilterActive = ref(false)
+const modelMenuOpen = computed({ get: () => modelItems.value.length > 0 && modelMenuRequested.value, set: (value: boolean) => { modelMenuRequested.value = value; if (!value) modelFilterActive.value = false } })
+const modelsLoading = ref(false)
+const modelsError = ref('')
+const modelsFetched = ref(false)
+let modelRequestVersion = 0
+watch(() => [form.value.protocol, form.value.baseUrl, form.value.secret, editorOpen.value], () => {
+  modelRequestVersion++
+  modelItems.value = []
+  modelFilterActive.value = false
+  modelsError.value = ''
+  modelsFetched.value = false
+  modelsLoading.value = false
+}, { flush: 'sync' })
+async function fetchModels() {
+  if (modelsLoading.value) return
+  modelsError.value = ''
+  if (credentialRequired.value && !form.value.secret.trim()) {
+    modelsError.value = t('ai.modelErrors.missing_key')
+    return
+  }
+  const version = ++modelRequestVersion
+  modelsLoading.value = true
+  try {
+    const models = await invoke<string[]>('desktop_ai_models', { request: {
+      protocol: form.value.protocol, baseUrl: form.value.baseUrl.trim(), secret: form.value.secret.trim(),
+    } })
+    if (version !== modelRequestVersion) return
+    modelItems.value = models
+    modelFilterActive.value = false
+    modelsFetched.value = true
+  } catch (error) {
+    if (version !== modelRequestVersion) return
+    const code = typeof error === 'string' && ['missing_key', 'invalid_url', 'unauthorized', 'forbidden', 'unsupported', 'rate_limited', 'redirect', 'service_error', 'network', 'timeout', 'invalid_response', 'empty', 'too_large'].includes(error) ? error : 'network'
+    modelsError.value = t(`ai.modelErrors.${code}`)
+  } finally {
+    if (version === modelRequestVersion) modelsLoading.value = false
+  }
+}
 const documentationUrl = computed(() => aiPresets.find(preset => preset.baseUrl === form.value.baseUrl.trim().replace(/\/$/, ''))?.documentationUrl)
 async function openDocumentation() {
   if (!documentationUrl.value) return
@@ -356,14 +398,7 @@ onMounted(() => void ai.connect())
           </UTooltip>
         </div>
       </UFormField>
-      <UFormField :label="t('ai.modelId')" required>
-        <UInput v-model="form.modelId" :aria-label="t('ai.modelId')" spellcheck="false" class="w-full" />
-      </UFormField>
-      <UFormField v-if="reasoningConfigurable" :label="t('ai.reasoningEffort')">
-        <USelect v-model="form.reasoningEffort" :items="reasoningItems" value-key="value" label-key="label" :aria-label="t('ai.reasoningEffort')" class="w-full" />
-        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ reasoningHint }}</p>
-      </UFormField>
-      <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :hint="t('ai.plainCredentialHint')" :required="credentialRequired && !editingProfile?.hasCredential">
+      <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :required="credentialRequired && !editingProfile?.hasCredential">
         <UInput
           v-model="form.secret"
           :type="secretVisible ? 'text' : 'password'"
@@ -384,6 +419,21 @@ onMounted(() => void ai.connect())
             />
           </template>
         </UInput>
+        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.plainCredentialHint') }}</p>
+      </UFormField>
+      <UFormField v-if="reasoningConfigurable" :label="t('ai.reasoningEffort')">
+        <USelect v-model="form.reasoningEffort" :items="reasoningItems" value-key="value" label-key="label" :aria-label="t('ai.reasoningEffort')" class="w-full" />
+        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ reasoningHint }}</p>
+      </UFormField>
+      <UFormField :label="t('ai.modelId')" required class="col-span-2 @max-[560px]:col-span-1">
+        <div class="flex items-start gap-2">
+          <UInputMenu v-model="form.modelId" v-model:open="modelMenuOpen" mode="autocomplete" :items="modelItems" :ignore-filter="!modelFilterActive" @input="modelFilterActive = true" :aria-label="t('ai.modelId')" :placeholder="t('ai.modelPlaceholder')" :reset-search-term-on-blur="false" :open-on-focus="false" spellcheck="false" class="min-w-0 flex-1">
+            <template #empty>{{ t('ai.modelListEmpty') }}</template>
+          </UInputMenu>
+          <UButton v-if="!usesCodexSubscription" color="neutral" variant="soft" icon="i-tabler-refresh" :label="t('ai.fetchModels')" :loading="modelsLoading" class="shrink-0" @click="fetchModels" />
+        </div>
+        <p v-if="modelsError" role="alert" class="type-caption m-0 mt-1 leading-4 text-[var(--danger)]">{{ modelsError }}</p>
+        <p v-else-if="modelsFetched" role="status" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.modelsFetched', { count: modelItems.length }) }}</p>
       </UFormField>
     </div>
 

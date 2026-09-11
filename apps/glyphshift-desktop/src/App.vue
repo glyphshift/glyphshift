@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { markLibraryUsed } from './useLibrarySort'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -34,7 +35,8 @@ const view = ref<View>('workflows')
 const collectionWorkflowId = ref<string | null>(null)
 const returnToCollectionId = ref<string | null>(null)
 const editorDirty = ref(false)
-const pendingExit = ref<NavigableView | 'close' | null>(null)
+const pendingExit = ref<NavigableView | 'close' | 'dictionary-back' | null>(null)
+const dictionaryParentWorkflowId = ref<string | null>(null)
 const discardOpen = computed(() => pendingExit.value !== null)
 const closingActiveTask = computed(() => pendingExit.value === 'close' && ai.taskRunning.value)
 const shellCompatibilityErrorKey = ref('')
@@ -49,6 +51,11 @@ const translationTaskProgress = computed(() => {
 let unlistenSoftwareCapture: UnlistenFn | null = null
 let unlistenWorkflowShortcut: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
+let unlistenTrayExit: UnlistenFn | null = null
+let unlistenExitFailure: UnlistenFn | null = null
+const exitError = ref('')
+const closingWindow = ref(false)
+let exitPrepared = false
 let collectionMonitor: ReturnType<typeof setInterval> | undefined
 let collecting = false
 let workflowMonitor: ReturnType<typeof setInterval> | undefined
@@ -64,6 +71,7 @@ async function openWorkflowCollection(id: string) {
     return
   }
   if (await probe.openWorkflow(id)) {
+    markLibraryUsed('workflows', id)
     workspace.workflowDetail.value = null
     returnToCollectionId.value = null
     editorDirty.value = false
@@ -79,6 +87,7 @@ async function openWorkflowCollection(id: string) {
 async function openWorkflow(id: string) {
   await workspace.loadWorkflow(id)
   if (workspace.workflowDetail.value?.id === id) {
+    markLibraryUsed('workflows', id)
     returnToCollectionId.value = view.value === 'capture' ? id : null
     view.value = 'workflows'
   }
@@ -94,9 +103,24 @@ async function closeWorkflowSettings() {
 }
 
 async function openDictionary(id: string) {
+  const parentWorkflowId = view.value === 'capture' ? collectionWorkflowId.value : null
   if (await workspace.loadDictionary(id)) {
+    dictionaryParentWorkflowId.value = parentWorkflowId
     editorDirty.value = false
     view.value = 'dictionary-editor'
+  }
+}
+
+async function returnFromDictionary() {
+  if (editorDirty.value) {
+    pendingExit.value = 'dictionary-back'
+    return
+  }
+  const workflowId = dictionaryParentWorkflowId.value
+  if (workflowId && workspace.model.value.workflows.some(item => item.id === workflowId)) {
+    await openWorkflowCollection(workflowId)
+  } else {
+    requestNavigation('dictionaries')
   }
 }
 
@@ -114,26 +138,33 @@ function requestNavigation(next: NavigableView) {
 }
 
 async function closeWindow() {
+  if (closingWindow.value) return
+  closingWindow.value = true
+  exitError.value = ''
   try {
+    if ('__TAURI_INTERNALS__' in window) await invoke('desktop_prepare_exit')
+    exitPrepared = true
     await getCurrentWindow().close()
   }
-  catch {
-    // Browser previews do not expose native window controls.
+  catch (error) {
+    exitPrepared = false
+    if ('__TAURI_INTERNALS__' in window) exitError.value = translateCommandError(error)
   }
+  finally { closingWindow.value = false }
 }
 
-async function minimizeWindow() {
+async function minimizeWindow(toTray = false) {
   try {
-    await getCurrentWindow().minimize()
+    await invoke(toTray ? 'desktop_hide_to_tray' : 'desktop_minimize_window')
   }
-  catch {
-    // Browser previews do not expose native window controls.
+  catch (error) {
+    if ('__TAURI_INTERNALS__' in window) exitError.value = translateCommandError(error)
   }
 }
 
-function requestWindowClose() {
-  if (appSettings.closeBehavior.value === 'minimize') {
-    void minimizeWindow()
+function requestWindowClose(forceQuit = false) {
+  if (!forceQuit && appSettings.closeBehavior.value !== 'quit') {
+    void minimizeWindow(appSettings.closeBehavior.value === 'tray')
     return
   }
   if (editorDirty.value || ai.taskRunning.value) {
@@ -146,8 +177,13 @@ function requestWindowClose() {
 async function connectWindowCloseBehavior() {
   if (!('__TAURI_INTERNALS__' in window)) return
   try {
+    unlistenTrayExit = await listen('glyphshift-request-exit', () => requestWindowClose(true))
+    unlistenExitFailure = await listen<CommandError>('glyphshift-exit-failed', event => {
+      exitPrepared = false
+      exitError.value = translateCommandError(event.payload)
+    })
     unlistenWindowClose = await getCurrentWindow().onCloseRequested(event => {
-      if (appSettings.closeBehavior.value === 'quit' && !editorDirty.value && !ai.taskRunning.value) return
+      if (exitPrepared) return
       event.preventDefault()
       requestWindowClose()
     })
@@ -166,6 +202,7 @@ function confirmDiscard() {
   pendingExit.value = null
   editorDirty.value = false
   if (destination === 'close') void closeWindow()
+  else if (destination === 'dictionary-back') void returnFromDictionary()
   else if (destination) view.value = destination
 }
 
@@ -322,6 +359,8 @@ onBeforeUnmount(() => {
   unlistenSoftwareCapture?.()
   unlistenWorkflowShortcut?.()
   unlistenWindowClose?.()
+  unlistenExitFailure?.()
+  unlistenTrayExit?.()
 })
 </script>
 
@@ -346,6 +385,7 @@ onBeforeUnmount(() => {
         @close="requestWindowClose"
       />
       <AppUpdateNotice />
+      <UAlert v-if="exitError" role="alert" color="error" :description="exitError" class="shrink-0" />
       <main id="main-content" ref="mainContent" tabindex="-1" class="flex min-h-0 flex-1 overflow-hidden outline-none" :aria-label="t('app.mainContent')">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <h1 class="sr-only">{{ t('app.desktopReloadTitle') }}</h1>
@@ -407,7 +447,8 @@ onBeforeUnmount(() => {
         v-else-if="view === 'dictionary-editor' && workspace.dictionaryDetail.value"
         :detail="workspace.dictionaryDetail.value"
         :busy="workspace.workspaceBusy.value"
-        @back="requestNavigation('dictionaries')"
+        :back-label="dictionaryParentWorkflowId ? t('dictionaryEditor.backWorkflow') : t('dictionaryEditor.back')"
+        @back="returnFromDictionary"
         @save="workspace.saveDictionary"
         @configure-ai="requestNavigation('settings')"
         @open-ai-tasks="requestNavigation('translation-tasks')"

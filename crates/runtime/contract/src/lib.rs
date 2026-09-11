@@ -1,7 +1,7 @@
 //! Immutable decision publications shared by orchestration and runtime hosts.
 
 use glyphshift_domain::{Generation, RouteLimits, RouteOperator, RouteProgram};
-use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
+use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules, FontPolicy, FontRule, TranslationSnapshot};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -31,6 +31,8 @@ struct WirePublication {
     route: WireRoute,
     translations: Vec<WireTranslation>,
     fonts: Vec<WireFont>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dictionary_rules: Vec<(Box<str>, Vec<RegexTranslationRule>)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -281,6 +283,7 @@ impl RuntimePublication {
             },
             translations,
             fonts,
+            dictionary_rules: self.snapshot.dictionary_rules().iter().map(|(id, rules)| (id.clone(), rules.rules().to_vec())).collect(),
         })
         .map_err(|_| RuntimeWireError::InvalidJson)
     }
@@ -324,6 +327,9 @@ impl RuntimePublication {
                 ),
                 _ => return Err(RuntimeWireError::InvalidJson),
             };
+        }
+        for (id, rules) in wire.dictionary_rules {
+            snapshot = snapshot.with_dictionary_rules(id, RegexTranslationRules::compile(rules).map_err(|_| RuntimeWireError::InvalidJson)?);
         }
         let mut font_policy = FontPolicy::empty();
         for font in wire.fonts {

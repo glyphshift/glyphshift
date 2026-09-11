@@ -1,3 +1,4 @@
+use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
 use glyphshift_ai_translation::FilterPolicy;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -210,6 +211,7 @@ pub(crate) enum ThemePreference {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CloseBehavior {
     Minimize,
+    Tray,
     #[default]
     Quit,
 }
@@ -226,6 +228,10 @@ pub(crate) struct AppSettings {
     launch_elevated: bool,
     #[serde(default)]
     close_behavior: CloseBehavior,
+    #[serde(default)]
+    minimize_to_tray: bool,
+    #[serde(default)]
+    always_on_top: bool,
     #[serde(default = "default_software_capture_shortcut")]
     software_capture_shortcut: Box<str>,
     #[serde(default = "default_auto_complete_interval")]
@@ -253,6 +259,8 @@ impl Default for AppSettings {
             launch_at_startup: false,
             launch_elevated: false,
             close_behavior: CloseBehavior::default(),
+            minimize_to_tray: false,
+            always_on_top: false,
             software_capture_shortcut: default_software_capture_shortcut(),
             auto_complete_interval_seconds: 10,
             check_updates_on_startup: true,
@@ -266,6 +274,11 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    pub(crate) fn minimize_to_tray(&self) -> bool { self.minimize_to_tray }
+    pub(crate) fn always_on_top(&self) -> bool { self.always_on_top }
+    pub(crate) fn english(&self) -> bool { self.locale_preference == LocalePreference::EnUs }
+
+
     pub(crate) fn text_filter_policy(&self) -> &FilterPolicy { &self.text_filter_policy }
     pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
@@ -283,6 +296,7 @@ impl AppSettings {
         self.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION
             && self.auto_complete_interval_seconds <= 60
             && self.text_filter_policy.hidden_sources(&[]).is_ok()
+
             && valid_font_fallbacks(&self.language_fallback_fonts)
             && valid_catalog(&self.favorite_fonts, 64, 128)
             && valid_catalog(&self.translation_languages, 128, 63)
@@ -314,6 +328,7 @@ fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
     };
     let close_behavior = match object.get("closeBehavior").and_then(|value| value.as_str()) {
         Some("minimize") => CloseBehavior::Minimize,
+        Some("tray") => CloseBehavior::Tray,
         _ => CloseBehavior::Quit,
     };
     let software_capture_shortcut = object
@@ -334,6 +349,8 @@ fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         close_behavior,
+        minimize_to_tray: object.get("minimizeToTray").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        always_on_top: object.get("alwaysOnTop").and_then(serde_json::Value::as_bool).unwrap_or(false),
         software_capture_shortcut,
         language_fallback_fonts: normalize_font_fallbacks(object.get("languageFallbackFonts")),
         favorite_fonts: normalize_catalog(object.get("favoriteFonts"), 64, 128),
@@ -364,6 +381,10 @@ pub(crate) struct AppSettingsUpdate {
     launch_at_startup: bool,
     launch_elevated: bool,
     close_behavior: CloseBehavior,
+    #[serde(default)]
+    minimize_to_tray: bool,
+    #[serde(default)]
+    always_on_top: bool,
     software_capture_shortcut: Box<str>,
     #[serde(default = "default_auto_complete_interval")]
     auto_complete_interval_seconds: u16,
@@ -382,6 +403,8 @@ pub(crate) struct AppSettingsUpdate {
 }
 
 impl AppSettingsUpdate {
+    pub(crate) fn always_on_top(&self) -> bool { self.always_on_top }
+
     pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
     }
@@ -404,6 +427,8 @@ impl From<AppSettingsUpdate> for AppSettings {
             launch_at_startup: update.launch_at_startup,
             launch_elevated: update.launch_elevated,
             close_behavior: update.close_behavior,
+            minimize_to_tray: update.minimize_to_tray,
+            always_on_top: update.always_on_top,
             software_capture_shortcut: update.software_capture_shortcut,
             auto_complete_interval_seconds: update.auto_complete_interval_seconds,
             check_updates_on_startup: update.check_updates_on_startup,
@@ -622,7 +647,9 @@ mod tests {
                 theme_preference: ThemePreference::Light,
                 launch_at_startup: true,
                 launch_elevated: true,
-                close_behavior: CloseBehavior::Minimize,
+                close_behavior: CloseBehavior::Tray,
+                minimize_to_tray: true,
+                always_on_top: true,
                 auto_complete_interval_seconds: 10,
                 check_updates_on_startup: true,
             text_filter_policy: FilterPolicy::default(),
@@ -667,6 +694,8 @@ mod tests {
                 launch_at_startup: false,
                 launch_elevated: false,
                 close_behavior: CloseBehavior::Quit,
+                minimize_to_tray: false,
+                always_on_top: false,
                 auto_complete_interval_seconds: 10,
                 check_updates_on_startup: true,
             text_filter_policy: FilterPolicy::default(),
@@ -810,4 +839,16 @@ mod global_filter_tests {
         let reopened = AppSettingsStore::open(root.path()).unwrap();
         assert_eq!(reopened.current().unwrap().text_filter_policy().hidden_sources(&["Chapter 2".into()]).unwrap(), vec![true]);
     }
+}
+
+#[tauri::command]
+pub(crate) fn desktop_validate_regex_rule(rule: RegexTranslationRule) -> Result<(), String> {
+    RegexTranslationRules::compile(vec![rule]).map(|_| ())
+}
+
+
+
+#[tauri::command]
+pub(crate) fn desktop_test_regex_rule(rule: RegexTranslationRule, source: String, mock_translation: String) -> Result<glyphshift_translation::RegexRuleTestResult, String> {
+    glyphshift_translation::test_regex_rule(rule, &source, &mock_translation)
 }

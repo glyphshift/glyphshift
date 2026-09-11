@@ -105,9 +105,11 @@ pub struct Dictionary {
     id: Box<str>,
     locale: Box<str>,
     entries: Vec<DictionaryEntry>,
+    text_rules: glyphshift_translation::RegexTranslationRules,
 }
 
 impl Dictionary {
+    pub fn with_text_rules(mut self, rules: glyphshift_translation::RegexTranslationRules) -> Self { self.text_rules = rules; self }
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -118,6 +120,7 @@ impl Dictionary {
             id: id.into(),
             locale: locale.into(),
             entries: entries.into_iter().collect(),
+            text_rules: glyphshift_translation::RegexTranslationRules::default(),
         }
     }
 }
@@ -406,6 +409,14 @@ pub fn resolve(
                     software_id: software.id.clone(),
                     dictionary_id: dictionary.id.clone(),
                 });
+            }
+            let rule_location = format!("@dictionary/{}", dictionary.id);
+            if !dictionary.text_rules.rules().is_empty() {
+                snapshot = snapshot.with_dictionary_rules(rule_location.clone(), dictionary.text_rules.clone());
+                has_text_replacement = true;
+                for entry in &dictionary.entries {
+                    snapshot = snapshot.with_entry(rule_location.clone(), entry.source.clone(), entry.translation.clone());
+                }
             }
             for entry in &dictionary.entries {
                 if let Some(winner) = winning_dictionaries.get(&entry.source) {

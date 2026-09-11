@@ -1,3 +1,4 @@
+import { markLibraryUsed } from '../useLibrarySort'
 import { invoke } from '@tauri-apps/api/core'
 import { i18n } from '../i18n'
 import type {
@@ -30,6 +31,7 @@ export function useDictionaryWorkspace() {
       dictionaryDetail.value = hasDesktopRuntime()
         ? await invoke<DictionaryDetail>('desktop_dictionary', { dictionaryId: id })
         : model.value.dictionaryDetails[id] ?? null
+      if (dictionaryDetail.value) markLibraryUsed('dictionaries', id)
       return dictionaryDetail.value
     }
     catch (error) {
@@ -38,11 +40,11 @@ export function useDictionaryWorkspace() {
     }
   }
 
-  async function saveDictionary(detail: DictionaryDetail) {
+  async function saveDictionary(detail: DictionaryDetail, clearCaptured = false) {
     workspaceBusy.value = true
     try {
       const snapshot = hasDesktopRuntime()
-        ? await invoke<DesktopSnapshot>('desktop_update_dictionary', { edit: {
+        ? await invoke<DesktopSnapshot>('desktop_update_dictionary', { clearCaptured, edit: {
             metadata: detail.metadata,
             baseRevision: detail.revision,
             entries: detail.entries,

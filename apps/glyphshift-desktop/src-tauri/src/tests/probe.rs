@@ -909,3 +909,50 @@ fn attached_dictionary_sources_block_collection_and_recheck_ai_writeback() {
     assert!(destination.entries().iter().any(|entry| entry.source() == "Still new"));
     assert!(app.backend.dictionary("dictionary.attached").unwrap().entries().iter().all(|entry| entry.translation().is_empty()));
 }
+
+#[test]
+fn collection_resolution_preserves_counts_and_filters_before_pagination_without_writes() {
+    let (mut app, _, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
+        .with_entries([DictionaryEntryCreate::new("Total", "总计"), DictionaryEntryCreate::new("Owned", "附加词条")])).unwrap();
+    let dictionary = app.backend.dictionary("dictionary.attached").unwrap().clone();
+    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![
+        glyphshift_translation::RegexTranslationRule { enabled: true, pattern: r"^(.+?)(:[ \t]*[0-9]+)$".into(), replacement: "{{TR}}$2".into() },
+        glyphshift_translation::RegexTranslationRule { enabled: true, pattern: "^Erase$".into(), replacement: "".into() },
+    ])).unwrap();
+    let run = app.create_probe_run(ProbeRunCreateRequest {
+        excluded_dictionary_ids: vec!["dictionary.attached".into()], id: "probe-resolution".into(), name: "Resolution".into(), software_id,
+        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
+        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
+    }).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    for source in ["Total: 33", "Selected:0", "Owned", "Erase"] { sink.observe(TEST_ADAPTER_ID, source); }
+    sink.finish().unwrap();
+    let before = app.backend.dictionary("dictionary.product").unwrap().clone();
+    let request = |search: &str, filter| crate::probe::ProbeRunQueryRequest { run_id: run.summary.id().into(), search: search.into(), adapter_ids: vec![], translation_filter: filter, merge_rules: None, page: 1, page_size: 50 };
+    let page = app.probe_run_entries(request("", ProbeTranslationFilter::RuleMatched)).unwrap();
+    assert_eq!(page.total(), 3);
+    let mut paged = request("", ProbeTranslationFilter::RuleMatched);
+    paged.page_size = 1;
+    let first = app.probe_run_entries(paged).unwrap();
+    assert_eq!(first.total(), 3);
+    assert_eq!(first.rows().len(), 1);
+    let json = serde_json::to_value(&page).unwrap();
+    let rows = json["rows"].as_array().unwrap();
+    let total = rows.iter().find(|row| row["source"] == "Total: 33").unwrap();
+    assert_eq!(total["translation"], "总计: 33");
+    assert_eq!(total["resolution"]["kind"], "rule_translated");
+    assert_eq!(total["resolution"]["dictionaryIds"][0], "dictionary.attached");
+    assert_eq!(rows.iter().find(|row| row["source"] == "Selected:0").unwrap()["resolution"]["kind"], "rule_pending");
+    assert_eq!(app.probe_run_entries(request("总计", ProbeTranslationFilter::Translated)).unwrap().total(), 1);
+    assert_eq!(app.probe_run_entries(request("", ProbeTranslationFilter::Skipped)).unwrap().total(), 1);
+    let owned = app.probe_run_entries(request("Owned", ProbeTranslationFilter::OtherDictionary)).unwrap();
+    assert_eq!(owned.total(), 1);
+    assert_eq!(owned.rows()[0].translation(), "附加词条");
+    assert_eq!(serde_json::to_value(owned).unwrap()["rows"][0]["resolution"]["editable"], false);
+    assert_eq!(app.backend.dictionary("dictionary.product").unwrap(), &before);
+    assert!(app.edit_probe_translation(ProbeTranslationEditRequest { run_id: run.summary.id().into(), source: "Total: 33".into(), translation: "直接翻译".into() }).is_err());
+    let exact = app.probe_run_entries(request("Total: 33", ProbeTranslationFilter::Translated)).unwrap();
+    assert_eq!(exact.rows()[0].translation(), "总计: 33");
+    assert_eq!(serde_json::to_value(exact).unwrap()["rows"][0]["resolution"]["kind"], "rule_translated");
+}

@@ -8,7 +8,7 @@ import { defaultTranslationLanguages, normalizeCatalog, normalizeTranslationLang
 
 export type LocalePreference = 'system' | AppLocale
 export type ThemePreference = 'system' | 'dark' | 'light'
-export type CloseBehavior = 'minimize' | 'quit'
+export type CloseBehavior = 'minimize' | 'tray' | 'quit'
 export type EffectiveTheme = 'dark' | 'light'
 
 export interface GlobalShortcutProbe {
@@ -22,6 +22,8 @@ export interface AppSettings {
   themePreference: ThemePreference
   launchAtStartup: boolean
   launchElevated: boolean
+  minimizeToTray: boolean
+  alwaysOnTop: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
   checkUpdatesOnStartup: boolean
@@ -38,6 +40,8 @@ interface AppSettingsUpdate {
   themePreference: ThemePreference
   launchAtStartup: boolean
   launchElevated: boolean
+  minimizeToTray: boolean
+  alwaysOnTop: boolean
   closeBehavior: CloseBehavior
   softwareCaptureShortcut: string
   checkUpdatesOnStartup: boolean
@@ -61,6 +65,8 @@ const fallbackSettings: AppSettings = {
   launchAtStartup: false,
   launchElevated: false,
   closeBehavior: 'quit',
+  minimizeToTray: false,
+  alwaysOnTop: false,
   softwareCaptureShortcut: 'Ctrl+Shift+F8',
   textFilterPolicy: defaultAiFilterPolicy(),
   autoCompleteIntervalSeconds: 10,
@@ -93,7 +99,7 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
   const themePreference = ['system', 'dark', 'light'].includes(candidate.themePreference ?? '')
     ? candidate.themePreference as ThemePreference
     : fallbackSettings.themePreference
-  const closeBehavior = ['minimize', 'quit'].includes(candidate.closeBehavior ?? '')
+  const closeBehavior = ['minimize', 'tray', 'quit'].includes(candidate.closeBehavior ?? '')
     ? candidate.closeBehavior as CloseBehavior
     : fallbackSettings.closeBehavior
   const softwareCaptureShortcut = typeof candidate.softwareCaptureShortcut === 'string'
@@ -116,6 +122,8 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
       ? candidate.launchElevated
       : fallbackSettings.launchElevated,
     closeBehavior,
+    minimizeToTray: candidate.minimizeToTray === true,
+    alwaysOnTop: candidate.alwaysOnTop === true,
     softwareCaptureShortcut,
     checkUpdatesOnStartup: typeof candidate.checkUpdatesOnStartup === 'boolean' ? candidate.checkUpdatesOnStartup : true,
     autoCompleteIntervalSeconds: Number.isInteger(candidate.autoCompleteIntervalSeconds) && candidate.autoCompleteIntervalSeconds! >= 0 && candidate.autoCompleteIntervalSeconds! <= 60 ? candidate.autoCompleteIntervalSeconds! : 10,  }
@@ -241,6 +249,8 @@ export function useAppSettings() {
       launchAtStartup: settings.value.launchAtStartup,
       launchElevated: settings.value.launchElevated,
       closeBehavior: settings.value.closeBehavior,
+      minimizeToTray: settings.value.minimizeToTray,
+      alwaysOnTop: settings.value.alwaysOnTop,
       softwareCaptureShortcut: settings.value.softwareCaptureShortcut,
       autoCompleteIntervalSeconds: settings.value.autoCompleteIntervalSeconds,
       checkUpdatesOnStartup: settings.value.checkUpdatesOnStartup,
@@ -273,6 +283,10 @@ export function useAppSettings() {
     themePreference: computed(() => settings.value.themePreference),
     launchAtStartup: computed(() => settings.value.launchAtStartup),
     launchElevated: computed(() => settings.value.launchElevated),
+    minimizeToTray: computed(() => settings.value.minimizeToTray),
+    alwaysOnTop: computed(() => settings.value.alwaysOnTop),
+    async setMinimizeToTray(value: boolean) { await update({ minimizeToTray: value }) },
+    async setAlwaysOnTop(value: boolean) { await update({ alwaysOnTop: value }) },
     closeBehavior: computed(() => settings.value.closeBehavior),
     softwareCaptureShortcut: computed(() => settings.value.softwareCaptureShortcut),
     async setLocalePreference(localePreference: LocalePreference) {

@@ -456,7 +456,7 @@ pub fn query_activation() -> Result<RuntimeActivationReport, TargetRuntimeError>
 }
 
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
-    let (capture, refresh_adapters) = {
+    let (capture, refresh_adapters, deactivated) = {
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
@@ -471,9 +471,12 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         // An adapter may drain callbacks which need this same Runtime mutex.
         // Never hold the decision lock while asking an adapter to deactivate.
         drop(state);
-        let deactivated = refresh_adapters
+        // Attempt every stop: one package failure must not keep later packages translating.
+        let stopped = refresh_adapters
             .iter()
-            .all(|adapter| adapter.deactivate().is_ok());
+            .map(|adapter| adapter.deactivate().is_ok())
+            .collect::<Vec<_>>();
+        let deactivated = stopped.iter().all(|stopped| *stopped);
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
@@ -481,22 +484,33 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
             .as_mut()
             .filter(|runtime| same_loaded_adapters(runtime, &loaded))
             .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        let mut stopped = stopped.into_iter();
+        for active in &mut runtime.active_adapters {
+            if *active && stopped.next().unwrap_or(false) {
+                *active = false;
+            }
+        }
         if deactivated {
             runtime.active = false;
-            runtime.active_adapters.fill(false);
             text_host::reset_runs(runtime);
             text_host::invalidate_scopes();
-        } else {
-            return Err(TargetRuntimeError::AdapterActivation);
         }
-        (runtime.capture.take(), refresh_adapters)
+        (
+            if deactivated { runtime.capture.take() } else { None },
+            refresh_adapters,
+            deactivated,
+        )
     };
     if let Some(capture) = capture {
         capture.finish()?;
     }
     request_adapter_refreshes(&refresh_adapters);
     request_current_process_redraw();
-    Ok(())
+    if deactivated {
+        Ok(())
+    } else {
+        Err(TargetRuntimeError::AdapterActivation)
+    }
 }
 
 fn active_native_adapters(runtime: &RuntimeState) -> Vec<Arc<LoadedNativeAdapter>> {
@@ -671,6 +685,9 @@ fn decide_source(
         unsafe {
             std::ptr::copy_nonoverlapping(font.as_ptr(), font_out, font.len());
         }
+    }
+    if text.is_some() {
+        text_host::mark_scope_replaced(context);
     }
     NativeDecisionV1 {
         status: STATUS_OK,

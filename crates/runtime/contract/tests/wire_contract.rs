@@ -165,3 +165,19 @@ fn font_scaling_round_trips_and_invalid_percentages_are_rejected() {
         .identity()
     );
 }
+
+#[test]
+fn regex_rules_survive_publication_and_affect_identity() {
+    use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
+    let base = TranslationSnapshot::empty(Generation::new(1));
+    let rules = RegexTranslationRules::compile(vec![RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true }]).unwrap();
+    let old = RuntimePublication::new(RouteProgram::direct("text"), base.clone(), FontPolicy::empty());
+    let new = RuntimePublication::new(RouteProgram::direct("text"), base.with_dictionary_rules("text", rules), FontPolicy::empty());
+    assert_ne!(old.identity().unwrap(), new.identity().unwrap());
+    let encoded = new.encode_json().unwrap();
+    assert_eq!(RuntimePublication::decode_json(&encoded).unwrap(), new);
+    let mut invalid: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    invalid["dictionary_rules"][0][1][0]["pattern"] = "[".into();
+    assert!(RuntimePublication::decode_json(&invalid.to_string()).is_err());
+    assert_eq!(RuntimePublication::decode_json(&old.encode_json().unwrap()).unwrap(), old);
+}
