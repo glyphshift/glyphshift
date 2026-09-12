@@ -1,5 +1,7 @@
 //! Native DirectWrite `CreateTextLayout` + Direct2D `DrawTextLayout` Adapter package.
 
+mod uniform_layout;
+
 use glyphshift_adapter_directwrite::ADAPTER_ID;
 use glyphshift_adapter_native_abi::{
     DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
@@ -25,9 +27,8 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection, IDWriteInlineObject,
-    IDWriteTextFormat, IDWriteTextLayout, IDWriteTypography, DWRITE_FACTORY_TYPE_SHARED,
-    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
-    DWRITE_TEXT_RANGE,
+    IDWriteTextLayout, IDWriteTypography, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_RANGE,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
@@ -64,9 +65,6 @@ struct HostBridge {
 #[derive(Clone)]
 struct LayoutRecord {
     source: Box<str>,
-    format: IDWriteTextFormat,
-    max_width: f32,
-    max_height: f32,
     sequence: u64,
 }
 
@@ -344,8 +342,8 @@ unsafe fn layout_is_uniform(layout: &IDWriteTextLayout, length: u32) -> bool {
     layout
         .GetTypography(0, &mut typography, Some(&mut range))
         .is_ok()
-        && typography.is_none()
         && range_covers_layout(range, length)
+        && uniform_layout::extended_is_uniform(layout, length)
 }
 
 unsafe extern "system" fn create_text_layout_detour(
@@ -361,9 +359,7 @@ unsafe extern "system" fn create_text_layout_detour(
         return HRESULT::from_win32(1);
     };
     let captured = if ACTIVE_FEATURES.load(Ordering::Acquire) != 0 && !callback_active() {
-        let source = read_text(text, length);
-        let format = IDWriteTextFormat::from_raw_borrowed(&format).cloned();
-        source.zip(format)
+        read_text(text, length)
     } else {
         None
     };
@@ -373,17 +369,20 @@ unsafe extern "system" fn create_text_layout_detour(
     if result.is_ok() && !layout_out.is_null() {
         let layout = *layout_out;
         if !layout.is_null() {
-            if let Some((source, format)) = captured {
+            if let Some(source) = captured {
                 remember_layout(
                     layout as usize,
                     LayoutRecord {
                         source,
-                        format,
-                        max_width,
-                        max_height,
                         sequence: 0,
                     },
                 );
+            } else if let Some(layouts) = LAYOUTS.get() {
+                // An empty or unobserved creation may reuse a released layout's
+                // address. It must never inherit that object's former source.
+                if let Ok(mut layouts) = layouts.write() {
+                    layouts.remove(&(layout as usize));
+                }
             }
         }
     }
@@ -397,12 +396,7 @@ fn replacement_layout(layout: *mut core::ffi::c_void) -> Option<IDWriteTextLayou
     }
     let _guard = CallbackGuard::enter()?;
     let record = observed_layout(layout as usize)?;
-    if active & FEATURE_TEXT_REPLACE != 0 {
-        let layout_ref = unsafe { IDWriteTextLayout::from_raw_borrowed(&layout) }?;
-        if !unsafe { layout_is_uniform(layout_ref, record.source.encode_utf16().count() as u32) } {
-            return None;
-        }
-    }
+    // A known draw remains observable when its formatting cannot be replaced safely.
     let decision = std::panic::catch_unwind(|| decide(&record.source))
         .ok()
         .flatten()?;
@@ -412,17 +406,23 @@ fn replacement_layout(layout: *mut core::ffi::c_void) -> Option<IDWriteTextLayou
     {
         return None;
     }
+    let layout_ref = unsafe { IDWriteTextLayout::from_raw_borrowed(&layout) }?;
+    if !unsafe { layout_is_uniform(layout_ref, record.source.encode_utf16().count() as u32) } {
+        return None;
+    }
     let factory: IDWriteFactory =
         unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }.ok()?;
     unsafe {
-        factory
+        let replacement = factory
             .CreateTextLayout(
                 &decision.text,
-                &record.format,
-                record.max_width,
-                record.max_height,
+                layout_ref,
+                layout_ref.GetMaxWidth(),
+                layout_ref.GetMaxHeight(),
             )
-            .ok()
+            .ok()?;
+        uniform_layout::copy(layout_ref, &replacement, decision.text.len() as u32).ok()?;
+        Some(replacement)
     }
 }
 
@@ -436,7 +436,7 @@ unsafe extern "system" fn draw_text_layout_primary_detour(
     let Some(original) = DRAW_PRIMARY_HOOK.get() else {
         return;
     };
-    let _scope = layout_scope(layout);
+    let scope = layout_scope(layout);
     if let Some(replacement) = replacement_layout(layout) {
         original.call(
             render_target,
@@ -446,6 +446,7 @@ unsafe extern "system" fn draw_text_layout_primary_detour(
             options,
         );
     } else {
+        drop(scope);
         original.call(render_target, origin, layout, brush, options);
     }
 }
@@ -460,7 +461,7 @@ unsafe extern "system" fn draw_text_layout_bitmap_detour(
     let Some(original) = DRAW_BITMAP_HOOK.get() else {
         return;
     };
-    let _scope = layout_scope(layout);
+    let scope = layout_scope(layout);
     if let Some(replacement) = replacement_layout(layout) {
         original.call(
             render_target,
@@ -470,6 +471,7 @@ unsafe extern "system" fn draw_text_layout_bitmap_detour(
             options,
         );
     } else {
+        drop(scope);
         original.call(render_target, origin, layout, brush, options);
     }
 }
@@ -560,7 +562,9 @@ static TEXT_HOST: std::sync::Mutex<Option<NativeTextHostBinding>> = std::sync::M
 /// A non-null host must point to a readable V1 extension whose context and callbacks
 /// remain valid until every Adapter callback has finished.
 #[no_mangle]
-pub unsafe extern "C" fn glyphshift_adapter_bind_text_host_v1(host: *const NativeTextHostV1) -> i32 {
+pub unsafe extern "C" fn glyphshift_adapter_bind_text_host_v1(
+    host: *const NativeTextHostV1,
+) -> i32 {
     let value = if host.is_null() {
         None
     } else {

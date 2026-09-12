@@ -19,8 +19,11 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, IDWriteFactory, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_MEASURING_MODE_NATURAL,
+    DWriteCreateFactory, IDWriteFactory, IDWriteTextLayout1, DWRITE_FACTORY_TYPE_SHARED,
+    DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES, DWRITE_FONT_STRETCH_NORMAL,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL,
+    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_RANGE,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::HDC as WindowsHdc;
@@ -772,17 +775,40 @@ pub fn render_raw_direct2d_text(text: &str) -> Result<PixelEvidence, String> {
 }
 
 pub fn render_raw_directwrite_layout(text: &str) -> Result<PixelEvidence, String> {
-    render_raw_directwrite_layout_on_target(text, false)
+    render_raw_directwrite_formatted_layout(text, false, DirectWriteLayoutStyle::Uniform)
 }
 
 pub fn render_raw_directwrite_compatible_layout(text: &str) -> Result<PixelEvidence, String> {
-    render_raw_directwrite_layout_on_target(text, true)
+    render_raw_directwrite_formatted_layout(text, true, DirectWriteLayoutStyle::Uniform)
 }
 
-fn render_raw_directwrite_layout_on_target(
+#[derive(Clone, Copy, Debug)]
+pub enum DirectWriteLayoutStyle {
+    Uniform,
+    Typography,
+    UpdatedUniformTypography,
+    LocalFontSize,
+    LocalTypography,
+    LocalCharacterSpacing,
+    ReusedEmpty,
+}
+
+pub fn render_raw_directwrite_formatted_layout(
     text: &str,
     compatible: bool,
+    style: DirectWriteLayoutStyle,
 ) -> Result<PixelEvidence, String> {
+    render_raw_directwrite_layout_sequence(text, compatible, style, 1, |_| {})
+        .map(|mut frames| frames.remove(0))
+}
+
+pub fn render_raw_directwrite_layout_sequence(
+    text: &str,
+    compatible: bool,
+    style: DirectWriteLayoutStyle,
+    frames: usize,
+    mut before_draw: impl FnMut(usize),
+) -> Result<Vec<PixelEvidence>, String> {
     let canvas = DibCanvas::new()?;
     let direct2d: ID2D1Factory =
         unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
@@ -836,6 +862,116 @@ fn render_raw_directwrite_layout_on_target(
         directwrite.CreateTextLayout(&units, &format, (WIDTH - 24) as f32, (HEIGHT - 24) as f32)
     }
     .map_err(|error| format!("CreateTextLayout failed: {error}"))?;
+    let layout = if matches!(style, DirectWriteLayoutStyle::ReusedEmpty) {
+        // Retain a batch so the fixture does not depend on the allocator choosing
+        // the most recently released object (x86 and x64 choose differently).
+        let mut sources = vec![layout];
+        for _ in 1..128 {
+            sources.push(
+                unsafe { directwrite.CreateTextLayout(&units, &format, 0.0, 10000.0) }
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        let addresses = sources.iter().map(Interface::as_raw).collect::<Vec<_>>();
+        drop(sources);
+        let mut others = Vec::new();
+        let mut reused = None;
+        for _ in 0..256 {
+            let empty = unsafe { directwrite.CreateTextLayout(&[], &format, 0.0, 10000.0) }
+                .map_err(|error| error.to_string())?;
+            if addresses.contains(&empty.as_raw()) {
+                reused = Some(empty);
+                break;
+            }
+            others.push(empty);
+        }
+        reused.ok_or("DirectWrite did not reuse a released layout for the empty-layout fixture")?
+    } else {
+        layout
+    };
+    match style {
+        DirectWriteLayoutStyle::Uniform | DirectWriteLayoutStyle::ReusedEmpty => {}
+        DirectWriteLayoutStyle::Typography
+        | DirectWriteLayoutStyle::UpdatedUniformTypography
+        | DirectWriteLayoutStyle::LocalTypography => {
+            let typography = unsafe { directwrite.CreateTypography() }
+                .map_err(|error| format!("CreateTypography failed: {error}"))?;
+            unsafe {
+                typography.AddFontFeature(DWRITE_FONT_FEATURE {
+                    nameTag: DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES,
+                    parameter: 0,
+                })
+            }
+            .map_err(|error| format!("AddFontFeature failed: {error}"))?;
+            unsafe {
+                layout.SetTypography(
+                    &typography,
+                    DWRITE_TEXT_RANGE {
+                        startPosition: 0,
+                        length: if matches!(style, DirectWriteLayoutStyle::LocalTypography) {
+                            1
+                        } else {
+                            units.len() as u32
+                        },
+                    },
+                )
+            }
+            .map_err(|error| format!("SetTypography failed: {error}"))?;
+        }
+        DirectWriteLayoutStyle::LocalFontSize => {
+            unsafe {
+                layout.SetFontSize(
+                    40.0,
+                    DWRITE_TEXT_RANGE {
+                        startPosition: 0,
+                        length: 1,
+                    },
+                )
+            }
+            .map_err(|error| format!("SetFontSize failed: {error}"))?;
+        }
+        DirectWriteLayoutStyle::LocalCharacterSpacing => {
+            let layout = layout
+                .cast::<IDWriteTextLayout1>()
+                .map_err(|error| error.to_string())?;
+            unsafe {
+                layout.SetCharacterSpacing(
+                    4.0,
+                    3.0,
+                    0.0,
+                    DWRITE_TEXT_RANGE {
+                        startPosition: 0,
+                        length: 1,
+                    },
+                )
+            }
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    if matches!(style, DirectWriteLayoutStyle::UpdatedUniformTypography) {
+        let range = DWRITE_TEXT_RANGE {
+            startPosition: 0,
+            length: units.len() as u32,
+        };
+        (|| unsafe {
+            layout.SetFontFamilyName(w!("Arial"), range)?;
+            layout.SetLocaleName(w!("zh-CN"), range)?;
+            layout.SetFontSize(24.0, range)?;
+            layout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range)?;
+            layout.SetUnderline(true, range)?;
+            layout.SetStrikethrough(true, range)?;
+            layout.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+            layout.SetMaxWidth(280.0)?;
+            layout.SetMaxHeight(64.0)?;
+            let extended = layout.cast::<IDWriteTextLayout1>()?;
+            extended.SetPairKerning(true, range)?;
+            extended.SetCharacterSpacing(1.0, 2.0, 0.0, range)
+        })()
+        .map_err(|error: windows::core::Error| {
+            format!("Update TextLayout formatting failed: {error}")
+        })?;
+    }
     let brush = unsafe {
         draw_target.CreateSolidColorBrush(
             &D2D1_COLOR_F {
@@ -854,46 +990,51 @@ fn render_raw_directwrite_layout_on_target(
         b: 1.0,
         a: 1.0,
     };
-    unsafe {
-        draw_target.BeginDraw();
-        draw_target.Clear(Some(&white));
-        draw_target.DrawTextLayout(
-            D2D_POINT_2F { x: 12.0, y: 12.0 },
-            &layout,
-            &brush,
-            D2D1_DRAW_TEXT_OPTIONS_NONE,
-        );
-        draw_target.EndDraw(None, None)
-    }
-    .map_err(|error| format!("TextLayout EndDraw failed: {error}"))?;
-
-    if compatible {
-        let bitmap_target = draw_target
-            .cast::<windows::Win32::Graphics::Direct2D::ID2D1BitmapRenderTarget>()
-            .map_err(|error| format!("ID2D1BitmapRenderTarget cast failed: {error}"))?;
-        let bitmap = unsafe { bitmap_target.GetBitmap() }
-            .map_err(|error| format!("GetBitmap failed: {error}"))?;
-        let destination = D2D_RECT_F {
-            left: 0.0,
-            top: 0.0,
-            right: WIDTH as f32,
-            bottom: HEIGHT as f32,
-        };
+    let mut evidence = Vec::with_capacity(frames);
+    for index in 0..frames {
+        before_draw(index);
         unsafe {
-            parent_target.BeginDraw();
-            parent_target.Clear(Some(&white));
-            parent_target.DrawBitmap(
-                &bitmap,
-                Some(&destination),
-                1.0,
-                D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                None,
+            draw_target.BeginDraw();
+            draw_target.Clear(Some(&white));
+            draw_target.DrawTextLayout(
+                D2D_POINT_2F { x: 12.0, y: 12.0 },
+                &layout,
+                &brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
             );
-            parent_target.EndDraw(None, None)
+            draw_target.EndDraw(None, None)
         }
-        .map_err(|error| format!("compatible copy EndDraw failed: {error}"))?;
+        .map_err(|error| format!("TextLayout EndDraw failed: {error}"))?;
+
+        if compatible {
+            let bitmap_target = draw_target
+                .cast::<windows::Win32::Graphics::Direct2D::ID2D1BitmapRenderTarget>()
+                .map_err(|error| format!("ID2D1BitmapRenderTarget cast failed: {error}"))?;
+            let bitmap = unsafe { bitmap_target.GetBitmap() }
+                .map_err(|error| format!("GetBitmap failed: {error}"))?;
+            let destination = D2D_RECT_F {
+                left: 0.0,
+                top: 0.0,
+                right: WIDTH as f32,
+                bottom: HEIGHT as f32,
+            };
+            unsafe {
+                parent_target.BeginDraw();
+                parent_target.Clear(Some(&white));
+                parent_target.DrawBitmap(
+                    &bitmap,
+                    Some(&destination),
+                    1.0,
+                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    None,
+                );
+                parent_target.EndDraw(None, None)
+            }
+            .map_err(|error| format!("compatible copy EndDraw failed: {error}"))?;
+        }
+        evidence.push(canvas.evidence());
     }
-    Ok(canvas.evidence())
+    Ok(evidence)
 }
 
 pub fn render_raw_direct2d_wic_text(text: &str) -> Result<PixelEvidence, String> {
