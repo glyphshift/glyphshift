@@ -575,21 +575,6 @@ impl DesktopApplication {
         result.map(|view| ProbeRunView { quick_probe: false, ..view })
     }
 
-    pub(super) fn retain_quick_probe(
-        &mut self,
-        run_id: &str,
-    ) -> Result<ProbeRunView, CommandError> {
-        if !self.quick_probe_sessions.contains(run_id) {
-            return Err(CommandError::new("quick_probe.not_found"));
-        }
-        let view = self.probe_run_summary(run_id)?;
-        self.quick_probe_sessions.remove(run_id)?;
-        Ok(ProbeRunView {
-            quick_probe: false,
-            ..view
-        })
-    }
-
     pub(super) fn cleanup_quick_probe(
         &mut self,
         run_id: &str,
@@ -750,28 +735,6 @@ pub(super) fn desktop_create_probe_from_sources(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .create_probe_from_sources(request)
-}
-
-#[tauri::command]
-pub(super) fn desktop_retain_quick_probe(
-    run_id: String,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<ProbeRunView, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .retain_quick_probe(&run_id)
-}
-
-#[tauri::command]
-pub(super) fn desktop_cleanup_quick_probe(
-    run_id: String,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<QuickProbeCleanupView, CommandError> {
-    application
-        .lock()
-        .map_err(|_| workspace_unavailable())?
-        .cleanup_quick_probe(&run_id)
 }
 
 #[cfg(test)]
