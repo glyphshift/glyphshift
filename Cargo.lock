@@ -1684,6 +1684,7 @@ dependencies = [
  "glyphshift-adapter-unity-il2cpp-standard-ui",
  "glyphshift-adapter-unity-standard-ui",
  "windows 0.58.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
