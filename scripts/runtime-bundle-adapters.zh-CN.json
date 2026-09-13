@@ -74,10 +74,10 @@
   {
     "id": "windows.qt.quick-text",
     "name": "Qt Quick 标准文字",
-    "summary": "适合动态 Qt 6.8.3 x64 的 QML 标签、菜单和提示；输入框、富文本和自绘文字不覆盖。停用后恢复原文，组件保留到目标退出。",
-    "technology": "Qt 6.8.3 / Qt Quick",
+    "summary": "适合动态 Qt 6.8.3 / 6.11.1 x64 的 QML 标签、菜单和提示；输入框、富文本和自绘文字不覆盖。停用后恢复原文，组件保留到目标退出。",
+    "technology": "Qt 6.8.3 / 6.11.1 / Qt Quick",
     "technicalTarget": "QtQuick!QQuickText + GUI thread lifecycle",
-    "documentationUrl": "https://doc.qt.io/qt-6.8/qml-qtquick-text.html"
+    "documentationUrl": "https://doc.qt.io/qt-6/qml-qtquick-text.html"
   },
   {
     "id": "windows.gtk3.pango-render-layout",
