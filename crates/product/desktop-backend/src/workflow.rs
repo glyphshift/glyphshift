@@ -294,10 +294,17 @@ impl DesktopBackend {
                     AdapterPlan::parallel(target.adapter_plan.adapter_ids.iter().cloned()),
                     target.dictionary_ids.iter().cloned(),
                 ).with_collection(target.write_dictionary_id.is_some());
-                target
-                    .font_policy
-                    .as_ref()
-                    .map_or(definition_target.clone(), |policy| {
+                let target_locale = self.target_locale(target, dictionary_override);
+                let fallback_policy = target_locale
+                    .as_deref()
+                    .and_then(|locale| self.environment.fallback_font_for_locale(locale))
+                    .map(|family| WorkflowFontPolicy::new(
+                        [family],
+                        FontCoverage::DictionaryMatches,
+                    ));
+                target.font_policy.as_ref().or(fallback_policy.as_ref()).map_or(
+                    definition_target.clone(),
+                    |policy| {
                         let mut compiled = CompiledTargetFontPolicy::new(
                             policy.families.iter().cloned(),
                             match policy.coverage {
@@ -313,7 +320,8 @@ impl DesktopBackend {
                             compiled = compiled.with_dictionary_override(id.clone(), font.families.iter().cloned(), font.scale_percent);
                         }
                         definition_target.with_font_policy(compiled)
-                    })
+                    },
+                )
             }),
         );
         let software = artifact
@@ -336,11 +344,9 @@ impl DesktopBackend {
                     },
                     |runtime| runtime_route(&runtime.route, &state.artifact.locations),
                 )?;
-                let language_dictionary = target.write_dictionary_id.as_ref().or_else(|| target.dictionary_ids.first());
-                let target_locale = language_dictionary.and_then(|id| {
-                    dictionary_override.filter(|dictionary| dictionary.id() == id.as_ref())
-                        .or_else(|| self.dictionaries.get(id.as_ref()))
-                }).map_or_else(|| state.locale.clone(), |dictionary| dictionary.metadata().target_locale().into());
+                let target_locale = self
+                    .target_locale(target, dictionary_override)
+                    .unwrap_or_else(|| state.locale.clone());
                 Ok(SoftwareInput::new(
                     state.artifact.id.clone(),
                     target_locale,
@@ -384,6 +390,30 @@ impl DesktopBackend {
             &self.environment.composition,
         )
         .map_err(BackendError::WorkflowRejected)
+    }
+
+    fn target_locale(
+        &self,
+        target: &WorkflowTargetArtifact,
+        dictionary_override: Option<&DictionaryView>,
+    ) -> Option<Box<str>> {
+        let state = self.software.get(&target.software_id)?;
+        let language_dictionary = target
+            .write_dictionary_id
+            .as_ref()
+            .or_else(|| target.dictionary_ids.first());
+        Some(
+            language_dictionary
+                .and_then(|id| {
+                    dictionary_override
+                        .filter(|dictionary| dictionary.id() == id.as_ref())
+                        .or_else(|| self.dictionaries.get(id.as_ref()))
+                })
+                .map_or_else(
+                    || state.locale.clone(),
+                    |dictionary| dictionary.metadata().target_locale().into(),
+                ),
+        )
     }
 
     pub(super) fn activation_conflict(&self, artifact: &WorkflowArtifact) -> Option<BackendError> {

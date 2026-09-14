@@ -1685,6 +1685,7 @@ dependencies = [
  "glyphshift-adapter-unity-standard-ui",
  "windows 0.58.0",
  "windows-sys 0.61.2",
+ "winreg",
 ]
 
 [[package]]

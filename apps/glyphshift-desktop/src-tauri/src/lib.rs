@@ -463,6 +463,12 @@ impl DesktopApplication {
                 })
                 .unwrap_or_default(),
             font_families.iter().cloned(),
+        )
+        .with_language_fallback_fonts(
+            settings
+                .language_fallback_fonts()
+                .iter()
+                .map(|fallback| (fallback.language(), fallback.font_family())),
         );
         let mut backend = DesktopBackend::open_with_environment(&data_root, environment)
             .map_err(|error| format!("{error:?}"))?;
@@ -634,6 +640,12 @@ fn desktop_update_settings(
     match settings.update(update) {
         Ok(saved) => {
             application.set_collection_filter_policy(saved.text_filter_policy().clone());
+            application.backend.replace_language_fallback_fonts(
+                saved
+                    .language_fallback_fonts()
+                    .iter()
+                    .map(|fallback| (fallback.language(), fallback.font_family())),
+            );
             window_controls::update_labels(&app, &saved);
             // The workflow loop republishes changed decision inputs on its next reconciliation.
             Ok(saved)

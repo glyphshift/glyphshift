@@ -645,6 +645,7 @@ export default {
     gtkPango: { name: 'GTK 3 界面', summary: '适合动态链接的 GTK 3；不适用于 GTK 4。' },
     raylib: { name: 'raylib 5.5 界面', summary: '适合动态链接的 raylib 5.5；不适用于静态链接或已缓存为纹理的文字。' },
     unityMono: { name: 'Unity Mono 标准界面', summary: '适合 Windows x64 的 Unity Mono 标准界面；不适用于 IL2CPP、UI Toolkit、NGUI 或自绘文字。' },
+    unityIl2cpp: { name: 'Unity IL2CPP 标准界面', summary: '适合 Windows x64 的 Unity IL2CPP TMP/uGUI 标准文字；不适用于 UI Toolkit、NGUI、自绘文字或 TMP SetText 快捷入口。' },
   },
   software: {
     title: '软件',

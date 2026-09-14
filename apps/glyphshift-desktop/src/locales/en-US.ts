@@ -627,6 +627,7 @@ export default {
     gtkPango: { name: 'GTK 3 interface', summary: 'For dynamically linked GTK 3 applications. GTK 4 is not supported.' },
     raylib: { name: 'raylib 5.5 interface', summary: 'For dynamically linked raylib 5.5 applications. Static links and text already cached as textures are not supported.' },
     unityMono: { name: 'Unity Mono standard UI', summary: 'For standard Unity Mono UI on Windows x64. IL2CPP, UI Toolkit, NGUI, and custom-drawn text are not supported.' },
+    unityIl2cpp: { name: 'Unity IL2CPP standard UI', summary: 'For standard Unity IL2CPP TMP/uGUI text on Windows x64. UI Toolkit, NGUI, custom-drawn text, and TMP SetText shortcuts are not supported.' },
   },
   software: {
     title: 'Software',

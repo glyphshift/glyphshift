@@ -52,7 +52,8 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-qt-painter-native',
     '-p', 'glyphshift-adapter-qt-quick-native',
     '-p', 'glyphshift-adapter-raylib-native',
-    '-p', 'glyphshift-adapter-unity-mono-standard-ui-native'
+    '-p', 'glyphshift-adapter-unity-mono-standard-ui-native',
+    '-p', 'glyphshift-adapter-unity-il2cpp-standard-ui-native'
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
@@ -146,6 +147,8 @@ $raylibBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
 $unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-standard-ui' 'dll'
+$unityIl2CppStandardUiBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_unity_il2cpp_standard_ui_native.dll' 'adapter-unity-il2cpp-standard-ui' 'dll'
 $monoGameBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_monogame_native.dll' 'adapter-monogame' 'dll'
 
@@ -205,6 +208,7 @@ $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
 $qtQuickPresentation = Get-AdapterPresentation 'windows.qt.quick-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
+$unityIl2CppStandardUiPresentation = Get-AdapterPresentation 'windows.unity.il2cpp.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
 $vguiLocalizePresentation = Get-AdapterPresentation 'windows.vgui.localize-query'
 $catSystem2Presentation = Get-AdapterPresentation 'windows.catsystem2.utf8-text'
@@ -324,6 +328,15 @@ $runtimeManifest = [ordered]@{
             technology = $unityMonoStandardUiPresentation.technology
             technicalTarget = $unityMonoStandardUiPresentation.technicalTarget
             documentationUrl = $unityMonoStandardUiPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $unityIl2CppStandardUiBundle.file
+            sha256 = $unityIl2CppStandardUiBundle.sha256
+            name = $unityIl2CppStandardUiPresentation.name
+            summary = $unityIl2CppStandardUiPresentation.summary
+            technology = $unityIl2CppStandardUiPresentation.technology
+            technicalTarget = $unityIl2CppStandardUiPresentation.technicalTarget
+            documentationUrl = $unityIl2CppStandardUiPresentation.documentationUrl
         }
     )
     isolated_workers = @()

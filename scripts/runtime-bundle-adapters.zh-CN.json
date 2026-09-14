@@ -102,5 +102,13 @@
     "technology": "Unity Mono / TextMeshPro / uGUI",
     "technicalTarget": "Mono JIT!TMP_Text.set_text + UnityEngine.UI.Text.set_text",
     "documentationUrl": "https://docs.unity3d.com/cn/current/Manual/scripting-backends-mono.html"
+  },
+  {
+    "id": "windows.unity.il2cpp.standard-ui",
+    "name": "Unity IL2CPP 标准界面",
+    "summary": "适合 Windows x64 的 Unity IL2CPP TMP/uGUI 标准 text 属性；需具备公开 IL2CPP 导出和可验证 GUI 主线程，不适用于 UI Toolkit、NGUI、自绘文字或 TMP SetText 快捷入口",
+    "technology": "Unity IL2CPP / TextMeshPro / uGUI",
+    "technicalTarget": "IL2CPP runtime!TMP_Text.set_text + UnityEngine.UI.Text.set_text",
+    "documentationUrl": "https://docs.unity3d.com/6000.0/Documentation/Manual/scripting-backends-il2cpp.html"
   }
 ]

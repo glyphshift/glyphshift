@@ -10,6 +10,7 @@ const presentationKeys: Record<string, string> = {
   'GTK 3 / Pango 绘制': 'gtkPango',
   'raylib DrawTextEx': 'raylib',
   'Unity Mono 标准界面': 'unityMono',
+  'Unity IL2CPP 标准界面': 'unityIl2cpp',
 }
 
 export function adapterSummary(adapter: AdapterOption, translate: (key: string) => string) {

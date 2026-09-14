@@ -132,6 +132,7 @@ pub struct DesktopEnvironment {
     composition: CompositionEnvironment,
     adapter_requirements: BTreeMap<Box<str>, AdapterRequirement>,
     font_families: BTreeSet<Box<str>>,
+    language_fallback_fonts: BTreeMap<Box<str>, Box<str>>,
 }
 
 impl DesktopEnvironment {
@@ -153,7 +154,43 @@ impl DesktopEnvironment {
             composition,
             adapter_requirements,
             font_families,
+            language_fallback_fonts: BTreeMap::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_language_fallback_fonts(
+        mut self,
+        fallbacks: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    ) -> Self {
+        self.replace_language_fallback_fonts(fallbacks);
+        self
+    }
+
+    fn replace_language_fallback_fonts(
+        &mut self,
+        fallbacks: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    ) {
+        self.language_fallback_fonts = fallbacks
+            .into_iter()
+            .filter_map(|(language, family)| {
+                let language = language.as_ref().trim().to_ascii_lowercase();
+                let family = family.as_ref().trim();
+                (!language.is_empty() && !family.is_empty()).then(|| {
+                    (Box::<str>::from(language), Box::<str>::from(family))
+                })
+            })
+            .collect();
+    }
+
+    fn fallback_font_for_locale(&self, locale: &str) -> Option<Box<str>> {
+        let requested = self
+            .language_fallback_fonts
+            .get(locale.trim().to_ascii_lowercase().as_str())?;
+        self.font_families
+            .iter()
+            .find(|installed| installed.eq_ignore_ascii_case(requested))
+            .cloned()
     }
 
     fn add_requirements(&mut self, requirements: impl IntoIterator<Item = AdapterRequirement>) {
@@ -279,5 +316,12 @@ impl DesktopBackend {
         font_families: impl IntoIterator<Item = impl Into<Box<str>>>,
     ) {
         self.environment.replace_font_families(font_families);
+    }
+
+    pub fn replace_language_fallback_fonts(
+        &mut self,
+        fallbacks: impl IntoIterator<Item = (impl AsRef<str>, impl AsRef<str>)>,
+    ) {
+        self.environment.replace_language_fallback_fonts(fallbacks);
     }
 }

@@ -72,6 +72,9 @@ pub(crate) struct LanguageFallbackFont {
 }
 
 impl LanguageFallbackFont {
+    pub(crate) fn language(&self) -> &str { &self.language }
+    pub(crate) fn font_family(&self) -> &str { &self.font_family }
+
     fn normalized(mut self) -> Self {
         self.language = self.language.trim().to_ascii_lowercase();
         self.font_family = self.font_family.trim().to_owned();
@@ -280,6 +283,9 @@ impl AppSettings {
 
 
     pub(crate) fn text_filter_policy(&self) -> &FilterPolicy { &self.text_filter_policy }
+    pub(crate) fn language_fallback_fonts(&self) -> &[LanguageFallbackFont] {
+        &self.language_fallback_fonts
+    }
     pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
     }

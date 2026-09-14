@@ -475,6 +475,57 @@ fn desktop_workflow_v4_persists_adapter_plan_and_inline_font_policy_outside_the_
 }
 
 #[test]
+fn desktop_language_fallback_font_becomes_default_runtime_font_policy() {
+    let root = tempdir().expect("language fallback product data");
+    let executable = root.path().join("SyntheticFallbackHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable fixture");
+    let environment = environment().with_language_fallback_fonts([
+        ("zh-cn", "available sans"),
+        ("ja", "Missing Font"),
+    ]);
+    let mut backend = DesktopBackend::open_with_environment(root.path(), environment)
+        .expect("open product data");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(&executable))
+        .expect("add software")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary-fallback", "Fallback", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
+        )
+        .expect("dictionary");
+    backend
+        .create_workflow(
+            WorkflowCreate::new("workflow-fallback", "Fallback workflow").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id,
+                    ["adapter-gdi"],
+                    ["dictionary-fallback"],
+                ),
+            ]),
+        )
+        .expect("workflow");
+
+    let intent = backend
+        .effective_workflow_intent("workflow-fallback")
+        .expect("effective intent");
+    assert_eq!(
+        intent.targets()[0].requested_features(),
+        &[Feature::TextReplace, Feature::FontSubstitute]
+    );
+    let publication = intent.targets()[0]
+        .runtime_spec()
+        .publication()
+        .encode_json()
+        .expect("runtime publication");
+    assert!(publication.contains("Available Sans"));
+    assert!(publication.contains("adapter-gdi"));
+}
+
+#[test]
 fn desktop_persists_pending_dictionary_entries_but_publishes_only_completed_entries() {
     let root = tempdir().expect("pending dictionary product data");
     let executable = root.path().join("SyntheticPendingHost.exe");
