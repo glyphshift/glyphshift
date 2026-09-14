@@ -266,7 +266,7 @@ export default {
     useAsDefault: '设为默认 AI 配置',
     localProvider: '本机服务',
     codexSubscription: 'Codex 订阅',
-    codexProfileHint: '使用这台电脑上已经登录的 Codex，默认模型为 gpt-5.6-sol。翻译会占用你的 Codex 订阅额度。',
+    codexProfileHint: '使用这台电脑上已经登录的 Codex，请填写要使用的模型。翻译会占用你的 Codex 订阅额度。',
     credentialStored: 'API Key 已保存',
     credentialMissing: '需要 API Key',
     testConnection: '测试连接',

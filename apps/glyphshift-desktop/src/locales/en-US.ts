@@ -272,7 +272,7 @@ export default {
     useAsDefault: 'Use as default AI connection',
     localProvider: 'Local service',
     codexSubscription: 'Codex subscription',
-    codexProfileHint: 'Uses Codex already signed in on this computer with gpt-5.6-sol as the default model. Translations use your Codex subscription allowance.',
+    codexProfileHint: 'Uses Codex already signed in on this computer. Enter the model you want to use. Translations use your Codex subscription allowance.',
     credentialStored: 'API key saved',
     credentialMissing: 'API key required',
     testConnection: 'Test connection',

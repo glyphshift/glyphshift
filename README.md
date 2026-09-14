@@ -8,6 +8,12 @@ Glyphshift 在目标软件运行时读取文字，查找字典，再把译文交
 
 它适合给常用工具整理界面翻译，也适合尝试翻译游戏菜单和对白。能翻译哪些地方，取决于目标软件的文字显示方式和适配器支持情况。
 
+## 工作流预览
+
+在工作流中查看收集到的原文、编辑译文，并使用 AI 补全。下图展示 Silhouette 的文字列表与翻译状态。
+
+![Glyphshift 工作流：Silhouette 原文、译文与翻译状态](preview/workflow-translation.png)
+
 ## 开始使用
 
 1. **安装并打开 Glyphshift。** 从上面的下载入口获取 Windows 安装包。

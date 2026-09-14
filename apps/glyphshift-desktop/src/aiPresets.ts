@@ -12,9 +12,9 @@ interface AiPreset {
 
 // Service defaults are editable drafts, not persisted provider identities.
 export const aiPresets: readonly AiPreset[] = [
-  { id: 'deepseek', documentationUrl: 'https://api-docs.deepseek.com/zh-cn/', name: 'DeepSeek', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.deepseek.com', modelId: 'deepseek-v4-flash', reasoningEffort: 'disabled' },
-  { id: 'qwen', documentationUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key/', name: 'Qwen', protocol: 'open_ai_chat_completions', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', modelId: 'qwen-plus', reasoningEffort: 'automatic' },
-  { id: 'siliconflow', documentationUrl: 'https://docs.siliconflow.cn/docs/userguide/quickstart', name: 'SiliconFlow', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.siliconflow.cn/v1', modelId: 'Qwen/Qwen2.5-72B-Instruct', reasoningEffort: 'automatic' },
+  { id: 'deepseek', documentationUrl: 'https://api-docs.deepseek.com/zh-cn/', name: 'DeepSeek', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.deepseek.com', modelId: '', reasoningEffort: 'disabled' },
+  { id: 'qwen', documentationUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key/', name: 'Qwen', protocol: 'open_ai_chat_completions', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', modelId: '', reasoningEffort: 'automatic' },
+  { id: 'siliconflow', documentationUrl: 'https://docs.siliconflow.cn/docs/userguide/quickstart', name: 'SiliconFlow', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.siliconflow.cn/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'openai', documentationUrl: 'https://platform.openai.com/docs/api-reference/models', name: 'OpenAI', protocol: 'open_ai_responses', baseUrl: 'https://api.openai.com/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'anthropic', documentationUrl: 'https://platform.claude.com/docs/en/api/models', name: 'Claude', protocol: 'anthropic_messages', baseUrl: 'https://api.anthropic.com', modelId: '', reasoningEffort: 'automatic' },
   { id: 'gemini', documentationUrl: 'https://ai.google.dev/api/models', name: 'Gemini', protocol: 'gemini_generate_content', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelId: '', reasoningEffort: 'automatic' },

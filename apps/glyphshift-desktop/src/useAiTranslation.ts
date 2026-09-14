@@ -221,7 +221,7 @@ export interface AiConnectionReport {
 }
 
 export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; modelId: string; concurrency: number; credentialRequired: boolean }> = {
-  codex_subscription: { baseUrl: 'codex://local', modelId: 'gpt-5.6-sol', concurrency: 1, credentialRequired: false },
+  codex_subscription: { baseUrl: 'codex://local', modelId: '', concurrency: 1, credentialRequired: false },
   open_ai_responses: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
   open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
   open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', modelId: '', concurrency: 2, credentialRequired: false },
