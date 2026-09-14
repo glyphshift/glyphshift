@@ -691,13 +691,24 @@ fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
     app.backend.enable_workflow("workflow.lifecycle").unwrap();
     runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_not_found"));
     assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "waiting");
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
+    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.component_load_failed"));
+    runtime.retry_attempt = 0;
+    runtime.retry_after_ms = 0;
     app.workflow_runtime_status.insert("workflow.lifecycle".into(), runtime);
     let before = calls.lock().unwrap().refreshed.len();
     app.refresh_workflows_with_retry(false).unwrap();
-    assert_eq!(calls.lock().unwrap().refreshed.len(), before);
-    app.refresh_workflows_with_retry(true).unwrap();
     assert_eq!(calls.lock().unwrap().refreshed.len(), before + 1);
+    let mut recovered = app.workflow_runtime_status["workflow.lifecycle"].clone();
+    assert!(recovered.targets.iter().any(|target| target.active));
+    assert!(recovered.errors.is_empty());
+
+    recovered.targets.iter_mut().for_each(|target| target.active = false);
+    recovered.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
+    app.workflow_runtime_status.insert("workflow.lifecycle".into(), recovered);
+    app.refresh_workflows_with_retry(false).unwrap();
+    assert_eq!(calls.lock().unwrap().refreshed.len(), before + 1);
+    app.refresh_workflows_with_retry(true).unwrap();
+    assert_eq!(calls.lock().unwrap().refreshed.len(), before + 2);
 }
 
 #[test]
@@ -733,6 +744,15 @@ fn workflow_transient_retry_is_bounded_and_hard_failure_requires_manual_retry() 
     runtime.retry_attempt = 3;
     assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 200));
     runtime.retry_attempt = 0;
+    runtime.errors.clear();
+    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.component_load_failed"));
+    runtime.retry_after_ms = 300;
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 299));
+    assert!(crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 300));
+    runtime.retry_attempt = 3;
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 400));
+    runtime.retry_attempt = 0;
+    runtime.errors.clear();
     runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
     assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 200));
 }

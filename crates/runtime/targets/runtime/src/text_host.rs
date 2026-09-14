@@ -72,7 +72,10 @@ pub(super) fn scope_blocks(context: &NativeDecisionContext) -> bool {
 // Only a successful replacement protects its resulting nested draw calls.
 pub(super) fn mark_scope_replaced(context: &NativeDecisionContext) {
     with_scopes(|state| {
-        if let Some((_, _, replaced)) = state.stack.iter_mut().rev()
+        if let Some((_, _, replaced)) = state
+            .stack
+            .iter_mut()
+            .rev()
             .find(|(owner, _, _)| *owner == std::ptr::from_ref(context) as usize)
         {
             *replaced = true;

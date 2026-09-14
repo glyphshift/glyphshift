@@ -19,8 +19,10 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
     -p glyphshift-adapter-gdiplus-native `
     -p glyphshift-adapter-gtk3-pango-native `
     -p glyphshift-adapter-qt-painter-native `
+    -p glyphshift-adapter-qt-text-document-native `
     -p glyphshift-adapter-qt-quick-native `
     -p glyphshift-adapter-raylib-native `
+    -p glyphshift-adapter-sidefx-cv-paint-buffer-native `
     -p glyphshift-adapter-unity-mono-standard-ui-native `
     -p glyphshift-target-runtime `
     -p glyphshift-test-controller-plugin `

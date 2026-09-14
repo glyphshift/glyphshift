@@ -197,7 +197,11 @@ fn deferred_vgui_runs_replace_whole_text_and_replay_unknown_operations() {
             );
         }
         update_publication(publication(2, "第二代")).unwrap();
-        assert_eq!(render(first, 12), "Label第二代", "a complete draw before an empty deferred run must not invalidate it");
+        assert_eq!(
+            render(first, 12),
+            "Label第二代",
+            "a complete draw before an empty deferred run must not invalidate it"
+        );
         for mode in [0, 4, 5, 7, 8, 10, 13] {
             assert_eq!(render(second, mode), "第二代");
         }

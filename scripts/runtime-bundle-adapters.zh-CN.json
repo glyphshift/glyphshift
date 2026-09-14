@@ -72,6 +72,14 @@
     "documentationUrl": "https://doc.qt.io/qt-6/qpainter.html#drawText"
   },
   {
+    "id": "windows.qt.text-document",
+    "name": "Qt Text Document",
+    "summary": "适合 Qt 6.8.3 x64 中通过 QTextDocument::setHtml 建模的纯文本提示和标签；富文本保持原样",
+    "technology": "Qt 6.8.3 / QTextDocument",
+    "technicalTarget": "QtGui!QTextDocument::setHtml",
+    "documentationUrl": "https://doc.qt.io/qt-6/qtextdocument.html#setHtml"
+  },
+  {
     "id": "windows.qt.quick-text",
     "name": "Qt Quick 标准文字",
     "summary": "适合动态 Qt 6.8.3 / 6.11.1 x64 的 QML 标签、菜单和提示；输入框、富文本和自绘文字不覆盖。停用后恢复原文，组件保留到目标退出。",
@@ -94,6 +102,14 @@
     "technology": "raylib 5.5",
     "technicalTarget": "raylib.dll!DrawTextEx",
     "documentationUrl": "https://www.raylib.com/cheatsheet/raylib_cheatsheet_v5.5.pdf"
+  },
+  {
+    "id": "windows.sidefx.cv-paint-buffer-text",
+    "name": "SideFX CV PaintBuffer 文字",
+    "summary": "适合 Windows x64、动态加载 libCV.dll 且导出已验证 textWrappedInBox ABI 的 SideFX CV 界面；已缓存的绘图区文字仍由目标自身决定何时重绘",
+    "technology": "SideFX CV PaintBuffer",
+    "technicalTarget": "libCV.dll!CV_PaintBuffer::textWrappedInBox",
+    "documentationUrl": "https://www.sidefx.com/docs/hdk/"
   },
   {
     "id": "windows.unity.mono.standard-ui",

@@ -633,30 +633,52 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
     deactivate_runtime().expect("changed Feature set pass-through");
 }
 
-
 #[test]
 #[ignore = "requires Native Adapter DLLs built before the target Runtime contract"]
 fn trh_006_stop_failure_does_not_leave_other_adapters_running() {
     let failing = refresh_native_package();
     let failing_hash = artifact_hash(&failing);
     let control = unsafe { libloading::Library::new(&failing) }.unwrap();
-    let set_status = unsafe { control.get::<unsafe extern "C" fn(i32)>(b"glyphshift_test_set_deactivate_status_v1\0") }.unwrap();
+    let set_status = unsafe {
+        control.get::<unsafe extern "C" fn(i32)>(b"glyphshift_test_set_deactivate_status_v1\0")
+    }
+    .unwrap();
     let gdi = native_package();
     let gdi_hash = artifact_hash(&gdi);
     let baseline = render_raw_gdi_unicode("Open").unwrap().signature();
-    let deployment = TargetRuntimeDeployment::new(publication(1, "Translated"), [
-        NativeAdapterDeployment::new(failing, refresh_binding(failing_hash)).unwrap(),
-        NativeAdapterDeployment::new(gdi, binding(gdi_hash, [Feature::TextReplace])).unwrap(),
-    ]);
+    let deployment = TargetRuntimeDeployment::new(
+        publication(1, "Translated"),
+        [
+            NativeAdapterDeployment::new(failing, refresh_binding(failing_hash)).unwrap(),
+            NativeAdapterDeployment::new(gdi, binding(gdi_hash, [Feature::TextReplace])).unwrap(),
+        ],
+    );
     activate_deployment(deployment).unwrap();
-    assert_ne!(render_raw_gdi_unicode("Open").unwrap().signature(), baseline);
+    assert_ne!(
+        render_raw_gdi_unicode("Open").unwrap().signature(),
+        baseline
+    );
     unsafe { set_status(glyphshift_adapter_native_abi::STATUS_ACTIVATION_FAILED) };
     let stop = deactivate_runtime();
     let after_stop = render_raw_gdi_unicode("Open").unwrap().signature();
-    let still_active = query_activation().unwrap().active_adapter_ids().map(str::to_owned).collect::<Vec<_>>();
+    let still_active = query_activation()
+        .unwrap()
+        .active_adapter_ids()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     unsafe { set_status(glyphshift_adapter_native_abi::STATUS_OK) };
     deactivate_runtime().unwrap();
-    assert_eq!(stop, Err(glyphshift_target_runtime::TargetRuntimeError::AdapterActivation));
-    assert_eq!(after_stop, baseline, "a preceding failure must not prevent GDI from restoring its original output");
-    assert_eq!(still_active, vec![glyphshift_test_native_adapter::ADAPTER_ID], "activation report must retain only the adapter whose stop failed");
+    assert_eq!(
+        stop,
+        Err(glyphshift_target_runtime::TargetRuntimeError::AdapterActivation)
+    );
+    assert_eq!(
+        after_stop, baseline,
+        "a preceding failure must not prevent GDI from restoring its original output"
+    );
+    assert_eq!(
+        still_active,
+        vec![glyphshift_test_native_adapter::ADAPTER_ID],
+        "activation report must retain only the adapter whose stop failed"
+    );
 }

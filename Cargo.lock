@@ -1582,6 +1582,7 @@ dependencies = [
  "glyphshift-adapter-qt-painter",
  "glyphshift-adapter-raylib",
  "glyphshift-adapter-sdk",
+ "glyphshift-adapter-sidefx-cv-paint-buffer",
  "glyphshift-adapter-unity-mono-standard-ui",
  "glyphshift-domain",
  "glyphshift-windows-host",
@@ -1636,6 +1637,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-qt-text-document"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-qt-text-document-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "glyphshift-adapter-qt-text-document",
+ "retour",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "glyphshift-adapter-raylib"
 version = "0.1.0"
 dependencies = [
@@ -1666,6 +1685,24 @@ name = "glyphshift-adapter-sdk"
 version = "0.1.0"
 dependencies = [
  "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-sidefx-cv-paint-buffer"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-sidefx-cv-paint-buffer-native"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-abi",
+ "glyphshift-adapter-sidefx-cv-paint-buffer",
+ "retour",
+ "windows 0.58.0",
 ]
 
 [[package]]
@@ -1847,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "glyphshift-desktop-shell"
-version = "0.4.2"
+version = "0.5.0"
 dependencies = [
  "glyphshift-adapter-registry",
  "glyphshift-ai-translation",

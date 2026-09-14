@@ -35,10 +35,12 @@ impl DesktopApplication {
 }
 
 // Live sessions still need liveness checks. Only inactive transient failures may
-// reconnect automatically; configuration, privilege and resident-module errors wait for the user.
+// reconnect automatically. A target can reject the runtime module while it is still
+// starting, so component-load failures share the bounded activation retry policy.
+// Configuration, privilege and restart-required errors still wait for the user.
 pub(super) fn automatic_retry_allowed(runtime: &WorkflowRuntimeView, now: u64) -> bool {
     if runtime.targets.iter().any(|target| target.active) { return true; }
     let errors = runtime.errors.values().filter(|error| error.code() != "runtime.target_not_found").collect::<Vec<_>>();
     errors.is_empty() || (runtime.retry_attempt < 3 && now >= runtime.retry_after_ms
-        && errors.iter().all(|error| error.code() == "runtime.activation_timed_out"))
+        && errors.iter().all(|error| matches!(error.code(), "runtime.activation_timed_out" | "runtime.component_load_failed")))
 }

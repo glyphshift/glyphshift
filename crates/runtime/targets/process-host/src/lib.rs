@@ -247,9 +247,10 @@ fn capture_supervisor_loop<T: ControllerTransport + Send + 'static>(
                 return;
             }
             Err(RecvTimeoutError::Timeout) => {
-                if drain_observations(&connection, target_id, &mut cursor, &ingress).is_err() {
-                    return;
-                }
+                // A target can transiently reject an observation query while its UI thread is
+                // busy. Keep the supervisor alive so the next poll can recover; explicit pause
+                // still reports a drain failure to the caller through SetPaused above.
+                let _ = drain_observations(&connection, target_id, &mut cursor, &ingress);
             }
             Err(RecvTimeoutError::Disconnected) => return,
         }

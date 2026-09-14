@@ -50,8 +50,10 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native',
+    '-p', 'glyphshift-adapter-qt-text-document-native',
     '-p', 'glyphshift-adapter-qt-quick-native',
     '-p', 'glyphshift-adapter-raylib-native',
+    '-p', 'glyphshift-adapter-sidefx-cv-paint-buffer-native',
     '-p', 'glyphshift-adapter-unity-mono-standard-ui-native',
     '-p', 'glyphshift-adapter-unity-il2cpp-standard-ui-native'
 )
@@ -141,10 +143,14 @@ $gtk3PangoBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
+$qtTextDocumentBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_qt_text_document_native.dll' 'adapter-qt-text-document' 'dll'
 $qtQuickBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_quick_native.dll' 'adapter-qt-quick' 'dll'
 $raylibBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_raylib_native.dll' 'adapter-raylib' 'dll'
+$sidefxCvPaintBufferBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_sidefx_cv_paint_buffer_native.dll' 'adapter-sidefx-cv-paint-buffer' 'dll'
 $unityMonoStandardUiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-standard-ui' 'dll'
 $unityIl2CppStandardUiBundle = Copy-VersionedBundleArtifact `
@@ -205,8 +211,10 @@ $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
 $directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-layout'
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
+$qtTextDocumentPresentation = Get-AdapterPresentation 'windows.qt.text-document'
 $qtQuickPresentation = Get-AdapterPresentation 'windows.qt.quick-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
+$sidefxCvPaintBufferPresentation = Get-AdapterPresentation 'windows.sidefx.cv-paint-buffer-text'
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
 $unityIl2CppStandardUiPresentation = Get-AdapterPresentation 'windows.unity.il2cpp.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
@@ -302,6 +310,16 @@ $runtimeManifest = [ordered]@{
             documentationUrl = $qtPainterPresentation.documentationUrl
         },
         [ordered]@{
+            file = $qtTextDocumentBundle.file
+            sha256 = $qtTextDocumentBundle.sha256
+            name = $qtTextDocumentPresentation.name
+            summary = $qtTextDocumentPresentation.summary
+            technology = $qtTextDocumentPresentation.technology
+            technicalTarget = $qtTextDocumentPresentation.technicalTarget
+            documentationUrl = $qtTextDocumentPresentation.documentationUrl
+            process_resident_after_deactivate = $true
+        },
+        [ordered]@{
             file = $qtQuickBundle.file
             sha256 = $qtQuickBundle.sha256
             name = $qtQuickPresentation.name
@@ -319,6 +337,15 @@ $runtimeManifest = [ordered]@{
             technology = $raylibPresentation.technology
             technicalTarget = $raylibPresentation.technicalTarget
             documentationUrl = $raylibPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $sidefxCvPaintBufferBundle.file
+            sha256 = $sidefxCvPaintBufferBundle.sha256
+            name = $sidefxCvPaintBufferPresentation.name
+            summary = $sidefxCvPaintBufferPresentation.summary
+            technology = $sidefxCvPaintBufferPresentation.technology
+            technicalTarget = $sidefxCvPaintBufferPresentation.technicalTarget
+            documentationUrl = $sidefxCvPaintBufferPresentation.documentationUrl
         },
         [ordered]@{
             file = $unityMonoStandardUiBundle.file

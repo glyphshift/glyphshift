@@ -486,6 +486,8 @@ fn tph_003_rejects_a_controller_ack_for_the_wrong_publication_identity() {
 #[derive(Default)]
 struct CaptureTransportState {
     queries: u64,
+    successful_queries: u64,
+    query_failures_remaining: u64,
     paused: bool,
     deactivated: bool,
 }
@@ -564,7 +566,12 @@ impl ControllerTransport for CaptureTransport {
             .lock()
             .map_err(|_| TransportFailure::MalformedMessage)?;
         state.queries += 1;
-        let (dropped, records) = match state.queries {
+        if state.query_failures_remaining > 0 {
+            state.query_failures_remaining -= 1;
+            return Err(TransportFailure::MalformedMessage);
+        }
+        state.successful_queries += 1;
+        let (dropped, records) = match state.successful_queries {
             1 => (
                 0,
                 vec![
@@ -602,6 +609,99 @@ impl ControllerTransport for CaptureTransport {
     }
 
     fn terminate(&mut self) {}
+}
+
+#[test]
+fn tph_006_capture_supervisor_recovers_after_one_query_failure() {
+    let state = Arc::new(Mutex::new(CaptureTransportState {
+        query_failures_remaining: 1,
+        ..CaptureTransportState::default()
+    }));
+    let mut connection = ControllerConnection::connect(
+        CaptureTransport {
+            state: state.clone(),
+        },
+        ExtensionId::new("org.example.capture-recovery"),
+        ProtocolVersion::new(1, 0),
+        ControllerNonce::new([0x55; 32]),
+        &mut NonceLedger::new(),
+    )
+    .expect("capture controller connection");
+    let controller_target = connection
+        .inventory()
+        .expect("capture controller inventory")
+        .targets()[0]
+        .id();
+    let artifacts = TargetArtifactCatalog::new(
+        RuntimeArtifact::new(local_artifact("runtime-capture-recovery.dll"), [0x63; 32]),
+        [(
+            PackageArtifactId::new("adapters/capture-recovery"),
+            local_artifact("adapter-capture-recovery.dll"),
+        )],
+    )
+    .expect("capture recovery artifacts");
+    let output = local_artifact("capture-recovery.json");
+    for checkpoint in [
+        output.with_extension("a.json"),
+        output.with_extension("b.json"),
+    ] {
+        let _ = std::fs::remove_file(checkpoint);
+    }
+    let capture = CaptureConfiguration::new(
+        CaptureSessionId::new("capture-recovery").expect("capture session id"),
+        &output,
+        10,
+    )
+    .expect("capture configuration");
+    let target = TargetInstance::new(
+        TargetInstanceId::new("capture-recovery-target"),
+        TargetFacts::new("windows", "x86_64"),
+    );
+    let sink = FileCaptureSink::start(capture).expect("Desktop capture owner");
+    let mut host =
+        TargetProcessHost::new(connection, artifacts).with_capture_ingress(sink.ingress());
+    host.register_target(target.id().clone(), controller_target);
+    let adapter_id = AdapterId::new("example.synthetic.observe");
+    let version = AdapterVersion::new(1, 0, 0);
+    let binding = AdapterBinding {
+        descriptor: AdapterDescriptor::new(
+            adapter_id.clone(),
+            version,
+            ApplyModel::ObserveOnly,
+            Placement::TargetProcess,
+            [Feature::TextObserve],
+        ),
+        adapter_id: adapter_id.clone(),
+        version,
+        apply_model: ApplyModel::ObserveOnly,
+        artifact_hash: ArtifactHash::sha256([0x64; 32]),
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/capture-recovery"),
+        },
+        features: vec![Feature::TextObserve],
+    };
+
+    host.activate_runtime(
+        &target,
+        std::slice::from_ref(&binding),
+        &publication(5, "Unused"),
+    )
+    .expect("activate capture producer");
+
+    std::thread::sleep(std::time::Duration::from_millis(650));
+
+    host.control_capture(SessionId::new(2), &target, true)
+        .expect("capture supervisor survives a transient query failure");
+    host.deactivate(SessionId::new(2), &target, &[binding], &[])
+        .expect("drain then deactivate recovered capture producer");
+    sink.finish().expect("finish Desktop capture owner");
+
+    let catalog = CaptureCatalog::read_current(&output).expect("recovered capture checkpoint");
+    assert!(catalog
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Open"));
+    assert!(state.lock().expect("capture recovery state").queries >= 2);
 }
 
 #[test]

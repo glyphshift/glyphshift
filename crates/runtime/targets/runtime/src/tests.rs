@@ -65,6 +65,59 @@ fn target_runtime_drains_observations_only_in_batch_producer_mode() {
 }
 
 #[test]
+fn native_runtime_matches_capture_key_for_edge_padded_text_and_preserves_padding() {
+    let _serial = TEST_RUNTIME.lock().unwrap();
+    assert_eq!(SourceTextPolicy::Exact.key(" Add "), "Add");
+    let publication = RuntimePublication::new(
+        RouteProgram::direct("capture"),
+        TranslationSnapshot::empty(Generation::new(1))
+            .with_entry("capture", "Add", "添加")
+            .with_entry("capture", " Exact ", "精确优先")
+            .with_entry("capture", "Exact", "去空格回退"),
+        FontPolicy::empty(),
+    );
+    activate_deployment(TargetRuntimeDeployment::new(
+        publication,
+        std::iter::empty(),
+    ))
+    .unwrap();
+    let context = Box::into_raw(Box::new(NativeDecisionContext {
+        adapter_id: "synthetic.padded".into(),
+        source_policy: SourceTextPolicy::Exact,
+        text_runs: Mutex::new(glyphshift_domain::TextRunResolver::default()),
+        text_host: OnceLock::new(),
+    }));
+    let decide = |source: &str| {
+        let source = source.encode_utf16().collect::<Vec<_>>();
+        let mut output = [0_u16; 64];
+        let decision = decide_utf16(
+            context.cast(),
+            source.as_ptr(),
+            source.len() as u32,
+            output.as_mut_ptr(),
+            output.len() as u32,
+            std::ptr::null_mut(),
+            0,
+        );
+        let text = String::from_utf16(&output[..decision.text_len as usize]).unwrap();
+        (decision, text)
+    };
+
+    let padded = decide(" Add ");
+    assert_ne!(padded.0.decision_bits & DECISION_TEXT_REPLACE, 0);
+    assert_eq!(padded.1, " 添加 ");
+
+    let exact = decide(" Exact ");
+    assert_ne!(exact.0.decision_bits & DECISION_TEXT_REPLACE, 0);
+    assert_eq!(exact.1, "精确优先");
+
+    deactivate_runtime().unwrap();
+    unsafe {
+        drop(Box::from_raw(context));
+    }
+}
+
+#[test]
 fn structured_text_resolves_before_capture_and_never_replaces_past_fragments() {
     use glyphshift_adapter_native_abi::*;
     let _serial = TEST_RUNTIME.lock().unwrap();
@@ -155,24 +208,49 @@ fn structured_text_resolves_before_capture_and_never_replaces_past_fragments() {
     let untouched = text_host::enter_scope(host.context);
     assert_eq!(send(TEXT_EVENT_DRAW, 0, "O").0.decision_bits, 0);
     let too_small = "Open".encode_utf16().collect::<Vec<_>>();
-    assert_ne!((host.decide_utf16)(host.context, too_small.as_ptr(),
-        too_small.len() as u32, std::ptr::null_mut(), 0, std::ptr::null_mut(), 0).status, STATUS_OK);
+    assert_ne!(
+        (host.decide_utf16)(
+            host.context,
+            too_small.as_ptr(),
+            too_small.len() as u32,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            0
+        )
+        .status,
+        STATUS_OK
+    );
     let inner = text_host::enter_scope(child.context);
     let source = "Open".encode_utf16().collect::<Vec<_>>();
     let mut output = [0; 64];
     let event = NativeTextEventV1::complete_draw(&source);
     let decision = text_host::decide_text(
-        child.context, &event, output.as_mut_ptr(), 64, std::ptr::null_mut(), 0,
+        child.context,
+        &event,
+        output.as_mut_ptr(),
+        64,
+        std::ptr::null_mut(),
+        0,
     );
-    assert_eq!(String::from_utf16(&output[..decision.text_len as usize]).unwrap(), "打开");
+    assert_eq!(
+        String::from_utf16(&output[..decision.text_len as usize]).unwrap(),
+        "打开"
+    );
     // The inner replacement protects its descendants, even with an untouched outer scope.
     assert_eq!(send(TEXT_EVENT_DRAW, 0, "是").0.decision_bits, 0);
     text_host::leave_scope(child.context, inner);
-    assert_ne!(raster().decision_bits & DECISION_TEXT_REPLACE, 0,
-        "legacy callbacks also pass through an untranslated parent");
+    assert_ne!(
+        raster().decision_bits & DECISION_TEXT_REPLACE,
+        0,
+        "legacy callbacks also pass through an untranslated parent"
+    );
     text_host::leave_scope(host.context, untouched);
     let observed = query_observations().unwrap();
-    assert!(observed.records().iter().any(|record| record.source() == "Open"));
+    assert!(observed
+        .records()
+        .iter()
+        .any(|record| record.source() == "Open"));
     let token = text_host::enter_scope(host.context);
     assert_ne!(token, 0);
     assert_eq!(send(TEXT_EVENT_DRAW, 0, "Open").1, "打开");

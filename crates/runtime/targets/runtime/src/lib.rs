@@ -496,7 +496,11 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
             text_host::invalidate_scopes();
         }
         (
-            if deactivated { runtime.capture.take() } else { None },
+            if deactivated {
+                runtime.capture.take()
+            } else {
+                None
+            },
             refresh_adapters,
             deactivated,
         )
@@ -644,6 +648,19 @@ fn decide_source(
     if matches!(decision.text, TextDecision::Keep) && canonical != source {
         decision = lookup(source); // Preserve exact legacy wrapped entries.
     }
+    let canonical_key = context.source_policy.key(source);
+    if matches!(decision.text, TextDecision::Keep)
+        && !canonical_key.is_empty()
+        && canonical_key != canonical
+    {
+        let fallback = lookup(&canonical_key);
+        if let TextDecision::Replace(text) = fallback.text {
+            decision.text = TextDecision::Replace(preserve_edge_padding(&canonical, text));
+        }
+        if matches!(decision.font, FontDecision::Keep) {
+            decision.font = fallback.font;
+        }
+    }
     if matches!(decision.text, TextDecision::Keep) && source.trim() == source {
         if let Some(alias) = runtime
             .source_aliases
@@ -659,9 +676,14 @@ fn decide_source(
         TextDecision::Keep => None,
         TextDecision::Replace(text) => Some(text.encode_utf16().collect::<Vec<_>>()),
     };
-    let scale_percent = match &decision.font { FontDecision::Scaled { percent, .. } => *percent, _ => 100 };
+    let scale_percent = match &decision.font {
+        FontDecision::Scaled { percent, .. } => *percent,
+        _ => 100,
+    };
     let font = match decision.font {
-        FontDecision::Scaled { family, .. } => family.map(|font| font.encode_utf16().collect::<Vec<_>>()),
+        FontDecision::Scaled { family, .. } => {
+            family.map(|font| font.encode_utf16().collect::<Vec<_>>())
+        }
         FontDecision::Keep => None,
         FontDecision::Substitute(font) => Some(font.encode_utf16().collect::<Vec<_>>()),
     };
@@ -696,14 +718,29 @@ fn decide_source(
             DECISION_TEXT_REPLACE
         } else {
             0
-        } | glyphshift_adapter_native_abi::font_scale_bits(scale_percent) | if font.is_some() {
-            DECISION_FONT_SUBSTITUTE
-        } else {
-            0
-        },
+        } | glyphshift_adapter_native_abi::font_scale_bits(scale_percent)
+            | if font.is_some() {
+                DECISION_FONT_SUBSTITUTE
+            } else {
+                0
+            },
         text_len: text.as_ref().map_or(0, |text| text.len() as u32),
         font_len: font.as_ref().map_or(0, |font| font.len() as u32),
     }
+}
+
+fn preserve_edge_padding(source: &str, translation: Arc<str>) -> Arc<str> {
+    let leading = source.len() - source.trim_start().len();
+    let trailing_start = source.trim_end().len();
+    if leading == 0 && trailing_start == source.len() {
+        return translation;
+    }
+    let mut padded =
+        String::with_capacity(leading + translation.len() + source.len() - trailing_start);
+    padded.push_str(&source[..leading]);
+    padded.push_str(&translation);
+    padded.push_str(&source[trailing_start..]);
+    padded.into()
 }
 
 extern "C" fn source_characters_utf16(
