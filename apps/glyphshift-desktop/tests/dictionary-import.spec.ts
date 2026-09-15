@@ -75,6 +75,7 @@ test('icons render with external icon APIs blocked and actions expose hover labe
   await expect(edit).toHaveAttribute('title', /界面基础词典/)
   await expect(edit.locator('svg path').first()).toBeAttached()
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '添加 AI 配置' }).locator('svg path').first()).toBeAttached()
   expect(requests).toEqual([])

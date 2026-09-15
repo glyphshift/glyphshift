@@ -66,6 +66,7 @@ export const model = ref<DesktopModel>(readModel())
 export const softwareBusy = ref(false)
 export const workspaceBusy = ref(false)
 export const refreshing = ref(false)
+export const lastWorkflowRefreshAt = ref(0)
 export const fontRefreshing = ref(false)
 export const messages = ref<Record<string, string>>({})
 export const dictionaryDetail = ref<DictionaryDetail | null>(null)
@@ -111,5 +112,6 @@ export function setMessage(id: string, message: string) {
 export async function connectDesktopBackend() {
   if (!hasDesktopRuntime()) return false
   applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_snapshot'))
+  lastWorkflowRefreshAt.value = Date.now()
   return true
 }

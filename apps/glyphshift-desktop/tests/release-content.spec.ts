@@ -72,6 +72,7 @@ test('desktop copy uses novice task language and keeps implementation terms out 
   const english = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'locales', 'en-US.ts'), 'utf8')
   const aiPanel = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', 'AiProfilesPanel.vue'), 'utf8')
   const diagnostics = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', 'RuntimeDiagnosticsModal.vue'), 'utf8')
+  const titleBar = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'components', 'TitleBar.vue'), 'utf8')
   const routineSurfaces = [
     'SettingsView.vue',
     'SoftwareTable.vue',
@@ -102,7 +103,7 @@ test('desktop copy uses novice task language and keeps implementation terms out 
   expect(aiPanel).not.toContain('credentialStorageHint')
   expect(aiPanel).not.toContain('modelDiscoveryNotTested')
   expect(diagnostics).not.toContain('publicationIdentity')
-  expect(routineSurfaces).toContain('icon="i-tabler-list-check"')
+  expect(titleBar).not.toContain('icon="i-tabler-list-check"')
   expect(routineSurfaces).not.toContain('<UtilityPageShell\n    title-id="translation-tasks-title"')
   for (const redundantKey of [
     "t('settings.description')",
@@ -160,7 +161,7 @@ test('root documents separate domain language, product truth, and the implemente
   expect(positions.every(position => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((left, right) => left - right))
   expect(design).toContain('Windows Translation Workbench')
-  expect(design).toContain('Settings 使用通用、软件、字体、语言四个局部导航')
+  expect(design).toContain('Settings 使用通用、AI 配置、文字处理、软件管理、字体管理、语言管理六个局部导航')
   expect(design).toContain('使用指南 / AI 翻译 / 故障排查 / 技术与兼容')
   expect(design).not.toContain('AI 翻译执行')
 })

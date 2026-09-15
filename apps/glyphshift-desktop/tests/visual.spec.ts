@@ -237,6 +237,8 @@ test('capture English light settings at wide and compact widths', async ({ page 
     productModel: model,
     appSettings: {
       settingsSchemaVersion: 1,
+      safetyNoticeVersion: 1,
+      onboardingVersion: 1,
       localePreference: 'en-US',
       themePreference: 'light',
     },
@@ -262,6 +264,8 @@ test('capture light workflow and software editor surfaces', async ({ page }) => 
     productModel: model,
     appSettings: {
       settingsSchemaVersion: 1,
+      safetyNoticeVersion: 1,
+      onboardingVersion: 1,
       localePreference: 'zh-CN',
       themePreference: 'light',
     },

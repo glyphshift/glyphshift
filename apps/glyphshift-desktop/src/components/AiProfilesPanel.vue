@@ -45,23 +45,35 @@ const pendingDelete = ref<AiProfile | null>(null)
 const excludedPatternsText = ref('')
 const advancedOpen = ref(false)
 const secretVisible = ref(false)
-const presetId = ref('custom')
-const presetItems = computed(() => [
-  { value: 'custom', label: t('ai.presetCustom') },
-  ...aiPresets.map(preset => ({ value: preset.id, label: t(`ai.presetNames.${preset.id}`) })),
+const presetId = ref('')
+const createStep = ref<'service' | 'config'>('service')
+const createStepItems = computed(() => [
+  { value: 'service' as const, label: t('ai.createSteps.service') },
+  { value: 'config' as const, label: t('ai.createSteps.config'), disabled: !presetId.value },
 ])
+const selectedPresetName = computed(() => presetId.value === 'custom'
+  ? t('ai.presetCustom')
+  : presetId.value
+    ? t(`ai.presetNames.${presetId.value}`)
+    : '')
 
-function applyPreset(id: string) {
+function choosePreset(id: string) {
   presetId.value = id
   const preset = aiPresets.find(item => item.id === id)
-  if (!preset || editingProfile.value) return
-  form.value.protocol = preset.protocol
-  form.value.name = t(`ai.presetNames.${preset.id}`)
-  form.value.baseUrl = preset.baseUrl
-  form.value.modelId = preset.modelId
-  form.value.reasoningEffort = preset.reasoningEffort
+  if (editingProfile.value) return
+  if (preset) {
+    form.value.protocol = preset.protocol
+    form.value.name = t(`ai.presetNames.${preset.id}`)
+    form.value.baseUrl = preset.baseUrl
+    form.value.modelId = preset.modelId
+    form.value.reasoningEffort = preset.reasoningEffort
+  } else {
+    const makeDefault = form.value.makeDefault
+    form.value = { ...newProfileForm(), makeDefault }
+  }
   form.value.secret = ''
   secretVisible.value = false
+  createStep.value = 'config'
 }
 
 
@@ -229,7 +241,8 @@ function reasoningLabel(profile: AiProfile) {
 }
 
 function openCreate() {
-  presetId.value = 'custom'
+  presetId.value = ''
+  createStep.value = 'service'
   editingProfile.value = null
   form.value = newProfileForm()
   excludedPatternsText.value = ''
@@ -239,6 +252,7 @@ function openCreate() {
 }
 
 function openEdit(profile: AiProfile) {
+  createStep.value = 'config'
   editingProfile.value = profile
   form.value = {
     id: profile.id,
@@ -370,16 +384,75 @@ onMounted(() => void ai.connect())
     :open="editorOpen"
     :title="editingProfile ? t('ai.editProfileTitle') : t('ai.addProfile')"
     :confirm-label="t('ai.saveProfile')"
+    :confirm-visible="Boolean(editingProfile) || createStep === 'config'"
     :confirm-disabled="!formValid"
     :busy="ai.busy.value"
     width="lg"
     @update:open="editorOpen = $event"
     @confirm="save"
   >
-    <div class="grid grid-cols-2 gap-x-4 gap-y-3 @max-[560px]:grid-cols-1">
-      <UFormField v-if="!editingProfile" :label="t('ai.preset')" class="col-span-2 @max-[560px]:col-span-1">
-        <USelect :model-value="presetId" :items="presetItems" value-key="value" label-key="label" :aria-label="t('ai.preset')" :title="t('ai.presetHint')" class="w-full" @update:model-value="applyPreset(String($event))" />
-      </UFormField>
+    <UTabs
+      v-if="!editingProfile"
+      v-model="createStep"
+      :content="false"
+      :items="createStepItems"
+      class="mb-4"
+      :aria-label="t('ai.createSteps.label')"
+    />
+
+    <div v-if="!editingProfile && createStep === 'service'">
+      <div class="mb-4">
+        <p class="type-label m-0 text-[var(--text)]">{{ t('ai.chooseServiceTitle') }}</p>
+        <p class="type-metadata mb-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.chooseServiceHint') }}</p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 @max-[560px]:grid-cols-2 @max-[380px]:grid-cols-1" role="group" :aria-label="t('ai.chooseServiceTitle')">
+        <button
+          v-for="preset in aiPresets"
+          :key="preset.id"
+          type="button"
+          :aria-label="t('ai.choosePreset', { name: t(`ai.presetNames.${preset.id}`) })"
+          :aria-pressed="presetId === preset.id"
+          class="group min-h-[76px] rounded-[var(--radius-control)] border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          :class="presetId === preset.id
+            ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+            : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'"
+          @click="choosePreset(preset.id)"
+        >
+          <span class="flex items-center justify-between gap-2">
+            <strong class="type-label truncate text-[var(--text)]">{{ t(`ai.presetNames.${preset.id}`) }}</strong>
+            <UIcon name="i-tabler-chevron-right" class="size-3.5 shrink-0 text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </span>
+          <UBadge color="neutral" variant="soft" size="sm" class="mt-2 max-w-full" :label="protocolLabel(preset.protocol)" />
+        </button>
+
+        <button
+          type="button"
+          :aria-label="t('ai.chooseCustomPreset')"
+          :aria-pressed="presetId === 'custom'"
+          class="group min-h-[76px] rounded-[var(--radius-control)] border border-dashed px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          :class="presetId === 'custom'
+            ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+            : 'border-[var(--border-strong)] bg-[var(--surface-subtle)] hover:border-[var(--accent)] hover:bg-[var(--surface-hover)]'"
+          @click="choosePreset('custom')"
+        >
+          <span class="flex items-center justify-between gap-2">
+            <strong class="type-label text-[var(--text)]">{{ t('ai.presetCustom') }}</strong>
+            <UIcon name="i-tabler-adjustments" class="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+          </span>
+          <span class="type-caption mt-2 block leading-4 text-[var(--text-muted)]">{{ t('ai.customPresetHint') }}</span>
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
+      <div v-if="!editingProfile" class="mb-4 flex items-center gap-2 rounded-[var(--radius-control)] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2">
+        <span class="type-metadata text-[var(--text-muted)]">{{ t('ai.selectedService') }}</span>
+        <UBadge color="primary" variant="soft" size="sm" :label="selectedPresetName" />
+        <UButton color="neutral" variant="ghost" size="xs" class="ml-auto" :label="t('ai.changeService')" @click="createStep = 'service'" />
+      </div>
+
+      <div class="grid grid-cols-2 gap-x-4 gap-y-3 @max-[560px]:grid-cols-1">
       <UFormField :label="t('ai.profileName')" required>
         <UInput v-model="form.name" :aria-label="t('ai.profileName')" :maxlength="128" class="w-full" />
       </UFormField>
@@ -435,9 +508,9 @@ onMounted(() => void ai.connect())
         <p v-if="modelsError" role="alert" class="type-caption m-0 mt-1 leading-4 text-[var(--danger)]">{{ modelsError }}</p>
         <p v-else-if="modelsFetched" role="status" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.modelsFetched', { count: modelItems.length }) }}</p>
       </UFormField>
-    </div>
+      </div>
 
-    <UCollapsible v-model:open="advancedOpen" class="mt-4 border-y border-[var(--border)]">
+      <UCollapsible v-model:open="advancedOpen" class="mt-4 border-y border-[var(--border)]">
       <UButton
         color="neutral"
         variant="ghost"
@@ -473,11 +546,24 @@ onMounted(() => void ai.connect())
           </div>
         </div>
       </template>
-    </UCollapsible>
+      </UCollapsible>
 
-    <div class="mt-4 flex flex-wrap items-center gap-5 border-t border-[var(--border)] pt-4">
-      <UCheckbox v-model="form.makeDefault" :label="t('ai.useAsDefault')" />
-    </div>
+      <div class="mt-4 flex flex-wrap items-center gap-5 border-t border-[var(--border)] pt-4">
+        <UCheckbox v-model="form.makeDefault" :label="t('ai.useAsDefault')" />
+      </div>
+    </template>
+
+    <template #footer-leading>
+      <UButton
+        v-if="!editingProfile && createStep === 'config'"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        icon="i-tabler-arrow-left"
+        :label="t('ai.changeService')"
+        @click="createStep = 'service'"
+      />
+    </template>
   </ManagementFormModal>
 
   <ConfirmDialog

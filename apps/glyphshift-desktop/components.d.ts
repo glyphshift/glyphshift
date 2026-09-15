@@ -26,6 +26,8 @@ declare module 'vue' {
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
     FavoriteFontSettings: typeof import('./src/components/FavoriteFontSettings.vue')['default']
     FieldHelp: typeof import('./src/components/FieldHelp.vue')['default']
+    FirstRunGuide: typeof import('./src/components/FirstRunGuide.vue')['default']
+    FirstRunSafetyNotice: typeof import('./src/components/FirstRunSafetyNotice.vue')['default']
     FontFallbackSettings: typeof import('./src/components/FontFallbackSettings.vue')['default']
     FontFamilySelect: typeof import('./src/components/FontFamilySelect.vue')['default']
     HelpView: typeof import('./src/components/HelpView.vue')['default']

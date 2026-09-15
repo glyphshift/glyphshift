@@ -22,6 +22,18 @@ async function startFromAiPreflight(page: Page) {
     .click()
 }
 
+async function openAiSettings(page: Page) {
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
+}
+
+async function openCustomAiCreate(page: Page) {
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加 AI 配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  await dialog.getByRole('button', { name: '选择自定义 AI 服务' }).click()
+  return dialog
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => {
     localStorage.setItem(key, JSON.stringify(value))
@@ -47,10 +59,9 @@ test('translation task empty state uses the shared management surface', async ({
 test('settings creates a default Ollama AI profile without asking for an API key', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
-
+  await openAiSettings(page)
   await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('本地 Ollama')
   await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
   await page.getByRole('option', { name: 'Ollama（本机）', exact: true }).click()
@@ -69,14 +80,14 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await expect(page.getByText(/qwen3:8b/)).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await expect(page.getByText('本地 Ollama', { exact: true })).toBeVisible()
 })
 
 test('settings creates a Codex subscription profile without endpoint or credential fields', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('我的 Codex')
   await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
   await page.getByRole('option', { name: 'Codex 订阅', exact: true }).click()
@@ -113,6 +124,7 @@ test('settings stores an API key in the profile and can reveal or hide it', asyn
   }, { key: aiStorageKey, value: profiles })
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: '编辑 AI 配置：可见密钥' }).click()
   const dialog = page.getByRole('dialog', { name: '编辑 AI 配置' })
   const keyInput = dialog.getByRole('textbox', { name: 'API Key（密钥）' })
@@ -128,6 +140,7 @@ test('settings stores an API key in the profile and can reveal or hide it', asyn
 
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: '编辑 AI 配置：可见密钥' }).click()
   await expect(page.getByRole('dialog', { name: '编辑 AI 配置' })
     .getByRole('textbox', { name: 'API Key（密钥）' })).toHaveValue('synthetic-visible-key')
@@ -136,8 +149,7 @@ test('settings stores an API key in the profile and can reveal or hide it', asyn
 test('DeepSeek profile defaults reasoning off and exposes only truthful effort levels', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('DeepSeek 翻译')
   await dialog.getByRole('textbox', { name: '服务地址' }).fill('https://api.deepseek.com')
   await dialog.getByRole('combobox', { name: '模型' }).fill('deepseek-v4-flash')
@@ -161,6 +173,7 @@ test('DeepSeek profile defaults reasoning off and exposes only truthful effort l
   await expect(page.getByText(/思考 关闭/)).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: '编辑 AI 配置：DeepSeek 翻译' }).click()
   const editor = page.getByRole('dialog', { name: '编辑 AI 配置' })
   await expect(editor.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
@@ -194,6 +207,7 @@ test('AI profile connection test reports model invocation separately from option
   }, { key: aiStorageKey, value: profiles })
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
 
   await page.getByRole('button', { name: '测试 AI 配置“本地 Ollama”' }).click()
 
@@ -213,10 +227,6 @@ test('AI profile connection test reports model invocation separately from option
   await expect(page.getByText('连接成功，可以开始翻译')).toBeVisible()
   await expect(testButton).toBeEnabled()
   const interval = page.getByRole('spinbutton', { name: '自动补全间隔（秒）' })
-  const folder = page.getByRole('button', { name: '打开字典文件夹', exact: true })
-  const intervalBox = await interval.boundingBox()
-  const folderBox = await folder.boundingBox()
-  expect(Math.abs(intervalBox!.x - folderBox!.x)).toBeLessThan(4)
   await interval.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('settings-auto-interval.png') })
 
@@ -225,7 +235,7 @@ test('AI profile connection test reports model invocation separately from option
 test('settings keeps AI profiles without a translation confirmation toggle', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
-
+  await openAiSettings(page)
   const aiSection = page.getByTestId('settings-section-ai')
   await expect(aiSection).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 翻译执行' })).toHaveCount(0)
@@ -236,8 +246,7 @@ test('settings keeps AI profiles without a translation confirmation toggle', asy
   await expect(aiSection.getByRole('switch', { name: '翻译前询问' })).toHaveCount(0)
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('自定义批次')
   await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
   await page.getByRole('option', { name: 'Ollama（本机）', exact: true }).click()
@@ -252,6 +261,7 @@ test('settings keeps AI profiles without a translation confirmation toggle', asy
 
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await expect(page.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveCount(0)
   await expect(page.getByRole('switch', { name: '翻译前询问' })).toHaveCount(0)
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
@@ -280,6 +290,8 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
     localStorage.setItem(profileKey, JSON.stringify(profileValue))
     localStorage.setItem(settingsKey, JSON.stringify({
       settingsSchemaVersion: 1,
+      safetyNoticeVersion: 1,
+      onboardingVersion: 1,
       localePreference: 'zh-CN',
       themePreference: 'dark',
       confirmAiTranslation: false,
@@ -466,6 +478,8 @@ test('dictionary AI fill reports all candidates completed across automatic batch
     localStorage.setItem(profileKey, JSON.stringify(profileValue))
     localStorage.setItem(settingsKey, JSON.stringify({
       settingsSchemaVersion: 1,
+      safetyNoticeVersion: 1,
+      onboardingVersion: 1,
       localePreference: 'zh-CN',
       themePreference: 'dark',
       confirmAiTranslation: false,
@@ -565,6 +579,8 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
     localStorage.setItem(profileKey, JSON.stringify(profileValue))
     localStorage.setItem(settingsKey, JSON.stringify({
       settingsSchemaVersion: 1,
+      safetyNoticeVersion: 1,
+      onboardingVersion: 1,
       localePreference: 'zh-CN',
       themePreference: 'dark',
       confirmAiTranslation: false,
@@ -897,15 +913,26 @@ test('probe shows only compact AI task status and links to full task details', a
 test('service presets fill editable drafts, clear keys between services and preserve saved edits', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: '添加 AI 配置' }).click()
   const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  await expect(dialog.getByText('先选择你要使用的 AI 服务', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '选择 DeepSeek' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择 OpenAI' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择自定义 AI 服务' })).toBeVisible()
+  if (process.env.GLYPHSHIFT_PRESET_CHOOSER_SCREENSHOT) {
+    await page.screenshot({ path: process.env.GLYPHSHIFT_PRESET_CHOOSER_SCREENSHOT, fullPage: true })
+  }
   const choose = async (name: string) => {
-    await dialog.getByRole('combobox', { name: '服务预设' }).click()
-    await page.getByRole('option', { name, exact: true }).click()
+    const serviceTab = dialog.getByRole('tab', { name: '1 选择服务' })
+    if (await serviceTab.getAttribute('data-state') !== 'active') await serviceTab.click()
+    await dialog.getByRole('button', { name: `选择 ${name}` }).click()
   }
   await choose('DeepSeek')
   await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('DeepSeek')
   await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
+  await expect(dialog.getByRole('combobox', { name: 'AI 服务' })).toContainText('OpenAI（Responses）')
   await expect(dialog.getByRole('combobox', { name: '模型', exact: true })).toHaveValue('')
   await expect(dialog.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
   await expect(dialog.getByRole('button', { name: '保存配置' })).toBeDisabled()
@@ -925,11 +952,40 @@ test('service presets fill editable drafts, clear keys between services and pres
   await dialog.getByRole('button', { name: '保存配置' }).click()
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
   const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
-  await expect(edit.getByRole('combobox', { name: '服务预设' })).toHaveCount(0)
+  await expect(edit.getByRole('tab', { name: '1 选择服务' })).toHaveCount(0)
   await expect(edit.getByRole('combobox', { name: '模型', exact: true })).toHaveValue('deepseek-custom-model')
   await expect(edit.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
+})
+
+test('service presets use audited provider protocols and base URLs', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加 AI 配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const cases = [
+    ['DeepSeek', 'OpenAI（Responses）', 'https://api.deepseek.com'],
+    ['通义千问（北京）', 'OpenAI（Chat Completions）', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+    ['硅基流动', 'OpenAI（Chat Completions）', 'https://api.siliconflow.cn/v1'],
+    ['OpenAI', 'OpenAI（Responses）', 'https://api.openai.com/v1'],
+    ['Claude', 'Anthropic', 'https://api.anthropic.com'],
+    ['Gemini', 'Gemini', 'https://generativelanguage.googleapis.com/v1beta'],
+    ['OpenRouter', '兼容 OpenAI 的服务', 'https://openrouter.ai/api/v1'],
+    ['Groq', 'OpenAI（Chat Completions）', 'https://api.groq.com/openai/v1'],
+    ['Mistral', 'OpenAI（Chat Completions）', 'https://api.mistral.ai/v1'],
+    ['xAI', 'OpenAI（Responses）', 'https://api.x.ai/v1'],
+    ['Ollama', 'Ollama', 'http://127.0.0.1:11434/api'],
+  ] as const
+
+  for (const [index, [name, protocol, baseUrl]] of cases.entries()) {
+    if (index > 0) await dialog.getByRole('tab', { name: '1 选择服务' }).click()
+    await dialog.getByRole('button', { name: `选择 ${name}` }).click()
+    await expect(dialog.getByRole('combobox', { name: 'AI 服务' })).toContainText(protocol)
+    await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue(baseUrl)
+  }
 })
 
 
@@ -937,10 +993,10 @@ test('AI setup guide and custom translation prompt support saving and restoring 
   await page.addInitScript(() => { window.open = ((url: string) => { (window as unknown as { openedGuide: string }).openedGuide = url; return null }) as typeof window.open })
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: '添加 AI 配置' }).click()
   const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
-  await dialog.getByRole('combobox', { name: '服务预设' }).click()
-  await page.getByRole('option', { name: 'DeepSeek', exact: true }).click()
+  await dialog.getByRole('button', { name: '选择 DeepSeek' }).click()
   await dialog.getByRole('button', { name: '查看配置文档' }).click()
   await expect.poll(() => page.evaluate(() => (window as unknown as { openedGuide: string }).openedGuide)).toBe('https://api-docs.deepseek.com/zh-cn/')
   await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-prompt-key')
@@ -957,6 +1013,7 @@ test('AI setup guide and custom translation prompt support saving and restoring 
   await dialog.getByRole('button', { name: '保存配置' }).click()
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
   await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
   const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
   await expect(edit.getByRole('button', { name: '查看配置文档' })).toBeVisible()

@@ -5,7 +5,7 @@ import { selectLanguage } from './fixtures/languageSelect'
 test('workflow owns per-dictionary fonts and scale and the add dialog uses managed languages', async ({ page }, info) => {
   await page.addInitScript(({ key, value }) => {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(value))
-    localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify({ favoriteFonts: ['Synthetic Serif'], translationLanguages: ['en-US', 'zh-CN', 'ja'] }))
+    localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify({ safetyNoticeVersion: 1, onboardingVersion: 1, favoriteFonts: ['Synthetic Serif'], translationLanguages: ['en-US', 'zh-CN', 'ja'] }))
   }, { key: storageKey, value: model })
   await page.goto('/')
   await page.getByRole('button', { name: '新建工作流', exact: true }).click()

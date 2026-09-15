@@ -15,6 +15,8 @@ import AppUpdateNotice from './components/AppUpdateNotice.vue'
 import TitleBar from './components/TitleBar.vue'
 import TranslationTasksView from './components/TranslationTasksView.vue'
 import WorkflowTable from './components/WorkflowTable.vue'
+import FirstRunGuide from './components/FirstRunGuide.vue'
+import FirstRunSafetyNotice from './components/FirstRunSafetyNotice.vue'
 import { useAppSettings } from './appSettings'
 import { useAiTranslation } from './useAiTranslation'
 import type { SoftwareQuickCaptureEvent, WorkflowCommandResult, WorkflowDetail, WorkflowTarget } from './model'
@@ -24,7 +26,11 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 35
+const desktopApiVersion = 36
+const safetyNoticeVersion = 1
+const onboardingVersion = 1
+const workflowBackgroundRefreshIntervalMs = 5_000
+const workflowBackgroundRefreshMinAgeMs = 4_000
 
 const { t } = useI18n()
 const appSettings = useAppSettings()
@@ -42,12 +48,13 @@ const closingActiveTask = computed(() => pendingExit.value === 'close' && ai.tas
 const shellCompatibilityErrorKey = ref('')
 const quickProbeCaptureActive = ref(false)
 const mainContent = ref<HTMLElement | null>(null)
+const firstRunBusy = ref(false)
+const firstRunError = ref('')
+const settingsSection = ref('general')
 const shellCompatibilityError = computed(() => shellCompatibilityErrorKey.value ? t(shellCompatibilityErrorKey.value) : '')
 const nuxtLocale = computed(() => appSettings.effectiveLocale.value === 'en-US' ? en : zh_cn)
-const translationTaskProgress = computed(() => {
-  const task = ai.currentJob.value
-  return task && ai.taskRunning.value ? `${task.finishedBatches}/${task.totalBatches}` : ''
-})
+const firstRunSafetyOpen = computed(() => appSettings.safetyNoticeVersion.value < safetyNoticeVersion)
+const firstRunGuideOpen = computed(() => !firstRunSafetyOpen.value && appSettings.onboardingVersion.value < onboardingVersion)
 let unlistenSoftwareCapture: UnlistenFn | null = null
 let unlistenWorkflowShortcut: UnlistenFn | null = null
 let unlistenWindowClose: UnlistenFn | null = null
@@ -126,7 +133,6 @@ async function returnFromDictionary() {
 
 function requestNavigation(next: NavigableView) {
   if (next === 'capture' || next === 'software') next = 'workflows'
-  if (next === 'workflows') void workspace.refreshWorkflows(false)
   if (next === view.value) return
   if (editorDirty.value) {
     pendingExit.value = next
@@ -135,6 +141,7 @@ function requestNavigation(next: NavigableView) {
   editorDirty.value = false
   collectionWorkflowId.value = null
   view.value = next
+  if (next === 'workflows') refreshWorkflowsInBackground()
 }
 
 async function closeWindow() {
@@ -214,6 +221,49 @@ function guardBrowserExit(event: BeforeUnloadEvent) {
 
 function focusMainContent() {
   mainContent.value?.focus({ preventScroll: true })
+}
+
+async function acceptSafetyNotice() {
+  firstRunBusy.value = true
+  firstRunError.value = ''
+  try {
+    await appSettings.setSafetyNoticeVersion(safetyNoticeVersion)
+  }
+  catch {
+    firstRunError.value = appSettings.settingsError.value || t('firstRun.saveFailed')
+  }
+  finally {
+    firstRunBusy.value = false
+  }
+}
+
+async function finishOnboarding() {
+  firstRunBusy.value = true
+  firstRunError.value = ''
+  try {
+    await appSettings.setOnboardingVersion(onboardingVersion)
+  }
+  catch {
+    firstRunError.value = appSettings.settingsError.value || t('firstRun.saveFailed')
+  }
+  finally {
+    firstRunBusy.value = false
+  }
+}
+
+watch(firstRunGuideOpen, value => {
+  if (value) {
+    settingsSection.value = 'general'
+    if (view.value !== 'settings') requestNavigation('settings')
+  }
+})
+
+function navigateOnboarding(section: string) {
+  if (section === 'workflows') requestNavigation('workflows')
+  else {
+    settingsSection.value = section
+    requestNavigation('settings')
+  }
 }
 
 function handleShellShortcut(event: KeyboardEvent) {
@@ -315,7 +365,13 @@ async function connectWorkflowShortcuts() {
   } catch { /* Shortcuts are available only in the native desktop. */ }
 }
 
-function refreshOnFocus() { if ('__TAURI_INTERNALS__' in window) void workspace.refreshWorkflows(false) }
+function refreshWorkflowsInBackground() {
+  if (!('__TAURI_INTERNALS__' in window) || workspace.workspaceBusy.value) return
+  if (Date.now() - workspace.lastWorkflowRefreshAt.value < workflowBackgroundRefreshMinAgeMs) return
+  void workspace.refreshWorkflows(false, false)
+}
+
+function refreshOnFocus() { refreshWorkflowsInBackground() }
 
 onMounted(() => {
   window.addEventListener('focus', refreshOnFocus)
@@ -328,8 +384,8 @@ onMounted(() => {
       finally { collecting = false }
     }, 1000)
     workflowMonitor = setInterval(() => {
-      if (workspace.activationIds.value.size && !workspace.workspaceBusy.value) void workspace.refreshWorkflows(false)
-    }, 5000)
+      if (workspace.activationIds.value.size) refreshWorkflowsInBackground()
+    }, workflowBackgroundRefreshIntervalMs)
   }
   window.addEventListener('beforeunload', guardBrowserExit)
   window.addEventListener('keydown', handleShellShortcut)
@@ -379,8 +435,6 @@ onBeforeUnmount(() => {
       </a>
       <TitleBar
         :current="view === 'capture' && collectionWorkflowId ? 'workflows' : view"
-        :translation-task-active="ai.taskRunning.value"
-        :translation-task-progress="translationTaskProgress"
         @navigate="requestNavigation"
         @close="requestWindowClose"
       />
@@ -475,7 +529,7 @@ onBeforeUnmount(() => {
       />
       <TranslationTasksView v-else-if="view === 'translation-tasks'" />
       <HelpView v-else-if="view === 'help'" :adapters="workspace.model.value.adapters" @navigate="requestNavigation" />
-      <SettingsView v-else @navigate="view = $event" />
+      <SettingsView v-else v-model:section="settingsSection" />
       </main>
       <ConfirmDialog
         :open="discardOpen"
@@ -486,6 +540,20 @@ onBeforeUnmount(() => {
         confirm-color="warning"
         @update:open="$event || cancelDiscard()"
         @confirm="confirmDiscard"
+      />
+      <FirstRunSafetyNotice
+        :open="firstRunSafetyOpen"
+        :busy="firstRunBusy"
+        :error="firstRunError"
+        @confirm="acceptSafetyNotice"
+      />
+      <FirstRunGuide
+        :open="firstRunGuideOpen"
+        :busy="firstRunBusy"
+        :error="firstRunError"
+        @navigate="navigateOnboarding"
+        @skip="finishOnboarding"
+        @complete="finishOnboarding"
       />
     </div>
   </UApp>

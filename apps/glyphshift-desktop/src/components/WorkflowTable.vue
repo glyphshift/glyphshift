@@ -196,7 +196,7 @@ const formValid = computed(() => formProblems.value.length === 0)
 const editorTabs = computed(() => [
   { value: 'software', slot: 'software', label: t('workflows.tabs.software'), icon: 'i-tabler-app-window', badge: problemBadge(softwareProblems.value) },
   { value: 'basic', slot: 'basic', label: t('workflows.tabs.basic'), icon: 'i-tabler-adjustments-horizontal', badge: problemBadge(basicProblems.value) },
-  { value: 'dictionary', slot: 'dictionary', label: t('workflows.tabs.dictionary'), icon: 'i-tabler-language', badge: problemBadge(dictionaryProblems.value) },
+  { value: 'dictionary', slot: 'dictionary', label: t('workflows.tabs.dictionary'), icon: 'i-tabler-language', badge: problemBadge(dictionaryProblems.value), ui: { trigger: 'tour-workflow-dictionary-tab' } },
   { value: 'font', slot: 'font', label: t('workflows.tabs.font'), icon: 'i-tabler-typography', badge: problemBadge(fontProblems.value) },
 ])
 const catalogFilterOptions = computed(() => [
@@ -218,10 +218,10 @@ const columnOptions = computed(() => [
 ])
 const tableColumns = computed<TableColumn<WorkflowSummary>[]>(() => [
   { id: 'select', header: '', meta: managementSelectionColumnMeta() },
-  { id: 'workflow', header: t('workflows.columns.workflow'), meta: { class: { th: `${managementIdentityColumnMeta('w-52').class.th} !w-auto`, td: managementIdentityColumnMeta('w-52').class.td } } },
+  { id: 'workflow', header: t('workflows.columns.workflow'), meta: { class: { th: `${managementIdentityColumnMeta('w-52').class.th} !w-auto !min-w-0 !max-w-none`, td: `${managementIdentityColumnMeta('w-52').class.td} !w-auto !min-w-0 !max-w-none` } } },
   ...(visibleColumns.value.software ? [{ id: 'software', header: t('workflows.columns.software'), meta: { class: { th: 'w-28 min-w-28 whitespace-nowrap', td: 'w-28 min-w-28' } } } satisfies TableColumn<WorkflowSummary>] : []),
   ...(visibleColumns.value.assets ? [{ id: 'assets', header: t('workflows.columns.assets'), meta: { class: { th: 'w-36 whitespace-nowrap', td: 'w-36 max-w-36' } } } satisfies TableColumn<WorkflowSummary>] : []),
-  ...(visibleColumns.value.status ? [{ id: 'status', header: t('workflows.columns.status'), meta: { class: { th: 'w-24 text-center', td: 'w-24 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
+  ...(visibleColumns.value.status ? [{ id: 'status', header: t('workflows.columns.status'), meta: { class: { th: 'w-32 max-w-32 text-center', td: 'w-32 max-w-32 text-center' } } } satisfies TableColumn<WorkflowSummary>] : []),
   { id: 'actions', header: t('workflows.columns.actions'), meta: managementActionsColumnMeta('w-60') },
 ])
 function workflowOverflowItems(item: WorkflowSummary): DropdownMenuItem[][] {
@@ -324,6 +324,19 @@ function runtimeIssues(item: WorkflowSummary) {
     error,
   }))
 }
+function runtimeWarnings(item: WorkflowSummary) {
+  return Object.entries(props.runtimeStatus[item.id]?.warnings ?? {}).map(([softwareId, error]) => ({
+    softwareId,
+    softwareName: props.software.find(candidate => candidate.id === softwareId)?.name ?? t('workflows.runtimeIssue.unknownSoftware'),
+    error,
+  }))
+}
+function runtimeNotices(item: WorkflowSummary) {
+  return [...runtimeIssues(item), ...runtimeWarnings(item)]
+}
+function hasCompatibilityWarning(item: WorkflowSummary) {
+  return runtimeWarnings(item).some(issue => issue.error.code === 'runtime.no_compatibility_signal')
+}
 function runtimeIssueKind(item: WorkflowSummary) {
   const codes = [...new Set(runtimeIssues(item).map(issue => issue.error.code))]
   if (codes.length !== 1) return 'multiple'
@@ -346,9 +359,14 @@ function runtimeIssueKind(item: WorkflowSummary) {
   }
   return knownKinds[code] ?? 'failed'
 }
-function actualLabel(item: WorkflowSummary) { return t(`workflowLifecycle.${actualStatus(item)}`) }
+function actualLabel(item: WorkflowSummary) {
+  return actualStatus(item) === 'running' && hasCompatibilityWarning(item)
+    ? t('workflowLifecycle.noSignal')
+    : t(`workflowLifecycle.${actualStatus(item)}`)
+}
 function actualColor(item: WorkflowSummary): 'success' | 'warning' | 'error' | 'neutral' {
   const status = actualStatus(item)
+  if (status === 'running' && hasCompatibilityWarning(item)) return 'warning'
   return workflowStateColor(status)
 }
 
@@ -381,6 +399,7 @@ function startCreate() {
   creating.value = true
   openSoftwarePicker()
 }
+defineExpose({ startCreate })
 function closeForm() {
   discardFormOpen.value = false
   if (props.editing) emit('closeEdit')
@@ -474,7 +493,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
     <template v-if="!formOpen">
     <ManagementPageHeader title-id="workflow-title" :title="t('workflows.title')" icon="i-tabler-git-branch">
       <template #actions>
-        <UButton color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('workflows.create')" :disabled="busy" @click="startCreate" />
+        <UButton data-tour="workflow-create" color="primary" variant="solid" size="sm" icon="i-tabler-plus" :label="t('workflows.create')" :disabled="busy" @click="startCreate" />
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :label="refreshing ? t('workflows.refreshing') : t('workflows.refresh')" :loading="refreshing" :disabled="refreshing" @click="emit('refresh')" />
       </template>
     </ManagementPageHeader>
@@ -487,21 +506,21 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <UButton color="neutral" variant="outline" size="sm" icon="i-tabler-player-stop" :label="t('workflows.bulkDisable')" :disabled="busy" @click="emit('toggleMany', [...selected], false)" />
         <UButton color="error" variant="soft" size="sm" icon="i-tabler-trash" :label="t('workflows.bulkDelete')" :disabled="busy" @click="pendingRemoval = items.filter(item => selected.has(item.id))" />
       </template>
-      <UTable data-testid="workflow-management-table" role="region" tabindex="0" aria-labelledby="workflow-title" :data="pageItems" :columns="tableColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'table-fixed min-w-[880px]' }" @dblclick="openOnDoubleClick">
+      <UTable data-testid="workflow-management-table" role="region" tabindex="0" aria-labelledby="workflow-title" :data="pageItems" :columns="tableColumns" sticky class="management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'w-full table-fixed min-w-full' }" @dblclick="openOnDoubleClick">
         <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('workflows.selectPage')" @update:model-value="togglePageSelection" /></template>
         <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.id)" :aria-label="t('common.selectNamed', { name: row.original.name })" @update:model-value="toggleSelection(row.original.id)" /></template>
         <template #workflow-cell="{ row }"><button type="button" class="max-w-full truncate text-left font-semibold hover:text-[var(--accent)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)]" :disabled="busy" @click="emit('collect', row.original.id)">{{ row.original.name }}</button><div v-if="row.original.description" class="type-metadata mt-0.5 truncate text-[var(--text-muted)]">{{ row.original.description }}</div></template>
         <template #software-cell="{ row }"><div class="truncate" :title="softwareNames(row.original)">{{ softwareNames(row.original) }}</div><div class="type-metadata mt-1 text-[var(--text-muted)]" :title="adapterNames(row.original)">{{ t('workflows.adapterCount', { count: new Set(row.original.targets.flatMap((target: WorkflowTarget) => target.adapterPlan.adapterIds)).size }) }}</div></template>
         <template #assets-cell="{ row }"><UTooltip :text="dictionaryNames(row.original) || t('workflows.none')"><span tabindex="0" class="inline-block">{{ t('workflows.dictionaryCount', { count: row.original.dictionaryIds.length }) }}</span></UTooltip><div class="type-metadata mt-0.5 truncate text-[var(--text-muted)]" :title="fontNames(row.original)">{{ t('workflows.fonts', { names: fontNames(row.original) || t('workflows.none') }) }}</div></template>
         <template #status-cell="{ row }">
-          <UPopover v-if="runtimeIssues(row.original).length" :ui="{ content: 'z-[80]' }">
-            <UButton :color="actualColor(row.original)" variant="soft" size="xs" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
+          <UPopover v-if="runtimeNotices(row.original).length" :ui="{ content: 'z-[80]' }">
+            <UButton class="max-w-full" :ui="{ label: 'truncate' }" :color="actualColor(row.original)" variant="soft" size="xs" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
             <template #content>
               <section data-testid="workflow-runtime-issues" class="w-80 p-3" :aria-label="t('workflows.runtimeIssue.title')">
-                <h2 class="m-0 text-[11px] font-semibold">{{ t('workflows.runtimeIssue.title') }}</h2>
-                <p class="type-metadata m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('workflows.runtimeIssue.description') }}</p>
+                <h2 class="m-0 text-[11px] font-semibold">{{ t(runtimeIssues(row.original).length ? 'workflows.runtimeIssue.title' : 'workflows.runtimeIssue.compatibilityTitle') }}</h2>
+                <p class="type-metadata m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t(runtimeIssues(row.original).length ? 'workflows.runtimeIssue.description' : 'workflows.runtimeIssue.compatibilityDescription') }}</p>
                 <div class="mt-3 divide-y divide-[var(--border)] border-y border-[var(--border)]">
-                  <div v-for="issue in runtimeIssues(row.original)" :key="issue.softwareId" class="py-2.5">
+                  <div v-for="issue in runtimeNotices(row.original)" :key="`${issue.softwareId}-${issue.error.code}`" class="py-2.5">
                     <div class="type-label font-semibold">{{ issue.softwareName }}</div>
                     <p class="type-metadata m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ translateCommandError(issue.error) }}</p>
                   </div>
@@ -512,7 +531,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
               </section>
             </template>
           </UPopover>
-          <UBadge v-else :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
+          <UBadge v-else class="max-w-full" :ui="{ label: 'truncate' }" :color="actualColor(row.original)" variant="soft" size="sm" :label="actualLabel(row.original)" :title="lastChecked(row.original)" />
         </template>
         <template #actions-cell="{ row }"><div class="flex items-center justify-center gap-1 whitespace-nowrap"><UButton :color="stopAction(row.original) ? 'neutral' : 'primary'" variant="ghost" size="xs" :icon="stopAction(row.original) ? 'i-tabler-player-stop' : 'i-tabler-player-play'" :label="t(stopAction(row.original) ? 'workflowLifecycle.stop' : 'workflows.start')" :loading="['connecting', 'stopping'].includes(actualStatus(row.original))" @click="emit('toggle', row.original.id, !stopAction(row.original))" /><UButton color="primary" variant="ghost" size="xs" icon="i-tabler-language" :label="t('workflows.collectAndTranslate')" :disabled="busy" @click="emit('collect', row.original.id)" /><UButton :title="t('workflows.settings')" color="neutral" variant="ghost" size="xs" icon="i-tabler-settings" :aria-label="t('common.editNamed', { name: row.original.name })" @click="emit('open', row.original.id)" /><UDropdownMenu :items="workflowOverflowItems(row.original)" :content="{ align: 'end' }"><UButton :title="t('common.moreActionsNamed', { name: row.original.name })" color="neutral" variant="ghost" size="xs" icon="i-tabler-dots" :aria-label="t('common.moreActionsNamed', { name: row.original.name })" /></UDropdownMenu></div></template>
         <template #empty><UEmpty icon="i-tabler-git-branch" :title="items.length ? t('workflows.noMatch') : t('workflows.empty')" :description="t('workflows.emptyDescription')" /></template>
@@ -531,7 +550,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       >
         <template #status><UBadge v-if="formDirty" color="warning" variant="subtle" size="sm" :label="t('common.unsaved')" /></template>
         <template #actions>
-          <UButton color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
+          <UButton data-tour="workflow-save" color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
         </template>
       </ManagementDetailHeader>
       <UAlert v-if="workflowMessage" role="alert" color="warning" variant="soft" :title="t('workflows.settings')" :description="workflowMessage" class="mb-3" />
@@ -596,7 +615,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
         <template #font>
           <section data-testid="workflow-font-tab" class="space-y-4" :aria-label="t('workflows.tabs.font')">
             <template v-if="activeTarget">
-              <div class="border-y border-[var(--border)] bg-[var(--surface-inset)] px-3 py-3"><strong class="type-label">{{ softwareName(activeTarget.softwareId) }}</strong><p class="type-metadata m-0 mt-2 leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
+              <div class="border-y border-[var(--border)] bg-[var(--surface-inset)] px-3 py-3"><h2 class="type-label m-0 font-semibold">{{ softwareName(activeTarget.softwareId) }}</h2><p class="type-metadata m-0 mt-2 leading-4 text-[var(--text-muted)]">{{ t('workflows.fontTargetHint', { name: softwareName(activeTarget.softwareId) }) }}</p></div>
               <UFormField :label="t('workflows.fontPolicy')" :hint="t('workflows.fontInheritanceHint')">
                 <USelect :model-value="!activeTarget.fontPolicy ? 'original' : 'workflow'" :items="fontModeOptions" :aria-label="t('workflows.fontPolicy')" class="w-full" @update:model-value="setFontMode(String($event))" />
               </UFormField>

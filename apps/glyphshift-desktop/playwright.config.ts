@@ -5,7 +5,7 @@ const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './tests',
-  outputDir: '../../local-test/desktop-playwright',
+  outputDir: '../../local-test/evidence/desktop-playwright',
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -17,6 +17,16 @@ export default defineConfig({
     baseURL,
     locale: 'zh-CN',
     colorScheme: 'light',
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: baseURL,
+        localStorage: [{
+          name: 'glyphshift.app-settings.v1',
+          value: JSON.stringify({ settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1 }),
+        }],
+      }],
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

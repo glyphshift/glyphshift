@@ -87,7 +87,7 @@ use workflow::{
     WorkflowTargetRuntimeView,
 };
 
-const DESKTOP_API_VERSION: u16 = 35;
+const DESKTOP_API_VERSION: u16 = 36;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -365,6 +365,13 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct WorkflowCompatibilityCheck {
+    started_at_ms: u64,
+    baseline_observation_revision: u64,
+    matched: bool,
+}
+
 struct DesktopApplication {
     backend: DesktopBackend,
     dictionary_distribution: DictionaryDistribution,
@@ -383,6 +390,7 @@ struct DesktopApplication {
     collection_filter: glyphshift_ai_translation::SourceFilterCache,
     collection_versions: BTreeMap<String, (u64, Vec<(Box<str>, u64)>)>,
     pending_collection_runs: BTreeSet<String>,
+    workflow_compatibility_checks: BTreeMap<String, WorkflowCompatibilityCheck>,
     quick_probe_sessions: QuickProbeSessionStore,
     active_probe_run_id: Option<Box<str>>,
     active_probe_capability: Option<ProbeRuntimeCapability>,
@@ -492,6 +500,7 @@ impl DesktopApplication {
             collection_filter: Default::default(),
             collection_versions: Default::default(),
             pending_collection_runs: Default::default(),
+            workflow_compatibility_checks: Default::default(),
             quick_probe_sessions,
             active_probe_run_id: None,
             active_probe_capability: None,

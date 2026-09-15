@@ -87,6 +87,8 @@ pub(super) struct WorkflowRuntimeView {
     pub(super) workflow_id: Box<str>,
     pub(super) targets: Vec<WorkflowTargetRuntimeView>,
     pub(super) errors: BTreeMap<Box<str>, CommandError>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) warnings: BTreeMap<Box<str>, CommandError>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -193,6 +195,7 @@ impl DesktopApplication {
         for record in records {
             self.collection_versions.remove(record.id());
             self.pending_collection_runs.remove(record.id());
+            self.workflow_compatibility_checks.remove(record.id());
             self.probe_runs.delete(record.id()).map_err(crate::probe::probe_run_error)?;
         }
         Ok(self.snapshot())
@@ -641,6 +644,7 @@ pub(super) fn workflow_runtime_view(
         workflow_id: intent.workflow_id().into(),
         targets,
         errors,
+        warnings: BTreeMap::new(),
     }
 }
 
@@ -676,6 +680,7 @@ fn unavailable_workflow_runtime_view(
                 )
             })
             .collect(),
+        warnings: BTreeMap::new(),
     }
 }
 
@@ -702,6 +707,7 @@ pub(super) fn idle_workflow_runtime_view(
             })
             .collect(),
         errors: BTreeMap::new(),
+        warnings: BTreeMap::new(),
     }
 }
 

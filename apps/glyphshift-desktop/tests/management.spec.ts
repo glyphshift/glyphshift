@@ -27,29 +27,29 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('compact workflow table keeps object identity and actions in view', async ({ page }) => {
+test('compact workflow table gives workflow identity the remaining width and keeps status bounded', async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 640 })
 
   const table = page.getByTestId('workflow-management-table')
   const row = table.getByRole('row').filter({ hasText: '默认创作工作流' })
   const identity = row.locator('.management-table-identity-cell')
+  const status = row.locator('td').nth(4)
   const actions = row.locator('.management-table-actions-cell')
 
   await expect(table).toBeVisible()
   await expect(identity).toBeVisible()
   await expect(actions).toBeVisible()
-  await expect.poll(() => table.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth
-    return element.scrollWidth > element.clientWidth
-  })).toBe(true)
-
+  await expect.poll(() => table.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   await expect.poll(async () => {
     const tableBox = await table.boundingBox()
     const identityBox = await identity.boundingBox()
+    const statusBox = await status.boundingBox()
     const actionsBox = await actions.boundingBox()
-    if (!tableBox || !identityBox || !actionsBox) return false
+    if (!tableBox || !identityBox || !statusBox || !actionsBox) return false
     return identityBox.x >= tableBox.x
       && identityBox.x + identityBox.width <= tableBox.x + tableBox.width
+      && statusBox.x >= tableBox.x
+      && statusBox.x + statusBox.width <= tableBox.x + tableBox.width
       && actionsBox.x >= tableBox.x
       && actionsBox.x + actionsBox.width <= tableBox.x + tableBox.width
   }).toBe(true)
@@ -91,7 +91,7 @@ test('workflow sections and Help keep a continuous visible heading outline', asy
   await expect(page.getByTestId('workflow-editor')).toBeVisible()
   expectNoHeadingJumps(await visibleHeadingLevels(page))
 
-  for (const tab of ['软件与适配器', '翻译字典', '字体策略']) {
+  for (const tab of ['设置软件', '基础配置', '翻译字典', '字体策略']) {
     await page.getByRole('tab', { name: tab }).click()
     expectNoHeadingJumps(await visibleHeadingLevels(page))
   }
@@ -123,7 +123,7 @@ test('functional copy follows the semantic desktop type ramp', async ({ page }) 
   })
 
   await expect(page.getByText('为每个软件组合适配器、有序词典和字体设置，并持续应用翻译。')).toHaveCount(0)
-  const metadata = page.getByText('1 个目标', { exact: true }).first()
+  const metadata = page.getByText('1 种适配器', { exact: true }).first()
   await expect(metadata).toBeVisible()
   await expect.poll(() => metadata.evaluate(element => getComputedStyle(element).fontSize)).toBe('11px')
 })

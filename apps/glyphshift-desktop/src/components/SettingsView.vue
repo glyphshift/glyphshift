@@ -14,18 +14,38 @@ import FavoriteFontSettings from './FavoriteFontSettings.vue'
 import RecentSoftwareSettings from './RecentSoftwareSettings.vue'
 import LanguageSettings from './LanguageSettings.vue'
 import AiProfilesPanel from './AiProfilesPanel.vue'
+import FirstRunSafetyNotice from './FirstRunSafetyNotice.vue'
 import { useAppUpdate } from '../useAppUpdate'
 import { version as appVersion } from '../../package.json'
 import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
 
-const section = ref('general')
-const sections = ['general', 'software', 'fonts', 'languages', 'rules'] as const
+const section = defineModel<string>('section', { default: 'general' })
+const sections = [
+  { value: 'general', icon: 'i-tabler-settings' },
+  { value: 'ai', icon: 'i-tabler-sparkles' },
+  { value: 'rules', icon: 'i-tabler-filter' },
+  { value: 'software', icon: 'i-tabler-app-window' },
+  { value: 'fonts', icon: 'i-tabler-typography' },
+  { value: 'languages', icon: 'i-tabler-language' },
+] as const
 const aiProfilesPanel = ref<InstanceType<typeof AiProfilesPanel>>()
 const { t } = useI18n()
 const appSettings = useAppSettings()
 const appUpdate = useAppUpdate()
 const openingDictionaryDirectory = ref(false)
 const dictionaryDirectoryError = ref('')
+const onboardingError = ref('')
+const safetyNoticeOpen = ref(false)
+
+async function reopenOnboarding() {
+  onboardingError.value = ''
+  try {
+    await appSettings.setOnboardingVersion(0)
+  } catch {
+    onboardingError.value = appSettings.settingsError.value || t('settings.onboarding.reopenFailed')
+  }
+}
+
 async function openDictionaryDirectory() {
   if (openingDictionaryDirectory.value) return
   openingDictionaryDirectory.value = true
@@ -232,27 +252,40 @@ onBeforeUnmount(() => {
       content-test-id="settings-layout"
   >
     <div class="space-y-4">
-      <UTabs v-model="section" :items="sections.map((value, index) => ({ value, label: t('settingsManager.' + value), icon: ['i-tabler-settings', 'i-tabler-app-window', 'i-tabler-typography', 'i-tabler-language', 'i-tabler-filter'][index] }))"
+      <UTabs v-model="section" :items="sections.map(item => ({ ...item, label: t('settingsManager.' + item.value), ui: { trigger: 'tour-settings-' + item.value } }))"
         :content="false" :aria-label="t('settingsManager.navigation')" data-testid="settings-tabs" color="neutral" variant="link" size="sm" activation-mode="manual"
         class="sticky top-0 z-20 w-full bg-[var(--app-bg)]"
         :ui="{ list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0 overflow-x-auto', indicator: 'hidden', trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0' }" />
+      <UAlert
+        v-if="appSettings.settingsError.value"
+        role="alert"
+        color="error"
+        variant="soft"
+        :title="t('settings.saveFailed')"
+        :description="appSettings.settingsError.value"
+        class="w-full"
+      />
       <RecentSoftwareSettings v-if="section === 'software'" />
       <div v-if="section === 'fonts'" class="space-y-4"><FavoriteFontSettings /><FontFallbackSettings /></div>
       <div v-show="section === 'rules'" class="space-y-4">
         <TextFilterSettings />
       </div>
       <LanguageSettings v-if="section === 'languages'" />
+      <div v-show="section === 'ai'" class="space-y-4">
+        <ManagementFormSection
+          data-testid="settings-section-ai"
+          :title="t('settings.aiTranslation.title')"
+        >
+          <template #actions>
+            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" @click="aiProfilesPanel?.openCreate()" />
+          </template>
+          <AiProfilesPanel ref="aiProfilesPanel" :show-create="false" />
+          <ManagementFormRow :label="t('ai.autoInterval')" :help="t('ai.autoIntervalHint')" icon="i-tabler-clock" control-width="compact">
+            <UInput :model-value="appSettings.settings.value.autoCompleteIntervalSeconds" type="number" min="0" max="60" step="1" :aria-label="t('ai.autoInterval')" :disabled="appSettings.settingsBusy.value" class="w-full" @change="updateAutoInterval" />
+          </ManagementFormRow>
+        </ManagementFormSection>
+      </div>
       <div v-show="section === 'general'" class="space-y-4">
-        <UAlert
-          v-if="appSettings.settingsError.value"
-          role="alert"
-          color="error"
-          variant="soft"
-          :title="t('settings.saveFailed')"
-          :description="appSettings.settingsError.value"
-          class="w-full"
-        />
-
         <ManagementFormSection
           data-testid="settings-section-appearance"
           :title="t('settings.appearance')"
@@ -294,26 +327,15 @@ onBeforeUnmount(() => {
 
         <ManagementFormSection :title="t('updates.title')">
           <ManagementFormRow :label="t('updates.autoCheck')" :description="t('updates.autoHint')" icon="i-tabler-refresh" control-width="compact">
-            <USwitch :model-value="appSettings.settings.value.checkUpdatesOnStartup" :aria-label="t('updates.autoCheck')" :disabled="appSettings.settingsBusy.value" @update:model-value="appSettings.setCheckUpdatesOnStartup" />
-          </ManagementFormRow>
-          <ManagementFormRow :label="t('updates.current', { version: appVersion })" icon="i-tabler-info-circle" control-width="compact">
-            <div class="space-y-2">
-              <UButton color="neutral" variant="outline" :label="t('updates.check')" :loading="appUpdate.checking.value" @click="appUpdate.check(true)" />
-              <p v-if="appUpdate.status.value !== 'idle'" role="status" class="type-metadata m-0">{{ t('updates.' + appUpdate.status.value + 'Status') }}</p>
+            <div class="flex justify-end">
+              <USwitch :model-value="appSettings.settings.value.checkUpdatesOnStartup" :aria-label="t('updates.autoCheck')" :disabled="appSettings.settingsBusy.value" @update:model-value="appSettings.setCheckUpdatesOnStartup" />
             </div>
           </ManagementFormRow>
-        </ManagementFormSection>
-
-        <ManagementFormSection
-          data-testid="settings-section-ai"
-          :title="t('settings.aiTranslation.title')"
-        >
-          <template #actions>
-            <UButton color="primary" variant="soft" size="sm" icon="i-tabler-plus" :label="t('ai.addProfile')" @click="aiProfilesPanel?.openCreate()" />
-          </template>
-          <AiProfilesPanel ref="aiProfilesPanel" :show-create="false" />
-          <ManagementFormRow :label="t('ai.autoInterval')" :help="t('ai.autoIntervalHint')" icon="i-tabler-clock" control-width="compact">
-            <UInput :model-value="appSettings.settings.value.autoCompleteIntervalSeconds" type="number" min="0" max="60" step="1" :aria-label="t('ai.autoInterval')" :disabled="appSettings.settingsBusy.value" class="w-full" @change="updateAutoInterval" />
+          <ManagementFormRow :label="t('updates.current', { version: appVersion })" icon="i-tabler-info-circle" control-width="compact">
+            <div class="flex flex-col items-end gap-2">
+              <UButton color="neutral" variant="outline" :label="t('updates.check')" :loading="appUpdate.checking.value" @click="appUpdate.check(true)" />
+              <p v-if="appUpdate.status.value !== 'idle'" role="status" class="type-metadata m-0 text-right">{{ t('updates.' + appUpdate.status.value + 'Status') }}</p>
+            </div>
           </ManagementFormRow>
         </ManagementFormSection>
 
@@ -365,13 +387,6 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
         </ManagementFormSection>
 
-        <ManagementFormSection data-testid="settings-section-data" :title="t('settings.data.title')">
-          <ManagementFormRow :label="t('settings.data.dictionaries')" :description="t('settings.data.description')" icon="i-tabler-folder" control-width="compact">
-            <UButton color="neutral" variant="outline" icon="i-tabler-folder-open" :label="t('settings.data.open')" :title="t('settings.data.open')" :loading="openingDictionaryDirectory" @click="openDictionaryDirectory" />
-          </ManagementFormRow>
-          <p v-if="dictionaryDirectoryError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ dictionaryDirectoryError }}</p>
-        </ManagementFormSection>
-
         <ManagementFormSection
           data-testid="settings-section-application"
           :title="t('settings.applicationAndPrivilege')"
@@ -415,6 +430,7 @@ onBeforeUnmount(() => {
           </ManagementFormRow>
           <ManagementFormRow
             :label="t('settings.launchElevated')"
+            data-tour="settings-admin"
             :description="t('settings.launchElevatedDescription')"
             icon="i-tabler-shield-up"
             control-width="compact"
@@ -444,7 +460,50 @@ onBeforeUnmount(() => {
             </div>
           </ManagementFormRow>
         </ManagementFormSection>
+
+        <ManagementFormSection :title="t('settings.onboarding.title')">
+          <ManagementFormRow
+            :label="t('settings.onboarding.safety')"
+            :description="t('settings.onboarding.safetyDescription')"
+            icon="i-tabler-shield-check"
+            control-width="compact"
+          >
+            <div class="flex justify-end">
+              <UButton color="neutral" variant="outline" icon="i-tabler-file-description"
+                :label="t('settings.onboarding.viewSafety')" @click="safetyNoticeOpen = true" />
+            </div>
+          </ManagementFormRow>
+          <ManagementFormRow
+            :label="t('settings.onboarding.guide')"
+            :description="t('settings.onboarding.description')"
+            icon="i-tabler-route"
+            control-width="compact"
+          >
+            <div class="flex justify-end">
+              <UButton
+                color="neutral"
+                variant="outline"
+                icon="i-tabler-refresh"
+                :label="t('settings.onboarding.reopen')"
+                :disabled="appSettings.settingsBusy.value"
+                :loading="appSettings.settingsBusy.value"
+                @click="reopenOnboarding"
+              />
+            </div>
+          </ManagementFormRow>
+          <p v-if="onboardingError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ onboardingError }}</p>
+        </ManagementFormSection>
+
+        <ManagementFormSection data-testid="settings-section-data" :title="t('settings.data.title')">
+          <ManagementFormRow :label="t('settings.data.dictionaries')" :description="t('settings.data.description')" icon="i-tabler-folder" control-width="compact">
+            <div class="flex justify-end">
+              <UButton color="neutral" variant="outline" icon="i-tabler-folder-open" :label="t('settings.data.open')" :title="t('settings.data.open')" :loading="openingDictionaryDirectory" @click="openDictionaryDirectory" />
+            </div>
+          </ManagementFormRow>
+          <p v-if="dictionaryDirectoryError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ dictionaryDirectoryError }}</p>
+        </ManagementFormSection>
       </div>
     </div>
+    <FirstRunSafetyNotice :open="safetyNoticeOpen" @confirm="safetyNoticeOpen = false" />
   </UtilityPageShell>
 </template>

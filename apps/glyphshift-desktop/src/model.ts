@@ -284,6 +284,7 @@ export interface WorkflowRuntimeStatus {
   workflowId: string
   targets: WorkflowTargetRuntime[]
   errors: Record<string, CommandError>
+  warnings?: Record<string, CommandError>
 }
 
 export type RuntimeTraceStatus

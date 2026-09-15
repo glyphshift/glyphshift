@@ -517,6 +517,7 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         collection_filter: Default::default(),
         collection_versions: Default::default(),
         pending_collection_runs: Default::default(),
+        workflow_compatibility_checks: Default::default(),
         probe_runs: ProbeRunStore::open(data_root.path().join("probe-runs"))
             .expect("probe run store"),
         quick_probe_sessions: QuickProbeSessionStore::open(data_root.path())
@@ -709,6 +710,54 @@ fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
     assert_eq!(calls.lock().unwrap().refreshed.len(), before + 1);
     app.refresh_workflows_with_retry(true).unwrap();
     assert_eq!(calls.lock().unwrap().refreshed.len(), before + 2);
+}
+
+#[test]
+fn workflow_reports_no_compatibility_signal_after_five_seconds_and_clears_it_after_observation() {
+    let (mut app, _calls, software_id, _root) = workflow_application();
+    app.backend.create_dictionary(DictionaryCreate::new(
+        "dictionary.compatibility",
+        "Compatibility",
+        "en-US",
+        "zh-CN",
+    )).unwrap();
+    app.backend.create_workflow(WorkflowCreate::new("workflow.compatibility", "Compatibility").with_targets([
+        WorkflowTargetCreate::new(
+            software_id.clone(),
+            [TEST_ADAPTER_ID],
+            ["dictionary.compatibility"],
+        ).with_write_dictionary("dictionary.compatibility"),
+    ])).unwrap();
+
+    let run = app.workflow_collection_view("workflow.compatibility").unwrap();
+    let started = app.enable_workflow("workflow.compatibility", false).unwrap();
+    assert_eq!(started.runtime.lifecycle.as_ref().unwrap().phase, "running");
+
+    let summary = app.probe_runs.summary(run.summary.id()).unwrap();
+    app.workflow_compatibility_checks.insert(run.summary.id().to_owned(), WorkflowCompatibilityCheck {
+        started_at_ms: glyphshift_capture::unix_time_millis().saturating_sub(5_000),
+        baseline_observation_revision: summary.observation_revision(),
+        matched: false,
+    });
+    app.update_workflow_collection_status("workflow.compatibility", true).unwrap();
+
+    let runtime = app.workflow_runtime_status["workflow.compatibility"].clone();
+    assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "running");
+    assert_eq!(
+        runtime.warnings.get(software_id.as_ref()).map(CommandError::code),
+        Some("runtime.no_compatibility_signal"),
+    );
+
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap(),
+    ).unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Open menu");
+    sink.finish().unwrap();
+    app.collect_workflow_sources(run.summary.id()).unwrap();
+    app.update_workflow_collection_status("workflow.compatibility", true).unwrap();
+
+    assert!(app.workflow_runtime_status["workflow.compatibility"].warnings.is_empty());
+    assert!(app.workflow_compatibility_checks[run.summary.id()].matched);
 }
 
 #[test]

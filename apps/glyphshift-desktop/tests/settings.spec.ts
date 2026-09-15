@@ -13,6 +13,8 @@ test.beforeEach(async ({ page }) => {
 test('browser settings keep valid fields when other fields are unknown or invalid', async ({ page }) => {
   await page.evaluate(() => localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify({
     settingsSchemaVersion: 999,
+    safetyNoticeVersion: 1,
+    onboardingVersion: 1,
     localePreference: 'en-US',
     themePreference: 42,
     launchAtStartup: true,
@@ -79,6 +81,17 @@ test('settings shares the full-width primary page axis across wide and compact w
   expect(compactGeometry.headerRight - compactGeometry.layoutRight).toBeLessThanOrEqual(12)
   await expect.poll(() => settingsLayout.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('settings navigation separates AI and management surfaces in the intended order', async ({ page }) => {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const tabs = page.getByTestId('settings-tabs').getByRole('tab')
+  await expect(tabs).toHaveCount(6)
+  expect(await tabs.allTextContents()).toEqual(['通用', 'AI 配置', '文字处理', '软件管理', '字体管理', '语言管理'])
+  await expect(page.getByTestId('settings-section-ai')).toBeHidden()
+  await tabs.filter({ hasText: 'AI 配置' }).click()
+  await expect(page.getByTestId('settings-section-ai')).toBeVisible()
+  await expect(page.getByTestId('settings-section-appearance')).toBeHidden()
 })
 
 test('help shares the full-width primary page axis and first-content rhythm', async ({ page }) => {
@@ -351,13 +364,15 @@ test('administrator launch preference persists before elevation and disables wit
       invoke: async (command: string, args?: { update?: { launchElevated?: boolean } }) => {
         if (command === 'desktop_settings') return {
           settingsSchemaVersion: 1,
+          safetyNoticeVersion: 1,
+          onboardingVersion: 1,
           localePreference: 'zh-CN',
           themePreference: 'dark',
           launchAtStartup: false,
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {
@@ -422,6 +437,7 @@ test('compact viewport keeps the application shell bounded', async ({ page }) =>
 
 test('AI add action shares its section header', async ({ page }) => {
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
   const section = page.getByTestId('settings-section-ai')
   await expect(section.locator('header').getByRole('button', { name: '添加 AI 配置' })).toBeVisible()
   const heading = await section.getByRole('heading').boundingBox()
@@ -433,18 +449,21 @@ test('AI add action shares its section header', async ({ page }) => {
 
 test('auto fill interval is configured in settings and survives reload', async ({ page }) => {
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
   const input = page.getByRole('spinbutton', { name: '自动补全间隔（秒）' })
   await expect(input).toHaveValue('10')
   await input.fill('25')
   await input.press('Tab')
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
   await expect(input).toHaveValue('25')
   await input.fill('0')
   await input.press('Tab')
   await expect(input).toHaveValue('0')
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
   await expect(input).toHaveValue('0')
   await input.fill('60')
   await input.press('Tab')
@@ -477,9 +496,9 @@ test('data settings open the native dictionary directory and allow retry', async
   await page.addInitScript(({ snapshot }) => {
     let attempts = 0
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
       if (command === 'desktop_snapshot') return snapshot
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_probe_runs') return []
       if (command === 'desktop_ai_profiles') return { defaultProfileId: null, profiles: [] }
       if (command === 'desktop_ai_translation_tasks') return { current: null, history: [] }
@@ -493,6 +512,10 @@ test('data settings open the native dictionary directory and allow retry', async
   await page.reload()
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const section = page.getByTestId('settings-section-data')
+  const application = page.getByTestId('settings-section-application')
+  const applicationBox = await application.boundingBox()
+  const dataBox = await section.boundingBox()
+  expect(dataBox!.y).toBeGreaterThan(applicationBox!.y + applicationBox!.height)
   await section.getByRole('button', { name: '打开字典文件夹', exact: true }).click()
   await expect(section.getByRole('alert')).toContainText('无法打开字典文件夹')
   await section.getByRole('button', { name: '打开字典文件夹', exact: true }).click()

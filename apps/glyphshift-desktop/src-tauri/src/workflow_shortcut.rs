@@ -200,7 +200,8 @@ pub(super) fn desktop_set_shortcut_recording(
     app: tauri::AppHandle,
     recording: bool,
 ) -> Result<(), CommandError> {
-    let state = app.state::<Mutex<WorkflowShortcuts>>();
+    // Elevation can dispatch WebView IPC while setup is still waiting for UAC.
+    let state = app.try_state::<Mutex<WorkflowShortcuts>>().ok_or_else(runtime_unavailable)?;
     let mut state = state.lock().map_err(|_| runtime_unavailable())?;
     state.recording = recording;
     if recording {
@@ -213,7 +214,8 @@ pub(super) fn desktop_set_shortcut_recording(
 pub(super) fn desktop_workflow_shortcut_errors(
     app: tauri::AppHandle,
 ) -> Result<BTreeMap<Box<str>, CommandError>, CommandError> {
-    app.state::<Mutex<WorkflowShortcuts>>()
+    app.try_state::<Mutex<WorkflowShortcuts>>()
+        .ok_or_else(runtime_unavailable)?
         .lock()
         .map(|state| state.errors.clone())
         .map_err(|_| runtime_unavailable())

@@ -18,6 +18,8 @@ export interface GlobalShortcutProbe {
 
 export interface AppSettings {
   settingsSchemaVersion: 1
+  safetyNoticeVersion: number
+  onboardingVersion: number
   localePreference: LocalePreference
   themePreference: ThemePreference
   launchAtStartup: boolean
@@ -36,6 +38,8 @@ export interface AppSettings {
 }
 
 interface AppSettingsUpdate {
+  safetyNoticeVersion: number
+  onboardingVersion: number
   localePreference: LocalePreference
   themePreference: ThemePreference
   launchAtStartup: boolean
@@ -60,6 +64,8 @@ interface DesktopPrivilegeStatus {
 const BROWSER_STORAGE_KEY = 'glyphshift.app-settings.v1'
 const fallbackSettings: AppSettings = {
   settingsSchemaVersion: 1,
+  safetyNoticeVersion: 0,
+  onboardingVersion: 0,
   localePreference: 'system',
   themePreference: 'dark',
   launchAtStartup: false,
@@ -113,6 +119,12 @@ function normalizeAppSettings(value: unknown): AppSettings | null {
     translationLanguages: normalizeTranslationLanguages(candidate.translationLanguages),
     recentSoftwareIds: Array.isArray(candidate.recentSoftwareIds) ? normalizeCatalog(candidate.recentSoftwareIds, 20, 128) : null,
     settingsSchemaVersion: 1,
+    safetyNoticeVersion: Number.isInteger(candidate.safetyNoticeVersion) && candidate.safetyNoticeVersion! >= 0
+      ? candidate.safetyNoticeVersion!
+      : fallbackSettings.safetyNoticeVersion,
+    onboardingVersion: Number.isInteger(candidate.onboardingVersion) && candidate.onboardingVersion! >= 0
+      ? candidate.onboardingVersion!
+      : fallbackSettings.onboardingVersion,
     localePreference,
     themePreference,
     launchAtStartup: typeof candidate.launchAtStartup === 'boolean'
@@ -244,6 +256,8 @@ async function updateSoftwareCaptureShortcut(shortcut: string) {
 export function useAppSettings() {
   function update(patch: Partial<AppSettingsUpdate>) {
     return updateAppSettings({
+      safetyNoticeVersion: settings.value.safetyNoticeVersion,
+      onboardingVersion: settings.value.onboardingVersion,
       localePreference: settings.value.localePreference,
       themePreference: settings.value.themePreference,
       launchAtStartup: settings.value.launchAtStartup,
@@ -265,6 +279,14 @@ export function useAppSettings() {
 
   return {
     settings,
+    safetyNoticeVersion: computed(() => settings.value.safetyNoticeVersion),
+    onboardingVersion: computed(() => settings.value.onboardingVersion),
+    async setSafetyNoticeVersion(value: number) {
+      if (Number.isInteger(value) && value >= 0) await update({ safetyNoticeVersion: value })
+    },
+    async setOnboardingVersion(value: number) {
+      if (Number.isInteger(value) && value >= 0) await update({ onboardingVersion: value })
+    },
     async setLanguageFallbackFonts(value: LanguageFallbackFont[]) { await update({ languageFallbackFonts: value }) },
     async setFavoriteFonts(value: string[]) { await update({ favoriteFonts: value }) },
     async setTranslationLanguages(value: string[]) { await update({ translationLanguages: value }) },

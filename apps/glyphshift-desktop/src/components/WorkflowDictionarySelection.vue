@@ -127,7 +127,7 @@ defineExpose({ showPicker })
       :confirm-label="mode === 'new' ? t('workflows.createAndAddDictionary') : t('workflows.addSelectedDictionaries')"
       :confirm-disabled="mode === 'existing' ? !pending.length : !dictionaryName.trim() || !sourceLocale.trim() || !targetLocale.trim()"
       @update:open="open = $event" @confirm="confirm">
-      <div class="space-y-4">
+      <div data-tour="workflow-dictionary-picker" class="space-y-4">
         <UTabs v-model="mode" :content="false" :items="[{ value: 'new', label: t('workflows.createWriteDictionary') }, { value: 'existing', label: t('workflows.existingDictionaries') }]" />
         <template v-if="mode === 'existing'">
           <UInput v-model="query" icon="i-tabler-search" class="w-full" :placeholder="t('workflows.searchDictionaries')" :aria-label="t('workflows.searchDictionaries')" />

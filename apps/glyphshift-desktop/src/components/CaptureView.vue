@@ -73,6 +73,11 @@ const lifecycleMessage = computed(() => {
   return workspaceMessages.value[props.workflowId] || Object.values(workspaceModel.value.workflowRuntimeStatus[props.workflowId]?.errors ?? {})
     .filter(error => error.code !== 'runtime.target_not_found').map(translateCommandError).join('；')
 })
+const compatibilityMessage = computed(() => {
+  if (!props.workflowId) return ''
+  return Object.values(workspaceModel.value.workflowRuntimeStatus[props.workflowId]?.warnings ?? {})
+    .filter(error => error.code === 'runtime.no_compatibility_signal').map(translateCommandError).join('；')
+})
 const collectionEnabled = computed(() => lifecycle.value?.collectNewSources ?? true)
 const hasWriter = computed(() => workspaceModel.value.workflows.find(item => item.id === props.workflowId)?.targets.some(target => target.writeDictionaryId))
 async function setCollection(enabled: boolean) {
@@ -1102,7 +1107,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
       <template #actions>
         <div data-testid="probe-detail-actions" class="flex items-center gap-2">
-          <UButton v-if="workflowId" :color="stopRequested ? 'neutral' : 'primary'" variant="outline" size="sm" :icon="stopRequested ? 'i-tabler-player-stop' : 'i-tabler-player-play'" :label="t(stopRequested ? 'workflowLifecycle.stop' : 'workflows.start')" :loading="Boolean(workflowCommandBusy)" @click="workflowWorkspace.setWorkflowEnabled(workflowId, !stopRequested)" />
+          <UButton v-if="workflowId" data-tour="workflow-start" :color="stopRequested ? 'neutral' : 'primary'" variant="outline" size="sm" :icon="stopRequested ? 'i-tabler-player-stop' : 'i-tabler-player-play'" :label="t(stopRequested ? 'workflowLifecycle.stop' : 'workflows.start')" :loading="Boolean(workflowCommandBusy)" @click="workflowWorkspace.setWorkflowEnabled(workflowId, !stopRequested)" />
           <template v-else>
           <UButton v-if="selectedRun.status === 'running'" color="neutral" variant="outline" size="sm" icon="i-tabler-player-pause" :label="t('capture.pause')" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="probe.setPaused(selectedRun.id, true)" />
           <UButton v-else color="primary" :variant="selectedRun.status === 'paused' ? 'soft' : 'solid'" size="sm" icon="i-tabler-player-play" :label="selectedRun.status === 'paused' ? t('capture.continue') : (workflowId ? t('workflows.start') : t('capture.resume'))" :loading="probe.busy.value && disconnectingRunId !== selectedRun.id" :disabled="disconnectingRunId === selectedRun.id" @click="selectedRun.status === 'paused' ? probe.setPaused(selectedRun.id, false) : probe.resume(selectedRun.id)" />
@@ -1122,6 +1127,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
     </ManagementPageHeader>
 
     <UAlert v-if="lifecycleMessage" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="lifecycleMessage" class="mb-3" />
+    <UAlert v-else-if="compatibilityMessage" data-testid="workflow-compatibility-warning" role="status" color="warning" variant="soft" icon="i-tabler-radar-off" :title="t('workflows.runtimeIssue.compatibilityTitle')" :description="compatibilityMessage" class="mb-3" />
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="probe.clearMessage()" /></template>
     </UAlert>

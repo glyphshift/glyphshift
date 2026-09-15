@@ -150,6 +150,7 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
                 })
                 .collect(),
             errors: BTreeMap::new(),
+            warnings: BTreeMap::new(),
         }
     }
 
@@ -185,6 +186,7 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
                 })
                 .collect(),
             errors: BTreeMap::new(),
+            warnings: BTreeMap::new(),
         };
         if fail {
             for target in &mut view.targets { target.active = true; }
@@ -431,6 +433,7 @@ fn test_desktop_application(
         collection_filter: Default::default(),
         collection_versions: Default::default(),
         pending_collection_runs: Default::default(),
+        workflow_compatibility_checks: Default::default(),
         probe_runs: ProbeRunStore::open(data_root.join("probe-runs")).expect("probe run store"),
         quick_probe_sessions: QuickProbeSessionStore::open(data_root)
             .expect("quick probe session store"),

@@ -18,6 +18,7 @@ import {
   errorMessage,
   fontRefreshing,
   hasDesktopRuntime,
+  lastWorkflowRefreshAt,
   model,
   refreshing,
   setMessage,
@@ -103,17 +104,17 @@ export function useWorkflowWorkspace() {
     }
   }
 
-  function refreshWorkflows(retry = true): Promise<boolean> {
+  function refreshWorkflows(retry = true, visible = true): Promise<boolean> {
     if (refreshRequest) {
-      if (retry && !refreshingWithRetry) return refreshRequest.then(() => refreshWorkflows(true))
+      if (retry && !refreshingWithRetry) return refreshRequest.then(() => refreshWorkflows(true, visible))
       return refreshRequest
     }
     refreshingWithRetry = retry
-    refreshRequest = performRefresh(retry).finally(() => { refreshRequest = undefined })
+    refreshRequest = performRefresh(retry, visible).finally(() => { refreshRequest = undefined })
     return refreshRequest
   }
-  async function performRefresh(retry: boolean) {
-    refreshing.value = true
+  async function performRefresh(retry: boolean, visible: boolean) {
+    if (visible) refreshing.value = true
     try {
       if (hasDesktopRuntime()) applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_refresh_workflows', { retry }))
       setMessage('workflows', '')
@@ -126,7 +127,8 @@ export function useWorkflowWorkspace() {
       return false
     }
     finally {
-      refreshing.value = false
+      lastWorkflowRefreshAt.value = Date.now()
+      if (visible) refreshing.value = false
     }
   }
 
@@ -328,6 +330,7 @@ export function useWorkflowWorkspace() {
   return {
     applyWorkflowResult,
     activationIds,
+    lastWorkflowRefreshAt,
     setWorkflowEnabled,
     setWorkflowCollection,
     refreshWorkflows,

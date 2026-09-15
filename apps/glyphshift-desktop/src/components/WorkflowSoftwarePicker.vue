@@ -93,7 +93,7 @@ async function confirm() {
 <template>
   <ManagementFormModal v-model:open="visible" :title="t('workflows.tabs.software')" width="lg" :busy="busy"
     :confirm-label="t('workflows.confirmSoftware')" :confirm-disabled="!path.trim()" @confirm="confirm">
-    <div class="space-y-4">
+    <div data-tour="workflow-software-picker" class="space-y-4">
       <UFormField :label="t('software.executablePath')" required>
         <div class="flex gap-2"><UInput v-model="path" class="min-w-0 flex-1" :aria-label="t('software.executablePath')" :disabled="busy" /><UButton color="neutral" variant="outline" :label="t('software.browse')" :disabled="busy" @click="browse" /></div>
       </UFormField>

@@ -128,6 +128,7 @@ const messageKeys: Record<string, string> = {
   'runtime.target_access_failed': 'errors.runtime.targetAccessFailed',
   'runtime.component_load_failed': 'errors.runtime.componentLoadFailed',
   'runtime.component_incompatible': 'errors.runtime.componentIncompatible',
+  'runtime.no_compatibility_signal': 'errors.runtime.noCompatibilitySignal',
   'runtime.target_restart_required': 'errors.runtime.targetRestartRequired',
   'runtime.activation_timed_out': 'errors.runtime.activationTimedOut',
   'runtime.activation_failed': 'errors.runtime.activationFailed',

@@ -223,6 +223,10 @@ pub(crate) enum CloseBehavior {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppSettings {
     settings_schema_version: u16,
+    #[serde(default)]
+    safety_notice_version: u16,
+    #[serde(default)]
+    onboarding_version: u16,
     locale_preference: LocalePreference,
     theme_preference: ThemePreference,
     #[serde(default)]
@@ -257,6 +261,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
+            safety_notice_version: 0,
+            onboarding_version: 0,
             locale_preference: LocalePreference::default(),
             theme_preference: ThemePreference::default(),
             launch_at_startup: false,
@@ -344,6 +350,16 @@ fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
         .map_or_else(default_software_capture_shortcut, Into::into);
     AppSettings {
         settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
+        safety_notice_version: object
+            .get("safetyNoticeVersion")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(0),
+        onboarding_version: object
+            .get("onboardingVersion")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(0),
         locale_preference,
         theme_preference,
         launch_at_startup: object
@@ -382,6 +398,10 @@ fn preserve_invalid_settings(path: &Path) {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AppSettingsUpdate {
+    #[serde(default)]
+    safety_notice_version: u16,
+    #[serde(default)]
+    onboarding_version: u16,
     locale_preference: LocalePreference,
     theme_preference: ThemePreference,
     launch_at_startup: bool,
@@ -428,6 +448,8 @@ impl From<AppSettingsUpdate> for AppSettings {
     fn from(update: AppSettingsUpdate) -> Self {
         Self {
             settings_schema_version: APP_SETTINGS_SCHEMA_VERSION,
+            safety_notice_version: update.safety_notice_version,
+            onboarding_version: update.onboarding_version,
             locale_preference: update.locale_preference,
             theme_preference: update.theme_preference,
             launch_at_startup: update.launch_at_startup,
@@ -649,6 +671,8 @@ mod tests {
 
         let saved = store
             .update(AppSettingsUpdate {
+                safety_notice_version: 1,
+                onboarding_version: 1,
                 locale_preference: LocalePreference::EnUs,
                 theme_preference: ThemePreference::Light,
                 launch_at_startup: true,
@@ -672,6 +696,8 @@ mod tests {
         assert!(!saved.should_request_elevation(Some(true)));
         assert!(!saved.should_request_elevation(None));
         assert_eq!(saved.software_capture_shortcut(), "Ctrl+Alt+KeyS");
+        assert_eq!(saved.safety_notice_version, 1);
+        assert_eq!(saved.onboarding_version, 1);
         assert!(
             serde_json::to_value(&saved)
                 .expect("serialize settings")
@@ -695,6 +721,8 @@ mod tests {
 
         let recovered = store
             .update(AppSettingsUpdate {
+                safety_notice_version: 0,
+                onboarding_version: 0,
                 locale_preference: LocalePreference::ZhCn,
                 theme_preference: ThemePreference::Dark,
                 launch_at_startup: false,

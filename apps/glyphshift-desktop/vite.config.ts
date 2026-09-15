@@ -46,7 +46,13 @@ export default defineConfig({
         checkbox: {
           slots: {
             root: 'items-center',
+            base: 'bg-[var(--field-bg)] ring-[var(--border-strong)]',
             label: 'type-label',
+          },
+        },
+        switch: {
+          slots: {
+            base: 'data-[state=unchecked]:border-[var(--border-strong)] data-[state=unchecked]:bg-[var(--surface-subtle)] data-[state=checked]:border-transparent',
           },
         },
         dropdownMenu: {

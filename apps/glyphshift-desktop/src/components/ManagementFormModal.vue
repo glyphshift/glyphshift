@@ -7,12 +7,14 @@ const props = withDefaults(defineProps<{
   title: string
   description?: string
   confirmLabel: string
+  confirmVisible?: boolean
   confirmDisabled?: boolean
   busy?: boolean
   width?: 'sm' | 'md' | 'lg' | 'xl'
   workspace?: boolean
 }>(), {
   description: '',
+  confirmVisible: true,
   confirmDisabled: false,
   busy: false,
   width: 'md',
@@ -68,6 +70,7 @@ const bodyClass = computed(() => props.workspace
         @click="emit('update:open', false)"
       />
       <UButton
+        v-if="confirmVisible"
         color="primary"
         variant="solid"
         size="sm"

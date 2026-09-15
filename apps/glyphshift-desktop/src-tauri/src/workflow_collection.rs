@@ -1,7 +1,68 @@
 use super::*;
 use crate::probe::probe_run_error;
 
+const WORKFLOW_COMPATIBILITY_SIGNAL_TIMEOUT_MS: u64 = 5_000;
+
 impl DesktopApplication {
+    fn set_workflow_compatibility_warning(
+        &mut self,
+        workflow_id: &str,
+        software_id: &str,
+        visible: bool,
+    ) {
+        let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id) else { return };
+        let changed = if visible {
+            if runtime.warnings.contains_key(software_id) {
+                false
+            } else {
+                runtime.warnings.insert(
+                    software_id.into(),
+                    CommandError::new("runtime.no_compatibility_signal"),
+                );
+                true
+            }
+        } else {
+            runtime.warnings.remove(software_id).is_some()
+        };
+        if changed {
+            runtime.revision = crate::workflow_lifecycle::next_revision();
+            runtime.checked_at_ms = glyphshift_capture::unix_time_millis();
+        }
+    }
+
+    fn update_workflow_compatibility_check(
+        &mut self,
+        workflow_id: &str,
+        software_id: &str,
+        run_id: &str,
+        observation_revision: u64,
+        checking: bool,
+    ) {
+        if !checking {
+            self.workflow_compatibility_checks.remove(run_id);
+            self.set_workflow_compatibility_warning(workflow_id, software_id, false);
+            return;
+        }
+
+        let now = glyphshift_capture::unix_time_millis();
+        let check = self
+            .workflow_compatibility_checks
+            .entry(run_id.to_owned())
+            .or_insert(WorkflowCompatibilityCheck {
+                started_at_ms: now,
+                baseline_observation_revision: observation_revision,
+                matched: false,
+            });
+
+        if !check.matched && observation_revision != check.baseline_observation_revision {
+            check.matched = true;
+        }
+        let matched = check.matched;
+        let timed_out = !matched
+            && now.saturating_sub(check.started_at_ms) >= WORKFLOW_COMPATIBILITY_SIGNAL_TIMEOUT_MS;
+        self.set_workflow_compatibility_warning(workflow_id, software_id, timed_out);
+    }
+
     pub(super) fn set_collection_filter_policy(&mut self, policy: glyphshift_ai_translation::FilterPolicy) {
         if self.collection_filter_policy != policy {
             self.collection_filter_policy = policy;
@@ -137,6 +198,13 @@ impl DesktopApplication {
                     }
                 }
                 if summary.status() != next { self.probe_runs.set_status(&id, next).map_err(probe_run_error)?; }
+                self.update_workflow_compatibility_check(
+                    workflow_id,
+                    target.software_id(),
+                    &id,
+                    summary.observation_revision(),
+                    running && target.collection_enabled(),
+                );
             }
         }
         Ok(())
