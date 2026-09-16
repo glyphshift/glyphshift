@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub const CAPTURE_OBSERVATION_BATCH_SCHEMA: &str = "glyphshift.capture-observation-batch/1";
+pub const CAPTURE_OBSERVATION_BATCH_SCHEMA: &str = "glyphshift.capture-observation-batch/2";
 pub(super) const MAX_ENTRIES: u32 = 250_000;
 pub(super) const MAX_SOURCE_UNITS: usize = 16 * 1024;
+pub(super) const MAX_TRANSLATION_CONTEXT_UNITS: usize = 1024;
 const MAX_PRODUCER_ID_BYTES: usize = 256;
 pub(super) const MAX_OBSERVATION_BATCH_RECORDS: usize = 256;
 pub const MAX_OBSERVATION_BATCH_BYTES: usize = 4 * 1024 * 1024;
@@ -150,12 +151,81 @@ impl CaptureProducerConfiguration {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureTranslationContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disambiguation: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plural_n: Option<i32>,
+}
+
+impl CaptureTranslationContext {
+    #[must_use]
+    pub fn new(
+        context: Option<impl Into<Box<str>>>,
+        disambiguation: Option<impl Into<Box<str>>>,
+        plural_n: Option<i32>,
+    ) -> Self {
+        Self {
+            context: context.map(Into::into),
+            disambiguation: disambiguation.map(Into::into),
+            plural_n,
+        }
+    }
+
+    #[must_use]
+    pub fn from_domain(context: &glyphshift_domain::TranslationContext) -> Self {
+        Self::new(
+            context.context().map(Box::<str>::from),
+            context.disambiguation().map(Box::<str>::from),
+            context.plural_n(),
+        )
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    #[must_use]
+    pub fn disambiguation(&self) -> Option<&str> {
+        self.disambiguation.as_deref()
+    }
+
+    #[must_use]
+    pub const fn plural_n(&self) -> Option<i32> {
+        self.plural_n
+    }
+
+    pub(super) fn validate(&self) -> Result<(), CaptureError> {
+        let string_valid = |value: Option<&str>| {
+            value.is_none_or(|value| {
+                value.encode_utf16().count() <= MAX_TRANSLATION_CONTEXT_UNITS
+                    && !value.contains('\0')
+            })
+        };
+        if string_valid(self.context())
+            && string_valid(self.disambiguation())
+            && self.plural_n.is_none_or(|n| n >= 0)
+        {
+            Ok(())
+        } else {
+            Err(CaptureError::InvalidObservationBatch)
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureObservationRecord {
     sequence: u64,
     adapter_id: Box<str>,
     source: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation_context: Option<CaptureTranslationContext>,
 }
 
 impl CaptureObservationRecord {
@@ -168,9 +238,20 @@ impl CaptureObservationRecord {
             sequence,
             adapter_id: adapter_id.into(),
             source: source.into(),
+            translation_context: None,
         };
         record.validate()?;
         Ok(record)
+    }
+
+    pub fn with_translation_context(
+        mut self,
+        context: CaptureTranslationContext,
+    ) -> Result<Self, CaptureError> {
+        context.validate()?;
+        self.translation_context = Some(context);
+        self.validate()?;
+        Ok(self)
     }
 
     #[must_use]
@@ -188,11 +269,19 @@ impl CaptureObservationRecord {
         &self.source
     }
 
+    #[must_use]
+    pub const fn translation_context(&self) -> Option<&CaptureTranslationContext> {
+        self.translation_context.as_ref()
+    }
+
     fn validate(&self) -> Result<(), CaptureError> {
         if self.sequence == 0 {
             return Err(CaptureError::InvalidObservationBatch);
         }
-        validate_observation_fields(&self.adapter_id, &self.source)
+        validate_observation_fields(&self.adapter_id, &self.source)?;
+        self.translation_context
+            .as_ref()
+            .map_or(Ok(()), CaptureTranslationContext::validate)
     }
 }
 

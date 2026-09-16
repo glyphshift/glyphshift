@@ -1,7 +1,9 @@
 //! Verified isolated-process host implementing the Controller transport contract.
 
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
-use glyphshift_capture::{CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId};
+use glyphshift_capture::{
+    CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId, CaptureTranslationContext,
+};
 use glyphshift_controller_sdk::{
     Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
     WireCaptureObservationBatch, WireControllerConfiguration, WireControllerLossPolicy,
@@ -615,8 +617,19 @@ fn decode_observation_batch(
         .records
         .into_iter()
         .map(|record| {
-            CaptureObservationRecord::new(record.sequence, record.adapter_id, record.source)
-                .map_err(|_| TransportFailure::MalformedMessage)
+            let observation =
+                CaptureObservationRecord::new(record.sequence, record.adapter_id, record.source)
+                    .map_err(|_| TransportFailure::MalformedMessage)?;
+            match record.translation_context {
+                Some(context) => observation
+                    .with_translation_context(CaptureTranslationContext::new(
+                        context.context.map(Box::<str>::from),
+                        context.disambiguation.map(Box::<str>::from),
+                        context.plural_n,
+                    ))
+                    .map_err(|_| TransportFailure::MalformedMessage),
+                None => Ok(observation),
+            }
         })
         .collect::<Result<Vec<_>, _>>()?;
     CaptureObservationBatch::new(producer_id, batch.generation, batch.dropped_total, records)

@@ -12,6 +12,7 @@ const MAX_ADAPTER_ID_BYTES: usize = 256;
 const MAX_SOURCE_TEXT_BYTES: usize = 16_384;
 const MAX_SURFACE_TOKEN_BYTES: usize = 256;
 const MAX_CONTEXT_FIELD_BYTES: usize = 256;
+const MAX_TRANSLATION_CONTEXT_FIELD_BYTES: usize = 4 * 1024;
 const MAX_ROUTE_STATE_ENTRIES: u16 = 1_024;
 const MAX_ROUTE_STEPS: u16 = 4_096;
 
@@ -190,7 +191,11 @@ impl DecisionEngine {
         state: &mut DecisionState,
     ) -> DecisionResult {
         let mut result = self.decide_exact(observation, route, snapshot, font_policy, state);
-        if matches!(result.trace.status, DecisionTraceStatus::NoMatch | DecisionTraceStatus::Matched) {
+        if matches!(result.trace.status, DecisionTraceStatus::NoMatch | DecisionTraceStatus::Matched)
+            && observation
+                .translation_context()
+                .is_none_or(|context| context.plural_n().is_none())
+        {
             for (location, rules) in snapshot.dictionary_rules() {
                 if rules.matching_rule_index(observation.source_text()).is_none() { continue; }
                 let text = rules.replace(observation.source_text(), |source|
@@ -261,8 +266,7 @@ impl DecisionEngine {
                 RouteOperator::Direct { location } => {
                     if let Some(matched) = decide_at(
                         location,
-                        observation.adapter_id(),
-                        observation.source_text(),
+                        observation,
                         snapshot,
                         font_policy,
                     ) {
@@ -288,8 +292,7 @@ impl DecisionEngine {
                         }
                         if let Some(matched) = decide_at(
                             location,
-                            observation.adapter_id(),
-                            observation.source_text(),
+                            observation,
                             snapshot,
                             font_policy,
                         ) {
@@ -389,14 +392,22 @@ fn valid_observation(observation: &TextObservation) -> bool {
     {
         return false;
     }
-    observation.context_heading().is_none_or(|context| {
+    let heading_valid = observation.context_heading().is_none_or(|context| {
         !context.kind().is_empty()
             && context.kind().len() <= MAX_CONTEXT_FIELD_BYTES
             && !context.key().is_empty()
             && context.key().len() <= MAX_CONTEXT_FIELD_BYTES
             && !context.label().is_empty()
             && context.label().len() <= MAX_CONTEXT_FIELD_BYTES
-    })
+    });
+    let translation_context_valid = observation.translation_context().is_none_or(|context| {
+        context.context().is_none_or(|value| {
+            value.len() <= MAX_TRANSLATION_CONTEXT_FIELD_BYTES && !value.contains('\0')
+        }) && context.disambiguation().is_none_or(|value| {
+            value.len() <= MAX_TRANSLATION_CONTEXT_FIELD_BYTES && !value.contains('\0')
+        }) && context.plural_n().is_none_or(|n| n >= 0)
+    });
+    heading_valid && translation_context_valid
 }
 
 fn consume_step(steps: &mut u16, max_steps: u16) -> bool {
@@ -406,13 +417,26 @@ fn consume_step(steps: &mut u16, max_steps: u16) -> bool {
 
 fn decide_at(
     location: &str,
-    adapter_id: &str,
-    source: &str,
+    observation: &TextObservation,
     snapshot: &TranslationSnapshot,
     font_policy: &FontPolicy,
 ) -> Option<MatchedDecision> {
-    let text = snapshot.lookup_for_adapter(location, adapter_id, source);
-    let font = font_policy.lookup_entry_for_adapter(location, adapter_id, source);
+    let text = observation
+        .translation_context()
+        .is_none_or(|context| context.plural_n().is_none())
+        .then(|| {
+            snapshot.lookup_for_adapter(
+                location,
+                observation.adapter_id(),
+                observation.source_text(),
+            )
+        })
+        .flatten();
+    let font = font_policy.lookup_entry_for_adapter(
+        location,
+        observation.adapter_id(),
+        observation.source_text(),
+    );
     decision_from_parts(text, font, snapshot)
 }
 

@@ -225,7 +225,11 @@ impl ProcessIsolatedWorker {
             .map_err(|_| WorkerHostError::InvalidObservation)?;
         ingress.report_dropped(dropped);
         for record in batch.records() {
-            let _ = ingress.try_observe(record.adapter_id(), record.source());
+            let _ = ingress.try_observe_with_context(
+                record.adapter_id(),
+                record.source(),
+                record.translation_context().cloned(),
+            );
         }
         Ok(WorkerDrainReport {
             records: batch.records().len() as u64,

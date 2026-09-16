@@ -273,7 +273,11 @@ fn drain_observations<T: ControllerTransport + Send + 'static>(
         let dropped = cursor.accept(&batch).map_err(|_| ())?;
         ingress.report_dropped(dropped);
         for record in batch.records() {
-            let _ = ingress.try_observe(record.adapter_id(), record.source());
+            let _ = ingress.try_observe_with_context(
+                record.adapter_id(),
+                record.source(),
+                record.translation_context().cloned(),
+            );
         }
         if empty {
             return Ok(());

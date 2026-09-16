@@ -1,5 +1,6 @@
 use super::super::{safe_identifier, CaptureError};
 use super::MAX_PROBE_QUERY_PAGE_SIZE;
+use crate::CaptureTranslationContext;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -362,6 +363,8 @@ pub enum ProbeEntryState {
 pub struct ProbeEntryRow {
     pub(super) source: Box<str>,
     pub(super) translation: Box<str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) translation_context: Option<CaptureTranslationContext>,
     pub(super) state: ProbeEntryState,
     pub(super) adapter_ids: Vec<Box<str>>,
     pub(super) count: u64,
@@ -415,6 +418,11 @@ impl ProbeEntryRow {
     #[must_use]
     pub fn translation(&self) -> &str {
         &self.translation
+    }
+
+    #[must_use]
+    pub const fn translation_context(&self) -> Option<&CaptureTranslationContext> {
+        self.translation_context.as_ref()
     }
 
     #[must_use]

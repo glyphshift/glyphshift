@@ -1,14 +1,16 @@
 use crate::observation::{validate_observation_fields, MAX_OBSERVATION_BATCH_RECORDS};
 use crate::{
     CaptureError, CaptureIngressStatus, CaptureObservationBatch, CaptureObservationRecord,
-    CaptureProducerConfiguration, CaptureProducerId,
+    CaptureProducerConfiguration, CaptureProducerId, CaptureTranslationContext,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
 
-const QUEUE_CAPACITY: usize = 8_192;
+// Runtime activation can expose a dense startup burst before the desktop-side supervisor has
+// completed the activation handshake and started draining observations.
+const QUEUE_CAPACITY: usize = 16_384;
 
 /// Hot-path input owned by one [`CaptureBatchProducer`].
 ///
@@ -30,6 +32,16 @@ impl CaptureBatchIngress {
         adapter_id: impl Into<Box<str>>,
         source: impl Into<Box<str>>,
     ) -> CaptureIngressStatus {
+        self.try_observe_with_context(adapter_id, source, None)
+    }
+
+    #[must_use]
+    pub fn try_observe_with_context(
+        &self,
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+        translation_context: Option<CaptureTranslationContext>,
+    ) -> CaptureIngressStatus {
         if !self.accepting.load(Ordering::Acquire) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return CaptureIngressStatus::Dropped;
@@ -37,7 +49,9 @@ impl CaptureBatchIngress {
         if self.paused.load(Ordering::Relaxed) {
             return CaptureIngressStatus::Paused;
         }
-        let Ok(observation) = PendingCaptureObservation::new(adapter_id, source) else {
+        let Ok(observation) =
+            PendingCaptureObservation::new(adapter_id, source, translation_context)
+        else {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return CaptureIngressStatus::Dropped;
         };
@@ -59,18 +73,24 @@ impl CaptureBatchIngress {
 struct PendingCaptureObservation {
     adapter_id: Box<str>,
     source: Box<str>,
+    translation_context: Option<CaptureTranslationContext>,
 }
 
 impl PendingCaptureObservation {
     fn new(
         adapter_id: impl Into<Box<str>>,
         source: impl Into<Box<str>>,
+        translation_context: Option<CaptureTranslationContext>,
     ) -> Result<Self, CaptureError> {
         let observation = Self {
             adapter_id: adapter_id.into(),
             source: source.into(),
+            translation_context,
         };
         validate_observation_fields(&observation.adapter_id, &observation.source)?;
+        if let Some(context) = &observation.translation_context {
+            context.validate()?;
+        }
         Ok(observation)
     }
 }
@@ -122,11 +142,14 @@ impl CaptureBatchProducer {
                 .last_sequence
                 .checked_add(1)
                 .ok_or(CaptureError::WorkerUnavailable)?;
-            let record = CaptureObservationRecord::new(
+            let mut record = CaptureObservationRecord::new(
                 sequence,
                 observation.adapter_id,
                 observation.source,
             )?;
+            if let Some(context) = observation.translation_context {
+                record = record.with_translation_context(context)?;
+            }
             self.last_sequence = sequence;
             self.pending.push_back(record);
         }

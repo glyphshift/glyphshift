@@ -29,7 +29,8 @@ type NavigableView = Exclude<View, 'dictionary-editor'>
 const desktopApiVersion = 36
 const safetyNoticeVersion = 1
 const onboardingVersion = 1
-const workflowBackgroundRefreshIntervalMs = 5_000
+const workflowMonitorIntervalMs = 250
+const workflowWaitingRefreshMinAgeMs = 250
 const workflowBackgroundRefreshMinAgeMs = 4_000
 
 const { t } = useI18n()
@@ -367,7 +368,14 @@ async function connectWorkflowShortcuts() {
 
 function refreshWorkflowsInBackground() {
   if (!('__TAURI_INTERNALS__' in window) || workspace.workspaceBusy.value) return
-  if (Date.now() - workspace.lastWorkflowRefreshAt.value < workflowBackgroundRefreshMinAgeMs) return
+  const waitingForTarget = [...workspace.activationIds.value].some(id => {
+    const runtime = workspace.model.value.workflowRuntimeStatus[id]
+    return !runtime || runtime.lifecycle?.phase === 'waiting'
+  })
+  // Startup-only framework translations can run before a normal UI refresh. While a workflow is
+  // waiting for its process, keep discovery warm and poll the existing controller connection.
+  const minAge = waitingForTarget ? workflowWaitingRefreshMinAgeMs : workflowBackgroundRefreshMinAgeMs
+  if (Date.now() - workspace.lastWorkflowRefreshAt.value < minAge) return
   void workspace.refreshWorkflows(false, false)
 }
 
@@ -385,7 +393,7 @@ onMounted(() => {
     }, 1000)
     workflowMonitor = setInterval(() => {
       if (workspace.activationIds.value.size) refreshWorkflowsInBackground()
-    }, workflowBackgroundRefreshIntervalMs)
+    }, workflowMonitorIntervalMs)
   }
   window.addEventListener('beforeunload', guardBrowserExit)
   window.addEventListener('keydown', handleShellShortcut)

@@ -11,6 +11,14 @@ pub const TEXT_EVENT_FRAGMENT: u32 = 4;
 pub const TEXT_EVENT_FINISH: u32 = 5;
 pub const TEXT_EVENT_CANCEL: u32 = 6;
 pub const TEXT_EVENT_GLYPH_RASTER: u32 = 7;
+pub const TEXT_EVENT_METADATA_VERSION_V1: u32 = 1;
+pub const TEXT_EVENT_METADATA_CONTEXT: u32 = 1 << 0;
+pub const TEXT_EVENT_METADATA_DISAMBIGUATION: u32 = 1 << 1;
+pub const TEXT_EVENT_METADATA_PLURAL_N: u32 = 1 << 2;
+pub const TEXT_EVENT_METADATA_KNOWN_FLAGS: u32 = TEXT_EVENT_METADATA_CONTEXT
+    | TEXT_EVENT_METADATA_DISAMBIGUATION
+    | TEXT_EVENT_METADATA_PLURAL_N;
+pub const MAX_TEXT_EVENT_CONTEXT_UNITS: usize = 1024;
 pub const STATUS_INVALID_TEXT_EVENT: i32 = 6;
 pub type EnterTextScopeV1 = extern "C" fn(*mut c_void) -> u64;
 pub type LeaveTextScopeV1 = extern "C" fn(*mut c_void, u64);
@@ -27,6 +35,24 @@ pub struct NativeTextEventV1 {
     pub ordinal: u32,
     pub source: *const u16,
     pub source_len: u32,
+}
+
+/// Versioned extension of [`NativeTextEventV1`] for framework translation calls.
+///
+/// `base` is the exact V1 prefix and `base.struct_size` identifies this V2 layout. The host
+/// callback signature remains V1 so old producers and V2 producers can share one binding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeTextEventV2 {
+    pub base: NativeTextEventV1,
+    pub metadata_version: u32,
+    pub metadata_flags: u32,
+    pub context: *const u16,
+    pub context_len: u32,
+    pub disambiguation: *const u16,
+    pub disambiguation_len: u32,
+    pub plural_n: i32,
+    pub reserved: u32,
 }
 
 impl NativeTextEventV1 {
@@ -107,6 +133,22 @@ impl NativeTextHostBinding {
         (self.decide)(
             self.context as *mut c_void,
             event,
+            text.as_mut_ptr(),
+            text.len() as u32,
+            font.as_mut_ptr(),
+            font.len() as u32,
+        )
+    }
+
+    pub fn decide_v2(
+        &self,
+        event: &NativeTextEventV2,
+        text: &mut [u16],
+        font: &mut [u16],
+    ) -> NativeDecisionV1 {
+        (self.decide)(
+            self.context as *mut c_void,
+            core::ptr::from_ref(&event.base),
             text.as_mut_ptr(),
             text.len() as u32,
             font.as_mut_ptr(),

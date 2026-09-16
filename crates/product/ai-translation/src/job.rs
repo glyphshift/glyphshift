@@ -304,6 +304,8 @@ fn translate_batch(
                 item_id: candidate.item_id.clone(),
                 source: candidate.source.clone(),
                 protected_tokens: candidate.protected_tokens.clone(),
+                context: candidate.context.clone(),
+                disambiguation: candidate.disambiguation.clone(),
             })
             .collect(),
     };
@@ -467,6 +469,8 @@ fn validate_response(
                 item_id: candidate.item_id.clone(),
                 source: candidate.source.clone(),
                 translation: text.into(),
+                context: candidate.context.clone(),
+                disambiguation: candidate.disambiguation.clone(),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;

@@ -169,6 +169,8 @@ fn translation_prompt(request: &ProviderRequest<'_>) -> Result<String, ProviderE
         "items": request.items().iter().map(|item| json!({
             "itemId": item.item_id(),
             "source": item.source(),
+            "context": item.context(),
+            "disambiguation": item.disambiguation(),
         })).collect::<Vec<_>>(),
     });
     let encoded = serde_json::to_string(&input)

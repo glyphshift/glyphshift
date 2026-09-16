@@ -88,6 +88,38 @@ fn concurrent_drain_does_not_drop_transient_observations() {
 }
 
 #[test]
+fn batch_producer_buffers_activation_burst_before_supervisor_starts() {
+    const OBSERVATION_COUNT: usize = 12_000;
+
+    let (mut producer, ingress) = CaptureBatchProducer::start(
+        CaptureProducerConfiguration::new(
+            CaptureProducerId::new("startup-burst").expect("producer id"),
+            1,
+        )
+        .expect("producer configuration"),
+    )
+    .expect("batch producer");
+
+    for index in 0..OBSERVATION_COUNT {
+        assert_eq!(
+            ingress.try_observe("windows.qt.translation-service", format!("Startup {index}")),
+            CaptureIngressStatus::Accepted,
+        );
+    }
+
+    let mut observed = 0;
+    loop {
+        let batch = producer.drain().expect("startup burst drain");
+        observed += batch.records().len();
+        if batch.records().is_empty() {
+            assert_eq!(batch.dropped_total(), 0);
+            break;
+        }
+    }
+    assert_eq!(observed, OBSERVATION_COUNT);
+}
+
+#[test]
 fn batch_producer_preserves_pending_records_drops_pause_and_owner_lifetime() {
     let (mut producer, ingress) = CaptureBatchProducer::start(
         CaptureProducerConfiguration::new(

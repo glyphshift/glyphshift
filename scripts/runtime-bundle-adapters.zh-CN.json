@@ -72,6 +72,14 @@
     "documentationUrl": "https://doc.qt.io/qt-6/qpainter.html#drawText"
   },
   {
+    "id": "windows.qt.translation-service",
+    "name": "Qt 翻译服务",
+    "summary": "适合动态 MSVC Qt 6.10.3 x64 中通过 QCoreApplication::translate 获取文字的界面；按 context / disambiguation 区分同名词条，plural 调用当前只采集不替换，未知 ABI 保持原文。",
+    "technology": "Qt 6.10.3 / QCoreApplication",
+    "technicalTarget": "QtCore!QCoreApplication::translate",
+    "documentationUrl": "https://doc.qt.io/qt-6/qcoreapplication.html#translate"
+  },
+  {
     "id": "windows.qt.text-document",
     "name": "Qt Text Document",
     "summary": "适合 Qt 6.8.3 x64 中通过 QTextDocument::setHtml 建模的纯文本提示和标签；富文本保持原样",

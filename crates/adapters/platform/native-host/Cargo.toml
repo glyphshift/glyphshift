@@ -22,6 +22,7 @@ glyphshift-adapter-gdi = { path = "../../implementations/native/gdi" }
 glyphshift-adapter-gdiplus = { path = "../../implementations/native/gdiplus" }
 glyphshift-adapter-gtk3-pango = { path = "../../implementations/framework/gtk3-pango" }
 glyphshift-adapter-qt-painter = { path = "../../implementations/framework/qt-painter" }
+glyphshift-adapter-qt-translation = { path = "../../implementations/framework/qt-translation" }
 glyphshift-adapter-raylib = { path = "../../implementations/framework/raylib" }
 glyphshift-adapter-sidefx-cv-paint-buffer = { path = "../../implementations/framework/sidefx-cv-paint-buffer" }
 glyphshift-adapter-unity-mono-standard-ui = { path = "../../implementations/framework/unity-mono-standard-ui" }

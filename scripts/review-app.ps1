@@ -7,6 +7,8 @@ param(
 
     [switch]$UseUserData,
 
+    [switch]$ResearchQt5,
+
     [switch]$BuildOnly
 )
 
@@ -83,7 +85,8 @@ New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 & (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') `
     -Profile $Profile `
     -OutputRoot $runtimeRoot `
-    -CargoTargetDir $cargoTargetDir
+    -CargoTargetDir $cargoTargetDir `
+    -ResearchQt5:$ResearchQt5
 
 Push-Location $desktopRoot
 try {

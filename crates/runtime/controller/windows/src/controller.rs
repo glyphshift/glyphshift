@@ -6,7 +6,7 @@ use crate::platform::{
 use crate::remote;
 use glyphshift_controller_sdk::{
     ControllerPlugin, PluginError, WireAdapterRequirement, WireCaptureObservationBatch,
-    WireCaptureObservationRecord, WireControllerConfiguration, WireControllerLossPolicy,
+    WireCaptureObservationRecord, WireCaptureTranslationContext, WireControllerConfiguration, WireControllerLossPolicy,
     WireFeature, WireInventory, WireRecipe, WireRuntimeAck, WireRuntimeDeployment,
     WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch, WireRuntimeTraceRecord,
     WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
@@ -548,6 +548,13 @@ impl ControllerPlugin for WindowsController {
                     sequence: record.sequence(),
                     adapter_id: record.adapter_id().into(),
                     source: record.source().into(),
+                    translation_context: record.translation_context().map(|context| {
+                        WireCaptureTranslationContext {
+                            context: context.context().map(str::to_owned),
+                            disambiguation: context.disambiguation().map(str::to_owned),
+                            plural_n: context.plural_n(),
+                        }
+                    }),
                 })
                 .collect(),
         })

@@ -1,6 +1,7 @@
 use glyphshift_controller_sdk::{
     serve, ControllerPlugin, PluginError, Response, ResponseEnvelope, WireCaptureObservationBatch,
-    WireCaptureObservationRecord, WireInventory, WireRecipe, PROTOCOL_SCHEMA,
+    WireCaptureObservationRecord, WireCaptureTranslationContext, WireInventory, WireRecipe,
+    PROTOCOL_SCHEMA,
 };
 use std::io::Cursor;
 
@@ -36,6 +37,11 @@ impl ControllerPlugin for ObservationPlugin {
                 sequence: 4,
                 adapter_id: "adapter.example".into(),
                 source: "Open".into(),
+                translation_context: Some(WireCaptureTranslationContext {
+                    context: Some("MainMenu".into()),
+                    disambiguation: Some("verb".into()),
+                    plural_n: None,
+                }),
             }],
         })
     }
@@ -65,4 +71,10 @@ fn ctl_sdk_002_round_trips_runtime_observation_batches() {
     assert_eq!(batch.dropped_total, 2);
     assert_eq!(batch.records[0].sequence, 4);
     assert_eq!(batch.records[0].source, "Open");
+    let context = batch.records[0]
+        .translation_context
+        .as_ref()
+        .expect("translation context");
+    assert_eq!(context.context.as_deref(), Some("MainMenu"));
+    assert_eq!(context.disambiguation.as_deref(), Some("verb"));
 }

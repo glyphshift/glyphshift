@@ -64,6 +64,8 @@ pub(crate) struct ProbeTranslationEditRequest {
     pub(crate) run_id: Box<str>,
     pub(crate) source: Box<str>,
     pub(crate) translation: Box<str>,
+    #[serde(default)]
+    pub(crate) translation_context: Option<CaptureTranslationContext>,
 }
 
 #[derive(Deserialize)]

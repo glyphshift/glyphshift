@@ -27,9 +27,10 @@ use dictionary::{
     DictionaryCatalogInstallRequest, DictionaryCatalogQueryRequest, DictionaryReplacementRequest,
 };
 use glyphshift_capture::{
-    CaptureConfiguration, ProbeDictionaryEntry, ProbeDictionarySnapshot, ProbeEntryPage,
-    ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus, ProbeRunStore,
-    ProbeRunSummary, ProbeRunUpdate, ProbeTranslationFilter, DEFAULT_MAX_ENTRIES,
+    CaptureConfiguration, CaptureTranslationContext, ProbeDictionaryEntry, ProbeDictionarySnapshot,
+    ProbeEntryPage, ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus,
+    ProbeRunStore, ProbeRunSummary, ProbeRunUpdate, ProbeTranslationFilter,
+    DEFAULT_MAX_ENTRIES,
 };
 use glyphshift_controller_windows::{
     current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,

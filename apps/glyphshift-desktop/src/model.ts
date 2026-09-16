@@ -178,10 +178,17 @@ export interface ProbeEntryResolution {
   editTranslation?: string | null
 }
 
+export interface ProbeTranslationContext {
+  context?: string | null
+  disambiguation?: string | null
+  pluralN?: number | null
+}
+
 export interface ProbeEntryRow {
   resolution?: ProbeEntryResolution
   source: string
   translation: string
+  translationContext?: ProbeTranslationContext | null
   state: 'pending' | 'translated' | 'unobserved' | 'ignored'
   adapterIds: string[]
   count: number

@@ -3,7 +3,7 @@ use glyphshift_decision::{
 };
 use glyphshift_domain::{
     FontDecision, Generation, RenderDecision, RouteLimits, RouteOperator, RouteProgram,
-    TextDecision, TextObservation,
+    TextDecision, TextObservation, TranslationContext,
 };
 use glyphshift_translation::{FontPolicy, FontRule, TranslationSnapshot};
 
@@ -15,6 +15,39 @@ fn decide(
     state: &mut DecisionState,
 ) -> glyphshift_decision::DecisionResult {
     DecisionEngine::new().decide(observation, route, snapshot, font_policy, state)
+}
+
+#[test]
+fn translation_call_context_uses_source_dictionary_and_plural_fails_open() {
+    let menu = TranslationContext::new(Some("MainMenu"), Option::<&str>::None, None);
+    let toolbar = TranslationContext::new(Some("Toolbar"), Option::<&str>::None, None);
+    let snapshot = TranslationSnapshot::empty(Generation::new(30))
+        .with_entry("menu", "Open", "打开");
+    let route = RouteProgram::direct("menu");
+    let mut state = DecisionState::new();
+
+    for context in [menu, toolbar] {
+        let result = decide(
+            &TextObservation::new("windows.qt.translation-service", "Open", "surface-main")
+                .with_translation_context(context),
+            &route,
+            &snapshot,
+            &FontPolicy::empty(),
+            &mut state,
+        );
+        assert_eq!(result.decision().text, TextDecision::Replace("打开".into()));
+    }
+
+    let plural = TranslationContext::new(Some("MainMenu"), Option::<&str>::None, Some(2));
+    let result = decide(
+        &TextObservation::new("windows.qt.translation-service", "Open", "surface-main")
+            .with_translation_context(plural),
+        &route,
+        &snapshot,
+        &FontPolicy::empty(),
+        &mut state,
+    );
+    assert_eq!(result.decision().text, TextDecision::Keep);
 }
 
 #[test]

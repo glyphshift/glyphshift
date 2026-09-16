@@ -580,6 +580,7 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     assert!(writer.entries()[0].translation().is_empty());
     app.edit_probe_translation(ProbeTranslationEditRequest {
         run_id: run.id().into(), source: "New source".into(), translation: "Translated source".into(),
+        translation_context: None,
     }).unwrap();
     assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries()[0].translation(), "Translated source");
     assert!(!calls.lock().unwrap().refreshed.is_empty());
@@ -901,7 +902,7 @@ fn dictionary_rules_collect_one_label_and_ai_ignores_dynamic_counts() {
     assert_eq!(plan.candidates()[0].source(), "Total");
     let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
         run_id: id.into(), snapshot_revision: dictionary.revision(), results: vec![
-            ai::ProbeAiTranslationResult { item_id: plan.candidates()[0].item_id().into(), source: "Total".into(), translation: "总计".into() },
+            ai::ProbeAiTranslationResult { item_id: plan.candidates()[0].item_id().into(), source: "Total".into(), translation: "总计".into(), context: None, disambiguation: None },
         ],
     }).unwrap();
     assert_eq!(applied.applied_count, 1);
@@ -935,7 +936,7 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
     assert_eq!(pending["rows"][0]["resolution"]["editable"], true);
     assert_eq!(pending["rows"][0]["resolution"]["editSource"], "Total");
     for text in ["总计", "合计"] {
-        app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:text.into() }).unwrap();
+        app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:text.into(), translation_context: None }).unwrap();
         let dictionary = app.backend.dictionary("dictionary.counter").unwrap();
         assert_eq!(dictionary.entries().len(), 1);
         assert_eq!(dictionary.entries()[0].source(), "Total");
@@ -944,13 +945,13 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
         assert_eq!(page["rows"][0]["translation"], format!("{text}:18"));
         assert_eq!(page["rows"][0]["resolution"]["editTranslation"], text);
     }
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:0".into(), translation:"".into() }).unwrap();
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:0".into(), translation:"".into(), translation_context: None }).unwrap();
     assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
     assert_eq!(rows(&mut app)["rows"][0]["resolution"]["kind"], "rule_pending");
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:100".into(), translation:"总数".into() }).unwrap();
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:100".into(), translation:"总数".into(), translation_context: None }).unwrap();
     app.bulk_probe_entries(super::super::probe::ProbeBulkRequest { run_id:id.into(), sources:vec!["Total:0".into(),"Total:18".into()], action:"clear_translations".into() }).unwrap();
     assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:"总数".into() }).unwrap();
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:"总数".into(), translation_context: None }).unwrap();
     let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
     app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
     app.collect_workflow_sources(id).unwrap();

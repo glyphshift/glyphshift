@@ -260,10 +260,22 @@ pub struct WireRuntimeTraceBatch {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireCaptureTranslationContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disambiguation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plural_n: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireCaptureObservationRecord {
     pub sequence: u64,
     pub adapter_id: String,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation_context: Option<WireCaptureTranslationContext>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

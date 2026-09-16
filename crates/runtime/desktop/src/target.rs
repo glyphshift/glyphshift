@@ -78,7 +78,12 @@ pub(super) trait ManagedRuntime: Send {
 
 impl ManagedRuntime for WindowsDesktopRuntime {
     fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
-        self.refresh_target_liveness()
+        if self.is_active() {
+            self.refresh_target_liveness()
+        } else {
+            self.refresh_discovery()?;
+            Ok(true)
+        }
     }
 
     fn application_id(&self) -> &str {
@@ -273,6 +278,28 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
 
     pub fn targets(&self) -> impl Iterator<Item = &RuntimeTarget> {
         self.targets.iter().map(|target| &target.view)
+    }
+
+    fn refresh_discovery(&mut self) -> Result<(), DesktopRuntimeError> {
+        let Some(RuntimePhase::Discovered(connection)) = self.phase.as_mut() else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        let inventory = connection
+            .inventory()
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        self.targets = inventory
+            .targets()
+            .iter()
+            .map(|target| TargetRecord {
+                view: RuntimeTarget {
+                    id: target.id().as_u64(),
+                    display_name: target.display_name().into(),
+                },
+                controller_id: target.id(),
+                facts: target.facts().clone(),
+            })
+            .collect();
+        Ok(())
     }
 
     pub fn acquire_point(

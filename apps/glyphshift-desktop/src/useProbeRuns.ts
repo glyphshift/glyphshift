@@ -3,7 +3,7 @@ import { applyWorkflowRuntime } from './workspace/state'
 import { invoke } from '@tauri-apps/api/core'
 import { isCommandError, translateCommandError, type CommandError } from './commandError'
 import { i18n } from './i18n'
-import type { ProbeEntryPage, ProbeExportFormat, ProbeRunSummary } from './model'
+import type { ProbeEntryPage, ProbeExportFormat, ProbeRunSummary, ProbeTranslationContext } from './model'
 
 export interface ProbeRunQueryInput {
   runId: string
@@ -343,10 +343,22 @@ export function useProbeRuns() {
     return invoke<ProbeEntryPage>('desktop_probe_run_entries', { request: input })
   }
 
-  async function editTranslation(runId: string, source: string, translation: string) {
+  async function editTranslation(
+    runId: string,
+    source: string,
+    translation: string,
+    translationContext?: ProbeTranslationContext | null,
+  ) {
     if (!hasDesktopRuntime()) return selectedRun.value
+    const requestTranslationContext = translationContext
+      ? {
+          context: translationContext.context,
+          disambiguation: translationContext.disambiguation,
+          pluralN: translationContext.pluralN,
+        }
+      : null
     const summary = await invoke<ProbeRunSummary>('desktop_edit_probe_translation', {
-      request: { runId, source, translation },
+      request: { runId, source, translation, translationContext: requestTranslationContext },
     })
     upsert(summary)
     return summary

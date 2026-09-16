@@ -104,6 +104,7 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
             run_id: created.summary.id().into(),
             source: "Open".into(),
             translation: "立即打开".into(),
+            translation_context: None,
         })
         .expect("edit and publish live preview");
     assert_eq!(edited.summary.preview_generation(), 2);
@@ -170,6 +171,97 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
     assert_eq!(
         serde_json::to_value(error).unwrap()["code"],
         "capture.not_active"
+    );
+}
+
+#[test]
+fn contextual_probe_edits_share_one_source_dictionary_entry_and_plural_is_read_only() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
+            id: "probe-contextual-edit".into(),
+            name: "Contextual edit".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create contextual probe");
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .expect("bound dictionary")
+        .clone();
+    application
+        .backend
+        .update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries([
+            DictionaryEntryCreate::new("Open", "打开"),
+        ]))
+        .expect("seed source-only entry");
+
+    let main_menu = CaptureTranslationContext::new(
+        Some("MainMenu"),
+        Option::<&str>::None,
+        None,
+    );
+    application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Open".into(),
+            translation: "主菜单打开".into(),
+            translation_context: Some(main_menu.clone()),
+        })
+        .expect("edit source entry from contextual row");
+    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    assert_eq!(dictionary.entries().len(), 1);
+    assert_eq!(dictionary.entries()[0].translation(), "主菜单打开");
+
+    application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Open".into(),
+            translation: "统一打开".into(),
+            translation_context: Some(CaptureTranslationContext::new(
+                Some("Toolbar"),
+                Option::<&str>::None,
+                None,
+            )),
+        })
+        .expect("edit same source from another context");
+    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    assert_eq!(dictionary.entries().len(), 1);
+    assert_eq!(dictionary.entries()[0].translation(), "统一打开");
+
+    application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Open".into(),
+            translation: "".into(),
+            translation_context: Some(main_menu),
+        })
+        .expect("clear source entry from contextual row");
+    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    assert!(dictionary.entries().is_empty());
+
+    let plural = CaptureTranslationContext::new(
+        Some("Counter"),
+        Option::<&str>::None,
+        Some(2),
+    );
+    let error = application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "%n files".into(),
+            translation: "%n 个文件".into(),
+            translation_context: Some(plural),
+        })
+        .expect_err("plural translation calls remain observe-only");
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["code"],
+        "capture.invalid_configuration"
     );
 }
 
@@ -308,6 +400,7 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
             run_id: first.summary.id().into(),
             source: "Close".into(),
             translation: "关闭".into(),
+            translation_context: None,
         })
         .expect("edit the bound dictionary directly");
     assert_eq!(edited.dictionary_entry_count, 2);
@@ -721,6 +814,92 @@ fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
 }
 
 #[test]
+fn probe_ai_uses_context_as_hint_but_writes_one_source_dictionary_entry() {
+    let (mut application, _calls, software_id, _data_root) = workflow_application();
+    let run = application
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
+            id: "probe-ai-context".into(),
+            name: "Contextual AI probe".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .expect("create contextual AI probe");
+    let capture = glyphshift_capture::FileCaptureSink::start(
+        application
+            .probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .expect("capture configuration"),
+    )
+    .expect("start contextual observation sink");
+    let ingress = capture.ingress();
+    let _ = ingress.try_observe_with_context(
+        TEST_ADAPTER_ID,
+        "New Project",
+        Some(CaptureTranslationContext::new(
+            Some("QgisApp"),
+            Option::<&str>::None,
+            None,
+        )),
+    );
+    let _ = ingress.try_observe_with_context(
+        TEST_ADAPTER_ID,
+        "New Project",
+        Some(CaptureTranslationContext::new(
+            Some("MainWindow"),
+            Option::<&str>::None,
+            None,
+        )),
+    );
+    glyphshift_capture::FileCaptureSink::finish(capture).expect("finish contextual observations");
+
+    let mut translation = glyphshift_ai_translation::AiTranslation::new();
+    let plan = translation
+        .plan_translation(
+            application
+                .probe_ai_plan_request(run.summary.id())
+                .expect("build contextual probe AI request"),
+        )
+        .expect("plan contextual translations");
+    let candidates = plan
+        .candidates()
+        .iter()
+        .filter(|candidate| candidate.source() == "New Project")
+        .collect::<Vec<_>>();
+    assert_eq!(candidates.len(), 1);
+    assert!(matches!(candidates[0].context(), Some("MainWindow" | "QgisApp")));
+
+    let results = candidates
+        .iter()
+        .map(|candidate| ai::ProbeAiTranslationResult {
+            item_id: candidate.item_id().into(),
+            source: candidate.source().into(),
+            translation: "新建项目".into(),
+            context: candidate.context().map(Box::<str>::from),
+            disambiguation: candidate.disambiguation().map(Box::<str>::from),
+        })
+        .collect();
+    let applied = application
+        .apply_probe_ai_results(ai::ProbeAiApplyRequest {
+            run_id: run.summary.id().into(),
+            snapshot_revision: plan.snapshot_revision(),
+            results,
+        })
+        .expect("write source-only AI result");
+    assert_eq!(applied.applied_count, 1);
+    assert_eq!(applied.skipped_count, 0);
+
+    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    assert!(dictionary.entries().iter().any(|entry| {
+        entry.source() == "New Project" && entry.translation() == "新建项目"
+    }));
+}
+
+#[test]
 fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     let run = application
@@ -756,6 +935,7 @@ fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
             run_id: run.summary.id().into(),
             source: "Save".into(),
             translation: "人工保存".into(),
+            translation_context: None,
         })
         .expect("user translation wins before AI writeback");
 
@@ -768,11 +948,15 @@ fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
                     item_id: "probe-row-save".into(),
                     source: "Save".into(),
                     translation: "AI 保存".into(),
+                    context: None,
+                    disambiguation: None,
                 },
                 ai::ProbeAiTranslationResult {
                     item_id: "probe-row-close".into(),
                     source: "Close".into(),
                     translation: "关闭".into(),
+                    context: None,
+                    disambiguation: None,
                 },
             ],
         })
@@ -880,6 +1064,7 @@ fn attached_dictionary_sources_block_collection_and_recheck_ai_writeback() {
     assert!(plan.candidates().iter().any(|entry| entry.source() == "Claimed later"));
     assert!(app.edit_probe_translation(ProbeTranslationEditRequest {
         run_id: run.summary.id().into(), source: "Already owned".into(), translation: "Must not append".into(),
+        translation_context: None,
     }).is_err());
     let input = root.path().join("owned.csv");
     std::fs::write(&input, "source,translation\nFresh,Allowed\nAlready owned,Blocked").unwrap();
@@ -898,8 +1083,8 @@ fn attached_dictionary_sources_block_collection_and_recheck_ai_writeback() {
     let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
         run_id: run.summary.id().into(), snapshot_revision: revision,
         results: vec![
-            ai::ProbeAiTranslationResult { item_id: "claimed".into(), source: "Claimed later".into(), translation: "Owned elsewhere".into() },
-            ai::ProbeAiTranslationResult { item_id: "new".into(), source: "Still new".into(), translation: "New translation".into() },
+            ai::ProbeAiTranslationResult { item_id: "claimed".into(), source: "Claimed later".into(), translation: "Owned elsewhere".into(), context: None, disambiguation: None },
+            ai::ProbeAiTranslationResult { item_id: "new".into(), source: "Still new".into(), translation: "New translation".into(), context: None, disambiguation: None },
         ],
     }).unwrap();
     assert_eq!(applied.applied_count, 1);
@@ -951,7 +1136,7 @@ fn collection_resolution_preserves_counts_and_filters_before_pagination_without_
     assert_eq!(owned.rows()[0].translation(), "附加词条");
     assert_eq!(serde_json::to_value(owned).unwrap()["rows"][0]["resolution"]["editable"], false);
     assert_eq!(app.backend.dictionary("dictionary.product").unwrap(), &before);
-    assert!(app.edit_probe_translation(ProbeTranslationEditRequest { run_id: run.summary.id().into(), source: "Total: 33".into(), translation: "直接翻译".into() }).is_err());
+    assert!(app.edit_probe_translation(ProbeTranslationEditRequest { run_id: run.summary.id().into(), source: "Total: 33".into(), translation: "直接翻译".into(), translation_context: None }).is_err());
     let exact = app.probe_run_entries(request("Total: 33", ProbeTranslationFilter::Translated)).unwrap();
     assert_eq!(exact.rows()[0].translation(), "总计: 33");
     assert_eq!(serde_json::to_value(exact).unwrap()["rows"][0]["resolution"]["kind"], "rule_translated");

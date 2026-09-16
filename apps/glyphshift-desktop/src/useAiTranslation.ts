@@ -71,6 +71,8 @@ export interface AiTranslationCandidate {
   itemId: string
   source: string
   protectedTokens: string[]
+  context?: string | null
+  disambiguation?: string | null
 }
 
 export interface AiSkippedItem {
@@ -93,6 +95,8 @@ export interface AiValidatedTranslation {
   itemId: string
   source: string
   translation: string
+  context?: string | null
+  disambiguation?: string | null
 }
 
 export interface AiProviderError {
@@ -201,6 +205,8 @@ export interface AiTranslationItemInput {
   source: string
   translation?: string | null
   ignored?: boolean
+  context?: string | null
+  disambiguation?: string | null
 }
 
 export interface ProbeAiApplyView {
@@ -478,6 +484,8 @@ function browserPlan(input: {
         itemId: item.itemId,
         source,
         protectedTokens: source.match(/\$\{[^}]+\}|\{[^}]+\}|%(?:\d+|s)/g) ?? [],
+        context: item.context ?? null,
+        disambiguation: item.disambiguation ?? null,
       })
     }
   })
@@ -646,6 +654,8 @@ async function startTranslation(planToken: string, profileId?: string | null) {
           itemId: item.itemId,
           source: item.source,
           translation: browserTranslation(item.source),
+          context: item.context ?? null,
+          disambiguation: item.disambiguation ?? null,
         })))
         job.completedCount = job.results.length
         job.finishedBatches += 1

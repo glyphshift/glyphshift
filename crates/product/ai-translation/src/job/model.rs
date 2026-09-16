@@ -11,6 +11,10 @@ pub struct ValidatedTranslation {
     pub(super) item_id: Box<str>,
     pub(super) source: Box<str>,
     pub(super) translation: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) context: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) disambiguation: Option<Box<str>>,
 }
 
 impl ValidatedTranslation {
@@ -27,6 +31,16 @@ impl ValidatedTranslation {
     #[must_use]
     pub fn translation(&self) -> &str {
         &self.translation
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    #[must_use]
+    pub fn disambiguation(&self) -> Option<&str> {
+        self.disambiguation.as_deref()
     }
 }
 

@@ -184,6 +184,10 @@ pub struct TranslationItem {
     source: Box<str>,
     translation: Option<Box<str>>,
     ignored: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disambiguation: Option<Box<str>>,
 }
 
 impl TranslationItem {
@@ -194,6 +198,8 @@ impl TranslationItem {
             source: source.into(),
             translation: None,
             ignored: false,
+            context: None,
+            disambiguation: None,
         }
     }
 
@@ -208,7 +214,20 @@ impl TranslationItem {
             source: source.into(),
             translation: Some(translation.into()),
             ignored: false,
+            context: None,
+            disambiguation: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_translation_context(
+        mut self,
+        context: Option<impl Into<Box<str>>>,
+        disambiguation: Option<impl Into<Box<str>>>,
+    ) -> Self {
+        self.context = context.map(Into::into);
+        self.disambiguation = disambiguation.map(Into::into);
+        self
     }
 
     #[must_use]
@@ -260,6 +279,10 @@ pub struct TranslationCandidate {
     item_id: Box<str>,
     source: Box<str>,
     protected_tokens: Vec<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context: Option<Box<str>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disambiguation: Option<Box<str>>,
 }
 
 impl TranslationCandidate {
@@ -276,6 +299,16 @@ impl TranslationCandidate {
     #[must_use]
     pub fn protected_tokens(&self) -> &[Box<str>] {
         &self.protected_tokens
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    #[must_use]
+    pub fn disambiguation(&self) -> Option<&str> {
+        self.disambiguation.as_deref()
     }
 }
 
@@ -412,6 +445,8 @@ impl AiTranslation {
                     item_id: item.item_id,
                     source: source.into(),
                     protected_tokens: protected_tokens(source),
+                    context: item.context,
+                    disambiguation: item.disambiguation,
                 });
             }
         }

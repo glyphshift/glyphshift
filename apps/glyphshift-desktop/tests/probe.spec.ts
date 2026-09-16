@@ -937,6 +937,97 @@ test('probe run keeps backend paging while adapter filters and view state recove
   ))).toEqual(['synthetic.draw-text'])
 })
 
+test('probe contextual rows keep observation identity while sharing one source translation', async ({ page }) => {
+  await page.addInitScript(({ snapshot }) => {
+    const contextualSnapshot = structuredClone(snapshot)
+    Object.assign(contextualSnapshot.workflows[0].targets[0], { writeDictionaryId: 'dictionary-proof' })
+    let summary = {
+      id: 'probe-context', name: 'Qt context probe', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      adapterIds: ['synthetic.text-out'], status: 'running', livePreviewEnabled: false,
+      observationRevision: 3, observedCount: 3, ignoredCount: 0, droppedObservations: 0,
+      previewGeneration: 1, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 2,
+      dictionaryEntryCount: 1, runtimeCapability: 'direct_replace', quickProbe: false,
+    }
+    const rows = [
+      {
+        source: 'Open', translation: '打开', translationContext: { context: 'MainMenu', disambiguation: null, pluralN: null },
+        state: 'translated', adapterIds: ['synthetic.text-out'], count: 1, firstSeenMs: 1, lastSeenMs: 3,
+      },
+      {
+        source: 'Open', translation: '打开', translationContext: { context: 'Toolbar', disambiguation: 'button', pluralN: null },
+        state: 'translated', adapterIds: ['synthetic.text-out'], count: 1, firstSeenMs: 1, lastSeenMs: 2,
+      },
+      {
+        source: '%n files', translation: '', translationContext: { context: 'Counter', disambiguation: null, pluralN: 2 },
+        state: 'pending', adapterIds: ['synthetic.text-out'], count: 1, firstSeenMs: 1, lastSeenMs: 1,
+        resolution: { kind: 'pending', dictionaryIds: [], ruleIndex: null, editable: false },
+      },
+    ]
+    const internals = {
+      invoke: async (command: string, args?: Record<string, any>) => {
+        if (command === 'desktop_settings') return {
+          settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
+          localePreference: 'zh-CN', themePreference: 'dark',
+        }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 36 }
+        if (command === 'desktop_snapshot') return contextualSnapshot
+        if (command === 'desktop_probe_runs') return [summary]
+        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_workflow_collection') return summary
+        if (command === 'desktop_probe_run_entries') return {
+          observationRevision: 3, dictionaryRevision: summary.dictionaryRevision,
+          page: 1, pageSize: 50, total: rows.length, rows,
+        }
+        if (command === 'desktop_edit_probe_translation') {
+          const request = structuredClone(args?.request)
+          ;(window as unknown as { __contextEditRequests?: unknown[] }).__contextEditRequests ??= []
+          ;(window as unknown as { __contextEditRequests: unknown[] }).__contextEditRequests.push(request)
+          for (const row of rows.filter(row => row.source === request.source)) {
+            row.translation = request.translation
+            row.state = request.translation ? 'translated' : 'pending'
+          }
+          summary = { ...summary, dictionaryRevision: summary.dictionaryRevision + 1 }
+          return summary
+        }
+        return null
+      },
+    }
+    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
+    localStorage.setItem('glyphshift.probe.selectedRun', 'probe-context')
+  }, { snapshot: model })
+  await page.reload()
+  await page.getByRole('button', { name: '查看文字', exact: true }).click()
+
+  const mainMenuRow = page.locator('tbody tr').filter({ hasText: 'MainMenu' })
+  const toolbarRow = page.locator('tbody tr').filter({ hasText: 'Toolbar · button' })
+  const pluralRow = page.locator('tbody tr').filter({ hasText: 'Counter · n=2' })
+  await expect(mainMenuRow).toBeVisible()
+  await expect(toolbarRow).toBeVisible()
+  await expect(pluralRow).toBeVisible()
+  await expect(pluralRow.getByRole('textbox')).toHaveAttribute('readonly', '')
+
+  const toolbarTranslation = toolbarRow.getByRole('textbox', { name: '“Open”的译文' })
+  await toolbarTranslation.fill('打开工具栏更新')
+  await toolbarTranslation.blur()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __contextEditRequests?: unknown[] }).__contextEditRequests?.[0]
+  ))).toEqual({
+    runId: 'probe-context', source: 'Open', translation: '打开工具栏更新',
+    translationContext: { context: 'Toolbar', disambiguation: 'button', pluralN: null },
+  })
+  await expect(mainMenuRow.getByRole('textbox', { name: '“Open”的译文' })).toHaveValue('打开工具栏更新')
+
+  await mainMenuRow.getByRole('checkbox').click()
+  await page.getByRole('button', { name: '从字典移除' }).click()
+  await expect.poll(() => page.evaluate(() => (
+    (window as unknown as { __contextEditRequests?: Array<{ translation?: string; translationContext?: unknown }> }).__contextEditRequests?.[1]
+  ))).toEqual({
+    runId: 'probe-context', source: 'Open', translation: '',
+    translationContext: { context: 'MainMenu', disambiguation: null, pluralN: null },
+  })
+  await expect(toolbarRow.getByRole('textbox', { name: '“Open”的译文' })).toHaveValue('')
+})
+
 test('elevated probe rejection explains the protected target without observer recovery', async ({ page }) => {
   await page.addInitScript(({ snapshot }) => {
     const summary = {

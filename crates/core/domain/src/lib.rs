@@ -130,6 +130,7 @@ pub struct TextObservation {
     source_text: Box<str>,
     surface_token: Box<str>,
     context_heading: Option<ObservationContext>,
+    translation_context: Option<TranslationContext>,
 }
 
 impl TextObservation {
@@ -144,6 +145,7 @@ impl TextObservation {
             source_text: source_text.into(),
             surface_token: surface_token.into(),
             context_heading: None,
+            translation_context: None,
         }
     }
 
@@ -155,6 +157,12 @@ impl TextObservation {
         label: impl Into<Box<str>>,
     ) -> Self {
         self.context_heading = Some(ObservationContext::new(kind, key, label));
+        self
+    }
+
+    #[must_use]
+    pub fn with_translation_context(mut self, context: TranslationContext) -> Self {
+        self.translation_context = Some(context);
         self
     }
 
@@ -177,6 +185,54 @@ impl TextObservation {
     pub const fn context_heading(&self) -> Option<&ObservationContext> {
         self.context_heading.as_ref()
     }
+
+    #[must_use]
+    pub const fn translation_context(&self) -> Option<&TranslationContext> {
+        self.translation_context.as_ref()
+    }
+}
+
+/// Framework translation-call metadata and plural input observed before rendering.
+///
+/// These fields remain observation evidence. Dictionary identity stays source-only; `plural_n`
+/// is retained so callers can keep plural translation calls fail-open until a dedicated plural
+/// model exists.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TranslationContext {
+    context: Option<Box<str>>,
+    disambiguation: Option<Box<str>>,
+    plural_n: Option<i32>,
+}
+
+impl TranslationContext {
+    #[must_use]
+    pub fn new(
+        context: Option<impl Into<Box<str>>>,
+        disambiguation: Option<impl Into<Box<str>>>,
+        plural_n: Option<i32>,
+    ) -> Self {
+        Self {
+            context: context.map(Into::into),
+            disambiguation: disambiguation.map(Into::into),
+            plural_n,
+        }
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    #[must_use]
+    pub fn disambiguation(&self) -> Option<&str> {
+        self.disambiguation.as_deref()
+    }
+
+    #[must_use]
+    pub const fn plural_n(&self) -> Option<i32> {
+        self.plural_n
+    }
+
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

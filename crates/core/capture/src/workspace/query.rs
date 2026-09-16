@@ -1,4 +1,5 @@
 use super::*;
+use crate::CaptureTranslationContext;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -56,23 +57,32 @@ impl ProbeRunStore {
             .iter()
             .map(|source| keys.key(source))
             .collect::<BTreeSet<_>>();
-        // Collection needs source membership only; don't build display rows, translations or adapter lists.
-        Ok(observations
-            .iter()
-            .flat_map(|catalog| catalog.entries())
-            .map(|entry| keys.key(entry.source()))
-            .filter(|source| !ignored.contains(source))
-            .flat_map(|source| map(&source))
-            .map(|source| keys.key(&source))
-            .filter(|source| {
-                !existing.contains(source)
-                    && !excluded.contains(source)
-                    && !ignored.contains(source)
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let mut uncollected = BTreeSet::new();
+        if let Some(observations) = observations.as_ref() {
+            for entry in observations.entries() {
+                if entry
+                    .translation_context()
+                    .is_some_and(|context| context.plural_n().is_some())
+                {
+                    continue;
+                }
+                let observed_source = keys.key(entry.source());
+                if ignored.contains(&observed_source) || excluded.contains(&observed_source) {
+                    continue;
+                }
+                for mapped_source in map(&observed_source) {
+                    let source = keys.key(&mapped_source);
+                    if existing.contains(&source)
+                        || excluded.contains(&source)
+                        || ignored.contains(&source)
+                    {
+                        continue;
+                    }
+                    uncollected.insert(Box::<str>::from(source));
+                }
+            }
+        }
+        Ok(uncollected.into_iter().collect())
     }
 
     pub fn query_entries(
@@ -376,15 +386,23 @@ impl ProbeRunStore {
             .iter()
             .map(|entry| (entry.source.as_ref(), entry.translation.as_ref()))
             .collect::<BTreeMap<_, _>>();
-        let mut aggregate = BTreeMap::<Box<str>, ProbeEntryRow>::new();
+        let mut aggregate = BTreeMap::<
+            (Box<str>, Option<CaptureTranslationContext>),
+            ProbeEntryRow,
+        >::new();
         let observations = self.read_observations(document.summary.id()).ok();
         if let Some(observations) = &observations {
             for entry in observations.entries() {
+                let row_key = (
+                    entry.source().into(),
+                    entry.translation_context().cloned(),
+                );
                 let row = aggregate
-                    .entry(entry.source().into())
+                    .entry(row_key)
                     .or_insert_with(|| ProbeEntryRow {
                         source: entry.source().into(),
                         translation: "".into(),
+                        translation_context: entry.translation_context().cloned(),
                         state: ProbeEntryState::Pending,
                         adapter_ids: Vec::new(),
                         count: 0,
@@ -416,7 +434,8 @@ impl ProbeRunStore {
                     .then_with(|| left.cmp(right))
             });
             row.adapter_ids.dedup();
-            if let Some(translation) = translations.get(row.source.as_ref()) {
+            let translation = translations.get(row.source.as_ref());
+            if let Some(translation) = translation {
                 row.translation = (*translation).into();
                 if !translation.trim().is_empty() {
                     row.state = ProbeEntryState::Translated;
@@ -431,11 +450,13 @@ impl ProbeRunStore {
             .iter()
             .filter(|_| document.summary.workflow_id.is_none())
         {
+            let row_key = (entry.source.clone(), None);
             aggregate
-                .entry(entry.source.clone())
+                .entry(row_key)
                 .or_insert_with(|| ProbeEntryRow {
                     source: entry.source.clone(),
                     translation: entry.translation.clone(),
+                    translation_context: None,
                     state: ProbeEntryState::Unobserved,
                     adapter_ids: Vec::new(),
                     count: 0,
@@ -451,14 +472,17 @@ impl ProbeRunStore {
             .iter()
             .map(|source| keys.key(source))
             .collect::<BTreeSet<_>>();
-        aggregate.retain(|source, _| !excluded.contains(&keys.key(source)));
+        aggregate.retain(|(source, _), _| !excluded.contains(&keys.key(source)));
         if keys.common == glyphshift_domain::SourceTextPolicy::Exact && keys.normalized.is_empty() {
             return Ok(aggregate.into_values().collect());
         }
-        let mut grouped = BTreeMap::<Box<str>, ProbeEntryRow>::new();
+        let mut grouped = BTreeMap::<
+            (Box<str>, Option<CaptureTranslationContext>),
+            ProbeEntryRow,
+        >::new();
         for mut row in aggregate.into_values() {
             row.source = keys.key(&row.source).into();
-            let key = row.source.clone();
+            let key = (row.source.clone(), row.translation_context.clone());
             grouped
                 .entry(key)
                 .and_modify(|previous| {

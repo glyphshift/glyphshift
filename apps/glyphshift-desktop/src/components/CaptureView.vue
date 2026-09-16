@@ -234,9 +234,9 @@ const translationFilterOptions = computed(() => (['all', 'untranslated', 'transl
 const translationFilterLabel = computed(() => translationFilterOptions.value.find(option => (
   option.value === translationFilter.value
 ))?.label ?? t('capture.translationFilter.all'))
-const currentSources = computed(() => entryPage.value.rows.map(row => row.source))
-const pageSelected = computed(() => Boolean(currentSources.value.length) && currentSources.value.every(source => selected.value.has(source)))
-const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(row.source)))
+const currentRowIds = computed(() => entryPage.value.rows.map(entryRowId))
+const pageSelected = computed(() => Boolean(currentRowIds.value.length) && currentRowIds.value.every(id => selected.value.has(id)))
+const selectedRows = computed(() => entryPage.value.rows.filter(row => selected.value.has(entryRowId(row))))
 const settingsPreviewAvailable = computed(() => Boolean(settingsAdapterIds.value.length)
   && settingsAdapterIds.value.some(id => props.adapters.find(adapter => adapter.id === id)?.features.includes('textReplace')))
 const settingsConfigurationLocked = computed(() => ['running', 'paused'].includes(selectedRun.value?.status ?? ''))
@@ -495,7 +495,7 @@ async function loadPageNow(request: number) {
       pageSize: pageSize.value,
     })
     if (request !== pageRequest || runId !== probe.selectedRunId.value) return
-    const editingRow = entryPage.value.rows.find(row => row.source === focusedTranslation.value)
+    const editingRow = entryPage.value.rows.find(row => entryRowId(row) === focusedTranslation.value)
     if (mergeRules.value && editingRow?.resolution?.editSource) {
       const replacement = nextPage.rows.find(row => row.resolution?.editSource === editingRow.resolution?.editSource
         && row.resolution?.ruleIndex === editingRow.resolution?.ruleIndex
@@ -543,7 +543,7 @@ async function prepareAiPlan() {
       items: entryPage.value.rows.map((row, index) => ({
         itemId: `probe-row-${index + 1}`,
         source: row.source,
-        translation: (translationValues.value[row.source] ?? row.translation) || null,
+        translation: (translationValues.value[entryRowId(row)] ?? row.translation) || null,
         ignored: row.state === 'ignored',
       })),
     })
@@ -707,16 +707,16 @@ function toggleAdapterFilter(id: string, checked: boolean) {
   adapterFilterIds.value = available.filter(adapterId => next.has(adapterId))
 }
 
-function toggleSelection(source: string) {
+function toggleSelection(id: string) {
   const next = new Set(selected.value)
-  next.has(source) ? next.delete(source) : next.add(source)
+  next.has(id) ? next.delete(id) : next.add(id)
   selected.value = next
 }
 
 function togglePageSelection() {
   const next = new Set(selected.value)
-  if (pageSelected.value) currentSources.value.forEach(source => next.delete(source))
-  else currentSources.value.forEach(source => next.add(source))
+  if (pageSelected.value) currentRowIds.value.forEach(id => next.delete(id))
+  else currentRowIds.value.forEach(id => next.add(id))
   selected.value = next
 }
 
@@ -736,34 +736,40 @@ function toggleListPageSelection() {
 async function bulk(action: 'ignore' | 'restore' | 'clear_translations') {
   const run = selectedRun.value
   if (!run || !selected.value.size) return
-  let sources = [...selected.value]
-  if (action === 'clear_translations') sources = selectedRows.value.filter(row => row.resolution?.editable !== false).map(row => row.source)
-  if (action === 'ignore') sources = selectedRows.value.filter(row => row.count > 0 && row.state !== 'ignored').map(row => row.source)
-  if (action === 'restore') sources = selectedRows.value.filter(row => row.state === 'ignored').map(row => row.source)
-  if (!sources.length) return
+  const rows = action === 'clear_translations'
+    ? selectedRows.value.filter(row => row.resolution?.editable !== false)
+    : action === 'ignore'
+      ? selectedRows.value.filter(row => row.count > 0 && row.state !== 'ignored')
+      : selectedRows.value.filter(row => row.state === 'ignored')
+  if (!rows.length) return
   try {
     if (action === 'clear_translations') {
-      for (const source of sources) {
-        const timer = editTimers.get(source)
+      for (const row of rows) {
+        const id = entryRowId(row)
+        const timer = editTimers.get(id)
         if (timer) clearTimeout(timer)
-        editTimers.delete(source)
+        editTimers.delete(id)
       }
       await translationSaveQueue
-    }
-    await probe.bulk(run.id, sources, action)
-    if (action === 'clear_translations') {
-      for (const source of sources) {
-        const timer = editTimers.get(source)
+      for (const row of rows) {
+        await probe.editTranslation(run.id, row.source, '', row.translationContext)
+      }
+      for (const row of rows) {
+        const id = entryRowId(row)
+        const timer = editTimers.get(id)
         if (timer) clearTimeout(timer)
-        editTimers.delete(source)
-        dirtyTranslations.delete(source)
-        translationValues.value[source] = ''
+        editTimers.delete(id)
+        dirtyTranslations.delete(id)
+        translationValues.value[id] = ''
       }
       emit('workspace-changed')
       dictionaryNotice.value = t('capture.removedFromDictionary', {
-        count: sources.length,
+        count: rows.length,
         dictionary: runDictionaryName(run),
       })
+    }
+    else {
+      await probe.bulk(run.id, [...new Set(rows.map(row => row.source))], action)
     }
     selected.value = new Set()
     await loadPage()
@@ -777,43 +783,62 @@ function entryRowId(row: ProbeEntryRow) {
   if (mergeRules.value && row.resolution?.editSource) return JSON.stringify([
     row.resolution.dictionaryIds, row.resolution.ruleIndex, row.resolution.editSource,
   ])
-  return row.source
+  return JSON.stringify([
+    row.source,
+    row.translationContext?.context ?? null,
+    row.translationContext?.disambiguation ?? null,
+    row.translationContext?.pluralN ?? null,
+  ])
+}
+
+function translationContextLabel(row: ProbeEntryRow) {
+  const context = row.translationContext
+  if (!context) return ''
+  return [
+    context.context,
+    context.disambiguation,
+    context.pluralN == null ? null : `n=${context.pluralN}`,
+  ].filter(Boolean).join(' · ')
 }
 
 function translationInputValue(row: ProbeEntryRow) {
-  if (dirtyTranslations.has(row.source)) return translationValues.value[row.source] ?? ''
-  if (focusedTranslation.value === row.source && row.resolution?.editSource) return row.resolution.editTranslation ?? ''
+  const id = entryRowId(row)
+  if (dirtyTranslations.has(id)) return translationValues.value[id] ?? ''
+  if (focusedTranslation.value === id && row.resolution?.editSource) return row.resolution.editTranslation ?? ''
   return row.translation
 }
 
-function blurTranslation(source: string) {
+function blurTranslation(row: ProbeEntryRow) {
   focusedTranslation.value = null
-  void saveTranslation(source).then(() => { if (mergeRules.value) return loadPage() })
+  void saveTranslation(entryRowId(row)).then(() => { if (mergeRules.value) return loadPage() })
 }
 
-function updateTranslation(source: string, value: unknown) {
-  if (entryPage.value.rows.find(row => row.source === source)?.resolution?.editable === false) return
+function updateTranslation(row: ProbeEntryRow, value: unknown) {
+  if (row.resolution?.editable === false) return
   dictionaryNotice.value = ''
+  const id = entryRowId(row)
   const translation = String(value ?? '')
-  translationValues.value = { ...translationValues.value, [source]: translation }
-  dirtyTranslations.add(source)
-  const previous = editTimers.get(source)
+  translationValues.value = { ...translationValues.value, [id]: translation }
+  dirtyTranslations.add(id)
+  const previous = editTimers.get(id)
   if (previous) clearTimeout(previous)
-  editTimers.set(source, setTimeout(() => void saveTranslation(source), 500))
+  editTimers.set(id, setTimeout(() => void saveTranslation(id), 500))
 }
 
-function saveTranslation(source: string) {
+function saveTranslation(id: string) {
   const run = selectedRun.value
-  if (!run || !dirtyTranslations.has(source)) return Promise.resolve()
-  const pending = editTimers.get(source)
+  if (!run || !dirtyTranslations.has(id)) return Promise.resolve()
+  const pending = editTimers.get(id)
   if (pending) clearTimeout(pending)
-  editTimers.delete(source)
+  editTimers.delete(id)
   const task = translationSaveQueue.then(async () => {
-    if (!dirtyTranslations.has(source)) return
+    if (!dirtyTranslations.has(id)) return
     try {
-      const value = translationValues.value[source] ?? ''
-      await probe.editTranslation(run.id, source, value)
-      if (translationValues.value[source] === value) dirtyTranslations.delete(source)
+      const row = entryPage.value.rows.find(candidate => entryRowId(candidate) === id)
+      if (!row) return
+      const value = translationValues.value[id] ?? ''
+      await probe.editTranslation(run.id, row.source, value, row.translationContext)
+      if (translationValues.value[id] === value) dirtyTranslations.delete(id)
       emit('workspace-changed')
       await loadPage()
     }
@@ -828,7 +853,7 @@ function saveTranslation(source: string) {
 async function openBoundDictionary() {
   const dictionaryId = selectedRun.value?.dictionaryId
   if (!dictionaryId) return
-  for (const source of [...dirtyTranslations]) await saveTranslation(source)
+  for (const id of [...dirtyTranslations]) await saveTranslation(id)
   if (!dirtyTranslations.size) emit('open-dictionary', dictionaryId)
 }
 
@@ -876,7 +901,10 @@ async function refreshTargetText() {
 
 function synchronizeTranslationValues(rows: readonly ProbeEntryRow[]) {
   const next = { ...translationValues.value }
-  for (const row of rows) if (!dirtyTranslations.has(row.source)) next[row.source] = row.translation
+  for (const row of rows) {
+    const id = entryRowId(row)
+    if (!dirtyTranslations.has(id)) next[id] = row.translation
+  }
   translationValues.value = next
 }
 
@@ -1010,7 +1038,7 @@ function stateLabel(state: string) {
 function translationVariantItems(row: ProbeEntryRow) {
   return (row.translationVariants ?? []).map(variant => ({
     label: variant.translation,
-    onSelect: () => { updateTranslation(row.source, variant.translation); void saveTranslation(row.source) },
+    onSelect: () => { updateTranslation(row, variant.translation); void saveTranslation(entryRowId(row)) },
   }))
 }
 
@@ -1208,11 +1236,16 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         <div ref="tableShell" class="relative h-full min-h-0 overflow-hidden">
           <UTable data-testid="capture-table-scroll" role="region" tabindex="0" :aria-label="t('capture.tableLabel')" :data="entryPage.rows" :get-row-id="entryRowId" :columns="entryColumns" sticky :loading="loading" class="capture-table-scroll management-table-scroll" :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[1040px]' }" @scroll.passive="updateScrollMetrics">
             <template #select-header><UCheckbox :model-value="pageSelected" :aria-label="t('capture.selectPage')" @update:model-value="togglePageSelection" /></template>
-            <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(row.original.source)" :aria-label="t('common.selectNamed', { name: row.original.source })" @update:model-value="toggleSelection(row.original.source)" /></template>
-            <template #source-cell="{ row }"><div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div></template>
+            <template #select-cell="{ row }"><UCheckbox :model-value="selected.has(entryRowId(row.original))" :aria-label="t('common.selectNamed', { name: row.original.source })" @update:model-value="toggleSelection(entryRowId(row.original))" /></template>
+            <template #source-cell="{ row }">
+              <div class="min-w-0">
+                <div class="truncate font-medium" :title="row.original.source">{{ row.original.source }}</div>
+                <div v-if="translationContextLabel(row.original)" class="type-metadata truncate text-[var(--text-muted)]" :title="translationContextLabel(row.original)">{{ translationContextLabel(row.original) }}</div>
+              </div>
+            </template>
             <template #translation-cell="{ row }">
               <div class="flex min-w-0 items-center gap-1">
-                <UInput :model-value="translationInputValue(row.original)" size="sm" class="min-w-0 flex-1" :placeholder="row.original.translationVariants?.length ? t('capture.resolveTranslation') : t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" :readonly="row.original.resolution?.editable === false" :title="row.original.resolution?.editable === false ? t(row.original.resolution?.kind.startsWith('rule_') ? 'captureResolution.ruleReadOnlyHint' : 'captureResolution.readOnlyHint') : row.original.resolution?.editSource ? t('captureResolution.editFixedHint', { source: row.original.resolution.editSource }) : undefined" @update:model-value="updateTranslation(row.original.source, $event)" @focus="focusedTranslation = row.original.source" @blur="blurTranslation(row.original.source)" />
+                <UInput :model-value="translationInputValue(row.original)" size="sm" class="min-w-0 flex-1" :placeholder="row.original.translationVariants?.length ? t('capture.resolveTranslation') : t('capture.pendingTranslation')" :aria-label="t('capture.translationFor', { source: row.original.source })" :readonly="row.original.resolution?.editable === false" :title="row.original.resolution?.editable === false ? t(row.original.resolution?.kind.startsWith('rule_') ? 'captureResolution.ruleReadOnlyHint' : 'captureResolution.readOnlyHint') : row.original.resolution?.editSource ? t('captureResolution.editFixedHint', { source: row.original.resolution.editSource }) : undefined" @update:model-value="updateTranslation(row.original, $event)" @focus="focusedTranslation = entryRowId(row.original)" @blur="blurTranslation(row.original)" />
                 <UDropdownMenu v-if="row.original.translationVariants?.length && row.original.resolution?.editable !== false" :items="translationVariantItems(row.original)" :content="{ align: 'end' }" :ui="{ content: 'max-w-[min(32rem,90vw)]', itemLabel: 'whitespace-pre-wrap break-words' }">
                   <UButton color="warning" variant="ghost" size="xs" icon="i-tabler-copy-check" :disabled="probe.busy.value" :aria-label="t('capture.chooseExistingTranslation', { count: row.original.translationVariants.length })" :title="t('capture.translationConflictHint')" />
                 </UDropdownMenu>

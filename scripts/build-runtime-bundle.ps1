@@ -9,6 +9,8 @@ param(
 
     [switch]$IncludeTestTarget,
 
+    [switch]$ResearchQt5,
+
     [switch]$KeepExistingOutput
 )
 
@@ -50,6 +52,7 @@ $cargoArguments = @(
     '-p', 'glyphshift-adapter-directwrite-native',
     '-p', 'glyphshift-adapter-gtk3-pango-native',
     '-p', 'glyphshift-adapter-qt-painter-native',
+    '-p', 'glyphshift-adapter-qt-translation-native',
     '-p', 'glyphshift-adapter-qt-text-document-native',
     '-p', 'glyphshift-adapter-qt-quick-native',
     '-p', 'glyphshift-adapter-raylib-native',
@@ -59,6 +62,9 @@ $cargoArguments = @(
 )
 if ($IncludeTestTarget) {
     $cargoArguments += @('-p', 'glyphshift-windows-runtime-target')
+}
+if ($ResearchQt5) {
+    $cargoArguments += @('--features', 'glyphshift-adapter-qt-translation-native/research-qt5')
 }
 if ($Profile -eq 'Release') {
     $cargoArguments += '--release'
@@ -143,6 +149,8 @@ $gtk3PangoBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_gtk3_pango_native.dll' 'adapter-gtk3-pango' 'dll'
 $qtPainterBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_painter_native.dll' 'adapter-qt-painter' 'dll'
+$qtTranslationBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_qt_translation_native.dll' 'adapter-qt-translation' 'dll'
 $qtTextDocumentBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_qt_text_document_native.dll' 'adapter-qt-text-document' 'dll'
 $qtQuickBundle = Copy-VersionedBundleArtifact `
@@ -211,6 +219,7 @@ $gdiPlusPresentation = Get-AdapterPresentation 'windows.gdiplus.draw-string'
 $directWritePresentation = Get-AdapterPresentation 'windows.directwrite.text-layout'
 $gtk3PangoPresentation = Get-AdapterPresentation 'windows.gtk3.pango-render-layout'
 $qtPainterPresentation = Get-AdapterPresentation 'windows.qt.painter-draw-text'
+$qtTranslationPresentation = Get-AdapterPresentation 'windows.qt.translation-service'
 $qtTextDocumentPresentation = Get-AdapterPresentation 'windows.qt.text-document'
 $qtQuickPresentation = Get-AdapterPresentation 'windows.qt.quick-text'
 $raylibPresentation = Get-AdapterPresentation 'windows.raylib.draw-text-ex'
@@ -308,6 +317,15 @@ $runtimeManifest = [ordered]@{
             technology = $qtPainterPresentation.technology
             technicalTarget = $qtPainterPresentation.technicalTarget
             documentationUrl = $qtPainterPresentation.documentationUrl
+        },
+        [ordered]@{
+            file = $qtTranslationBundle.file
+            sha256 = $qtTranslationBundle.sha256
+            name = $qtTranslationPresentation.name
+            summary = $qtTranslationPresentation.summary
+            technology = $qtTranslationPresentation.technology
+            technicalTarget = $qtTranslationPresentation.technicalTarget
+            documentationUrl = $qtTranslationPresentation.documentationUrl
         },
         [ordered]@{
             file = $qtTextDocumentBundle.file

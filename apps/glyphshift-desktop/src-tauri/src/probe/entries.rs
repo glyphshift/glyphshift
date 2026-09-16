@@ -57,6 +57,7 @@ impl DesktopApplication {
                 |row| {
                     if request.merge_rules.unwrap_or(true)
                         && row.state() != glyphshift_capture::ProbeEntryState::Ignored
+                        && row.translation_context().is_none()
                     {
                         resolver.rule_group_key(row.source())
                     } else {
@@ -71,6 +72,13 @@ impl DesktopApplication {
         &mut self,
         mut request: ProbeTranslationEditRequest,
     ) -> Result<ProbeRunView, CommandError> {
+        if request
+            .translation_context
+            .as_ref()
+            .is_some_and(|context| context.plural_n().is_some())
+        {
+            return Err(CommandError::new("capture.invalid_configuration"));
+        }
         let summary = self
             .probe_runs
             .summary(&request.run_id)

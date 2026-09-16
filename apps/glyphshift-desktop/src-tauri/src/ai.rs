@@ -110,11 +110,14 @@ impl DesktopAiState {
                 source,
                 translation,
                 ignored,
+                context,
+                disambiguation,
             } = item;
             let item = match translation {
                 Some(translation) => TranslationItem::translated(item_id, source, translation),
                 None => TranslationItem::untranslated(item_id, source),
-            };
+            }
+            .with_translation_context(context, disambiguation);
             if ignored {
                 item.ignored()
             } else {
@@ -249,6 +252,10 @@ pub(super) struct AiTranslationItemRequest {
     translation: Option<Box<str>>,
     #[serde(default)]
     ignored: bool,
+    #[serde(default)]
+    context: Option<Box<str>>,
+    #[serde(default)]
+    disambiguation: Option<Box<str>>,
 }
 
 #[derive(Deserialize)]
@@ -282,6 +289,10 @@ pub(super) struct ProbeAiTranslationResult {
     pub(super) item_id: Box<str>,
     pub(super) source: Box<str>,
     pub(super) translation: Box<str>,
+    #[serde(default)]
+    pub(super) context: Option<Box<str>>,
+    #[serde(default)]
+    pub(super) disambiguation: Option<Box<str>>,
 }
 
 #[derive(Deserialize)]
@@ -434,6 +445,16 @@ impl DesktopApplication {
         let mut items = Vec::with_capacity(rows.len());
         let mut seen = BTreeSet::new();
         for row in rows.iter() {
+            let translation_context = row.translation_context();
+            if translation_context.is_some_and(|context| context.plural_n().is_some()) {
+                continue;
+            }
+            let context = translation_context
+                .and_then(|context| context.context())
+                .map(Box::<str>::from);
+            let disambiguation = translation_context
+                .and_then(|context| context.disambiguation())
+                .map(Box::<str>::from);
             let sources = resolver.collection_sources(row.source());
             if row.state() == glyphshift_capture::ProbeEntryState::Ignored && sources != vec![Box::<str>::from(row.source())] { continue; }
             for source in sources {
@@ -446,7 +467,8 @@ impl DesktopApplication {
                     TranslationItem::untranslated(item_id, source)
                 } else {
                     TranslationItem::translated(item_id, source, translation)
-                };
+                }
+                .with_translation_context(context.clone(), disambiguation.clone());
                 items.push(if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() { item.ignored() } else { item });
             }
         }
@@ -496,15 +518,19 @@ impl DesktopApplication {
                 .query_entries(&request.run_id, &query, &dictionary_snapshot)
                 .map_err(probe::probe_run_error)?;
             for row in page.rows() {
-                if row.has_translation_conflict() || !row.translation().trim().is_empty() { protected_sources.insert(Box::<str>::from(row.source())); }
+                let translation_context = row.translation_context();
+                if translation_context.is_some_and(|context| context.plural_n().is_some()) {
+                    continue;
+                }
+                if row.has_translation_conflict() || !row.translation().trim().is_empty() {
+                    protected_sources.insert(Box::<str>::from(row.source()));
+                }
                 if row.state() != glyphshift_capture::ProbeEntryState::Unobserved {
                     observed_sources.insert(Box::<str>::from(row.source()));
                     observed_sources.extend(resolver.collection_sources(row.source()));
                 }
             }
-            if observed_sources.len() >= page.total()
-                || page.rows().len() < glyphshift_capture::MAX_PROBE_QUERY_PAGE_SIZE
-            {
+            if page.rows().len() < glyphshift_capture::MAX_PROBE_QUERY_PAGE_SIZE {
                 break;
             }
             page_number = page_number.saturating_add(1);
@@ -586,6 +612,8 @@ fn sync_translation_task(
                             item_id: result.item_id().into(),
                             source: result.source().into(),
                             translation: result.translation().into(),
+                            context: result.context().map(Box::<str>::from),
+                            disambiguation: result.disambiguation().map(Box::<str>::from),
                         })
                         .collect(),
                 })

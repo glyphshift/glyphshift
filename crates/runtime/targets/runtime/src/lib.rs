@@ -8,7 +8,9 @@ use glyphshift_adapter_native_abi::{NativeTextHostV1, TEXT_HOST_VERSION_V1};
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_adapter_registry::AdapterBinding;
 use glyphshift_capture::CaptureObservationBatch;
-use glyphshift_domain::{FontDecision, SourceTextPolicy, TextDecision, TextObservation};
+use glyphshift_domain::{
+    FontDecision, SourceTextPolicy, TextDecision, TextObservation, TranslationContext,
+};
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
@@ -600,6 +602,7 @@ extern "C" fn decide_utf16(
         font_out,
         font_capacity,
         true,
+        None,
     )
 }
 
@@ -611,6 +614,7 @@ fn decide_source(
     font_out: *mut u16,
     font_capacity: u32,
     can_replace: bool,
+    translation_context: Option<&TranslationContext>,
 ) -> NativeDecisionV1 {
     let Ok(state) = runtime_state().lock() else {
         return decision_error(STATUS_OUTPUT_TOO_SMALL);
@@ -629,7 +633,11 @@ fn decide_source(
     }
     let canonical = context.source_policy.normalize(source);
     if let Some(capture) = &runtime.capture {
-        capture.try_observe(context.adapter_id.clone(), canonical.as_ref().into());
+        capture.try_observe(
+            context.adapter_id.clone(),
+            canonical.as_ref().into(),
+            translation_context.cloned(),
+        );
     }
     if !can_replace {
         return NativeDecisionV1 {
@@ -638,11 +646,17 @@ fn decide_source(
         };
     }
     let lookup = |text: &str| {
-        runtime.kernel.decide(&TextObservation::new(
+        let observation = TextObservation::new(
             context.adapter_id.clone(),
             text,
             "native.surface",
-        ))
+        );
+        let observation = translation_context
+            .cloned()
+            .map_or(observation.clone(), |translation_context| {
+                observation.with_translation_context(translation_context)
+            });
+        runtime.kernel.decide(&observation)
     };
     let mut decision = lookup(&canonical);
     if matches!(decision.text, TextDecision::Keep) && canonical != source {

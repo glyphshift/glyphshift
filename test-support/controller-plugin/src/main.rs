@@ -156,6 +156,7 @@ impl ControllerPlugin for SyntheticController {
                 sequence: 11,
                 adapter_id: "example.synthetic.process-inline".into(),
                 source: "Open".into(),
+                translation_context: None,
             }],
         })
     }

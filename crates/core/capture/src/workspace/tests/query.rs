@@ -1,4 +1,104 @@
 use super::*;
+use crate::{CaptureIngressStatus, CaptureTranslationContext};
+
+#[test]
+fn qt_translation_context_keeps_rows_distinct_but_dictionary_collection_source_only() {
+    let (_root, mut store) = run_store();
+    let summary = store
+        .create(
+            ProbeRunCreate::new(
+                "probe-qt-context",
+                "Qt context probe",
+                "software-one",
+                "dictionary-one",
+                ["windows.qt.translation-service"],
+                false,
+            )
+            .expect("probe create"),
+        )
+        .expect("create run");
+    let sink = FileCaptureSink::start(
+        store
+            .capture_configuration(summary.id(), 100)
+            .expect("capture config"),
+    )
+    .expect("capture sink");
+    let ingress = sink.ingress();
+    for context in ["MainMenu", "Toolbar"] {
+        assert_eq!(
+            ingress.try_observe_with_context(
+                "windows.qt.translation-service",
+                "Open",
+                Some(CaptureTranslationContext::new(
+                    Some(context),
+                    Option::<&str>::None,
+                    None,
+                )),
+            ),
+            CaptureIngressStatus::Accepted
+        );
+    }
+    assert_eq!(
+        ingress.try_observe_with_context(
+            "windows.qt.translation-service",
+            "Open",
+            Some(CaptureTranslationContext::new(
+                Some("MainMenu"),
+                Option::<&str>::None,
+                Some(2),
+            )),
+        ),
+        CaptureIngressStatus::Accepted
+    );
+    let catalog = sink.finish().expect("finish capture");
+    assert_eq!(catalog.entries().len(), 3);
+
+    let empty = ProbeDictionarySnapshot::new(1, []).expect("empty dictionary");
+    let page = store
+        .query_entries(
+            summary.id(),
+            &ProbeQuery::new("", 1, 20).expect("query"),
+            &empty,
+        )
+        .expect("context rows");
+    assert_eq!(page.total(), 3);
+    assert_eq!(
+        page.rows()
+            .iter()
+            .filter_map(|row| row.translation_context())
+            .map(|context| (context.context().unwrap_or_default(), context.plural_n()))
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([("MainMenu", None), ("MainMenu", Some(2)), ("Toolbar", None)])
+    );
+
+    let pending = store
+        .uncollected_sources_mapped(summary.id(), &empty, |source| vec![source.into()])
+        .expect("uncollected sources");
+    assert_eq!(pending, vec![Box::<str>::from("Open")]);
+
+    let generic = ProbeDictionarySnapshot::new(3, [ProbeDictionaryEntry::new("Open", "打开")])
+        .expect("generic dictionary");
+    assert!(store
+        .uncollected_sources_mapped(summary.id(), &generic, |source| vec![source.into()])
+        .expect("generic fallback")
+        .is_empty());
+
+    let page = store
+        .query_entries(
+            summary.id(),
+            &ProbeQuery::new("", 1, 20).expect("query"),
+            &generic,
+        )
+        .expect("source-only dictionary rows");
+    assert_eq!(
+        page.rows()
+            .iter()
+            .filter(|row| row.translation_context().is_some_and(|context| context.plural_n().is_none()))
+            .map(|row| row.translation())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["打开"])
+    );
+}
 
 #[test]
 fn query_filters_joined_rows_by_run_adapter_without_changing_full_exports() {

@@ -303,7 +303,10 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
             );
         }
         let wire_body = String::from_utf8_lossy(request.body());
-        assert!(wire_body.contains(r#"\"items\":[\"Open\",\"Close\"]"#));
+        assert!(wire_body.contains(r#"\"source\":\"Open\""#));
+        assert!(wire_body.contains(r#"\"source\":\"Close\""#));
+        assert!(wire_body.contains(r#"\"context\":null"#));
+        assert!(wire_body.contains(r#"\"disambiguation\":null"#));
         assert!(!wire_body.contains("item_id"));
         assert!(!wire_body.contains("protected_tokens"));
         assert!(wire_body.contains(r#""minItems":2"#));

@@ -84,6 +84,24 @@ impl EntryResolver {
         row: &mut ProbeEntryRow,
         skip_reason: Option<glyphshift_ai_translation::SkipReason>,
     ) {
+        if row
+            .translation_context()
+            .is_some_and(|context| context.plural_n().is_some())
+        {
+            row.set_resolution(
+                ProbeEntryResolution {
+                    kind: "pending".into(),
+                    skip_reason: None,
+                    dictionary_ids: Vec::new(),
+                    rule_index: None,
+                    editable: false,
+                    edit_source: None,
+                    edit_translation: None,
+                },
+                None,
+            );
+            return;
+        }
         let filtered = skip_reason.is_some();
         let exact = self.entries.get(row.source());
         let mut dictionary_ids = exact

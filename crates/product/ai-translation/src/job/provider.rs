@@ -192,6 +192,8 @@ pub struct ProviderItem {
     pub(super) item_id: Box<str>,
     pub(super) source: Box<str>,
     pub(super) protected_tokens: Vec<Box<str>>,
+    pub(super) context: Option<Box<str>>,
+    pub(super) disambiguation: Option<Box<str>>,
 }
 
 impl ProviderItem {
@@ -208,6 +210,16 @@ impl ProviderItem {
     #[must_use]
     pub fn protected_tokens(&self) -> &[Box<str>] {
         &self.protected_tokens
+    }
+
+    #[must_use]
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    #[must_use]
+    pub fn disambiguation(&self) -> Option<&str> {
+        self.disambiguation.as_deref()
     }
 }
 

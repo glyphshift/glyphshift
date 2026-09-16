@@ -382,7 +382,6 @@ impl DesktopRuntimePool {
             return Ok(runtime_status(runtime.as_ref(), requested_features));
         }
         let Some(target_id) = target_id.or_else(|| runtime.targets().first().map(RuntimeTarget::id)) else {
-            self.sessions.remove(application_id.as_ref());
             return Err(DesktopRuntimeError::UnknownTarget);
         };
         if let Some(configuration) = collection {

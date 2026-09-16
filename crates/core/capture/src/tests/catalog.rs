@@ -94,6 +94,35 @@ fn cloned_ingresses_merge_multiple_producers_through_one_checkpoint_owner() {
 }
 
 #[test]
+fn capture_sink_buffers_a_startup_burst_before_checkpointing_catches_up() {
+    const OBSERVATION_COUNT: usize = 12_000;
+
+    let root = tempdir().expect("capture root");
+    let output = root.path().join("capture.json");
+    let sink = FileCaptureSink::start(
+        CaptureConfiguration::new(
+            CaptureSessionId::new("capture-startup-burst").expect("session id"),
+            &output,
+            OBSERVATION_COUNT as u32,
+        )
+        .expect("configuration"),
+    )
+    .expect("capture sink");
+    let ingress = sink.ingress();
+
+    for index in 0..OBSERVATION_COUNT {
+        assert_eq!(
+            ingress.try_observe("windows.qt.translation-service", format!("Startup {index}")),
+            CaptureIngressStatus::Accepted,
+        );
+    }
+
+    let catalog = sink.finish().expect("startup burst catalog");
+    assert_eq!(catalog.entries().len(), OBSERVATION_COUNT);
+    assert_eq!(catalog.dropped_observations(), 0);
+}
+
+#[test]
 fn capture_sink_caps_unique_entries_without_blocking_the_observer() {
     let root = tempdir().expect("capture root");
     let output = root.path().join("capture.json");

@@ -207,6 +207,7 @@ fn dictionary_edit_still_publishes_after_probe_creation_transaction_ends() {
     let started = application.create_probe_from_sources_for_test(request).unwrap();
     let edited = application.edit_probe_translation(ProbeTranslationEditRequest {
         run_id: started.summary.id().into(), source: "Assets".into(), translation: "资产".into(),
+        translation_context: None,
     }).unwrap();
     assert_eq!(edited.summary.preview_generation(), 2);
     assert_eq!(calls.lock().unwrap().capture_publications.len(), 2);

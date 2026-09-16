@@ -1,5 +1,8 @@
 use crate::observation::{safe_identifier, MAX_ENTRIES, MAX_SOURCE_UNITS};
-use crate::{CaptureConfiguration, CaptureError, CaptureIngressStatus, CaptureSessionId};
+use crate::{
+    CaptureConfiguration, CaptureError, CaptureIngressStatus, CaptureSessionId,
+    CaptureTranslationContext,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -10,9 +13,11 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub const CAPTURE_CATALOG_SCHEMA: &str = "glyphshift.capture-catalog/2";
+pub const CAPTURE_CATALOG_SCHEMA: &str = "glyphshift.capture-catalog/3";
 pub const DEFAULT_MAX_ENTRIES: u32 = 50_000;
-const QUEUE_CAPACITY: usize = 8_192;
+// A target drain can forward a full startup burst faster than the checkpoint worker persists it.
+// Keep the sink queue aligned with the target-side activation headroom.
+const QUEUE_CAPACITY: usize = 16_384;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,6 +25,8 @@ const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 pub struct CaptureCatalogEntry {
     source: Box<str>,
     adapter_id: Box<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation_context: Option<CaptureTranslationContext>,
     count: u64,
     first_seen_ms: u64,
     last_seen_ms: u64,
@@ -34,6 +41,11 @@ impl CaptureCatalogEntry {
     #[must_use]
     pub fn adapter_id(&self) -> &str {
         &self.adapter_id
+    }
+
+    #[must_use]
+    pub const fn translation_context(&self) -> Option<&CaptureTranslationContext> {
+        self.translation_context.as_ref()
     }
 
     #[must_use]
@@ -125,13 +137,17 @@ impl CaptureCatalog {
             !entry.source.trim().is_empty()
                 && entry.source.encode_utf16().count() <= MAX_SOURCE_UNITS
                 && safe_identifier(&entry.adapter_id)
+                && entry
+                    .translation_context
+                    .as_ref()
+                    .is_none_or(|context| context.validate().is_ok())
                 && entry.count > 0
                 && entry.first_seen_ms <= entry.last_seen_ms
         });
         let unique_entries = self
             .entries
             .iter()
-            .map(|entry| (&entry.source, &entry.adapter_id))
+            .map(|entry| (&entry.source, &entry.adapter_id, &entry.translation_context))
             .collect::<BTreeSet<_>>()
             .len()
             == self.entries.len();
@@ -149,10 +165,17 @@ impl CaptureCatalog {
     /// A read projection for consumers with producer-declared text semantics.
     /// The persisted raw catalog is untouched, including its provenance.
     pub(crate) fn map_sources(mut self, normalize: impl Fn(&str, &str) -> String) -> Self {
-        let mut merged = BTreeMap::<(Box<str>, Box<str>), CaptureCatalogEntry>::new();
+        let mut merged = BTreeMap::<
+            (Box<str>, Box<str>, Option<CaptureTranslationContext>),
+            CaptureCatalogEntry,
+        >::new();
         for mut entry in self.entries {
             entry.source = normalize(&entry.adapter_id, &entry.source).into();
-            let key = (entry.source.clone(), entry.adapter_id.clone());
+            let key = (
+                entry.source.clone(),
+                entry.adapter_id.clone(),
+                entry.translation_context.clone(),
+            );
             merged.entry(key).and_modify(|previous| {
                 previous.count = previous.count.saturating_add(entry.count);
                 previous.first_seen_ms = previous.first_seen_ms.min(entry.first_seen_ms);
@@ -169,7 +192,10 @@ struct CaptureCatalogBuilder {
     started_at_ms: u64,
     max_entries: usize,
     revision: u64,
-    entries: BTreeMap<(Box<str>, Box<str>), CaptureCatalogEntry>,
+    entries: BTreeMap<
+        (Box<str>, Box<str>, Option<CaptureTranslationContext>),
+        CaptureCatalogEntry,
+    >,
     fallback_adapters: BTreeSet<Box<str>>,
 }
 
@@ -211,7 +237,16 @@ impl CaptureCatalogBuilder {
         let entries = previous
             .entries
             .into_iter()
-            .map(|entry| ((entry.source.clone(), entry.adapter_id.clone()), entry))
+            .map(|entry| {
+                (
+                    (
+                        entry.source.clone(),
+                        entry.adapter_id.clone(),
+                        entry.translation_context.clone(),
+                    ),
+                    entry,
+                )
+            })
             .collect();
         Ok((
             Self {
@@ -226,15 +261,28 @@ impl CaptureCatalogBuilder {
         ))
     }
 
-    fn record(&mut self, adapter_id: Box<str>, source: &str, observed_at_ms: u64) -> u64 {
+    fn record(
+        &mut self,
+        adapter_id: Box<str>,
+        source: &str,
+        translation_context: Option<CaptureTranslationContext>,
+        observed_at_ms: u64,
+    ) -> u64 {
         let source = source.trim();
         if source.is_empty()
             || source.encode_utf16().count() > MAX_SOURCE_UNITS
             || !safe_identifier(&adapter_id)
+            || translation_context
+                .as_ref()
+                .is_some_and(|context| context.validate().is_err())
         {
             return 1;
         }
-        let key = (source.into(), adapter_id.clone());
+        let key = (
+            source.into(),
+            adapter_id.clone(),
+            translation_context.clone(),
+        );
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.count = entry.count.saturating_add(1);
             entry.last_seen_ms = entry.last_seen_ms.max(observed_at_ms);
@@ -248,7 +296,7 @@ impl CaptureCatalogBuilder {
             let fallback_key = self
                 .entries
                 .iter()
-                .filter(|((_, existing_adapter_id), _)| {
+                .filter(|((_, existing_adapter_id, _), _)| {
                     self.fallback_adapters.contains(existing_adapter_id)
                 })
                 .min_by(|(left_key, left), (right_key, right)| {
@@ -264,20 +312,31 @@ impl CaptureCatalogBuilder {
                 .entries
                 .remove(&fallback_key)
                 .map_or(0, |entry| entry.count);
-            self.insert(adapter_id, source, observed_at_ms);
+            self.insert(adapter_id, source, translation_context, observed_at_ms);
             return displaced;
         }
-        self.insert(adapter_id, source, observed_at_ms);
+        self.insert(adapter_id, source, translation_context, observed_at_ms);
         0
     }
 
-    fn insert(&mut self, adapter_id: Box<str>, source: &str, observed_at_ms: u64) {
-        let key = (source.into(), adapter_id.clone());
+    fn insert(
+        &mut self,
+        adapter_id: Box<str>,
+        source: &str,
+        translation_context: Option<CaptureTranslationContext>,
+        observed_at_ms: u64,
+    ) {
+        let key = (
+            source.into(),
+            adapter_id.clone(),
+            translation_context.clone(),
+        );
         self.entries.insert(
             key,
             CaptureCatalogEntry {
                 source: source.into(),
                 adapter_id,
+                translation_context,
                 count: 1,
                 first_seen_ms: observed_at_ms,
                 last_seen_ms: observed_at_ms,
@@ -303,6 +362,7 @@ enum CaptureCommand {
     Observe {
         adapter_id: Box<str>,
         source: Box<str>,
+        translation_context: Option<CaptureTranslationContext>,
         observed_at_ms: u64,
     },
     Finish,
@@ -329,6 +389,16 @@ impl CaptureIngress {
         adapter_id: impl Into<Box<str>>,
         source: impl Into<Box<str>>,
     ) -> CaptureIngressStatus {
+        self.try_observe_with_context(adapter_id, source, None)
+    }
+
+    #[must_use]
+    pub fn try_observe_with_context(
+        &self,
+        adapter_id: impl Into<Box<str>>,
+        source: impl Into<Box<str>>,
+        translation_context: Option<CaptureTranslationContext>,
+    ) -> CaptureIngressStatus {
         if !self.accepting.load(Ordering::Acquire) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return CaptureIngressStatus::Dropped;
@@ -339,6 +409,7 @@ impl CaptureIngress {
         let command = CaptureCommand::Observe {
             adapter_id: adapter_id.into(),
             source: source.into(),
+            translation_context,
             observed_at_ms: unix_time_millis(),
         };
         self.in_flight.fetch_add(1, Ordering::AcqRel);
@@ -415,9 +486,15 @@ impl FileCaptureSink {
                         Some(CaptureCommand::Observe {
                             adapter_id,
                             source,
+                            translation_context,
                             observed_at_ms,
                         }) => {
-                            let dropped = builder.record(adapter_id, &source, observed_at_ms);
+                            let dropped = builder.record(
+                                adapter_id,
+                                &source,
+                                translation_context,
+                                observed_at_ms,
+                            );
                             if dropped > 0 {
                                 worker_dropped.fetch_add(dropped, Ordering::Relaxed);
                             }

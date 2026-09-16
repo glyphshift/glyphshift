@@ -4,7 +4,7 @@ use glyphshift_adapter_registry::{
 use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
 use glyphshift_capture::{
     CaptureCatalog, CaptureConfiguration, CaptureObservationBatch, CaptureObservationRecord,
-    CaptureProducerId, CaptureSessionId, FileCaptureSink,
+    CaptureProducerId, CaptureSessionId, CaptureTranslationContext, FileCaptureSink,
 };
 use glyphshift_domain::{
     AdapterId, ApplyModel, Feature, Generation, Placement, RouteProgram, TargetFacts,
@@ -576,6 +576,13 @@ impl ControllerTransport for CaptureTransport {
                 0,
                 vec![
                     CaptureObservationRecord::new(1, "example.synthetic.observe", "Open")
+                        .and_then(|record| {
+                            record.with_translation_context(CaptureTranslationContext::new(
+                                Some("MainMenu"),
+                                Some("verb"),
+                                None,
+                            ))
+                        })
                         .map_err(|_| TransportFailure::MalformedMessage)?,
                 ],
             ),
@@ -701,6 +708,14 @@ fn tph_006_capture_supervisor_recovers_after_one_query_failure() {
         .entries()
         .iter()
         .any(|entry| entry.source() == "Open"));
+    let open = catalog
+        .entries()
+        .iter()
+        .find(|entry| entry.source() == "Open")
+        .expect("contextual Open observation");
+    let context = open.translation_context().expect("translation context");
+    assert_eq!(context.context(), Some("MainMenu"));
+    assert_eq!(context.disambiguation(), Some("verb"));
     assert!(state.lock().expect("capture recovery state").queries >= 2);
 }
 

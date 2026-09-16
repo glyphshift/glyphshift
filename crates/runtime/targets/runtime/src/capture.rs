@@ -1,8 +1,10 @@
 use crate::TargetRuntimeError;
 use glyphshift_capture::{
     CaptureBatchIngress, CaptureBatchProducer, CaptureConfiguration, CaptureIngress,
-    CaptureObservationBatch, CaptureProducerConfiguration, FileCaptureSink,
+    CaptureObservationBatch, CaptureProducerConfiguration, CaptureTranslationContext,
+    FileCaptureSink,
 };
+use glyphshift_domain::TranslationContext;
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,13 +74,21 @@ impl RuntimeCapture {
         }
     }
 
-    pub(super) fn try_observe(&self, adapter_id: Box<str>, source: Box<str>) {
+    pub(super) fn try_observe(
+        &self,
+        adapter_id: Box<str>,
+        source: Box<str>,
+        translation_context: Option<TranslationContext>,
+    ) {
+        let translation_context = translation_context
+            .as_ref()
+            .map(CaptureTranslationContext::from_domain);
         match self {
             Self::File { ingress, .. } => {
-                let _ = ingress.try_observe(adapter_id, source);
+                let _ = ingress.try_observe_with_context(adapter_id, source, translation_context);
             }
             Self::Batch { ingress, .. } => {
-                let _ = ingress.try_observe(adapter_id, source);
+                let _ = ingress.try_observe_with_context(adapter_id, source, translation_context);
             }
         }
     }

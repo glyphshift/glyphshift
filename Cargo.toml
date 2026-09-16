@@ -21,6 +21,8 @@ members = [
     "crates/adapters/implementations/fallback/ocr",
     "crates/adapters/implementations/framework/qt-painter",
     "crates/adapters/implementations/framework/qt-painter-native",
+    "crates/adapters/implementations/framework/qt-translation",
+    "crates/adapters/implementations/framework/qt-translation-native",
     "crates/adapters/implementations/framework/qt-text-document",
     "crates/adapters/implementations/framework/qt-text-document-native",
     "crates/adapters/implementations/framework/qt-quick",
