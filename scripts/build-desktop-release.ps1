@@ -34,7 +34,11 @@ New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
     -CargoTargetDir $cargoTargetDir
 
 $runtimeManifestPath = Join-Path $runtimeRoot 'runtime-bundle.json'
-$runtimeManifest = Get-Content -Raw -LiteralPath $runtimeManifestPath | ConvertFrom-Json
+$runtimeManifestJson = [System.IO.File]::ReadAllText(
+    $runtimeManifestPath,
+    [System.Text.Encoding]::UTF8
+)
+$runtimeManifest = $runtimeManifestJson | ConvertFrom-Json
 if ($runtimeManifest.schema -notin @('glyphshift.runtime-bundle/3', 'glyphshift.runtime-bundle/4')) {
     throw 'Desktop Release requires a supported Runtime Bundle schema.'
 }
