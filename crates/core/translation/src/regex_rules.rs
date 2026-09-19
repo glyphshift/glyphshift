@@ -79,7 +79,9 @@ impl RegexTranslationRules {
         for part in &rule.parts {
             if let Part::Translation(group) = part {
                 if let Some(value) = captures.get(*group) {
-                    if !value.as_str().trim().is_empty() && !sources.iter().any(|s| s == value.as_str()) {
+                    if !value.as_str().trim().is_empty()
+                        && !sources.iter().any(|s| s == value.as_str())
+                    {
                         sources.push(value.as_str().to_owned());
                     }
                 }
@@ -89,8 +91,13 @@ impl RegexTranslationRules {
     }
 
     pub fn matching_rule_index(&self, source: &str) -> Option<usize> {
-        if source.len() > MAX_OUTPUT_BYTES { return None; }
-        self.rules.iter().zip(&self.compiled).position(|(rule, compiled)| rule.enabled && compiled.expression.is_match(source))
+        if source.len() > MAX_OUTPUT_BYTES {
+            return None;
+        }
+        self.rules
+            .iter()
+            .zip(&self.compiled)
+            .position(|(rule, compiled)| rule.enabled && compiled.expression.is_match(source))
     }
 
     /// First matching rule wins. Missing dictionary translations keep the source;
@@ -177,7 +184,6 @@ fn capture_reference(token: &str, expression: &Regex) -> Result<(usize, usize), 
     Ok((index, length + 1))
 }
 
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegexRuleTestResult {
@@ -200,9 +206,17 @@ pub fn test_regex_rule(
     let rules = RegexTranslationRules::compile(vec![rule])?;
     let captures = rules.compiled[0].expression.captures(source);
     let Some(captures) = captures else {
-        return Ok(RegexRuleTestResult { matched: false, captures: vec![], output: source.into(), missing_translation: false });
+        return Ok(RegexRuleTestResult {
+            matched: false,
+            captures: vec![],
+            output: source.into(),
+            missing_translation: false,
+        });
     };
-    let captures = captures.iter().map(|value| value.map(|value| value.as_str().to_owned())).collect();
+    let captures = captures
+        .iter()
+        .map(|value| value.map(|value| value.as_str().to_owned()))
+        .collect();
     let mut missing_translation = false;
     let output = rules.replace(source, |_| {
         if mock_translation.is_empty() {
@@ -215,9 +229,18 @@ pub fn test_regex_rule(
     // An optional unmatched translation group also leaves the original intact.
     if output.is_none() && !missing_translation {
         let groups = rules.compiled[0].expression.captures(source).unwrap();
-        missing_translation = rules.compiled[0].parts.iter().any(|part|
-            matches!(part, Part::Translation(index) if groups.get(*index).is_none()));
-        if !missing_translation { return Err("output_too_long".into()); }
+        missing_translation = rules.compiled[0]
+            .parts
+            .iter()
+            .any(|part| matches!(part, Part::Translation(index) if groups.get(*index).is_none()));
+        if !missing_translation {
+            return Err("output_too_long".into());
+        }
     }
-    Ok(RegexRuleTestResult { matched: true, captures, output: output.map_or_else(|| source.into(), |value| value.to_string()), missing_translation })
+    Ok(RegexRuleTestResult {
+        matched: true,
+        captures,
+        output: output.map_or_else(|| source.into(), |value| value.to_string()),
+        missing_translation,
+    })
 }

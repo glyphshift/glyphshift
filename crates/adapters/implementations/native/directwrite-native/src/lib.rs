@@ -4,9 +4,9 @@ mod uniform_layout;
 
 use glyphshift_adapter_directwrite::ADAPTER_ID;
 use glyphshift_adapter_native_abi::{
-    DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
-    NativeNegotiationV1, NativeRuntimeHostV1, ARCH_X86, ARCH_X86_64, DECISION_TEXT_REPLACE,
-    FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED,
+    ARCH_X86, ARCH_X86_64, DECISION_TEXT_REPLACE, DecideUtf16V1, FEATURE_TEXT_OBSERVE,
+    FEATURE_TEXT_REPLACE, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
+    NativeNegotiationV1, NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED,
     STATUS_INVALID_HOST, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use glyphshift_adapter_native_abi::{NativeTextEventV1, NativeTextHostBinding, NativeTextHostV1};
@@ -15,22 +15,23 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
-use windows::core::{Interface, HRESULT, PCWSTR};
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT, D2D_POINT_2F,
+    D2D_POINT_2F, D2D1_ALPHA_MODE_IGNORE, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, ID2D1Factory, ID2D1RenderTarget, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
-    D2D1_DRAW_TEXT_OPTIONS, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE,
+    D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1CreateFactory,
+    ID2D1Factory, ID2D1RenderTarget,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection, IDWriteInlineObject,
-    IDWriteTextLayout, IDWriteTypography, DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_RANGE,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_RANGE, DWriteCreateFactory, IDWriteFactory,
+    IDWriteFontCollection, IDWriteInlineObject, IDWriteTextLayout, IDWriteTypography,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+use windows::core::{HRESULT, Interface, PCWSTR};
 
 const SUPPORTED_FEATURES: u64 = FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE;
 const MAX_TEXT_UNITS: usize = 16 * 1024;

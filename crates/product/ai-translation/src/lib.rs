@@ -82,10 +82,17 @@ pub struct SourceFilterCache {
 }
 impl SourceFilterCache {
     pub fn configure(&mut self, policy: &FilterPolicy) -> Result<(), PlanError> {
-        if self.policy.as_ref() == Some(policy) { return Ok(()); }
-        let patterns = policy.excluded_patterns.iter().enumerate().map(|(index, pattern)|
-            Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
-        ).collect::<Result<Vec<_>, _>>()?;
+        if self.policy.as_ref() == Some(policy) {
+            return Ok(());
+        }
+        let patterns = policy
+            .excluded_patterns
+            .iter()
+            .enumerate()
+            .map(|(index, pattern)| {
+                Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.patterns = patterns;
         self.policy = Some(policy.clone());
         self.results.clear();
@@ -93,10 +100,14 @@ impl SourceFilterCache {
         Ok(())
     }
 
-    pub fn hidden(&mut self, source: &str) -> bool { self.reason(source).is_some() }
+    pub fn hidden(&mut self, source: &str) -> bool {
+        self.reason(source).is_some()
+    }
 
     pub fn reason(&mut self, source: &str) -> Option<SkipReason> {
-        if let Some(result) = self.results.get(source) { return *result; }
+        if let Some(result) = self.results.get(source) {
+            return *result;
+        }
         let policy = self.policy.as_ref()?;
         let item = TranslationItem::untranslated("visibility", source);
         let hidden = skip_reason(&item, source.trim(), policy, &self.patterns);
@@ -112,13 +123,21 @@ impl SourceFilterCache {
 impl FilterPolicy {
     /// Source-only classification shared by dictionary visibility and translation planning.
     pub fn hidden_sources(&self, sources: &[String]) -> Result<Vec<bool>, PlanError> {
-        let patterns = self.excluded_patterns.iter().enumerate().map(|(index, pattern)|
-            Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
-        ).collect::<Result<Vec<_>, _>>()?;
-        Ok(sources.iter().map(|source| {
-            let item = TranslationItem::untranslated("visibility", source.as_str());
-            skip_reason(&item, source.trim(), self, &patterns).is_some()
-        }).collect())
+        let patterns = self
+            .excluded_patterns
+            .iter()
+            .enumerate()
+            .map(|(index, pattern)| {
+                Regex::new(pattern).map_err(|_| PlanError::InvalidExcludedPattern { index })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(sources
+            .iter()
+            .map(|source| {
+                let item = TranslationItem::untranslated("visibility", source.as_str());
+                skip_reason(&item, source.trim(), self, &patterns).is_some()
+            })
+            .collect())
     }
 
     pub(crate) fn from_persisted_value(value: Option<&serde_json::Value>) -> Self {
@@ -593,7 +612,9 @@ fn is_numeric_measurement(source: &str) -> bool {
     if source
         .chars()
         .any(|character| matches!(character, '/' | ':' | '×' | '*'))
-        && source.chars().all(|character| character.is_numeric() || character.is_whitespace() || ".,+-/:×*xX".contains(character))
+        && source.chars().all(|character| {
+            character.is_numeric() || character.is_whitespace() || ".,+-/:×*xX".contains(character)
+        })
     {
         return true;
     }
@@ -668,7 +689,11 @@ mod plan_cache_tests {
                     1,
                     "en-US",
                     "zh-CN",
-                    [TranslationItem::translated("row-1", "Already translated", "Translated")],
+                    [TranslationItem::translated(
+                        "row-1",
+                        "Already translated",
+                        "Translated",
+                    )],
                 ))
                 .expect("synthetic plan");
             assert_eq!(plan.candidates.len(), 0);
@@ -687,15 +712,41 @@ mod dictionary_filter_contract {
     use super::*;
     #[test]
     fn visibility_uses_the_same_source_rules_without_requiring_an_ai_profile() {
-        let sources = ["123", "Open menu", "https://example.com", "1920x1080", "Chapter 2"].map(String::from);
+        let sources = [
+            "123",
+            "Open menu",
+            "https://example.com",
+            "1920x1080",
+            "Chapter 2",
+        ]
+        .map(String::from);
         let policy = FilterPolicy::default();
-        assert_eq!(policy.hidden_sources(&sources).unwrap(), vec![true, false, true, true, false]);
+        assert_eq!(
+            policy.hidden_sources(&sources).unwrap(),
+            vec![true, false, true, true, false]
+        );
         let mut ai = AiTranslation::default();
-        let plan = ai.plan_translation(TranslationPlanRequest::new("view", 1, "en-US", "zh-CN",
-            sources.iter().enumerate().map(|(index, source)| TranslationItem::untranslated(index.to_string(), source.as_str())))
-            .with_filter_policy(policy)).unwrap();
+        let plan = ai
+            .plan_translation(
+                TranslationPlanRequest::new(
+                    "view",
+                    1,
+                    "en-US",
+                    "zh-CN",
+                    sources.iter().enumerate().map(|(index, source)| {
+                        TranslationItem::untranslated(index.to_string(), source.as_str())
+                    }),
+                )
+                .with_filter_policy(policy),
+            )
+            .unwrap();
         assert_eq!(plan.skipped_count(), 3);
-        assert!(FilterPolicy::default().with_excluded_patterns(["["]).hidden_sources(&sources).is_err());
+        assert!(
+            FilterPolicy::default()
+                .with_excluded_patterns(["["])
+                .hidden_sources(&sources)
+                .is_err()
+        );
     }
 }
 
@@ -704,11 +755,22 @@ mod source_filter_cache_tests {
     use super::*;
     #[test]
     fn classification_cache_matches_batch_and_invalidates_on_rule_changes() {
-        let sources: Vec<String> = vec!["123".into(), "Open menu".into(), "Ctrl+S".into(), "Scene 42".into()];
+        let sources: Vec<String> = vec![
+            "123".into(),
+            "Open menu".into(),
+            "Ctrl+S".into(),
+            "Scene 42".into(),
+        ];
         let mut policy = FilterPolicy::default();
         let mut cache = SourceFilterCache::default();
         cache.configure(&policy).unwrap();
-        assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| cache.hidden(source))
+                .collect::<Vec<_>>(),
+            policy.hidden_sources(&sources).unwrap()
+        );
         cache.configure(&policy).unwrap();
         assert_eq!(cache.results.len(), 4);
         assert_eq!(cache.reason("123"), Some(SkipReason::PureNumberOrSymbols));
@@ -719,7 +781,13 @@ mod source_filter_cache_tests {
         assert!(cache.results.is_empty());
         assert_eq!(cache.reason("Scene 42"), Some(SkipReason::ContainsDigit));
         assert_eq!(cache.reason("Open menu"), Some(SkipReason::CustomPattern));
-        assert_eq!(sources.iter().map(|source| cache.hidden(source)).collect::<Vec<_>>(), policy.hidden_sources(&sources).unwrap());
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| cache.hidden(source))
+                .collect::<Vec<_>>(),
+            policy.hidden_sources(&sources).unwrap()
+        );
         policy.excluded_patterns.push("[".into());
         assert!(cache.configure(&policy).is_err());
     }

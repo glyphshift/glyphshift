@@ -1,12 +1,10 @@
-mod entry_resolution;
-mod exit;
-mod updates;
-mod data;
 mod ai;
 mod ai_models;
-mod window_controls;
 mod command_error;
+mod data;
 mod dictionary;
+mod entry_resolution;
+mod exit;
 mod font_catalog;
 mod probe;
 mod probe_transfer;
@@ -14,6 +12,8 @@ mod quick_probe;
 mod settings;
 mod shortcut;
 mod software;
+mod updates;
+mod window_controls;
 mod workflow;
 mod workflow_collection;
 mod workflow_lifecycle;
@@ -23,18 +23,19 @@ use command_error::CommandError;
 use dictionary::offline_dictionary_distribution;
 #[cfg(test)]
 use dictionary::{
-    dictionary_distribution_error, dictionary_export_error, dictionary_import_error,
     DictionaryCatalogInstallRequest, DictionaryCatalogQueryRequest, DictionaryReplacementRequest,
+    dictionary_distribution_error, dictionary_export_error, dictionary_import_error,
 };
 use glyphshift_capture::{
-    CaptureConfiguration, CaptureTranslationContext, ProbeDictionaryEntry, ProbeDictionarySnapshot,
-    ProbeEntryPage, ProbeExportFormat, ProbeQuery, ProbeRunCreate, ProbeRunError, ProbeRunStatus,
-    ProbeRunStore, ProbeRunSummary, ProbeRunUpdate, ProbeTranslationFilter,
-    DEFAULT_MAX_ENTRIES,
+    CaptureConfiguration, CaptureTranslationContext, DEFAULT_MAX_ENTRIES, ProbeDictionaryEntry,
+    ProbeDictionarySnapshot, ProbeEntryPage, ProbeExportFormat, ProbeQuery, ProbeRunCreate,
+    ProbeRunError, ProbeRunStatus, ProbeRunStore, ProbeRunSummary, ProbeRunUpdate,
+    ProbeTranslationFilter,
 };
 use glyphshift_controller_windows::{
-    current_process_is_elevated, foreground_windows_executable, inspect_windows_executable,
-    launch_process_elevated, running_windows_executables, WindowsElevationError, WindowsExecutable,
+    WindowsElevationError, WindowsExecutable, current_process_is_elevated,
+    foreground_windows_executable, inspect_windows_executable, launch_process_elevated,
+    running_windows_executables,
 };
 use glyphshift_desktop_backend::{
     BackendError, DesktopBackend, DesktopEnvironment, DesktopSnapshot, DictionaryCreate,
@@ -60,19 +61,19 @@ use glyphshift_workflow::ResolveError;
 use probe::ProbeRuntimeCapability;
 #[cfg(test)]
 use probe::{
-    capture_preview_publish_error, ProbeDictionaryBindingRequest, ProbeRunCreateRequest,
-    ProbeRunUpdateRequest, ProbeTranslationEditRequest,
+    ProbeDictionaryBindingRequest, ProbeRunCreateRequest, ProbeRunUpdateRequest,
+    ProbeTranslationEditRequest, capture_preview_publish_error,
 };
 use quick_probe::QuickProbeSessionStore;
 use serde::{Deserialize, Serialize};
 use settings::{
-    configure_launch_at_startup, AppSettings, AppSettingsStore, AppSettingsUpdate, SettingsError,
-    DEFAULT_SOFTWARE_CAPTURE_SHORTCUT,
+    AppSettings, AppSettingsStore, AppSettingsUpdate, DEFAULT_SOFTWARE_CAPTURE_SHORTCUT,
+    SettingsError, configure_launch_at_startup,
 };
 #[cfg(test)]
 use software::{
-    software_preflight_state, SoftwarePreflightState, SoftwareQuickCaptureState,
-    SoftwareQuickCaptureTransition,
+    SoftwarePreflightState, SoftwareQuickCaptureState, SoftwareQuickCaptureTransition,
+    software_preflight_state,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -80,12 +81,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 use workflow::{
-    idle_workflow_runtime_view, runtime_command_error, workflow_runtime_view, WorkflowRuntimeView,
+    WorkflowRuntimeView, idle_workflow_runtime_view, runtime_command_error, workflow_runtime_view,
 };
 #[cfg(test)]
 use workflow::{
-    runtime_command_error_with_privilege, workflow_activation_command_error,
-    WorkflowTargetRuntimeView,
+    WorkflowTargetRuntimeView, runtime_command_error_with_privilege,
+    workflow_activation_command_error,
 };
 
 const DESKTOP_API_VERSION: u16 = 36;
@@ -219,7 +220,12 @@ struct DesktopProductSnapshot {
 }
 
 trait WorkflowRuntimeService: Send {
-    fn control_workflow_collection(&mut self, _workflow_id: &str, _software_id: &str, _paused: bool) -> Result<(), DesktopRuntimeError> {
+    fn control_workflow_collection(
+        &mut self,
+        _workflow_id: &str,
+        _software_id: &str,
+        _paused: bool,
+    ) -> Result<(), DesktopRuntimeError> {
         Err(DesktopRuntimeError::InvalidState)
     }
 
@@ -227,7 +233,8 @@ trait WorkflowRuntimeService: Send {
         &mut self,
         _workflow_id: &str,
         _collections: BTreeMap<Box<str>, CaptureConfiguration>,
-    ) {}
+    ) {
+    }
 
     fn activate_workflow(
         &mut self,
@@ -277,7 +284,12 @@ trait WorkflowRuntimeService: Send {
 }
 
 impl WorkflowRuntimeService for DesktopRuntimePool {
-    fn control_workflow_collection(&mut self, workflow_id: &str, software_id: &str, paused: bool) -> Result<(), DesktopRuntimeError> {
+    fn control_workflow_collection(
+        &mut self,
+        workflow_id: &str,
+        software_id: &str,
+        paused: bool,
+    ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntimePool::control_workflow_collection(self, workflow_id, software_id, paused)
     }
 
@@ -384,7 +396,12 @@ struct DesktopApplication {
     font_families: Vec<Box<str>>,
     font_cache_root: PathBuf,
     probe_runs: ProbeRunStore,
-    probe_snapshot_cache: std::cell::RefCell<Option<(Vec<(Box<str>, u64)>, std::sync::Arc<ProbeDictionarySnapshot>)>>,
+    probe_snapshot_cache: std::cell::RefCell<
+        Option<(
+            Vec<(Box<str>, u64)>,
+            std::sync::Arc<ProbeDictionarySnapshot>,
+        )>,
+    >,
     exiting: bool,
     exit_ready: bool,
     collection_filter_policy: glyphshift_ai_translation::FilterPolicy,
@@ -399,7 +416,11 @@ struct DesktopApplication {
 }
 
 impl DesktopApplication {
-    fn open(data_root: PathBuf, runtime_root: PathBuf, settings: &AppSettings) -> Result<Self, String> {
+    fn open(
+        data_root: PathBuf,
+        runtime_root: PathBuf,
+        settings: &AppSettings,
+    ) -> Result<Self, String> {
         let mut probe_runs = ProbeRunStore::open(data_root.join("workflow-records"))
             .map_err(|error| format!("probe run startup: {error:?}"))?;
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
@@ -547,7 +568,12 @@ impl DesktopApplication {
                                 )
                             })
                     })
-                    .map(|runtime| (Box::<str>::from(workflow.id()), self.project_workflow_runtime(runtime)))
+                    .map(|runtime| {
+                        (
+                            Box::<str>::from(workflow.id()),
+                            self.project_workflow_runtime(runtime),
+                        )
+                    })
             })
             .collect();
         DesktopProductSnapshot {
@@ -633,7 +659,10 @@ fn desktop_update_settings(
     if settings.software_capture_shortcut() != software_capture_shortcut.as_ref() {
         return Err(CommandError::new("settings.shortcut_update_failed"));
     }
-    let previous_topmost = settings.current().map_err(settings_command_error)?.always_on_top();
+    let previous_topmost = settings
+        .current()
+        .map_err(settings_command_error)?
+        .always_on_top();
     let next_topmost = update.always_on_top();
     let previous_launch_at_startup = settings.launch_at_startup();
     let launch_at_startup_changed = previous_launch_at_startup != update.launch_at_startup();
@@ -643,7 +672,9 @@ fn desktop_update_settings(
     let mut application = application.lock().map_err(|_| workspace_unavailable())?;
     if previous_topmost != next_topmost {
         if window_controls::set_topmost(&app, next_topmost).is_err() {
-            if launch_at_startup_changed { let _ = configure_launch_at_startup(previous_launch_at_startup); }
+            if launch_at_startup_changed {
+                let _ = configure_launch_at_startup(previous_launch_at_startup);
+            }
             return Err(CommandError::new("settings.window_failed"));
         }
     }
@@ -659,9 +690,11 @@ fn desktop_update_settings(
             window_controls::update_labels(&app, &saved);
             // The workflow loop republishes changed decision inputs on its next reconciliation.
             Ok(saved)
-        },
+        }
         Err(error) => {
-            if previous_topmost != next_topmost { let _ = window_controls::set_topmost(&app, previous_topmost); }
+            if previous_topmost != next_topmost {
+                let _ = window_controls::set_topmost(&app, previous_topmost);
+            }
             if launch_at_startup_changed {
                 let _ = configure_launch_at_startup(previous_launch_at_startup);
             }
@@ -782,11 +815,16 @@ pub fn run() {
                 return Ok(());
             }
             let ai_state = ai::DesktopAiState::open(&data_root).map_err(std::io::Error::other)?;
-            let saved_settings = settings.current().map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
-            let application =
-                DesktopApplication::open(data_root, runtime_root, &saved_settings).map_err(std::io::Error::other)?;
-            settings.initialize_favorite_fonts(&application.font_families)
-                .map_err(|error| std::io::Error::other(format!("favorite fonts startup: {error:?}")))?;
+            let saved_settings = settings
+                .current()
+                .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
+            let application = DesktopApplication::open(data_root, runtime_root, &saved_settings)
+                .map_err(std::io::Error::other)?;
+            settings
+                .initialize_favorite_fonts(&application.font_families)
+                .map_err(|error| {
+                    std::io::Error::other(format!("favorite fonts startup: {error:?}"))
+                })?;
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(ai_state));
             app.manage(Mutex::new(application));
@@ -883,7 +921,10 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if let Some(state) = app.try_state::<Mutex<DesktopApplication>>() {
-                    let result = state.lock().map_err(|_| workspace_unavailable()).and_then(|mut application| application.prepare_exit());
+                    let result = state
+                        .lock()
+                        .map_err(|_| workspace_unavailable())
+                        .and_then(|mut application| application.prepare_exit());
                     if let Err(error) = result {
                         api.prevent_exit();
                         let _ = app.emit("glyphshift-exit-failed", error);

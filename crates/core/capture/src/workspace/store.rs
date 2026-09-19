@@ -1,5 +1,5 @@
 use super::super::{
-    safe_identifier, unix_time_millis, CaptureCatalog, CaptureConfiguration, CaptureSessionId,
+    CaptureCatalog, CaptureConfiguration, CaptureSessionId, safe_identifier, unix_time_millis,
 };
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};

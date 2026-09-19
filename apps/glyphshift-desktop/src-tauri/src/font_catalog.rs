@@ -89,8 +89,8 @@ fn normalize_font_families(
 
 #[cfg(target_os = "windows")]
 fn system_font_families() -> Vec<Box<str>> {
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
     let mut families = BTreeSet::new();
     for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {

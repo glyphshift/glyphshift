@@ -10,7 +10,9 @@ impl DesktopApplication {
         software_id: &str,
         visible: bool,
     ) {
-        let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id) else { return };
+        let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id) else {
+            return;
+        };
         let changed = if visible {
             if runtime.warnings.contains_key(software_id) {
                 false
@@ -63,17 +65,32 @@ impl DesktopApplication {
         self.set_workflow_compatibility_warning(workflow_id, software_id, timed_out);
     }
 
-    pub(super) fn set_collection_filter_policy(&mut self, policy: glyphshift_ai_translation::FilterPolicy) {
+    pub(super) fn set_collection_filter_policy(
+        &mut self,
+        policy: glyphshift_ai_translation::FilterPolicy,
+    ) {
         if self.collection_filter_policy != policy {
             self.collection_filter_policy = policy;
             self.collection_versions.clear();
         }
     }
 
-    fn collection_record_id(&mut self, workflow_id: &str, software_id: &str, dictionary_id: &str, index: usize) -> Result<String, CommandError> {
+    fn collection_record_id(
+        &mut self,
+        workflow_id: &str,
+        software_id: &str,
+        dictionary_id: &str,
+        index: usize,
+    ) -> Result<String, CommandError> {
         let records = self.probe_runs.list().map_err(probe_run_error)?;
-        let matches = records.iter().filter(|run| run.workflow_id() == Some(workflow_id)
-            && run.software_id() == software_id && run.dictionary_id() == dictionary_id).collect::<Vec<_>>();
+        let matches = records
+            .iter()
+            .filter(|run| {
+                run.workflow_id() == Some(workflow_id)
+                    && run.software_id() == software_id
+                    && run.dictionary_id() == dictionary_id
+            })
+            .collect::<Vec<_>>();
         match matches.as_slice() {
             [] => {
                 let base = format!("collection-{workflow_id}-{index}");
@@ -92,112 +109,263 @@ impl DesktopApplication {
 
     pub(super) fn collect_workflow_sources(&mut self, run_id: &str) -> Result<(), CommandError> {
         let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        let Some(workflow_id) = summary.workflow_id() else { return Ok(()) };
-        let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
-        if !workflow.targets().iter().any(|target| target.software_id() == summary.software_id()
-            && target.write_dictionary_id() == Some(summary.dictionary_id())) { return Ok(()) }
-        if self.ensure_ai_dictionary_writable(summary.dictionary_id()).is_err() {
+        let Some(workflow_id) = summary.workflow_id() else {
+            return Ok(());
+        };
+        let workflow = self
+            .backend
+            .workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
+        if !workflow.targets().iter().any(|target| {
+            target.software_id() == summary.software_id()
+                && target.write_dictionary_id() == Some(summary.dictionary_id())
+        }) {
+            return Ok(());
+        }
+        if self
+            .ensure_ai_dictionary_writable(summary.dictionary_id())
+            .is_err()
+        {
             self.pending_collection_runs.insert(run_id.to_owned());
             return Ok(());
         }
         self.pending_collection_runs.insert(run_id.to_owned());
-        let version = (summary.observation_revision(), self.probe_snapshot_key(&summary)?);
+        let version = (
+            summary.observation_revision(),
+            self.probe_snapshot_key(&summary)?,
+        );
         if self.collection_versions.get(run_id) == Some(&version) {
             self.pending_collection_runs.remove(run_id);
             return Ok(());
         }
         let snapshot = self.probe_entries_snapshot(&summary)?;
         let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
-        let mut sources = self.probe_runs.uncollected_sources_mapped(run_id, &snapshot, |source| resolver.collection_sources(source)).map_err(probe_run_error)?;
-        self.collection_filter.configure(&self.collection_filter_policy).map_err(crate::ai::ai_plan_error)?;
+        let mut sources = self
+            .probe_runs
+            .uncollected_sources_mapped(run_id, &snapshot, |source| {
+                resolver.collection_sources(source)
+            })
+            .map_err(probe_run_error)?;
+        self.collection_filter
+            .configure(&self.collection_filter_policy)
+            .map_err(crate::ai::ai_plan_error)?;
         sources.retain(|source| !self.collection_filter.hidden(source));
         if !sources.is_empty() {
-            let dictionary = self.backend.dictionary(summary.dictionary_id()).cloned().map_err(|_| CommandError::new("dictionary.not_found"))?;
-            let entries = dictionary.entries().iter().map(|entry| DictionaryEntryCreate::new(entry.source(), entry.translation()))
-                .chain(sources.into_iter().map(|source| DictionaryEntryCreate::new(source, "")));
-            self.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries(entries))
+            let dictionary = self
+                .backend
+                .dictionary(summary.dictionary_id())
+                .cloned()
+                .map_err(|_| CommandError::new("dictionary.not_found"))?;
+            let entries = dictionary
+                .entries()
+                .iter()
+                .map(|entry| DictionaryEntryCreate::new(entry.source(), entry.translation()))
+                .chain(
+                    sources
+                        .into_iter()
+                        .map(|source| DictionaryEntryCreate::new(source, "")),
+                );
+            self.backend
+                .update_dictionary(
+                    DictionaryEdit::from_dictionary(&dictionary).with_entries(entries),
+                )
                 .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
         }
         // Mark only successful checks. A dictionary locked by AI is retried after unlock.
-        let version = (summary.observation_revision(), self.probe_snapshot_key(&summary)?);
-        if self.collection_versions.len() >= 128 { self.collection_versions.clear(); }
+        let version = (
+            summary.observation_revision(),
+            self.probe_snapshot_key(&summary)?,
+        );
+        if self.collection_versions.len() >= 128 {
+            self.collection_versions.clear();
+        }
         self.collection_versions.insert(run_id.to_owned(), version);
         self.pending_collection_runs.remove(run_id);
         Ok(())
     }
 
-    pub(super) fn workflow_collection_view(&mut self, workflow_id: &str) -> Result<crate::probe::ProbeRunView, CommandError> {
+    pub(super) fn workflow_collection_view(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<crate::probe::ProbeRunView, CommandError> {
         self.prepare_workflow_collection(workflow_id)?;
-        let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
+        let workflow = self
+            .backend
+            .workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
         if workflow.targets().len() != 1 || workflow.targets()[0].write_dictionary_id().is_none() {
             return Err(CommandError::new("capture.invalid_configuration"));
         }
-        let id = self.collection_record_id(workflow_id, workflow.targets()[0].software_id(), workflow.targets()[0].write_dictionary_id().unwrap(), 0)?;
+        let id = self.collection_record_id(
+            workflow_id,
+            workflow.targets()[0].software_id(),
+            workflow.targets()[0].write_dictionary_id().unwrap(),
+            0,
+        )?;
         self.probe_run_summary(&id)
     }
 
-    pub(super) fn prepare_workflow_collection(&mut self, workflow_id: &str) -> Result<(), CommandError> {
-        let legacy = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
-        if legacy.targets().iter().any(|target| target.collection_preference().is_none() && target.write_dictionary_id().is_some()) {
-            let paused = self.probe_runs.list().map_err(probe_run_error)?.iter()
-                .any(|record| record.workflow_id() == Some(workflow_id) && record.status() == ProbeRunStatus::Paused);
-            self.backend.set_workflow_collection_enabled(workflow_id, !paused).map_err(|_| CommandError::new("workflow.invalid_update"))?;
+    pub(super) fn prepare_workflow_collection(
+        &mut self,
+        workflow_id: &str,
+    ) -> Result<(), CommandError> {
+        let legacy = self
+            .backend
+            .workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
+        if legacy.targets().iter().any(|target| {
+            target.collection_preference().is_none() && target.write_dictionary_id().is_some()
+        }) {
+            let paused = self
+                .probe_runs
+                .list()
+                .map_err(probe_run_error)?
+                .iter()
+                .any(|record| {
+                    record.workflow_id() == Some(workflow_id)
+                        && record.status() == ProbeRunStatus::Paused
+                });
+            self.backend
+                .set_workflow_collection_enabled(workflow_id, !paused)
+                .map_err(|_| CommandError::new("workflow.invalid_update"))?;
         }
-        let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
+        let workflow = self
+            .backend
+            .workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
         let mut collections = BTreeMap::new();
         for (index, target) in workflow.targets().iter().enumerate() {
-            let Some(dictionary_id) = target.write_dictionary_id() else { continue };
-            self.backend.dictionary(dictionary_id).map_err(|_| CommandError::new("dictionary.not_found"))?;
-            let id = self.collection_record_id(workflow_id, target.software_id(), dictionary_id, index)?;
-            let excluded = target.dictionary_ids().iter().filter(|id| id.as_ref() != dictionary_id).cloned().collect::<Vec<_>>();
+            let Some(dictionary_id) = target.write_dictionary_id() else {
+                continue;
+            };
+            self.backend
+                .dictionary(dictionary_id)
+                .map_err(|_| CommandError::new("dictionary.not_found"))?;
+            let id =
+                self.collection_record_id(workflow_id, target.software_id(), dictionary_id, index)?;
+            let excluded = target
+                .dictionary_ids()
+                .iter()
+                .filter(|id| id.as_ref() != dictionary_id)
+                .cloned()
+                .collect::<Vec<_>>();
             if let Ok(current) = self.probe_runs.summary(&id) {
-                if current.workflow_id() != Some(workflow_id) || current.software_id() != target.software_id() {
+                if current.workflow_id() != Some(workflow_id)
+                    || current.software_id() != target.software_id()
+                {
                     return Err(CommandError::new("capture.invalid_configuration"));
                 }
-                let changed = current.dictionary_id() != dictionary_id || current.adapter_ids() != target.adapter_plan().adapter_ids()
+                let changed = current.dictionary_id() != dictionary_id
+                    || current.adapter_ids() != target.adapter_plan().adapter_ids()
                     || current.excluded_dictionary_ids() != excluded;
-                if changed && matches!(current.status(), ProbeRunStatus::Running | ProbeRunStatus::Paused) {
+                if changed
+                    && matches!(
+                        current.status(),
+                        ProbeRunStatus::Running | ProbeRunStatus::Paused
+                    )
+                {
                     return Err(CommandError::new("capture.invalid_configuration"));
                 }
                 if changed || current.name() != workflow.name() || !current.live_preview_enabled() {
-                    self.probe_runs.update(&id, ProbeRunUpdate::new(workflow.name(), dictionary_id,
-                        target.adapter_plan().adapter_ids().iter().cloned(), true).map_err(probe_run_error)?
-                        .with_excluded_dictionaries(excluded).map_err(probe_run_error)?).map_err(probe_run_error)?;
+                    self.probe_runs
+                        .update(
+                            &id,
+                            ProbeRunUpdate::new(
+                                workflow.name(),
+                                dictionary_id,
+                                target.adapter_plan().adapter_ids().iter().cloned(),
+                                true,
+                            )
+                            .map_err(probe_run_error)?
+                            .with_excluded_dictionaries(excluded)
+                            .map_err(probe_run_error)?,
+                        )
+                        .map_err(probe_run_error)?;
                 }
             } else {
-                let create = ProbeRunCreate::new(id.clone(), workflow.name(), target.software_id(), dictionary_id,
-                    target.adapter_plan().adapter_ids().iter().cloned(), true).map_err(probe_run_error)?
-                    .with_excluded_dictionaries(excluded).map_err(probe_run_error)?
-                    .with_workflow(workflow_id).map_err(probe_run_error)?;
+                let create = ProbeRunCreate::new(
+                    id.clone(),
+                    workflow.name(),
+                    target.software_id(),
+                    dictionary_id,
+                    target.adapter_plan().adapter_ids().iter().cloned(),
+                    true,
+                )
+                .map_err(probe_run_error)?
+                .with_excluded_dictionaries(excluded)
+                .map_err(probe_run_error)?
+                .with_workflow(workflow_id)
+                .map_err(probe_run_error)?;
                 self.probe_runs.create(create).map_err(probe_run_error)?;
             }
-            collections.insert(target.software_id().into(), self.probe_runs.capture_configuration(&id, DEFAULT_MAX_ENTRIES).map_err(probe_run_error)?);
+            collections.insert(
+                target.software_id().into(),
+                self.probe_runs
+                    .capture_configuration(&id, DEFAULT_MAX_ENTRIES)
+                    .map_err(probe_run_error)?,
+            );
         }
-        if let Some(runtimes) = self.runtimes.as_mut() { runtimes.configure_workflow_collection(workflow_id, collections); }
+        if let Some(runtimes) = self.runtimes.as_mut() {
+            runtimes.configure_workflow_collection(workflow_id, collections);
+        }
         Ok(())
     }
 
-    pub(super) fn update_workflow_collection_status(&mut self, workflow_id: &str, running: bool) -> Result<(), CommandError> {
-        let workflow = self.backend.workflow(workflow_id).map_err(|_| CommandError::new("workflow.invalid"))?;
+    pub(super) fn update_workflow_collection_status(
+        &mut self,
+        workflow_id: &str,
+        running: bool,
+    ) -> Result<(), CommandError> {
+        let workflow = self
+            .backend
+            .workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.invalid"))?;
         for (index, target) in workflow.targets().iter().enumerate() {
-            let Some(dictionary_id) = target.write_dictionary_id() else { continue };
-            let running = running && self.workflow_runtime_status.get(workflow_id).is_some_and(|runtime|
-                runtime.targets.iter().any(|state| state.software_id.as_ref() == target.software_id() && state.active));
-            let id = self.collection_record_id(workflow_id, target.software_id(), dictionary_id, index)?;
+            let Some(dictionary_id) = target.write_dictionary_id() else {
+                continue;
+            };
+            let running = running
+                && self
+                    .workflow_runtime_status
+                    .get(workflow_id)
+                    .is_some_and(|runtime| {
+                        runtime.targets.iter().any(|state| {
+                            state.software_id.as_ref() == target.software_id() && state.active
+                        })
+                    });
+            let id =
+                self.collection_record_id(workflow_id, target.software_id(), dictionary_id, index)?;
             if let Ok(summary) = self.probe_runs.summary(&id) {
-                let next = if running && !target.collection_enabled() { ProbeRunStatus::Paused }
-                    else if running { ProbeRunStatus::Running } else { ProbeRunStatus::Ready };
+                let next = if running && !target.collection_enabled() {
+                    ProbeRunStatus::Paused
+                } else if running {
+                    ProbeRunStatus::Running
+                } else {
+                    ProbeRunStatus::Ready
+                };
                 if running && (summary.status() != next || !target.collection_enabled()) {
                     if let Some(runtimes) = self.runtimes.as_mut() {
-                        if let Err(error) = runtimes.control_workflow_collection(workflow_id, target.software_id(), !target.collection_enabled()) {
-                            if let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id) {
-                                runtime.errors.insert(target.software_id().into(), crate::workflow::runtime_command_error(error, true));
+                        if let Err(error) = runtimes.control_workflow_collection(
+                            workflow_id,
+                            target.software_id(),
+                            !target.collection_enabled(),
+                        ) {
+                            if let Some(runtime) = self.workflow_runtime_status.get_mut(workflow_id)
+                            {
+                                runtime.errors.insert(
+                                    target.software_id().into(),
+                                    crate::workflow::runtime_command_error(error, true),
+                                );
                             }
                             continue;
                         }
                     }
                 }
-                if summary.status() != next { self.probe_runs.set_status(&id, next).map_err(probe_run_error)?; }
+                if summary.status() != next {
+                    self.probe_runs
+                        .set_status(&id, next)
+                        .map_err(probe_run_error)?;
+                }
                 self.update_workflow_compatibility_check(
                     workflow_id,
                     target.software_id(),
@@ -213,19 +381,29 @@ impl DesktopApplication {
 
 #[tauri::command]
 pub(super) fn desktop_workflow_collection(
-    application: State<'_, Mutex<DesktopApplication>>, workflow_id: String,
+    application: State<'_, Mutex<DesktopApplication>>,
+    workflow_id: String,
 ) -> Result<crate::probe::ProbeRunView, CommandError> {
-    application.lock().map_err(|_| workspace_unavailable())?.workflow_collection_view(&workflow_id)
+    application
+        .lock()
+        .map_err(|_| workspace_unavailable())?
+        .workflow_collection_view(&workflow_id)
 }
 
 /// Drain persisted capture checkpoints independently of UI summary and target refresh requests.
 #[tauri::command]
-pub(super) fn desktop_collect_workflow_sources(application: State<'_, Mutex<DesktopApplication>>) -> Result<(), CommandError> {
+pub(super) fn desktop_collect_workflow_sources(
+    application: State<'_, Mutex<DesktopApplication>>,
+) -> Result<(), CommandError> {
     let mut application = application.lock().map_err(|_| workspace_unavailable())?;
     let records = application.probe_runs.list().map_err(probe_run_error)?;
     for record in records {
-        if record.workflow_id().is_some() && (matches!(record.status(), ProbeRunStatus::Running | ProbeRunStatus::Paused)
-            || application.pending_collection_runs.contains(record.id())) {
+        if record.workflow_id().is_some()
+            && (matches!(
+                record.status(),
+                ProbeRunStatus::Running | ProbeRunStatus::Paused
+            ) || application.pending_collection_runs.contains(record.id()))
+        {
             application.collect_workflow_sources(record.id())?;
         }
     }
@@ -234,14 +412,25 @@ pub(super) fn desktop_collect_workflow_sources(application: State<'_, Mutex<Desk
 
 #[tauri::command]
 pub(super) fn desktop_set_workflow_collection(
-    application: State<'_, Mutex<DesktopApplication>>, workflow_id: String, enabled: bool,
+    application: State<'_, Mutex<DesktopApplication>>,
+    workflow_id: String,
+    enabled: bool,
 ) -> Result<DesktopProductSnapshot, CommandError> {
     let mut application = application.lock().map_err(|_| workspace_unavailable())?;
-    application.backend.set_workflow_collection_enabled(&workflow_id, enabled)
+    application
+        .backend
+        .set_workflow_collection_enabled(&workflow_id, enabled)
         .map_err(|_| CommandError::new("capture.invalid_configuration"))?;
-    let running = application.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == workflow_id);
+    let running = application
+        .backend
+        .enabled_workflow_ids()
+        .iter()
+        .any(|id| id.as_ref() == workflow_id);
     application.update_workflow_collection_status(&workflow_id, running)?;
-    if let Some(runtime) = application.workflow_runtime_status.get_mut(workflow_id.as_str()) {
+    if let Some(runtime) = application
+        .workflow_runtime_status
+        .get_mut(workflow_id.as_str())
+    {
         runtime.revision = crate::workflow_lifecycle::next_revision();
         runtime.checked_at_ms = glyphshift_capture::unix_time_millis();
     }

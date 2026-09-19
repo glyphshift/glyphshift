@@ -227,12 +227,8 @@ impl TranslationProvider for HttpTranslationProvider {
             AiProviderProtocol::MicrosoftTranslator => {
                 policy.with_max_source_chars_per_request(50_000)
             }
-            AiProviderProtocol::GoogleTranslate => {
-                policy.with_max_source_chars_per_request(5_000)
-            }
-            AiProviderProtocol::BaiduTranslate => {
-                policy.with_max_source_chars_per_request(950)
-            }
+            AiProviderProtocol::GoogleTranslate => policy.with_max_source_chars_per_request(5_000),
+            AiProviderProtocol::BaiduTranslate => policy.with_max_source_chars_per_request(950),
             _ => policy,
         }
     }
@@ -628,9 +624,9 @@ fn encode_form_component(value: &str, output: &mut String) {
 
 fn md5_hex(input: &[u8]) -> String {
     const S: [u32; 64] = [
-        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14,
-        20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
-        16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5,
+        9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10,
+        15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
     ];
     const K: [u32; 64] = [
         0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613,
@@ -826,7 +822,10 @@ fn build_microsoft_translator_request(
         .credential()
         .ok_or_else(|| invalid_request("missing provider credential"))?;
     let mut headers = vec![
-        (Box::<str>::from("content-type"), Box::<str>::from("application/json")),
+        (
+            Box::<str>::from("content-type"),
+            Box::<str>::from("application/json"),
+        ),
         (
             Box::<str>::from("ocp-apim-subscription-key"),
             Box::<str>::from(credential),
@@ -1037,10 +1036,12 @@ fn decode_libretranslate_response(
             })
             .collect::<Result<Vec<_>, _>>()?
     } else if request.items().len() == 1 {
-        vec![translated
-            .as_str()
-            .ok_or_else(|| malformed_response("provider returned invalid translation text"))?
-            .to_owned()]
+        vec![
+            translated
+                .as_str()
+                .ok_or_else(|| malformed_response("provider returned invalid translation text"))?
+                .to_owned(),
+        ]
     } else {
         return Err(malformed_response(
             "provider returned a mismatched translation count",
@@ -1081,7 +1082,9 @@ fn decode_google_translate_response(
             let text = row
                 .get("translatedText")
                 .and_then(Value::as_str)
-                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+                .ok_or_else(|| {
+                    malformed_response("provider response did not contain translation text")
+                })?;
             Ok(ProviderTranslation::new(item.item_id(), text))
         })
         .collect::<Result<Vec<_>, ProviderError>>()?;
@@ -1122,10 +1125,9 @@ fn decode_baidu_translate_response(
         .iter()
         .zip(rows)
         .map(|(item, row)| {
-            let text = row
-                .get("dst")
-                .and_then(Value::as_str)
-                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+            let text = row.get("dst").and_then(Value::as_str).ok_or_else(|| {
+                malformed_response("provider response did not contain translation text")
+            })?;
             Ok(ProviderTranslation::new(item.item_id(), text))
         })
         .collect::<Result<Vec<_>, ProviderError>>()?;
@@ -1157,7 +1159,9 @@ fn decode_microsoft_translator_response(
                 .and_then(|translations| translations.first())
                 .and_then(|translation| translation.get("text"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+                .ok_or_else(|| {
+                    malformed_response("provider response did not contain translation text")
+                })?;
             Ok(ProviderTranslation::new(item.item_id(), text))
         })
         .collect::<Result<Vec<_>, ProviderError>>()?;

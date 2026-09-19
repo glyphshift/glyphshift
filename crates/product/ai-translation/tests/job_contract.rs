@@ -4,10 +4,10 @@ use glyphshift_ai_translation::{
     TranslationBatchPolicy, TranslationItem, TranslationJobError, TranslationJobStatus,
     TranslationPlanRequest, TranslationProvider,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
 

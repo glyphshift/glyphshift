@@ -135,11 +135,13 @@ fn deferred_vgui_runs_replace_whole_text_and_replay_unknown_operations() {
         assert_eq!(render(second, 0), "打开");
         let records = query_observations().unwrap();
         assert_eq!(records.records().len(), 2);
-        assert!(records
-            .records()
-            .iter()
-            .all(|record| record.source() == "Open"
-                && record.adapter_id() == "windows.vgui.text-run"));
+        assert!(
+            records
+                .records()
+                .iter()
+                .all(|record| record.source() == "Open"
+                    && record.adapter_id() == "windows.vgui.text-run")
+        );
         assert_eq!(
             render(first, 4),
             "打开",

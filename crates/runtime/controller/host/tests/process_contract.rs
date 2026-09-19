@@ -2,8 +2,8 @@
 
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_controller_host::{
-    measure_code_hash, ControllerLoadError, ControllerStartupConfig, ControllerTrustPolicy,
-    ProcessControllerTransport, VerifiedControllerArtifact,
+    ControllerLoadError, ControllerStartupConfig, ControllerTrustPolicy,
+    ProcessControllerTransport, VerifiedControllerArtifact, measure_code_hash,
 };
 use glyphshift_domain::{AdapterId, Feature};
 use glyphshift_extension::{

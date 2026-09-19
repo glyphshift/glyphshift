@@ -9,8 +9,8 @@ use glyphshift_domain::{
 use glyphshift_runtime_contract::{RuntimePublication, RuntimePublicationIdentity};
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 const MAX_DECISION_TRACES: usize = 256;
 

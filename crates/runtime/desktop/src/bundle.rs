@@ -423,7 +423,10 @@ impl RuntimeBundle {
                 .filter(|feature| {
                     matches!(
                         feature,
-                        Feature::TextObserve | Feature::TextReplace | Feature::FontSubstitute | Feature::FontScale
+                        Feature::TextObserve
+                            | Feature::TextReplace
+                            | Feature::FontSubstitute
+                            | Feature::FontScale
                     )
                 })
                 .collect::<Vec<_>>();

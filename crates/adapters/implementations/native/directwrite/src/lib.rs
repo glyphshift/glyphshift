@@ -1,10 +1,10 @@
 //! Host-independent contracts for DirectWrite TextLayout draw-time replacement.
 
 use glyphshift_adapter_sdk::{
-    authorize, ActivationGrant, AdapterDescriptor, AdapterError, AdapterVersion,
+    ActivationGrant, AdapterDescriptor, AdapterError, AdapterVersion, authorize,
 };
 use glyphshift_domain::{AdapterId, ApplyModel, Feature, Placement, RenderDecision, TextDecision};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub const ADAPTER_ID: &str = "windows.directwrite.text-layout";
 const MAX_TEXT_UNITS: usize = 16 * 1024;

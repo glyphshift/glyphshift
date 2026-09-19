@@ -1,7 +1,7 @@
 use super::*;
 use crate::hybrid::resolve_runtime_activation;
 use crate::isolated::map_worker_error;
-use crate::worker::{valid_worker_code, MAX_HEALTH_CODE_BYTES};
+use crate::worker::{MAX_HEALTH_CODE_BYTES, valid_worker_code};
 use glyphshift_domain::AdapterId;
 use glyphshift_session::{BoundFeature, HostActivation, HostFailure, HostOperationFailure};
 

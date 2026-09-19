@@ -114,9 +114,11 @@ fn software_mutations_return_the_same_product_snapshot_shape() {
         snapshot.configuration.software()[0].description(),
         "默认合成场景"
     );
-    assert!(snapshot
-        .workflow_runtime_status
-        .contains_key("workflow.product"));
+    assert!(
+        snapshot
+            .workflow_runtime_status
+            .contains_key("workflow.product")
+    );
 }
 
 #[test]
@@ -163,11 +165,13 @@ fn software_delete_reports_references_before_touching_the_runtime() {
     assert_eq!(serialized["code"], "software.referenced");
     assert_eq!(serialized["args"]["workflowCount"], 1);
     assert_eq!(serialized["args"]["probeCount"], 1);
-    assert!(calls
-        .lock()
-        .expect("runtime call log")
-        .software_removed
-        .is_empty());
+    assert!(
+        calls
+            .lock()
+            .expect("runtime call log")
+            .software_removed
+            .is_empty()
+    );
 }
 
 #[test]
@@ -192,11 +196,13 @@ fn software_delete_removes_an_unreferenced_record_after_runtime_cleanup() {
         .remove_software(&disposable_id)
         .expect("remove unreferenced software");
 
-    assert!(snapshot
-        .configuration
-        .software()
-        .iter()
-        .all(|software| software.id() != disposable_id.as_ref()));
+    assert!(
+        snapshot
+            .configuration
+            .software()
+            .iter()
+            .all(|software| software.id() != disposable_id.as_ref())
+    );
     assert_eq!(
         calls.lock().expect("runtime call log").software_removed,
         vec![disposable_id]

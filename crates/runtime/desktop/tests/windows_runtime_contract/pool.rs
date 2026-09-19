@@ -68,12 +68,15 @@ fn desktop_runtime_pool_keeps_two_software_active_and_isolates_stop() {
         .expect("stop alpha Runtime");
     assert_eq!(alpha_target.render(), alpha_baseline);
     assert_ne!(beta_target.render(), beta_baseline);
-    assert!(!pool
-        .status(&alpha_id)
-        .is_some_and(|status| status.is_active()));
-    assert!(pool
-        .status(&beta_id)
-        .is_some_and(|status| status.is_active()));
+    assert!(
+        !pool
+            .status(&alpha_id)
+            .is_some_and(|status| status.is_active())
+    );
+    assert!(
+        pool.status(&beta_id)
+            .is_some_and(|status| status.is_active())
+    );
 
     pool.set_features(beta_id, &beta_spec, None, std::iter::empty())
         .expect("stop beta Runtime");

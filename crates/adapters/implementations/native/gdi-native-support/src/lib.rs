@@ -1,17 +1,17 @@
 //! Shared fail-open host bridge and font substitution for Win32 GDI text seams.
 
 use glyphshift_adapter_native_abi::{
-    font_scale_percent, DecideUtf16V1, NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1,
-    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SCALE, FEATURE_FONT_SUBSTITUTE,
-    FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST,
-    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
+    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, DecideUtf16V1, FEATURE_FONT_SCALE,
+    FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, NativeDecisionV1,
+    NativeNegotiationV1, NativeRuntimeHostV1, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST,
+    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE, font_scale_percent,
 };
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontIndirectW, DeleteObject, GetCurrentObject, GetObjectW, SelectObject, DEFAULT_CHARSET,
-    FONT_CHARSET, HDC, HGDIOBJ, LOGFONTW, OBJ_FONT, SYMBOL_CHARSET,
+    CreateFontIndirectW, DEFAULT_CHARSET, DeleteObject, FONT_CHARSET, GetCurrentObject, GetObjectW,
+    HDC, HGDIOBJ, LOGFONTW, OBJ_FONT, SYMBOL_CHARSET, SelectObject,
 };
 
 pub const SUPPORTED_FEATURES: u64 =

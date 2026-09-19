@@ -1,4 +1,4 @@
-use super::super::{safe_identifier, CaptureError};
+use super::super::{CaptureError, safe_identifier};
 use super::MAX_PROBE_QUERY_PAGE_SIZE;
 use crate::CaptureTranslationContext;
 use serde::{Deserialize, Serialize};

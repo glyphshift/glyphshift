@@ -35,10 +35,12 @@ fn incompatible_probe_plan_is_rejected_before_its_draft_dictionary_is_created() 
         serde_json::to_value(error).expect("serialize incompatibility")["code"],
         "capture.unknown_adapter"
     );
-    assert!(application
-        .backend
-        .dictionary("dictionary.incompatible-draft")
-        .is_err());
+    assert!(
+        application
+            .backend
+            .dictionary("dictionary.incompatible-draft")
+            .is_err()
+    );
 }
 
 #[test]
@@ -125,10 +127,12 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
 
     let calls = calls.lock().expect("runtime call log");
     assert_eq!(calls.capture_publications.len(), 4);
-    assert!(calls
-        .capture_publications
-        .iter()
-        .all(|(published_software, _)| published_software.as_ref() == software_id.as_ref()));
+    assert!(
+        calls
+            .capture_publications
+            .iter()
+            .all(|(published_software, _)| published_software.as_ref() == software_id.as_ref())
+    );
     assert_eq!(calls.capture_publications[0].1.generation().value(), 1);
     assert_eq!(calls.capture_publications[1].1.generation().value(), 2);
     let mut published_entries = Vec::new();
@@ -197,16 +201,13 @@ fn contextual_probe_edits_share_one_source_dictionary_entry_and_plural_is_read_o
         .clone();
     application
         .backend
-        .update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries([
-            DictionaryEntryCreate::new("Open", "打开"),
-        ]))
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary)
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
+        )
         .expect("seed source-only entry");
 
-    let main_menu = CaptureTranslationContext::new(
-        Some("MainMenu"),
-        Option::<&str>::None,
-        None,
-    );
+    let main_menu = CaptureTranslationContext::new(Some("MainMenu"), Option::<&str>::None, None);
     application
         .edit_probe_translation(ProbeTranslationEditRequest {
             run_id: run.summary.id().into(),
@@ -215,7 +216,10 @@ fn contextual_probe_edits_share_one_source_dictionary_entry_and_plural_is_read_o
             translation_context: Some(main_menu.clone()),
         })
         .expect("edit source entry from contextual row");
-    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap();
     assert_eq!(dictionary.entries().len(), 1);
     assert_eq!(dictionary.entries()[0].translation(), "主菜单打开");
 
@@ -231,7 +235,10 @@ fn contextual_probe_edits_share_one_source_dictionary_entry_and_plural_is_read_o
             )),
         })
         .expect("edit same source from another context");
-    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap();
     assert_eq!(dictionary.entries().len(), 1);
     assert_eq!(dictionary.entries()[0].translation(), "统一打开");
 
@@ -243,14 +250,13 @@ fn contextual_probe_edits_share_one_source_dictionary_entry_and_plural_is_read_o
             translation_context: Some(main_menu),
         })
         .expect("clear source entry from contextual row");
-    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap();
     assert!(dictionary.entries().is_empty());
 
-    let plural = CaptureTranslationContext::new(
-        Some("Counter"),
-        Option::<&str>::None,
-        Some(2),
-    );
+    let plural = CaptureTranslationContext::new(Some("Counter"), Option::<&str>::None, Some(2));
     let error = application
         .edit_probe_translation(ProbeTranslationEditRequest {
             run_id: run.summary.id().into(),
@@ -405,13 +411,15 @@ fn probe_runs_pause_release_and_reuse_one_dictionary_without_copying_entries() {
         .expect("edit the bound dictionary directly");
     assert_eq!(edited.dictionary_entry_count, 2);
     assert_eq!(edited.dictionary_revision, 2);
-    assert!(application
-        .backend
-        .dictionary("dictionary.product")
-        .expect("edited shared dictionary")
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Close" && entry.translation() == "关闭"));
+    assert!(
+        application
+            .backend
+            .dictionary("dictionary.product")
+            .expect("edited shared dictionary")
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Close" && entry.translation() == "关闭")
+    );
 
     let paused = application
         .set_probe_run_paused(first.summary.id(), true)
@@ -651,12 +659,14 @@ fn probe_settings_and_clear_all_preserve_the_run_but_clear_its_bound_dictionary(
     assert_eq!(cleared.summary.status(), ProbeRunStatus::Paused);
     assert_eq!(cleared.summary.preview_generation(), 1);
     assert_eq!(cleared.dictionary_entry_count, 0);
-    assert!(application
-        .backend
-        .dictionary("dictionary.product")
-        .expect("cleared dictionary")
-        .entries()
-        .is_empty());
+    assert!(
+        application
+            .backend
+            .dictionary("dictionary.product")
+            .expect("cleared dictionary")
+            .entries()
+            .is_empty()
+    );
     assert!(application.active_probe_run_id.is_none());
     let blocked = application
         .create_probe_run(ProbeRunCreateRequest {
@@ -802,10 +812,11 @@ fn probe_ai_plan_uses_every_observed_row_and_preserves_completed_entries() {
         .expect("plan probe translations");
 
     assert_eq!(plan.candidates().len(), 52);
-    assert!(plan
-        .candidates()
-        .iter()
-        .any(|item| item.source() == "Pending item 51"));
+    assert!(
+        plan.candidates()
+            .iter()
+            .any(|item| item.source() == "Pending item 51")
+    );
     assert!(plan.candidates().iter().any(|item| item.source() == "Save"));
     assert!(plan.skipped().iter().any(|item| item.source() == "42"
         && item.reason() == glyphshift_ai_translation::SkipReason::PureNumberOrSymbols));
@@ -871,7 +882,10 @@ fn probe_ai_uses_context_as_hint_but_writes_one_source_dictionary_entry() {
         .filter(|candidate| candidate.source() == "New Project")
         .collect::<Vec<_>>();
     assert_eq!(candidates.len(), 1);
-    assert!(matches!(candidates[0].context(), Some("MainWindow" | "QgisApp")));
+    assert!(matches!(
+        candidates[0].context(),
+        Some("MainWindow" | "QgisApp")
+    ));
 
     let results = candidates
         .iter()
@@ -893,10 +907,15 @@ fn probe_ai_uses_context_as_hint_but_writes_one_source_dictionary_entry() {
     assert_eq!(applied.applied_count, 1);
     assert_eq!(applied.skipped_count, 0);
 
-    let dictionary = application.backend.dictionary("dictionary.product").unwrap();
-    assert!(dictionary.entries().iter().any(|entry| {
-        entry.source() == "New Project" && entry.translation() == "新建项目"
-    }));
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap();
+    assert!(
+        dictionary.entries().iter().any(|entry| {
+            entry.source() == "New Project" && entry.translation() == "新建项目"
+        })
+    );
 }
 
 #[test]
@@ -968,78 +987,170 @@ fn probe_ai_writeback_rechecks_blank_entries_after_user_edits() {
         .backend
         .dictionary("dictionary.product")
         .expect("updated dictionary");
-    assert!(dictionary
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Save" && entry.translation() == "人工保存"));
-    assert!(dictionary
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Close" && entry.translation() == "关闭"));
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Save" && entry.translation() == "人工保存")
+    );
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Close" && entry.translation() == "关闭")
+    );
 }
 
 #[test]
 fn probe_import_modes_preserve_metadata_pending_entries_and_reject_partial_bad_input() {
     use crate::probe_transfer::{ImportMode, ProbeImportRequest};
     let (mut app, _, software_id, root) = workflow_application();
-    let run = app.create_probe_run(ProbeRunCreateRequest {
-        excluded_dictionary_ids: Vec::new(), id: "probe-import".into(), name: "Import".into(), software_id,
-        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
-        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
-    }).unwrap();
-    let original = app.backend.dictionary(run.summary.dictionary_id()).unwrap().clone();
+    let run = app
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: Vec::new(),
+            id: "probe-import".into(),
+            name: "Import".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .unwrap();
+    let original = app
+        .backend
+        .dictionary(run.summary.dictionary_id())
+        .unwrap()
+        .clone();
     let input = root.path().join("entries.csv");
     std::fs::write(&input, "source,translation\r\nNew,First\r\nPending,\r\n").unwrap();
-    let request = |mode| ProbeImportRequest { run_id: "probe-import".into(), input_path: input.clone(), format: "csv".into(), mode };
-    app.import_probe_entries(request(ImportMode::Overwrite)).unwrap();
-    assert!(app.backend.dictionary(original.id()).unwrap().entries().iter().any(|e| e.source() == "Pending" && e.translation().is_empty()));
+    let request = |mode| ProbeImportRequest {
+        run_id: "probe-import".into(),
+        input_path: input.clone(),
+        format: "csv".into(),
+        mode,
+    };
+    app.import_probe_entries(request(ImportMode::Overwrite))
+        .unwrap();
+    assert!(
+        app.backend
+            .dictionary(original.id())
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|e| e.source() == "Pending" && e.translation().is_empty())
+    );
     std::fs::write(&input, "source,translation\nNew,Second").unwrap();
-    app.import_probe_entries(request(ImportMode::KeepExisting)).unwrap();
-    assert_eq!(app.backend.dictionary(original.id()).unwrap().entries().iter().find(|e| e.source() == "New").unwrap().translation(), "First");
-    app.import_probe_entries(request(ImportMode::Overwrite)).unwrap();
-    assert_eq!(app.backend.dictionary(original.id()).unwrap().entries().iter().find(|e| e.source() == "New").unwrap().translation(), "Second");
+    app.import_probe_entries(request(ImportMode::KeepExisting))
+        .unwrap();
+    assert_eq!(
+        app.backend
+            .dictionary(original.id())
+            .unwrap()
+            .entries()
+            .iter()
+            .find(|e| e.source() == "New")
+            .unwrap()
+            .translation(),
+        "First"
+    );
+    app.import_probe_entries(request(ImportMode::Overwrite))
+        .unwrap();
+    assert_eq!(
+        app.backend
+            .dictionary(original.id())
+            .unwrap()
+            .entries()
+            .iter()
+            .find(|e| e.source() == "New")
+            .unwrap()
+            .translation(),
+        "Second"
+    );
     let before = app.backend.dictionary(original.id()).unwrap().clone();
     std::fs::write(&input, "source,translation\nNew,Third\nNew,Duplicate").unwrap();
-    assert!(app.import_probe_entries(request(ImportMode::Replace)).is_err());
+    assert!(
+        app.import_probe_entries(request(ImportMode::Replace))
+            .is_err()
+    );
     assert_eq!(app.backend.dictionary(original.id()).unwrap(), &before);
     std::fs::write(&input, "source,translation\nOnly,Replacement").unwrap();
-    app.import_probe_entries(request(ImportMode::Replace)).unwrap();
+    app.import_probe_entries(request(ImportMode::Replace))
+        .unwrap();
     let dictionary = app.backend.dictionary(original.id()).unwrap();
     assert_eq!(dictionary.metadata(), original.metadata());
     assert_eq!(dictionary.entries().len(), 1);
     assert_eq!(dictionary.entries()[0].source(), "Only");
 }
 
-
 #[test]
 fn invalid_exclusion_is_rejected_before_creating_a_dictionary() {
     let (mut app, _, software_id, _root) = workflow_application();
     for excluded in ["dictionary.missing", "dictionary.new"] {
-        assert!(app.create_probe_run(ProbeRunCreateRequest {
-            excluded_dictionary_ids: vec![excluded.into()], id: "probe-excluded".into(), name: "Excluded".into(), software_id: software_id.clone(),
-            adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
-            dictionary: ProbeDictionaryBindingRequest::New { id: "dictionary.new".into(), name: "New".into(), description: "".into(), source_locale: "en-US".into(), target_locale: "zh-CN".into() },
-        }).is_err());
+        assert!(
+            app.create_probe_run(ProbeRunCreateRequest {
+                excluded_dictionary_ids: vec![excluded.into()],
+                id: "probe-excluded".into(),
+                name: "Excluded".into(),
+                software_id: software_id.clone(),
+                adapter_ids: vec![TEST_ADAPTER_ID.into()],
+                live_preview_enabled: false,
+                dictionary: ProbeDictionaryBindingRequest::New {
+                    id: "dictionary.new".into(),
+                    name: "New".into(),
+                    description: "".into(),
+                    source_locale: "en-US".into(),
+                    target_locale: "zh-CN".into()
+                },
+            })
+            .is_err()
+        );
         assert!(app.backend.dictionary("dictionary.new").is_err());
     }
 }
 
-
 #[test]
 fn excluded_dictionary_references_and_revisions_are_preserved() {
     let (mut app, _, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.excluded", "Excluded", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Done", "完成")])).unwrap();
-    let run = app.create_probe_run(ProbeRunCreateRequest {
-        excluded_dictionary_ids: vec!["dictionary.excluded".into()], id: "probe-exclusion-reference".into(), name: "Exclusion".into(), software_id,
-        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
-        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
-    }).unwrap();
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.excluded", "Excluded", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Done", "完成")]),
+        )
+        .unwrap();
+    let run = app
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: vec!["dictionary.excluded".into()],
+            id: "probe-exclusion-reference".into(),
+            name: "Exclusion".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .unwrap();
     assert_eq!(run.exclusion_revisions, vec![1]);
-    let error = app.delete_dictionaries(&["dictionary.excluded".into()]).unwrap_err();
-    assert_eq!(serde_json::to_value(error).unwrap()["code"], "dictionary.referenced");
-    let dictionary = app.backend.dictionary("dictionary.excluded").unwrap().clone();
-    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_entries([DictionaryEntryCreate::new("Done", "更新")])).unwrap();
+    let error = app
+        .delete_dictionaries(&["dictionary.excluded".into()])
+        .unwrap_err();
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["code"],
+        "dictionary.referenced"
+    );
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.excluded")
+        .unwrap()
+        .clone();
+    app.backend
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary)
+                .with_entries([DictionaryEntryCreate::new("Done", "更新")]),
+        )
+        .unwrap();
     let refreshed = app.probe_run_summary(run.summary.id()).unwrap();
     assert_eq!(refreshed.dictionary_revision, run.dictionary_revision);
     assert_eq!(refreshed.exclusion_revisions, vec![2]);
@@ -1048,74 +1159,225 @@ fn excluded_dictionary_references_and_revisions_are_preserved() {
 #[test]
 fn attached_dictionary_sources_block_collection_and_recheck_ai_writeback() {
     let (mut app, _, software_id, root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Already owned", "")])).unwrap();
-    let run = app.create_probe_run(ProbeRunCreateRequest {
-        excluded_dictionary_ids: vec!["dictionary.attached".into()], id: "probe-ownership".into(), name: "Ownership".into(), software_id,
-        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
-        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
-    }).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for source in ["Already owned", "Claimed later", "Still new"] { sink.observe(TEST_ADAPTER_ID, source); }
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Already owned", "")]),
+        )
+        .unwrap();
+    let run = app
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: vec!["dictionary.attached".into()],
+            id: "probe-ownership".into(),
+            name: "Ownership".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for source in ["Already owned", "Claimed later", "Still new"] {
+        sink.observe(TEST_ADAPTER_ID, source);
+    }
     sink.finish().unwrap();
     let mut ai = glyphshift_ai_translation::AiTranslation::new();
-    let plan = ai.plan_translation(app.probe_ai_plan_request(run.summary.id()).unwrap()).unwrap();
-    assert!(!plan.candidates().iter().any(|entry| entry.source() == "Already owned"));
-    assert!(plan.candidates().iter().any(|entry| entry.source() == "Claimed later"));
-    assert!(app.edit_probe_translation(ProbeTranslationEditRequest {
-        run_id: run.summary.id().into(), source: "Already owned".into(), translation: "Must not append".into(),
-        translation_context: None,
-    }).is_err());
+    let plan = ai
+        .plan_translation(app.probe_ai_plan_request(run.summary.id()).unwrap())
+        .unwrap();
+    assert!(
+        !plan
+            .candidates()
+            .iter()
+            .any(|entry| entry.source() == "Already owned")
+    );
+    assert!(
+        plan.candidates()
+            .iter()
+            .any(|entry| entry.source() == "Claimed later")
+    );
+    assert!(
+        app.edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Already owned".into(),
+            translation: "Must not append".into(),
+            translation_context: None,
+        })
+        .is_err()
+    );
     let input = root.path().join("owned.csv");
-    std::fs::write(&input, "source,translation\nFresh,Allowed\nAlready owned,Blocked").unwrap();
-    let before_import = app.backend.dictionary("dictionary.product").unwrap().clone();
-    for mode in [crate::probe_transfer::ImportMode::KeepExisting, crate::probe_transfer::ImportMode::Overwrite, crate::probe_transfer::ImportMode::Replace] {
-        assert!(app.import_probe_entries(crate::probe_transfer::ProbeImportRequest {
-            run_id: run.summary.id().into(), input_path: input.clone(), format: "csv".into(), mode,
-        }).is_err());
-        assert_eq!(app.backend.dictionary("dictionary.product").unwrap(), &before_import);
+    std::fs::write(
+        &input,
+        "source,translation\nFresh,Allowed\nAlready owned,Blocked",
+    )
+    .unwrap();
+    let before_import = app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .clone();
+    for mode in [
+        crate::probe_transfer::ImportMode::KeepExisting,
+        crate::probe_transfer::ImportMode::Overwrite,
+        crate::probe_transfer::ImportMode::Replace,
+    ] {
+        assert!(
+            app.import_probe_entries(crate::probe_transfer::ProbeImportRequest {
+                run_id: run.summary.id().into(),
+                input_path: input.clone(),
+                format: "csv".into(),
+                mode,
+            })
+            .is_err()
+        );
+        assert_eq!(
+            app.backend.dictionary("dictionary.product").unwrap(),
+            &before_import
+        );
     }
-    let attached = app.backend.dictionary("dictionary.attached").unwrap().clone();
-    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&attached).with_entries([
-        DictionaryEntryCreate::new("Already owned", ""), DictionaryEntryCreate::new("Claimed later", ""),
-    ])).unwrap();
-    let revision = app.backend.dictionary("dictionary.product").unwrap().revision();
-    let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
-        run_id: run.summary.id().into(), snapshot_revision: revision,
-        results: vec![
-            ai::ProbeAiTranslationResult { item_id: "claimed".into(), source: "Claimed later".into(), translation: "Owned elsewhere".into(), context: None, disambiguation: None },
-            ai::ProbeAiTranslationResult { item_id: "new".into(), source: "Still new".into(), translation: "New translation".into(), context: None, disambiguation: None },
-        ],
-    }).unwrap();
+    let attached = app
+        .backend
+        .dictionary("dictionary.attached")
+        .unwrap()
+        .clone();
+    app.backend
+        .update_dictionary(DictionaryEdit::from_dictionary(&attached).with_entries([
+            DictionaryEntryCreate::new("Already owned", ""),
+            DictionaryEntryCreate::new("Claimed later", ""),
+        ]))
+        .unwrap();
+    let revision = app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .revision();
+    let applied = app
+        .apply_probe_ai_results(ai::ProbeAiApplyRequest {
+            run_id: run.summary.id().into(),
+            snapshot_revision: revision,
+            results: vec![
+                ai::ProbeAiTranslationResult {
+                    item_id: "claimed".into(),
+                    source: "Claimed later".into(),
+                    translation: "Owned elsewhere".into(),
+                    context: None,
+                    disambiguation: None,
+                },
+                ai::ProbeAiTranslationResult {
+                    item_id: "new".into(),
+                    source: "Still new".into(),
+                    translation: "New translation".into(),
+                    context: None,
+                    disambiguation: None,
+                },
+            ],
+        })
+        .unwrap();
     assert_eq!(applied.applied_count, 1);
     assert_eq!(applied.skipped_count, 1);
     let destination = app.backend.dictionary("dictionary.product").unwrap();
-    assert!(!destination.entries().iter().any(|entry| ["Already owned", "Claimed later"].contains(&entry.source())));
-    assert!(destination.entries().iter().any(|entry| entry.source() == "Still new"));
-    assert!(app.backend.dictionary("dictionary.attached").unwrap().entries().iter().all(|entry| entry.translation().is_empty()));
+    assert!(
+        !destination
+            .entries()
+            .iter()
+            .any(|entry| ["Already owned", "Claimed later"].contains(&entry.source()))
+    );
+    assert!(
+        destination
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Still new")
+    );
+    assert!(
+        app.backend
+            .dictionary("dictionary.attached")
+            .unwrap()
+            .entries()
+            .iter()
+            .all(|entry| entry.translation().is_empty())
+    );
 }
 
 #[test]
 fn collection_resolution_preserves_counts_and_filters_before_pagination_without_writes() {
     let (mut app, _, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Total", "总计"), DictionaryEntryCreate::new("Owned", "附加词条")])).unwrap();
-    let dictionary = app.backend.dictionary("dictionary.attached").unwrap().clone();
-    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![
-        glyphshift_translation::RegexTranslationRule { enabled: true, pattern: r"^(.+?)(:[ \t]*[0-9]+)$".into(), replacement: "{{TR}}$2".into() },
-        glyphshift_translation::RegexTranslationRule { enabled: true, pattern: "^Erase$".into(), replacement: "".into() },
-    ])).unwrap();
-    let run = app.create_probe_run(ProbeRunCreateRequest {
-        excluded_dictionary_ids: vec!["dictionary.attached".into()], id: "probe-resolution".into(), name: "Resolution".into(), software_id,
-        adapter_ids: vec![TEST_ADAPTER_ID.into()], live_preview_enabled: false,
-        dictionary: ProbeDictionaryBindingRequest::Existing { dictionary_id: "dictionary.product".into() },
-    }).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for source in ["Total: 33", "Selected:0", "Owned", "Erase"] { sink.observe(TEST_ADAPTER_ID, source); }
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.attached", "Attached", "en-US", "zh-CN")
+                .with_entries([
+                    DictionaryEntryCreate::new("Total", "总计"),
+                    DictionaryEntryCreate::new("Owned", "附加词条"),
+                ]),
+        )
+        .unwrap();
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.attached")
+        .unwrap()
+        .clone();
+    app.backend
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![
+                glyphshift_translation::RegexTranslationRule {
+                    enabled: true,
+                    pattern: r"^(.+?)(:[ \t]*[0-9]+)$".into(),
+                    replacement: "{{TR}}$2".into(),
+                },
+                glyphshift_translation::RegexTranslationRule {
+                    enabled: true,
+                    pattern: "^Erase$".into(),
+                    replacement: "".into(),
+                },
+            ]),
+        )
+        .unwrap();
+    let run = app
+        .create_probe_run(ProbeRunCreateRequest {
+            excluded_dictionary_ids: vec!["dictionary.attached".into()],
+            id: "probe-resolution".into(),
+            name: "Resolution".into(),
+            software_id,
+            adapter_ids: vec![TEST_ADAPTER_ID.into()],
+            live_preview_enabled: false,
+            dictionary: ProbeDictionaryBindingRequest::Existing {
+                dictionary_id: "dictionary.product".into(),
+            },
+        })
+        .unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for source in ["Total: 33", "Selected:0", "Owned", "Erase"] {
+        sink.observe(TEST_ADAPTER_ID, source);
+    }
     sink.finish().unwrap();
-    let before = app.backend.dictionary("dictionary.product").unwrap().clone();
-    let request = |search: &str, filter| crate::probe::ProbeRunQueryRequest { run_id: run.summary.id().into(), search: search.into(), adapter_ids: vec![], translation_filter: filter, merge_rules: None, page: 1, page_size: 50 };
-    let page = app.probe_run_entries(request("", ProbeTranslationFilter::RuleMatched)).unwrap();
+    let before = app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .clone();
+    let request = |search: &str, filter| crate::probe::ProbeRunQueryRequest {
+        run_id: run.summary.id().into(),
+        search: search.into(),
+        adapter_ids: vec![],
+        translation_filter: filter,
+        merge_rules: None,
+        page: 1,
+        page_size: 50,
+    };
+    let page = app
+        .probe_run_entries(request("", ProbeTranslationFilter::RuleMatched))
+        .unwrap();
     assert_eq!(page.total(), 3);
     let mut paged = request("", ProbeTranslationFilter::RuleMatched);
     paged.page_size = 1;
@@ -1124,20 +1386,62 @@ fn collection_resolution_preserves_counts_and_filters_before_pagination_without_
     assert_eq!(first.rows().len(), 1);
     let json = serde_json::to_value(&page).unwrap();
     let rows = json["rows"].as_array().unwrap();
-    let total = rows.iter().find(|row| row["source"] == "Total: 33").unwrap();
+    let total = rows
+        .iter()
+        .find(|row| row["source"] == "Total: 33")
+        .unwrap();
     assert_eq!(total["translation"], "总计: 33");
     assert_eq!(total["resolution"]["kind"], "rule_translated");
-    assert_eq!(total["resolution"]["dictionaryIds"][0], "dictionary.attached");
-    assert_eq!(rows.iter().find(|row| row["source"] == "Selected:0").unwrap()["resolution"]["kind"], "rule_pending");
-    assert_eq!(app.probe_run_entries(request("总计", ProbeTranslationFilter::Translated)).unwrap().total(), 1);
-    assert_eq!(app.probe_run_entries(request("", ProbeTranslationFilter::Skipped)).unwrap().total(), 1);
-    let owned = app.probe_run_entries(request("Owned", ProbeTranslationFilter::OtherDictionary)).unwrap();
+    assert_eq!(
+        total["resolution"]["dictionaryIds"][0],
+        "dictionary.attached"
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|row| row["source"] == "Selected:0")
+            .unwrap()["resolution"]["kind"],
+        "rule_pending"
+    );
+    assert_eq!(
+        app.probe_run_entries(request("总计", ProbeTranslationFilter::Translated))
+            .unwrap()
+            .total(),
+        1
+    );
+    assert_eq!(
+        app.probe_run_entries(request("", ProbeTranslationFilter::Skipped))
+            .unwrap()
+            .total(),
+        1
+    );
+    let owned = app
+        .probe_run_entries(request("Owned", ProbeTranslationFilter::OtherDictionary))
+        .unwrap();
     assert_eq!(owned.total(), 1);
     assert_eq!(owned.rows()[0].translation(), "附加词条");
-    assert_eq!(serde_json::to_value(owned).unwrap()["rows"][0]["resolution"]["editable"], false);
-    assert_eq!(app.backend.dictionary("dictionary.product").unwrap(), &before);
-    assert!(app.edit_probe_translation(ProbeTranslationEditRequest { run_id: run.summary.id().into(), source: "Total: 33".into(), translation: "直接翻译".into(), translation_context: None }).is_err());
-    let exact = app.probe_run_entries(request("Total: 33", ProbeTranslationFilter::Translated)).unwrap();
+    assert_eq!(
+        serde_json::to_value(owned).unwrap()["rows"][0]["resolution"]["editable"],
+        false
+    );
+    assert_eq!(
+        app.backend.dictionary("dictionary.product").unwrap(),
+        &before
+    );
+    assert!(
+        app.edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: run.summary.id().into(),
+            source: "Total: 33".into(),
+            translation: "直接翻译".into(),
+            translation_context: None
+        })
+        .is_err()
+    );
+    let exact = app
+        .probe_run_entries(request("Total: 33", ProbeTranslationFilter::Translated))
+        .unwrap();
     assert_eq!(exact.rows()[0].translation(), "总计: 33");
-    assert_eq!(serde_json::to_value(exact).unwrap()["rows"][0]["resolution"]["kind"], "rule_translated");
+    assert_eq!(
+        serde_json::to_value(exact).unwrap()["rows"][0]["resolution"]["kind"],
+        "rule_translated"
+    );
 }

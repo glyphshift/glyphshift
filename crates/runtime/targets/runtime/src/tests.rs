@@ -49,10 +49,12 @@ fn target_runtime_drains_observations_only_in_batch_producer_mode() {
 
     control_capture(CaptureRuntimeControl::new(true)).expect("pause producer");
     assert_eq!(observe("Ignored").status, STATUS_OK);
-    assert!(query_observations()
-        .expect("paused observation batch")
-        .records()
-        .is_empty());
+    assert!(
+        query_observations()
+            .expect("paused observation batch")
+            .records()
+            .is_empty()
+    );
     control_capture(CaptureRuntimeControl::new(false)).expect("resume producer");
     deactivate_runtime().expect("deactivate batch producer");
     assert_eq!(
@@ -247,10 +249,12 @@ fn structured_text_resolves_before_capture_and_never_replaces_past_fragments() {
     );
     text_host::leave_scope(host.context, untouched);
     let observed = query_observations().unwrap();
-    assert!(observed
-        .records()
-        .iter()
-        .any(|record| record.source() == "Open"));
+    assert!(
+        observed
+            .records()
+            .iter()
+            .any(|record| record.source() == "Open")
+    );
     let token = text_host::enter_scope(host.context);
     assert_ne!(token, 0);
     assert_eq!(send(TEXT_EVENT_DRAW, 0, "Open").1, "打开");
@@ -280,18 +284,24 @@ fn structured_text_resolves_before_capture_and_never_replaces_past_fragments() {
     .unwrap();
     text_host::leave_scope(host.context, token);
     let records = query_observations().unwrap();
-    assert!(records
-        .records()
-        .iter()
-        .any(|record| record.source() == "Open"));
-    assert!(records
-        .records()
-        .iter()
-        .any(|record| record.source() == "Outside"));
-    assert!(!records
-        .records()
-        .iter()
-        .any(|record| record.source() == "是"));
+    assert!(
+        records
+            .records()
+            .iter()
+            .any(|record| record.source() == "Open")
+    );
+    assert!(
+        records
+            .records()
+            .iter()
+            .any(|record| record.source() == "Outside")
+    );
+    assert!(
+        !records
+            .records()
+            .iter()
+            .any(|record| record.source() == "是")
+    );
     assert_ne!(
         raster().decision_bits & DECISION_TEXT_REPLACE,
         0,

@@ -257,7 +257,7 @@ impl DesktopApplication {
                         }
                         Ok(None) => raw_sources.push(source.clone()),
                         Err(()) => {
-                            return Err(CommandError::new("capture.source_owned_by_dictionary"))
+                            return Err(CommandError::new("capture.source_owned_by_dictionary"));
                         }
                     }
                 }

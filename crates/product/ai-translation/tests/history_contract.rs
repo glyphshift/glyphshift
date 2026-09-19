@@ -270,8 +270,9 @@ fn malformed_history_opens_empty_and_preserves_the_original_file() {
 
     assert!(history.records().is_empty());
     assert!(root.path().join("ai-translation-history.json").exists());
-    assert!(root
-        .path()
-        .join("ai-translation-history.invalid.json")
-        .exists());
+    assert!(
+        root.path()
+            .join("ai-translation-history.invalid.json")
+            .exists()
+    );
 }

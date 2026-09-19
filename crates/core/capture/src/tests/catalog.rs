@@ -169,8 +169,8 @@ fn preferred_sources_displace_fallback_evidence_when_capacity_is_full() {
 
 #[test]
 fn capture_sink_checkpoints_during_continuous_observations() {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     let root = tempdir().expect("capture root");
@@ -252,10 +252,12 @@ fn capture_sink_checkpoints_while_running_and_pause_does_not_end_the_session() {
     );
     let finished = sink.finish().expect("finish capture");
     assert_eq!(finished.entries().len(), 2);
-    assert!(finished
-        .entries()
-        .iter()
-        .all(|entry| entry.source() != "Ignored while paused"));
+    assert!(
+        finished
+            .entries()
+            .iter()
+            .all(|entry| entry.source() != "Ignored while paused")
+    );
 }
 
 #[test]
@@ -280,14 +282,18 @@ fn capture_sink_resumes_an_existing_catalog_without_resetting_its_revision_or_en
     let resumed_catalog = resumed.finish().expect("resumed catalog");
 
     assert!(resumed_catalog.revision() > first_catalog.revision());
-    assert!(resumed_catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Before reconnect"));
-    assert!(resumed_catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "After reconnect"));
+    assert!(
+        resumed_catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Before reconnect")
+    );
+    assert!(
+        resumed_catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "After reconnect")
+    );
     assert_eq!(
         CaptureCatalog::read_current(&output).expect("current catalog"),
         resumed_catalog

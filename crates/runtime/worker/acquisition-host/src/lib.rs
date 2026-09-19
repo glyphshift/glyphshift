@@ -4,14 +4,14 @@ use glyphshift_acquisition::{
     AcquisitionError, AcquisitionRequest, AcquisitionResult, AuthorizedTarget,
 };
 use glyphshift_acquisition_worker_sdk::{
-    decode_response, encode_request, WireError, WorkerTargetGrant, MAX_WIRE_BYTES,
+    MAX_WIRE_BYTES, WireError, WorkerTargetGrant, decode_response, encode_request,
 };
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 

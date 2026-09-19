@@ -386,15 +386,17 @@ fn ctl_windows_005_rejects_a_changed_runtime_before_target_injection() {
         .encode_json()
         .expect("runtime deployment json");
 
-    assert!(controller
-        .activate_runtime(
-            &target_token,
-            &WireRuntimeDeployment {
-                runtime_library: changed_runtime.to_string_lossy().into_owned(),
-                runtime_library_sha256: sha256(&original_runtime),
-                deployment_json: encoded_deployment,
-                generation: 1,
-            },
-        )
-        .is_err());
+    assert!(
+        controller
+            .activate_runtime(
+                &target_token,
+                &WireRuntimeDeployment {
+                    runtime_library: changed_runtime.to_string_lossy().into_owned(),
+                    runtime_library_sha256: sha256(&original_runtime),
+                    deployment_json: encoded_deployment,
+                    generation: 1,
+                },
+            )
+            .is_err()
+    );
 }

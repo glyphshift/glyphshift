@@ -342,15 +342,17 @@ mod tests {
     #[test]
     fn rejects_unknown_architecture() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        assert!(ArchitectureControllerTransport::new([(
-            "unknown".into(),
-            Fake {
-                arch: "x86",
-                calls,
-                fail: false
-            }
-        )])
-        .is_err());
+        assert!(
+            ArchitectureControllerTransport::new([(
+                "unknown".into(),
+                Fake {
+                    arch: "x86",
+                    calls,
+                    fail: false
+                }
+            )])
+            .is_err()
+        );
     }
     #[test]
     fn an_unavailable_x86_controller_does_not_block_x64_discovery() {

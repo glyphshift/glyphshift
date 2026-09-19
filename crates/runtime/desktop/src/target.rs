@@ -1,5 +1,5 @@
 use super::*;
-use crate::acquisition::{map_acquisition_protocol_error, AcquisitionExecutor};
+use crate::acquisition::{AcquisitionExecutor, map_acquisition_protocol_error};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeTarget {
@@ -42,7 +42,9 @@ pub(super) trait ManagedRuntime: Send {
         0
     }
     fn applied_generation(&self) -> Option<Generation>;
-    fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> { Ok(!self.targets().is_empty()) }
+    fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
+        Ok(!self.targets().is_empty())
+    }
     fn start(
         &mut self,
         target_id: u64,
@@ -589,17 +591,32 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
     }
 
     fn refresh_target_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
-        let Some(RuntimePhase::Active { monitor, sessions, .. }) = self.phase.as_mut() else {
+        let Some(RuntimePhase::Active {
+            monitor, sessions, ..
+        }) = self.phase.as_mut()
+        else {
             return Ok(false);
         };
-        let ids = self.targets.iter().filter(|target| sessions.contains_key(&target.view.id))
-            .map(|target| target.controller_id).collect::<Vec<_>>();
-        let running = monitor.running_targets(&ids).map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
-        if running.len() == ids.len() && !ids.is_empty() { return Ok(true); }
+        let ids = self
+            .targets
+            .iter()
+            .filter(|target| sessions.contains_key(&target.view.id))
+            .map(|target| target.controller_id)
+            .collect::<Vec<_>>();
+        let running = monitor
+            .running_targets(&ids)
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        if running.len() == ids.len() && !ids.is_empty() {
+            return Ok(true);
+        }
         // Dead instances no longer accept stop commands. Remove them before stopping surviving
         // family members once, then rediscover the changed process family with fresh authority.
-        let live_ids = self.targets.iter().filter(|target| running.contains(&target.controller_id))
-            .map(|target| target.view.id).collect::<BTreeSet<_>>();
+        let live_ids = self
+            .targets
+            .iter()
+            .filter(|target| running.contains(&target.controller_id))
+            .map(|target| target.view.id)
+            .collect::<BTreeSet<_>>();
         sessions.retain(|id, _| live_ids.contains(id));
         self.stop()?;
         Ok(false)

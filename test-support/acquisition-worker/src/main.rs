@@ -3,7 +3,7 @@ use glyphshift_acquisition::{
     AcquisitionResult, AuthorizedTarget, DesktopPoint, DesktopRect, Granularity,
     InteractiveSelection, InteractiveTextAcquisition, Provenance,
 };
-use glyphshift_acquisition_worker_sdk::{serve_stdio, AcquisitionWorker, WorkerAcquisitionRequest};
+use glyphshift_acquisition_worker_sdk::{AcquisitionWorker, WorkerAcquisitionRequest, serve_stdio};
 
 struct SyntheticAdapter {
     anchor: DesktopRect,

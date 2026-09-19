@@ -75,12 +75,14 @@ fn request() -> AcquisitionRequest {
 fn result(request: &AcquisitionRequest) -> AcquisitionResult {
     let adapter = FixtureAdapter {
         provenance: Provenance::Structured,
-        candidates: vec![AcquisitionCandidate::new(
-            "round trip",
-            [DesktopRect::new(-24, 25, 12, 50).expect("anchor")],
-            Granularity::Word,
-        )
-        .with_confidence(Confidence::new(9_200).expect("confidence"))],
+        candidates: vec![
+            AcquisitionCandidate::new(
+                "round trip",
+                [DesktopRect::new(-24, 25, 12, 50).expect("anchor")],
+                Granularity::Word,
+            )
+            .with_confidence(Confidence::new(9_200).expect("confidence")),
+        ],
     };
     InteractiveTextAcquisition::new([Box::new(adapter) as Box<dyn AcquisitionAdapter>])
         .acquire(request)

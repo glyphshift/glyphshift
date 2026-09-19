@@ -1,14 +1,14 @@
 //! Executable reference implementations of each Adapter apply model.
 
 use glyphshift_adapter_sdk::{
-    authorize, ActivationGrant, AdapterError, DrawCommand, InlineTextInput, ObjectId,
-    ObservationId, ProbeEvidence, SyntheticTarget,
+    ActivationGrant, AdapterError, DrawCommand, InlineTextInput, ObjectId, ObservationId,
+    ProbeEvidence, SyntheticTarget, authorize,
 };
 use glyphshift_domain::{
     ApplyModel, Feature, FontDecision, Generation, Placement, RenderDecision, TextDecision,
 };
 use std::collections::BTreeMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InlineReferenceAdapter {
@@ -290,7 +290,9 @@ fn apply_decision(
         FontDecision::Substitute(font) if active_features.contains(&Feature::FontSubstitute) => {
             font.as_ref()
         }
-        FontDecision::Keep | FontDecision::Substitute(_) | FontDecision::Scaled { .. } => original.font(),
+        FontDecision::Keep | FontDecision::Substitute(_) | FontDecision::Scaled { .. } => {
+            original.font()
+        }
     };
     DrawCommand::new(text, font)
 }

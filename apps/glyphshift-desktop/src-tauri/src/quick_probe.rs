@@ -1,6 +1,6 @@
 use super::*;
 use crate::probe::{
-    probe_run_error, ProbeDictionaryBindingRequest, ProbeRunCreateRequest, ProbeRunView,
+    ProbeDictionaryBindingRequest, ProbeRunCreateRequest, ProbeRunView, probe_run_error,
 };
 use crate::software::SoftwarePreflightState;
 use serde::{Deserialize, Serialize};
@@ -571,8 +571,13 @@ impl DesktopApplication {
                 }
             }
         }
-        if result.is_ok() { self.quick_probe_sessions.remove(&run_id)?; }
-        result.map(|view| ProbeRunView { quick_probe: false, ..view })
+        if result.is_ok() {
+            self.quick_probe_sessions.remove(&run_id)?;
+        }
+        result.map(|view| ProbeRunView {
+            quick_probe: false,
+            ..view
+        })
     }
 
     pub(super) fn cleanup_quick_probe(
@@ -698,10 +703,15 @@ impl DesktopApplication {
             } else {
                 // Rename only the old generated label, preserving metadata and entries.
                 if record.owns_dictionary && record.dictionary_id.starts_with("quick-dictionary-") {
-                    if let Ok(dictionary) = self.backend.dictionary(&record.dictionary_id).cloned() {
-                        if let Some(name) = dictionary.metadata().name().strip_suffix(" 临时词典") {
-                            let edit = DictionaryEdit::from_dictionary(&dictionary).with_name(format!("{name} 字典"));
-                            self.backend.update_dictionary(edit).map_err(|_| CommandError::new("dictionary.invalid_update"))?;
+                    if let Ok(dictionary) = self.backend.dictionary(&record.dictionary_id).cloned()
+                    {
+                        if let Some(name) = dictionary.metadata().name().strip_suffix(" 临时词典")
+                        {
+                            let edit = DictionaryEdit::from_dictionary(&dictionary)
+                                .with_name(format!("{name} 字典"));
+                            self.backend
+                                .update_dictionary(edit)
+                                .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
                         }
                     }
                 }
@@ -840,9 +850,10 @@ mod store_tests {
 
         assert!(store.is_empty());
         assert!(root.path().join("quick-probe-sessions.json").exists());
-        assert!(root
-            .path()
-            .join("quick-probe-sessions.invalid.json")
-            .exists());
+        assert!(
+            root.path()
+                .join("quick-probe-sessions.invalid.json")
+                .exists()
+        );
     }
 }

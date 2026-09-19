@@ -3,12 +3,12 @@
 use glyphshift_adapter_gdi::EXT_TEXT_OUT_ADAPTER_ID;
 use glyphshift_adapter_gdi_native_support::allows_font_substitution;
 use glyphshift_adapter_native_abi::{
-    font_scale_percent, DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1,
-    NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1, SourceCharactersUtf16V1, ARCH_X86,
-    ARCH_X86_64, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, FEATURE_FONT_SCALE,
-    FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS,
-    STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
-    STATUS_UNSUPPORTED_FEATURE,
+    ARCH_X86, ARCH_X86_64, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, DecideUtf16V1,
+    FEATURE_FONT_SCALE, FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE,
+    NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1, NativeNegotiationV1,
+    NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST,
+    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE, SourceCharactersUtf16V1,
+    font_scale_percent,
 };
 use retour::GenericDetour;
 use std::cell::Cell;
@@ -16,13 +16,13 @@ use std::collections::{BTreeSet, HashMap};
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
-use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{BOOL, RECT};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontIndirectW, DeleteObject, GetCurrentObject, GetGlyphIndicesW, GetObjectW,
-    SelectObject, DEFAULT_CHARSET, GGI_MARK_NONEXISTING_GLYPHS, HDC, HGDIOBJ, LOGFONTW, OBJ_FONT,
+    CreateFontIndirectW, DEFAULT_CHARSET, DeleteObject, GGI_MARK_NONEXISTING_GLYPHS,
+    GetCurrentObject, GetGlyphIndicesW, GetObjectW, HDC, HGDIOBJ, LOGFONTW, OBJ_FONT, SelectObject,
 };
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::core::{PCWSTR, s, w};
 
 const SUPPORTED_FEATURES: u64 =
     FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE | FEATURE_FONT_SCALE;
@@ -395,7 +395,10 @@ mod reentry_regression {
     fn rejected_nested_entry_keeps_outer_callback_guarded() {
         let outer = CallbackGuard::enter().unwrap();
         assert!(CallbackGuard::enter().is_none());
-        assert!(CallbackGuard::enter().is_none(), "a rejected nested entry must not unlock the outer callback");
+        assert!(
+            CallbackGuard::enter().is_none(),
+            "a rejected nested entry must not unlock the outer callback"
+        );
         drop(outer);
         assert!(CallbackGuard::enter().is_some());
     }

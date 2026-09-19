@@ -67,12 +67,16 @@ fn process_family_inventory_keeps_stable_tokens_and_surviving_members_after_root
         vec!["target:3", "target:4"]
     );
     assert!(!controller.runtime_libraries.contains_key("target:2"));
-    assert!(controller
-        .prepare("target:2", &[WireFeature::TextReplace])
-        .is_err());
-    assert!(controller
-        .prepare("target:3", &[WireFeature::TextReplace])
-        .is_ok());
+    assert!(
+        controller
+            .prepare("target:2", &[WireFeature::TextReplace])
+            .is_err()
+    );
+    assert!(
+        controller
+            .prepare("target:3", &[WireFeature::TextReplace])
+            .is_ok()
+    );
 }
 
 #[test]
@@ -85,11 +89,13 @@ fn process_family_inventory_never_reuses_a_token_after_process_id_reuse() {
 
     let first = controller.inventory().expect("first process instance");
     assert_eq!(first.targets[0].token, "target:1");
-    assert!(controller
-        .inventory()
-        .expect("process exit inventory")
-        .targets
-        .is_empty());
+    assert!(
+        controller
+            .inventory()
+            .expect("process exit inventory")
+            .targets
+            .is_empty()
+    );
     let replacement = controller
         .inventory()
         .expect("replacement process instance");

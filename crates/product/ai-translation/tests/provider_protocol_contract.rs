@@ -398,13 +398,19 @@ fn microsoft_translator_nmt_uses_native_wire_shape_region_and_character_usage() 
     );
     let body: serde_json::Value =
         serde_json::from_slice(request.body()).expect("Microsoft Translator request JSON");
-    assert_eq!(body.pointer("/inputs/0/language"), Some(&serde_json::json!("en")));
+    assert_eq!(
+        body.pointer("/inputs/0/language"),
+        Some(&serde_json::json!("en"))
+    );
     assert_eq!(
         body.pointer("/inputs/0/targets/0/language"),
         Some(&serde_json::json!("zh-Hans"))
     );
     assert!(body.pointer("/inputs/0/targets/0/deploymentName").is_none());
-    assert_eq!(body.pointer("/inputs/1/text"), Some(&serde_json::json!("Close")));
+    assert_eq!(
+        body.pointer("/inputs/1/text"),
+        Some(&serde_json::json!("Close"))
+    );
 }
 
 #[test]
@@ -536,9 +542,14 @@ fn google_translate_sends_multiple_sources_in_one_request() {
     let captured = requests.lock().expect("captured request");
     assert_eq!(captured.len(), 1);
     let request = &captured[0];
-    assert!(request.url().starts_with("https://translation.googleapis.com/language/translate/v2?"));
+    assert!(
+        request
+            .url()
+            .starts_with("https://translation.googleapis.com/language/translate/v2?")
+    );
     assert!(request.url().contains("key=synthetic-google-key"));
-    let body: serde_json::Value = serde_json::from_slice(request.body()).expect("Google Translate request JSON");
+    let body: serde_json::Value =
+        serde_json::from_slice(request.body()).expect("Google Translate request JSON");
     assert_eq!(body.get("q"), Some(&serde_json::json!(["Open", "Close"])));
     assert_eq!(body.get("source"), Some(&serde_json::json!("en")));
     assert_eq!(body.get("target"), Some(&serde_json::json!("zh-CN")));
@@ -605,8 +616,14 @@ fn baidu_translate_batches_sources_into_one_signed_request() {
     let captured = requests.lock().expect("captured request");
     assert_eq!(captured.len(), 1);
     let request = &captured[0];
-    assert_eq!(request.url(), "https://fanyi-api.baidu.com/api/trans/vip/translate");
-    assert_eq!(request.header("content-type"), Some("application/x-www-form-urlencoded"));
+    assert_eq!(
+        request.url(),
+        "https://fanyi-api.baidu.com/api/trans/vip/translate"
+    );
+    assert_eq!(
+        request.header("content-type"),
+        Some("application/x-www-form-urlencoded")
+    );
     let body = String::from_utf8_lossy(request.body());
     assert!(body.contains("q=Open%0AClose"));
     assert!(body.contains("from=en"));
@@ -955,23 +972,68 @@ fn retryable_rate_limit_response_is_retried_before_the_batch_fails() {
 
 #[test]
 fn connection_checks_bound_timeout_and_do_not_retry() {
-    for (scope, timeout, attempts) in [("connection:test", 30_000, 1), ("dictionary:test", 1_800_000, 3)] {
+    for (scope, timeout, attempts) in [
+        ("connection:test", 30_000, 1),
+        ("dictionary:test", 1_800_000, 3),
+    ] {
         let root = tempdir().unwrap();
         let mut profiles = AiProfileCatalog::open(root.path()).unwrap();
-        profiles.save_profile(AiProfileDraft::new("test", "Test", AiProviderProtocol::OllamaChat, "synthetic-model").with_timeout_ms(1_800_000).with_max_retries(2)).unwrap();
+        profiles
+            .save_profile(
+                AiProfileDraft::new(
+                    "test",
+                    "Test",
+                    AiProviderProtocol::OllamaChat,
+                    "synthetic-model",
+                )
+                .with_timeout_ms(1_800_000)
+                .with_max_retries(2),
+            )
+            .unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let mut translation = AiTranslation::new();
-        translation.register_http_provider(AiProviderProtocol::OllamaChat, Arc::new(RecordingTransport { requests: requests.clone(), response: HttpResponse::json(200, r#"{"message":{"content":"not structured output"}}"#) }));
-        let plan = translation.plan_translation(TranslationPlanRequest::new(scope, 1, "en-US", "zh-CN", [TranslationItem::untranslated("one", "Open")])).unwrap();
-        let job = translation.start_translation(plan.token(), profiles.resolve_profile("test").unwrap()).unwrap();
+        translation.register_http_provider(
+            AiProviderProtocol::OllamaChat,
+            Arc::new(RecordingTransport {
+                requests: requests.clone(),
+                response: HttpResponse::json(
+                    200,
+                    r#"{"message":{"content":"not structured output"}}"#,
+                ),
+            }),
+        );
+        let plan = translation
+            .plan_translation(TranslationPlanRequest::new(
+                scope,
+                1,
+                "en-US",
+                "zh-CN",
+                [TranslationItem::untranslated("one", "Open")],
+            ))
+            .unwrap();
+        let job = translation
+            .start_translation(plan.token(), profiles.resolve_profile("test").unwrap())
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !translation.translation_job(&job).unwrap().status().is_terminal() {
+        while !translation
+            .translation_job(&job)
+            .unwrap()
+            .status()
+            .is_terminal()
+        {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(5));
         }
         let captured = requests.lock().unwrap();
         assert_eq!(captured.len(), attempts);
-        assert!(captured.iter().all(|request| request.timeout_ms() == timeout));
-        assert_eq!(profiles.resolve_profile("test").unwrap().timeout_ms(), 1_800_000);
+        assert!(
+            captured
+                .iter()
+                .all(|request| request.timeout_ms() == timeout)
+        );
+        assert_eq!(
+            profiles.resolve_profile("test").unwrap().timeout_ms(),
+            1_800_000
+        );
     }
 }

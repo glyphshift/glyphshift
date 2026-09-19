@@ -22,17 +22,26 @@ impl ProbeRunStore {
                 .map_err(|_| ProbeRunError::Export),
             ProbeExportFormat::ObservationsCsv => {
                 let observations = self.read_observations(run_id)?;
-                let mut output =
-                    String::from("\u{feff}source,context,disambiguation,pluralN,adapterId,count,firstSeenMs,lastSeenMs\r\n");
+                let mut output = String::from(
+                    "\u{feff}source,context,disambiguation,pluralN,adapterId,count,firstSeenMs,lastSeenMs\r\n",
+                );
                 for entry in observations.entries() {
                     let context = entry.translation_context();
                     push_csv_row(
                         &mut output,
                         [
                             entry.source().to_owned(),
-                            context.and_then(CaptureTranslationContext::context).unwrap_or_default().to_owned(),
-                            context.and_then(CaptureTranslationContext::disambiguation).unwrap_or_default().to_owned(),
-                            context.and_then(|context| context.plural_n()).map_or_else(String::new, |n| n.to_string()),
+                            context
+                                .and_then(CaptureTranslationContext::context)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            context
+                                .and_then(CaptureTranslationContext::disambiguation)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            context
+                                .and_then(|context| context.plural_n())
+                                .map_or_else(String::new, |n| n.to_string()),
                             entry.adapter_id().to_owned(),
                             entry.count().to_string(),
                             entry.first_seen_ms().to_string(),
@@ -52,9 +61,17 @@ impl ProbeRunStore {
                         &mut output,
                         [
                             row.source.to_string(),
-                            context.and_then(CaptureTranslationContext::context).unwrap_or_default().to_owned(),
-                            context.and_then(CaptureTranslationContext::disambiguation).unwrap_or_default().to_owned(),
-                            context.and_then(|context| context.plural_n()).map_or_else(String::new, |n| n.to_string()),
+                            context
+                                .and_then(CaptureTranslationContext::context)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            context
+                                .and_then(CaptureTranslationContext::disambiguation)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            context
+                                .and_then(|context| context.plural_n())
+                                .map_or_else(String::new, |n| n.to_string()),
                             row.translation.to_string(),
                             state_name(row.state).to_owned(),
                             row.adapter_ids.join(" | "),

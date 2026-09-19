@@ -1,13 +1,13 @@
 //! Copy the current, uniformly formatted layout without mutating the target's object.
 
-use windows::core::{Interface, Result, PCWSTR};
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Graphics::DirectWrite::{
-    IDWriteFontFallback, IDWriteTextLayout, IDWriteTextLayout1, IDWriteTextLayout2,
-    IDWriteTextLayout3, IDWriteTextLayout4, DWRITE_FONT_AXIS_VALUE, DWRITE_FONT_STRETCH_NORMAL,
-    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_SPACING,
-    DWRITE_LINE_SPACING_METHOD_DEFAULT, DWRITE_TEXT_RANGE, DWRITE_TRIMMING,
+    DWRITE_FONT_AXIS_VALUE, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_LINE_SPACING, DWRITE_LINE_SPACING_METHOD_DEFAULT,
+    DWRITE_TEXT_RANGE, DWRITE_TRIMMING, IDWriteFontFallback, IDWriteTextLayout, IDWriteTextLayout1,
+    IDWriteTextLayout2, IDWriteTextLayout3, IDWriteTextLayout4,
 };
+use windows::core::{Interface, PCWSTR, Result};
 
 pub(super) unsafe fn extended_is_uniform(layout: &IDWriteTextLayout, length: u32) -> bool {
     if let Ok(layout) = layout.cast::<IDWriteTextLayout1>() {

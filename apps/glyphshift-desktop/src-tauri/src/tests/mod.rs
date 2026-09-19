@@ -163,7 +163,12 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .expect("runtime call log")
             .disabled
             .push(intent.workflow_id().into());
-        let fail = self.calls.lock().unwrap().stop_failure_ids.contains(intent.workflow_id());
+        let fail = self
+            .calls
+            .lock()
+            .unwrap()
+            .stop_failure_ids
+            .contains(intent.workflow_id());
         let mut view = WorkflowRuntimeView {
             lifecycle: None,
             checked_at_ms: glyphshift_capture::unix_time_millis(),
@@ -189,8 +194,13 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             warnings: BTreeMap::new(),
         };
         if fail {
-            for target in &mut view.targets { target.active = true; }
-            view.errors.insert(intent.targets()[0].software_id().into(), CommandError::new("runtime.session_rejected"));
+            for target in &mut view.targets {
+                target.active = true;
+            }
+            view.errors.insert(
+                intent.targets()[0].software_id().into(),
+                CommandError::new("runtime.session_rejected"),
+            );
         }
         view
     }
@@ -258,7 +268,12 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
         Ok(())
     }
 
-    fn control_workflow_collection(&mut self, _workflow_id: &str, software_id: &str, paused: bool) -> Result<(), DesktopRuntimeError> {
+    fn control_workflow_collection(
+        &mut self,
+        _workflow_id: &str,
+        software_id: &str,
+        paused: bool,
+    ) -> Result<(), DesktopRuntimeError> {
         self.control_capture(software_id, paused)
     }
 

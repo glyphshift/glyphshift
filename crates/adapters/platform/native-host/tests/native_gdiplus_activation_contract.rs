@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
 use glyphshift_adapter_native_abi::{
-    NativeDecisionV1, NativeRuntimeHostV1, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE,
+    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, NativeDecisionV1, NativeRuntimeHostV1,
     STATUS_OK,
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;

@@ -1,9 +1,9 @@
 use crate::model::valid_locale;
 use crate::{
     ArtifactStatement, ArtifactTrustVerifier, CatalogContractError, CatalogPage, CatalogPortError,
-    CatalogQuery, CatalogRelease, CatalogReleaseSummary, DictionaryDistributionPort,
-    DictionaryInstallStore, DictionaryInstallationView, InstallRequest, InstallStoreError,
-    InstallationClock, TrustVerifierError, VerifiedDictionaryArtifact, DEFAULT_MAX_ARTIFACT_BYTES,
+    CatalogQuery, CatalogRelease, CatalogReleaseSummary, DEFAULT_MAX_ARTIFACT_BYTES,
+    DictionaryDistributionPort, DictionaryInstallStore, DictionaryInstallationView, InstallRequest,
+    InstallStoreError, InstallationClock, TrustVerifierError, VerifiedDictionaryArtifact,
 };
 use glyphshift_dictionary_package::DictionaryPackage;
 use sha2::{Digest, Sha256};

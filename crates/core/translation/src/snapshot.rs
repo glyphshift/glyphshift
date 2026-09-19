@@ -1,5 +1,5 @@
-use glyphshift_domain::Generation;
 use crate::RegexTranslationRules;
+use glyphshift_domain::Generation;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -92,10 +92,18 @@ impl SnapshotDigest {
             }
         }
         for (location, rules) in regex_rules {
-        Self::digest_fields(&mut lanes, [b"rule-owner".as_slice(), location.as_bytes()]);
-        for rule in rules.rules() {
-            Self::digest_fields(&mut lanes, [b"regex-rule".as_slice(), rule.pattern.as_bytes(), rule.replacement.as_bytes(), if rule.enabled { b"1" } else { b"0" }]);
-        }
+            Self::digest_fields(&mut lanes, [b"rule-owner".as_slice(), location.as_bytes()]);
+            for rule in rules.rules() {
+                Self::digest_fields(
+                    &mut lanes,
+                    [
+                        b"regex-rule".as_slice(),
+                        rule.pattern.as_bytes(),
+                        rule.replacement.as_bytes(),
+                        if rule.enabled { b"1" } else { b"0" },
+                    ],
+                );
+            }
         }
         let mut digest = [0_u8; 32];
         for (index, lane) in lanes.into_iter().enumerate() {
@@ -346,15 +354,24 @@ impl TranslationSnapshot {
     }
 
     #[must_use]
-    pub fn with_dictionary_rules(mut self, location: impl Into<Box<str>>, rules: RegexTranslationRules) -> Self {
+    pub fn with_dictionary_rules(
+        mut self,
+        location: impl Into<Box<str>>,
+        rules: RegexTranslationRules,
+    ) -> Self {
         let location = location.into();
-        if let Some((_, existing)) = self.regex_rules.iter_mut().find(|(id, _)| id == &location) { *existing = rules; }
-        else { self.regex_rules.push((location, rules)); }
+        if let Some((_, existing)) = self.regex_rules.iter_mut().find(|(id, _)| id == &location) {
+            *existing = rules;
+        } else {
+            self.regex_rules.push((location, rules));
+        }
         self.refresh_digest();
         self
     }
 
-    pub fn dictionary_rules(&self) -> &Vec<(Box<str>, RegexTranslationRules)> { &self.regex_rules }
+    pub fn dictionary_rules(&self) -> &Vec<(Box<str>, RegexTranslationRules)> {
+        &self.regex_rules
+    }
 
     fn refresh_digest(&mut self) {
         self.digest = SnapshotDigest::from_entries(

@@ -15,9 +15,8 @@ pub const TEXT_EVENT_METADATA_VERSION_V1: u32 = 1;
 pub const TEXT_EVENT_METADATA_CONTEXT: u32 = 1 << 0;
 pub const TEXT_EVENT_METADATA_DISAMBIGUATION: u32 = 1 << 1;
 pub const TEXT_EVENT_METADATA_PLURAL_N: u32 = 1 << 2;
-pub const TEXT_EVENT_METADATA_KNOWN_FLAGS: u32 = TEXT_EVENT_METADATA_CONTEXT
-    | TEXT_EVENT_METADATA_DISAMBIGUATION
-    | TEXT_EVENT_METADATA_PLURAL_N;
+pub const TEXT_EVENT_METADATA_KNOWN_FLAGS: u32 =
+    TEXT_EVENT_METADATA_CONTEXT | TEXT_EVENT_METADATA_DISAMBIGUATION | TEXT_EVENT_METADATA_PLURAL_N;
 pub const MAX_TEXT_EVENT_CONTEXT_UNITS: usize = 1024;
 pub const STATUS_INVALID_TEXT_EVENT: i32 = 6;
 pub type EnterTextScopeV1 = extern "C" fn(*mut c_void) -> u64;
@@ -122,7 +121,6 @@ impl NativeTextHostBinding {
     pub fn matches(&self, host: &NativeRuntimeHostV1) -> bool {
         self.context == host.context as usize
     }
-
 
     pub fn decide(
         &self,

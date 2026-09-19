@@ -153,10 +153,12 @@ fn batch_producer_preserves_pending_records_drops_pause_and_owner_lifetime() {
             < second.records().first().expect("second head").sequence()
     );
     assert_eq!(second.dropped_total(), 1);
-    assert!(second
-        .records()
-        .windows(2)
-        .all(|records| records[1].sequence() == records[0].sequence() + 1));
+    assert!(
+        second
+            .records()
+            .windows(2)
+            .all(|records| records[1].sequence() == records[0].sequence() + 1)
+    );
 
     producer.set_paused(true);
     assert_eq!(

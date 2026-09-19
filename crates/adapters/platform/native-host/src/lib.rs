@@ -1,14 +1,14 @@
 //! Dynamic loader for trusted target-process Adapter packages.
 
 mod metadata;
-pub use metadata::{inspect_pe_architecture, NativeAdapterMetadata};
+pub use metadata::{NativeAdapterMetadata, inspect_pe_architecture};
 
-use glyphshift_adapter_native_abi::{
-    descriptor_matches, feature_bits, NativeAbiError, NativeAdapterApiV1, NativeAdapterEntryV1,
-    NativeRuntimeHostV1, ENTRY_SYMBOL_V1, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
-    STATUS_UNSUPPORTED_FEATURE,
-};
 use glyphshift_adapter_native_abi::{BindTextHostV1, NativeTextHostV1, TEXT_HOST_BIND_SYMBOL_V1};
+use glyphshift_adapter_native_abi::{
+    ENTRY_SYMBOL_V1, NativeAbiError, NativeAdapterApiV1, NativeAdapterEntryV1, NativeRuntimeHostV1,
+    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE, descriptor_matches,
+    feature_bits,
+};
 use glyphshift_adapter_sdk::AdapterDescriptor;
 use glyphshift_domain::{Feature, SourceTextPolicy};
 use libloading::Library;

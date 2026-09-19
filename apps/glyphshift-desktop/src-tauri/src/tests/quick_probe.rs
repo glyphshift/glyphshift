@@ -6,7 +6,7 @@ use crate::quick_probe::{
 
 fn quick_probe_request(executable: &Path) -> ProbeCreationRequest {
     ProbeCreationRequest {
-            excluded_dictionary_ids: Vec::new(),
+        excluded_dictionary_ids: Vec::new(),
         target: ProbeTargetSourceRequest::ActiveProcess {
             executable_path: executable.to_string_lossy().into_owned(),
         },
@@ -25,7 +25,7 @@ fn library_probe_request(
     dictionary_id: impl Into<Box<str>>,
 ) -> ProbeCreationRequest {
     ProbeCreationRequest {
-            excluded_dictionary_ids: Vec::new(),
+        excluded_dictionary_ids: Vec::new(),
         target: ProbeTargetSourceRequest::Library {
             software_id: software_id.into(),
         },
@@ -129,41 +129,88 @@ fn quick_probe_start_failure_compensates_every_new_asset() {
         snapshot.dictionaries().len(),
         initial_snapshot.dictionaries().len()
     );
-    assert!(application
-        .probe_run_list()
-        .expect("list probes after compensation")
-        .is_empty());
-    assert!(QuickProbeSessionStore::open(data_root.path())
-        .expect("reopen compensated ledger")
-        .is_empty());
+    assert!(
+        application
+            .probe_run_list()
+            .expect("list probes after compensation")
+            .is_empty()
+    );
+    assert!(
+        QuickProbeSessionStore::open(data_root.path())
+            .expect("reopen compensated ledger")
+            .is_empty()
+    );
 }
-
 
 #[test]
 fn new_dictionary_probe_is_regular_and_stop_delete_keep_assets() {
     let (mut application, _calls, software_id, root) = workflow_application();
     let request = quick_probe_request(&software_executable(&application, &software_id));
-    let started = application.create_probe_from_sources_for_test(request).unwrap();
+    let started = application
+        .create_probe_from_sources_for_test(request)
+        .unwrap();
     assert!(!started.quick_probe);
     assert!(started.summary.live_preview_enabled());
-    assert!(QuickProbeSessionStore::open(root.path()).unwrap().is_empty());
-    assert!(application.delete_probe_runs(&[started.summary.id().into()]).is_err());
-    application.disconnect_probe_run(started.summary.id()).unwrap();
-    application.delete_probe_runs(&[started.summary.id().into()]).unwrap();
-    assert!(application.backend.dictionary(started.summary.dictionary_id()).is_ok());
-    assert!(application.backend.snapshot().software().iter().any(|s| s.id() == software_id.as_ref()));
+    assert!(
+        QuickProbeSessionStore::open(root.path())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        application
+            .delete_probe_runs(&[started.summary.id().into()])
+            .is_err()
+    );
+    application
+        .disconnect_probe_run(started.summary.id())
+        .unwrap();
+    application
+        .delete_probe_runs(&[started.summary.id().into()])
+        .unwrap();
+    assert!(
+        application
+            .backend
+            .dictionary(started.summary.dictionary_id())
+            .is_ok()
+    );
+    assert!(
+        application
+            .backend
+            .snapshot()
+            .software()
+            .iter()
+            .any(|s| s.id() == software_id.as_ref())
+    );
 }
 
 #[test]
 fn active_source_creates_durable_software_and_dictionary_without_promotion() {
     let (mut application, calls, _, root) = workflow_application();
     let exe = write_synthetic_executable(root.path(), "SyntheticDurableTarget.exe");
-    let started = application.create_probe_from_sources_for_test(quick_probe_request(&exe)).unwrap();
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&exe))
+        .unwrap();
     assert!(!started.quick_probe);
-    application.disconnect_probe_run(started.summary.id()).unwrap();
-    application.delete_probe_runs(&[started.summary.id().into()]).unwrap();
-    assert!(application.backend.dictionary(started.summary.dictionary_id()).is_ok());
-    assert!(application.backend.snapshot().software().iter().any(|s| s.id() == started.summary.software_id()));
+    application
+        .disconnect_probe_run(started.summary.id())
+        .unwrap();
+    application
+        .delete_probe_runs(&[started.summary.id().into()])
+        .unwrap();
+    assert!(
+        application
+            .backend
+            .dictionary(started.summary.dictionary_id())
+            .is_ok()
+    );
+    assert!(
+        application
+            .backend
+            .snapshot()
+            .software()
+            .iter()
+            .any(|s| s.id() == started.summary.software_id())
+    );
     assert!(calls.lock().unwrap().software_removed.is_empty());
 }
 
@@ -172,7 +219,9 @@ fn existing_dictionary_can_be_selected_without_creating_another() {
     let (mut application, _, software_id, _root) = workflow_application();
     let id = first_dictionary_id(&application);
     let count = application.backend.snapshot().dictionaries().len();
-    let started = application.create_probe_from_sources_for_test(library_probe_request(software_id, id.clone())).unwrap();
+    let started = application
+        .create_probe_from_sources_for_test(library_probe_request(software_id, id.clone()))
+        .unwrap();
     assert_eq!(started.summary.dictionary_id(), id.as_ref());
     assert_eq!(application.backend.snapshot().dictionaries().len(), count);
     assert!(!started.quick_probe);
@@ -182,18 +231,40 @@ fn existing_dictionary_can_be_selected_without_creating_another() {
 fn successful_legacy_task_is_promoted_without_losing_its_dictionary() {
     let (mut application, _, software_id, root) = workflow_application();
     let exe = software_executable(&application, &software_id);
-    let started = application.create_probe_from_sources_for_test(quick_probe_request(&exe)).unwrap();
-    application.disconnect_probe_run(started.summary.id()).unwrap();
-    let dictionary = application.backend.dictionary(started.summary.dictionary_id()).unwrap().clone();
-    application.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_name("Synthetic 临时词典")).unwrap();
+    let started = application
+        .create_probe_from_sources_for_test(quick_probe_request(&exe))
+        .unwrap();
+    application
+        .disconnect_probe_run(started.summary.id())
+        .unwrap();
+    let dictionary = application
+        .backend
+        .dictionary(started.summary.dictionary_id())
+        .unwrap()
+        .clone();
+    application
+        .backend
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary).with_name("Synthetic 临时词典"),
+        )
+        .unwrap();
     let ledger = serde_json::json!({"schema":"glyphshift.quick-probe-sessions/1", "sessions":[{
         "runId":started.summary.id(), "softwareId":software_id, "dictionaryId":dictionary.id(),
         "executablePath":exe.to_string_lossy(), "ownsSoftware":false, "ownsDictionary":true, "phase":"active"
     }]});
-    std::fs::write(root.path().join("quick-probe-sessions.json"), serde_json::to_vec(&ledger).unwrap()).unwrap();
+    std::fs::write(
+        root.path().join("quick-probe-sessions.json"),
+        serde_json::to_vec(&ledger).unwrap(),
+    )
+    .unwrap();
     application.quick_probe_sessions = QuickProbeSessionStore::open(root.path()).unwrap();
     application.recover_quick_probe_sessions().unwrap();
-    assert!(!application.probe_run_summary(started.summary.id()).unwrap().quick_probe);
+    assert!(
+        !application
+            .probe_run_summary(started.summary.id())
+            .unwrap()
+            .quick_probe
+    );
     let migrated = application.backend.dictionary(dictionary.id()).unwrap();
     assert_eq!(migrated.metadata().name(), "Synthetic 字典");
     assert_eq!(migrated.entries(), dictionary.entries());
@@ -204,11 +275,17 @@ fn successful_legacy_task_is_promoted_without_losing_its_dictionary() {
 fn dictionary_edit_still_publishes_after_probe_creation_transaction_ends() {
     let (mut application, calls, software_id, _root) = workflow_application();
     let request = quick_probe_request(&software_executable(&application, &software_id));
-    let started = application.create_probe_from_sources_for_test(request).unwrap();
-    let edited = application.edit_probe_translation(ProbeTranslationEditRequest {
-        run_id: started.summary.id().into(), source: "Assets".into(), translation: "资产".into(),
-        translation_context: None,
-    }).unwrap();
+    let started = application
+        .create_probe_from_sources_for_test(request)
+        .unwrap();
+    let edited = application
+        .edit_probe_translation(ProbeTranslationEditRequest {
+            run_id: started.summary.id().into(),
+            source: "Assets".into(),
+            translation: "资产".into(),
+            translation_context: None,
+        })
+        .unwrap();
     assert_eq!(edited.summary.preview_generation(), 2);
     assert_eq!(calls.lock().unwrap().capture_publications.len(), 2);
 }

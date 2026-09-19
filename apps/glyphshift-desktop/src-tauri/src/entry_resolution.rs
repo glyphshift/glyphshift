@@ -31,7 +31,11 @@ impl EntryResolver {
         let mut rules = Vec::new();
         for id in ids {
             if let Ok(dictionary) = backend.dictionary(&id) {
-                rules.push((id.clone(), RegexTranslationRules::compile(dictionary.metadata().text_rules().to_vec()).expect("validated rules")));
+                rules.push((
+                    id.clone(),
+                    RegexTranslationRules::compile(dictionary.metadata().text_rules().to_vec())
+                        .expect("validated rules"),
+                ));
                 for entry in dictionary.entries() {
                     entries
                         .entry(entry.source().to_owned())
@@ -50,7 +54,11 @@ impl EntryResolver {
     pub(super) fn collection_sources(&self, source: &str) -> Vec<Box<str>> {
         for (id, rules) in &self.rules {
             if let Some(sources) = rules.collection_sources(source) {
-                return if id == &self.writer { sources.into_iter().map(Into::into).collect() } else { Vec::new() };
+                return if id == &self.writer {
+                    sources.into_iter().map(Into::into).collect()
+                } else {
+                    Vec::new()
+                };
             }
         }
         vec![source.into()]
@@ -60,9 +68,15 @@ impl EntryResolver {
         for (id, rules) in &self.rules {
             if let Some(index) = rules.matching_rule_index(source) {
                 let sources = rules.collection_sources(source)?;
-                if sources.is_empty() { return None; }
-                return Some(std::iter::once(id.clone()).chain(std::iter::once(index.to_string().into_boxed_str()))
-                    .chain(sources.into_iter().map(Into::into)).collect());
+                if sources.is_empty() {
+                    return None;
+                }
+                return Some(
+                    std::iter::once(id.clone())
+                        .chain(std::iter::once(index.to_string().into_boxed_str()))
+                        .chain(sources.into_iter().map(Into::into))
+                        .collect(),
+                );
             }
         }
         None
@@ -73,7 +87,9 @@ impl EntryResolver {
             if let Some(sources) = rules.collection_sources(source) {
                 return if id == &self.writer && sources.len() == 1 {
                     Ok(Some(sources[0].as_str().into()))
-                } else { Err(()) };
+                } else {
+                    Err(())
+                };
             }
         }
         Ok(None)
@@ -123,24 +139,47 @@ impl EntryResolver {
         let mut translation: Option<Arc<str>> = None;
         if row.state() == ProbeEntryState::Ignored {
             kind = "ignored";
-        } else if let Some((id, rules, index)) = self.rules.iter().find_map(|(id, rules)| rules.matching_rule_index(row.source()).map(|index| (id, rules, index))) {
+        } else if let Some((id, rules, index)) = self.rules.iter().find_map(|(id, rules)| {
+            rules
+                .matching_rule_index(row.source())
+                .map(|index| (id, rules, index))
+        }) {
             rule_index = Some(index);
             edit_source = self.editable_rule_source(row.source()).ok().flatten();
             editable = edit_source.is_some();
-            edit_translation = edit_source.as_ref().map(|source| self.entries.get(source.as_ref())
-                .and_then(|entries| entries.iter().find(|(owner, _)| owner == id))
-                .map(|(_, text)| text.clone()).unwrap_or_default());
+            edit_translation = edit_source.as_ref().map(|source| {
+                self.entries
+                    .get(source.as_ref())
+                    .and_then(|entries| entries.iter().find(|(owner, _)| owner == id))
+                    .map(|(_, text)| text.clone())
+                    .unwrap_or_default()
+            });
             dictionary_ids = vec![id.clone()];
-            translation = rules.replace(row.source(), |source| self.entries.get(source)?
-                .iter().find(|(owner, text)| owner == id && !text.trim().is_empty())
-                .map(|(_, text)| Arc::from(text.as_ref())));
-            kind = match translation.as_deref() { Some("") => "rule_skipped", Some(_) => "rule_translated", None => "rule_pending" };
+            translation = rules.replace(row.source(), |source| {
+                self.entries
+                    .get(source)?
+                    .iter()
+                    .find(|(owner, text)| owner == id && !text.trim().is_empty())
+                    .map(|(_, text)| Arc::from(text.as_ref()))
+            });
+            kind = match translation.as_deref() {
+                Some("") => "rule_skipped",
+                Some(_) => "rule_translated",
+                None => "rule_pending",
+            };
             // A matched rule owns this display row, including missing translations.
-            if translation.is_none() { translation = Some(Arc::from("")); }
+            if translation.is_none() {
+                translation = Some(Arc::from(""));
+            }
         } else if row.has_translation_conflict() {
             kind = "conflict";
-        } else if let Some((_, text)) = exact.into_iter().flatten().find(|(_, text)| !text.trim().is_empty()) {
-            kind = "dictionary"; translation = Some(Arc::from(text.as_ref()));
+        } else if let Some((_, text)) = exact
+            .into_iter()
+            .flatten()
+            .find(|(_, text)| !text.trim().is_empty())
+        {
+            kind = "dictionary";
+            translation = Some(Arc::from(text.as_ref()));
         } else if !row.translation().trim().is_empty() {
             kind = "dictionary";
         }

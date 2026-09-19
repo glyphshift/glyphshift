@@ -5,10 +5,10 @@ use glyphshift_capture::{
     CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId, CaptureTranslationContext,
 };
 use glyphshift_controller_sdk::{
-    Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
+    PROTOCOL_SCHEMA, Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
     WireCaptureObservationBatch, WireControllerConfiguration, WireControllerLossPolicy,
     WireFeature, WireOperation, WireRuntimeDeployment, WireRuntimeFontOutcome,
-    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant, PROTOCOL_SCHEMA,
+    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant,
 };
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{CodeHash, ControllerCodeIdentity, ExtensionId, ProtocolVersion};

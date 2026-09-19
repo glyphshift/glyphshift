@@ -1,12 +1,12 @@
-use crate::observation::{validate_observation_fields, MAX_OBSERVATION_BATCH_RECORDS};
+use crate::observation::{MAX_OBSERVATION_BATCH_RECORDS, validate_observation_fields};
 use crate::{
     CaptureError, CaptureIngressStatus, CaptureObservationBatch, CaptureObservationRecord,
     CaptureProducerConfiguration, CaptureProducerId, CaptureTranslationContext,
 };
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 
 // Runtime activation can expose a dense startup burst before the desktop-side supervisor has
 // completed the activation handshake and started draining observations.

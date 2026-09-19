@@ -21,8 +21,8 @@ fn decide(
 fn translation_call_context_uses_source_dictionary_and_plural_fails_open() {
     let menu = TranslationContext::new(Some("MainMenu"), Option::<&str>::None, None);
     let toolbar = TranslationContext::new(Some("Toolbar"), Option::<&str>::None, None);
-    let snapshot = TranslationSnapshot::empty(Generation::new(30))
-        .with_entry("menu", "Open", "打开");
+    let snapshot =
+        TranslationSnapshot::empty(Generation::new(30)).with_entry("menu", "Open", "打开");
     let route = RouteProgram::direct("menu");
     let mut state = DecisionState::new();
 

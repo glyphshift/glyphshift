@@ -283,19 +283,21 @@ fn single_workflows_stop_only_their_owned_software() {
     for (index, software) in software_ids.iter().enumerate() {
         let id = format!("workflow.single-{index}");
         create_single_workflow(&mut backend, &id, software, "dictionary.shared");
-        assert!(pool
-            .reconcile_workflow(&backend.effective_workflow_intent(&id).unwrap())
-            .unwrap()
-            .errors()
-            .is_empty());
+        assert!(
+            pool.reconcile_workflow(&backend.effective_workflow_intent(&id).unwrap())
+                .unwrap()
+                .errors()
+                .is_empty()
+        );
     }
     pool.stop_workflow("workflow.single-0").unwrap();
     assert!(pool.status(&software_ids[0]).is_none());
     for software in &software_ids[1..] {
-        assert!(pool
-            .status(software)
-            .unwrap()
-            .is_feature_active(Feature::TextReplace));
+        assert!(
+            pool.status(software)
+                .unwrap()
+                .is_feature_active(Feature::TextReplace)
+        );
     }
 }
 
@@ -363,11 +365,12 @@ fn capture_owns_one_software_and_cannot_overlap_a_translation_workflow() {
 
     pool.stop_capture(software_id.as_str())
         .expect("stop capture");
-    assert!(pool
-        .reconcile_workflow(&intent)
-        .expect("start workflow after capture")
-        .errors()
-        .is_empty());
+    assert!(
+        pool.reconcile_workflow(&intent)
+            .expect("start workflow after capture")
+            .errors()
+            .is_empty()
+    );
     let workflow_conflict_configuration = CaptureConfiguration::new(
         glyphshift_capture::CaptureSessionId::new("capture-workflow-conflict").expect("session id"),
         root.path().join("capture-workflow-conflict.json"),
@@ -663,12 +666,18 @@ fn explicit_workflow_replacement_removes_the_entire_old_intent() {
         .unwrap();
     assert!(replaced.errors().is_empty());
     for software in &software_ids {
-        assert!(pool
-            .status(software)
-            .unwrap()
-            .is_feature_active(Feature::TextReplace));
+        assert!(
+            pool.status(software)
+                .unwrap()
+                .is_feature_active(Feature::TextReplace)
+        );
     }
-    assert!(pool.stop_workflow("workflow.old").unwrap().errors().is_empty());
+    assert!(
+        pool.stop_workflow("workflow.old")
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
     pool.stop_workflow("workflow.new").unwrap();
     assert!(pool.status(&software_ids[0]).is_none());
     assert!(pool.status(&software_ids[1]).is_some());
@@ -760,21 +769,27 @@ fn workflow_stop_failure_keeps_one_last_applied_target_without_rolling_back_othe
     assert!(pool.workflow_owns_target("workflow.stop-0", &software_ids[0]));
     assert!(!pool.workflow_owns_target("workflow.stop-1", &software_ids[0]));
     let retried = pool.stop_workflow("workflow.stop-0").unwrap();
-    assert_eq!(retried.errors().get(software_ids[0].as_str()), Some(&DesktopRuntimeError::SessionRejected));
-    assert!(pool
-        .status(&software_ids[1])
-        .unwrap()
-        .is_feature_active(Feature::TextReplace));
-    assert!(pool
-        .stop_workflow("workflow.stop-1")
-        .unwrap()
-        .errors()
-        .is_empty());
+    assert_eq!(
+        retried.errors().get(software_ids[0].as_str()),
+        Some(&DesktopRuntimeError::SessionRejected)
+    );
+    assert!(
+        pool.status(&software_ids[1])
+            .unwrap()
+            .is_feature_active(Feature::TextReplace)
+    );
+    assert!(
+        pool.stop_workflow("workflow.stop-1")
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
     assert!(pool.status(&software_ids[1]).is_none());
-    assert!(pool
-        .status(&software_ids[0])
-        .unwrap()
-        .is_feature_active(Feature::TextReplace));
+    assert!(
+        pool.status(&software_ids[0])
+            .unwrap()
+            .is_feature_active(Feature::TextReplace)
+    );
 }
 
 #[test]
@@ -820,41 +835,50 @@ fn workflow_collection_shares_translation_session_and_can_be_disabled() {
         "workflow.collection",
         [(software_id.clone().into(), capture)].into(),
     );
-    assert!(pool
-        .reconcile_workflow(&intent)
-        .unwrap()
-        .errors()
-        .is_empty());
+    assert!(
+        pool.reconcile_workflow(&intent)
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
     let status = pool.status(&software_id).unwrap();
     assert!(status.is_feature_active(Feature::TextObserve));
     assert!(status.is_feature_active(Feature::TextReplace));
-    assert!(pool
-        .reconcile_workflow(&intent)
-        .unwrap()
-        .errors()
-        .is_empty());
+    assert!(
+        pool.reconcile_workflow(&intent)
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
     pool.configure_workflow_collection("workflow.collection", BTreeMap::new());
-    assert!(pool
-        .reconcile_workflow(&intent)
-        .unwrap()
-        .errors()
-        .is_empty());
-    assert!(pool
-        .status(&software_id)
-        .unwrap()
-        .is_feature_active(Feature::TextReplace));
-    assert!(!pool
-        .status(&software_id)
-        .unwrap()
-        .is_feature_active(Feature::TextObserve));
-    assert!(pool
-        .stop_workflow("workflow.collection")
-        .unwrap()
-        .errors()
-        .is_empty());
-    assert!(!pool
-        .status(&software_id)
-        .is_some_and(|status| status.is_active()));
+    assert!(
+        pool.reconcile_workflow(&intent)
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
+    assert!(
+        pool.status(&software_id)
+            .unwrap()
+            .is_feature_active(Feature::TextReplace)
+    );
+    assert!(
+        !pool
+            .status(&software_id)
+            .unwrap()
+            .is_feature_active(Feature::TextObserve)
+    );
+    assert!(
+        pool.stop_workflow("workflow.collection")
+            .unwrap()
+            .errors()
+            .is_empty()
+    );
+    assert!(
+        !pool
+            .status(&software_id)
+            .is_some_and(|status| status.is_active())
+    );
 }
 
 fn create_single_workflow(
@@ -886,9 +910,18 @@ fn failed_workflow_collection_start_is_discarded_before_retry() {
         .selected_software_id()
         .expect("selected software")
         .to_owned();
-    backend.create_dictionary(DictionaryCreate::new("dictionary.retry", "Retry", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Open", "Translated")])).unwrap();
-    create_single_workflow(&mut backend, "workflow.retry", &software_id, "dictionary.retry");
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.retry", "Retry", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "Translated")]),
+        )
+        .unwrap();
+    create_single_workflow(
+        &mut backend,
+        "workflow.retry",
+        &software_id,
+        "dictionary.retry",
+    );
     let intent = backend.effective_workflow_intent("workflow.retry").unwrap();
     let configuration = CaptureConfiguration::new(
         glyphshift_capture::CaptureSessionId::new("capture-retry").expect("session id"),
@@ -901,12 +934,25 @@ fn failed_workflow_collection_start_is_discarded_before_retry() {
         discoveries: Arc::clone(&discoveries),
     }));
 
-    pool.configure_workflow_collection("workflow.retry", BTreeMap::from([(software_id.clone().into(), configuration)]));
+    pool.configure_workflow_collection(
+        "workflow.retry",
+        BTreeMap::from([(software_id.clone().into(), configuration)]),
+    );
     let failed = pool.reconcile_workflow(&intent).unwrap();
-    assert_eq!(failed.errors().get(software_id.as_str()), Some(&DesktopRuntimeError::ProtocolRejected));
+    assert_eq!(
+        failed.errors().get(software_id.as_str()),
+        Some(&DesktopRuntimeError::ProtocolRejected)
+    );
     let connected = pool.reconcile_workflow(&intent).unwrap();
-    assert!(connected.errors().is_empty(), "retry must rediscover after failed collection activation");
-    assert!(pool.status(&software_id).unwrap().is_feature_active(Feature::TextObserve));
+    assert!(
+        connected.errors().is_empty(),
+        "retry must rediscover after failed collection activation"
+    );
+    assert!(
+        pool.status(&software_id)
+            .unwrap()
+            .is_feature_active(Feature::TextObserve)
+    );
     assert_eq!(discoveries.load(Ordering::SeqCst), 2);
 }
 
@@ -944,12 +990,19 @@ fn workflow_status_poll_keeps_the_active_connection() {
         .effective_workflow_intent("workflow.restart")
         .expect("restart intent");
     let discoveries = Arc::new(AtomicUsize::new(1));
-    let mut pool = DesktopRuntimePool::with_factory(Box::new(RetryRuntimeFactory { discoveries: Arc::clone(&discoveries) }));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RetryRuntimeFactory {
+        discoveries: Arc::clone(&discoveries),
+    }));
     let configuration = CaptureConfiguration::new(
         glyphshift_capture::CaptureSessionId::new("poll-capture").unwrap(),
-        root.path().join("observations.json"), 100,
-    ).unwrap();
-    pool.configure_workflow_collection("workflow.restart", BTreeMap::from([(software_id.clone().into(), configuration)]));
+        root.path().join("observations.json"),
+        100,
+    )
+    .unwrap();
+    pool.configure_workflow_collection(
+        "workflow.restart",
+        BTreeMap::from([(software_id.clone().into(), configuration)]),
+    );
     pool.reconcile_workflow(&intent).expect("initial reconcile");
 
     let before = discoveries.load(Ordering::SeqCst);
@@ -960,11 +1013,20 @@ fn workflow_status_poll_keeps_the_active_connection() {
     assert!(refreshed.errors().is_empty());
     for _ in 0..3 {
         assert!(pool.refresh_workflow(&intent).unwrap().errors().is_empty());
-        assert!(pool.status(&software_id).unwrap().is_feature_active(Feature::TextObserve));
-        pool.control_workflow_collection("workflow.restart", &software_id, true).unwrap();
+        assert!(
+            pool.status(&software_id)
+                .unwrap()
+                .is_feature_active(Feature::TextObserve)
+        );
+        pool.control_workflow_collection("workflow.restart", &software_id, true)
+            .unwrap();
     }
 
-    assert_eq!(discoveries.load(Ordering::SeqCst), before, "status polling must not stop and rediscover the running target");
+    assert_eq!(
+        discoveries.load(Ordering::SeqCst),
+        before,
+        "status polling must not stop and rediscover the running target"
+    );
     let status = pool.status(&software_id).expect("refreshed status");
     assert!(status.is_feature_requested(Feature::TextReplace));
     assert!(status.is_feature_active(Feature::TextReplace));
@@ -977,21 +1039,44 @@ fn workflow_refresh_discards_exited_instance_and_finds_restart_without_restartin
     let exe = root.path().join("SyntheticLifetime.exe");
     fs::write(&exe, b"synthetic").unwrap();
     let mut backend = open_test_backend(root.path().join("data"));
-    let software = backend.add_software(ExecutableSelection::new(exe)).unwrap().selected_software_id().unwrap().to_owned();
-    backend.create_dictionary(DictionaryCreate::new("lifetime", "Lifetime", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Open", "Translation")])).unwrap();
+    let software = backend
+        .add_software(ExecutableSelection::new(exe))
+        .unwrap()
+        .selected_software_id()
+        .unwrap()
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("lifetime", "Lifetime", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "Translation")]),
+        )
+        .unwrap();
     create_single_workflow(&mut backend, "lifetime", &software, "lifetime");
     let intent = backend.effective_workflow_intent("lifetime").unwrap();
     let instance = Arc::new(AtomicUsize::new(1));
     let discoveries = Arc::new(AtomicUsize::new(0));
-    let mut pool = DesktopRuntimePool::with_factory(Box::new(RestartingRuntimeFactory { instance: instance.clone(), discoveries: discoveries.clone() }));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RestartingRuntimeFactory {
+        instance: instance.clone(),
+        discoveries: discoveries.clone(),
+    }));
     pool.reconcile_workflow(&intent).unwrap();
     pool.refresh_workflow(&intent).unwrap();
-    assert_eq!(discoveries.load(Ordering::SeqCst), 1, "live targets must not restart");
+    assert_eq!(
+        discoveries.load(Ordering::SeqCst),
+        1,
+        "live targets must not restart"
+    );
     instance.store(0, Ordering::SeqCst);
     let stopped = pool.refresh_workflow(&intent).unwrap();
-    assert_eq!(stopped.errors().get(software.as_str()), Some(&DesktopRuntimeError::UnknownTarget));
-    assert!(!pool.status(&software).is_some_and(|status| status.is_active()));
+    assert_eq!(
+        stopped.errors().get(software.as_str()),
+        Some(&DesktopRuntimeError::UnknownTarget)
+    );
+    assert!(
+        !pool
+            .status(&software)
+            .is_some_and(|status| status.is_active())
+    );
     instance.store(2, Ordering::SeqCst);
     assert!(pool.refresh_workflow(&intent).unwrap().errors().is_empty());
     assert_eq!(pool.status(&software).unwrap().active_target_id(), Some(2));

@@ -109,7 +109,10 @@ pub struct Dictionary {
 }
 
 impl Dictionary {
-    pub fn with_text_rules(mut self, rules: glyphshift_translation::RegexTranslationRules) -> Self { self.text_rules = rules; self }
+    pub fn with_text_rules(mut self, rules: glyphshift_translation::RegexTranslationRules) -> Self {
+        self.text_rules = rules;
+        self
+    }
     #[must_use]
     pub fn new(
         id: impl Into<Box<str>>,
@@ -157,8 +160,16 @@ pub struct TargetFontPolicy {
 
 impl TargetFontPolicy {
     #[must_use]
-    pub fn with_dictionary_override(mut self, id: impl Into<Box<str>>, families: impl IntoIterator<Item = impl Into<Box<str>>>, percent: Option<u16>) -> Self {
-        self.dictionary_overrides.insert(id.into(), (families.into_iter().map(Into::into).collect(), percent));
+    pub fn with_dictionary_override(
+        mut self,
+        id: impl Into<Box<str>>,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+        percent: Option<u16>,
+    ) -> Self {
+        self.dictionary_overrides.insert(
+            id.into(),
+            (families.into_iter().map(Into::into).collect(), percent),
+        );
         self
     }
 
@@ -412,10 +423,15 @@ pub fn resolve(
             }
             let rule_location = format!("@dictionary/{}", dictionary.id);
             if !dictionary.text_rules.rules().is_empty() {
-                snapshot = snapshot.with_dictionary_rules(rule_location.clone(), dictionary.text_rules.clone());
+                snapshot = snapshot
+                    .with_dictionary_rules(rule_location.clone(), dictionary.text_rules.clone());
                 has_text_replacement = true;
                 for entry in &dictionary.entries {
-                    snapshot = snapshot.with_entry(rule_location.clone(), entry.source.clone(), entry.translation.clone());
+                    snapshot = snapshot.with_entry(
+                        rule_location.clone(),
+                        entry.source.clone(),
+                        entry.translation.clone(),
+                    );
                 }
             }
             for entry in &dictionary.entries {
@@ -532,9 +548,20 @@ pub fn resolve(
                 add_rule(None, default_family.clone(), policy.scale_percent)?;
             }
             for (source, dictionary_id) in &winning_dictionaries {
-                let (family, percent) = if let Some((families, scale)) = policy.dictionary_overrides.get(dictionary_id) {
-                    (if families.is_empty() { default_family.clone() } else { select_family(families)? }, scale.unwrap_or(policy.scale_percent))
-                } else { (default_family.clone(), policy.scale_percent) };
+                let (family, percent) = if let Some((families, scale)) =
+                    policy.dictionary_overrides.get(dictionary_id)
+                {
+                    (
+                        if families.is_empty() {
+                            default_family.clone()
+                        } else {
+                            select_family(families)?
+                        },
+                        scale.unwrap_or(policy.scale_percent),
+                    )
+                } else {
+                    (default_family.clone(), policy.scale_percent)
+                };
                 add_rule(Some(source), family, percent)?;
             }
         }

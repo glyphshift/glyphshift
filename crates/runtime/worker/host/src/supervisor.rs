@@ -6,9 +6,9 @@ use glyphshift_capture::{CaptureIngress, CaptureProducerConfiguration};
 use glyphshift_domain::AdapterId;
 use glyphshift_isolated_worker_sdk::WorkerTargetGrant;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 

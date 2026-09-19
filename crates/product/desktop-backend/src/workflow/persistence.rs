@@ -83,11 +83,20 @@ fn workflow_artifact_from_value(value: &serde_json::Value) -> Option<WorkflowArt
         .filter_map(|target| {
             let mut target = target.clone();
             if let Some(object) = target.as_object_mut() {
-                let valid = object.get("writeDictionaryId").and_then(serde_json::Value::as_str)
-                    .filter(|id| object.get("dictionaryIds").and_then(serde_json::Value::as_array)
-                        .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(*id))))
+                let valid = object
+                    .get("writeDictionaryId")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|id| {
+                        object
+                            .get("dictionaryIds")
+                            .and_then(serde_json::Value::as_array)
+                            .is_some_and(|ids| ids.iter().any(|value| value.as_str() == Some(*id)))
+                    })
                     .map(str::to_owned);
-                object.insert("writeDictionaryId".into(), valid.map_or(serde_json::Value::Null, serde_json::Value::String));
+                object.insert(
+                    "writeDictionaryId".into(),
+                    valid.map_or(serde_json::Value::Null, serde_json::Value::String),
+                );
             }
             serde_json::from_value(target).ok()
         })

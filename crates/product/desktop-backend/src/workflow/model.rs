@@ -132,11 +132,16 @@ pub struct WorkflowDictionaryFont {
     pub(super) scale_percent: Option<u16>,
 }
 
-fn default_font_scale() -> u16 { 100 }
+fn default_font_scale() -> u16 {
+    100
+}
 
 impl WorkflowFontPolicy {
     #[must_use]
-    pub fn with_scale_percent(mut self, percent: u16) -> Self { self.scale_percent = percent; self }
+    pub fn with_scale_percent(mut self, percent: u16) -> Self {
+        self.scale_percent = percent;
+        self
+    }
 
     #[must_use]
     pub fn new(
@@ -356,8 +361,12 @@ impl WorkflowTargetView {
         &self.adapter_plan
     }
 
-    pub fn collection_preference(&self) -> Option<bool> { self.collect_new_sources }
-    pub fn collection_enabled(&self) -> bool { self.write_dictionary_id.is_some() && self.collect_new_sources.unwrap_or(true) }
+    pub fn collection_preference(&self) -> Option<bool> {
+        self.collect_new_sources
+    }
+    pub fn collection_enabled(&self) -> bool {
+        self.write_dictionary_id.is_some() && self.collect_new_sources.unwrap_or(true)
+    }
 
     #[must_use]
     pub const fn font_policy(&self) -> Option<&WorkflowFontPolicy> {

@@ -1,7 +1,7 @@
 //! Injected target-process Runtime Host for verified native Adapter packages.
 
 use glyphshift_adapter_native_abi::{
-    NativeDecisionV1, NativeRuntimeHostV1, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE,
+    DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, NativeDecisionV1, NativeRuntimeHostV1,
     STATUS_OK, STATUS_OUTPUT_TOO_SMALL,
 };
 use glyphshift_adapter_native_abi::{NativeTextHostV1, TEXT_HOST_VERSION_V1};
@@ -14,17 +14,17 @@ use glyphshift_domain::{
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_runtime_kernel::RuntimeKernel;
 use glyphshift_target_runtime_contract::{
-    CaptureRuntimeControl, RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1,
+    CaptureRuntimeControl, MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES,
+    MAX_RUNTIME_TRACE_BYTES, RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1,
     RuntimeDiagnosticsControl, RuntimeDiagnosticsQueryV1, RuntimeObservationQueryV1,
-    RuntimeTraceBatch, RuntimeTraceRecord, TargetRuntimeDeployment,
-    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
-    STATUS_TARGET_RUNTIME_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED,
-    STATUS_TARGET_RUNTIME_ADAPTER_CHANGED, STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED,
-    STATUS_TARGET_RUNTIME_ALREADY_ACTIVE, STATUS_TARGET_RUNTIME_CAPTURE_FAILED,
-    STATUS_TARGET_RUNTIME_INVALID_COMMAND, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
-    STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_OK,
-    STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL, STATUS_TARGET_RUNTIME_UNAVAILABLE,
-    STATUS_TARGET_RUNTIME_UPDATE_FAILED, STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    RuntimeTraceBatch, RuntimeTraceRecord, STATUS_TARGET_RUNTIME_ACTIVATION_FAILED,
+    STATUS_TARGET_RUNTIME_ADAPTER_ACTIVATION_FAILED, STATUS_TARGET_RUNTIME_ADAPTER_CHANGED,
+    STATUS_TARGET_RUNTIME_ADAPTER_LOAD_FAILED, STATUS_TARGET_RUNTIME_ALREADY_ACTIVE,
+    STATUS_TARGET_RUNTIME_CAPTURE_FAILED, STATUS_TARGET_RUNTIME_INVALID_COMMAND,
+    STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT, STATUS_TARGET_RUNTIME_KERNEL_ACTIVATION_FAILED,
+    STATUS_TARGET_RUNTIME_OK, STATUS_TARGET_RUNTIME_OUTPUT_TOO_SMALL,
+    STATUS_TARGET_RUNTIME_UNAVAILABLE, STATUS_TARGET_RUNTIME_UPDATE_FAILED,
+    STATUS_TARGET_RUNTIME_UPDATE_REJECTED, TargetRuntimeDeployment,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -540,7 +540,7 @@ fn request_current_process_redraw() {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        RedrawWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE,
+        RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RedrawWindow,
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
@@ -646,11 +646,7 @@ fn decide_source(
         };
     }
     let lookup = |text: &str| {
-        let observation = TextObservation::new(
-            context.adapter_id.clone(),
-            text,
-            "native.surface",
-        );
+        let observation = TextObservation::new(context.adapter_id.clone(), text, "native.surface");
         let observation = translation_context
             .cloned()
             .map_or(observation.clone(), |translation_context| {

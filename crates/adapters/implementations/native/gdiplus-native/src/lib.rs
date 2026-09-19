@@ -2,9 +2,9 @@
 
 use glyphshift_adapter_gdiplus::ADAPTER_ID;
 use glyphshift_adapter_native_abi::{
-    DecideUtf16V1, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeDecisionV1,
-    NativeNegotiationV1, NativeRuntimeHostV1, ARCH_X86, ARCH_X86_64, DECISION_FONT_SUBSTITUTE,
-    DECISION_TEXT_REPLACE, FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE,
+    ARCH_X86, ARCH_X86_64, DECISION_FONT_SUBSTITUTE, DECISION_TEXT_REPLACE, DecideUtf16V1,
+    FEATURE_FONT_SUBSTITUTE, FEATURE_TEXT_OBSERVE, FEATURE_TEXT_REPLACE, NativeAdapterApiV1,
+    NativeAdapterDescriptorV1, NativeDecisionV1, NativeNegotiationV1, NativeRuntimeHostV1,
     PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK,
     STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
@@ -12,8 +12,8 @@ use retour::GenericDetour;
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
-use windows::core::{s, w};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::core::{s, w};
 
 const SUPPORTED_FEATURES: u64 =
     FEATURE_TEXT_OBSERVE | FEATURE_TEXT_REPLACE | FEATURE_FONT_SUBSTITUTE;

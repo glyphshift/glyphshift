@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
 use glyphshift_adapter_native_abi::{
-    NativeDecisionV1, NativeRuntimeHostV1, DECISION_TEXT_REPLACE, STATUS_INVALID_HOST, STATUS_OK,
+    DECISION_TEXT_REPLACE, NativeDecisionV1, NativeRuntimeHostV1, STATUS_INVALID_HOST, STATUS_OK,
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_domain::Feature;

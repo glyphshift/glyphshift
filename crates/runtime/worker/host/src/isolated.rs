@@ -1,4 +1,4 @@
-use crate::supervisor::{allocate_producer_generation, WorkerSupervisor};
+use crate::supervisor::{WorkerSupervisor, allocate_producer_generation};
 use crate::{WorkerArtifactCatalog, WorkerHealth, WorkerHostError};
 use glyphshift_adapter_registry::{AdapterBinding, AdapterHostBinding};
 use glyphshift_capture::{CaptureIngress, CaptureProducerConfiguration};
@@ -10,8 +10,8 @@ use glyphshift_session::{
     SessionDiagnostic, SessionId, TargetInstance, TargetInstanceId,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 /// Adapter Host for one isolated worker process per target and Adapter binding.

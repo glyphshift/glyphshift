@@ -1,5 +1,5 @@
 use glyphshift_adapter_gdiplus::{
-    descriptor, GdiPlusCall, GdiPlusFont, GdiPlusInlineAdapter, ADAPTER_ID,
+    ADAPTER_ID, GdiPlusCall, GdiPlusFont, GdiPlusInlineAdapter, descriptor,
 };
 use glyphshift_adapter_sdk::{ActivationGrant, AdapterError, AdapterVersion};
 use glyphshift_domain::{

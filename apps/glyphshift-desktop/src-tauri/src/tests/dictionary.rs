@@ -134,11 +134,13 @@ fn dictionary_file_exchange_uses_one_portable_json_without_a_publish_service() {
     let snapshot = application
         .import_dictionary_file(input)
         .expect("import dictionary file");
-    assert!(snapshot
-        .configuration
-        .dictionaries()
-        .iter()
-        .any(|dictionary| dictionary.id() == "dictionary.exchange"));
+    assert!(
+        snapshot
+            .configuration
+            .dictionaries()
+            .iter()
+            .any(|dictionary| dictionary.id() == "dictionary.exchange")
+    );
     application
         .export_dictionary_file("dictionary.exchange", output.clone())
         .expect("export dictionary file");
@@ -319,9 +321,11 @@ fn active_ai_task_locks_only_its_target_dictionary_for_writes() {
             "zh-CN",
         ))
         .expect("another dictionary remains writable");
-    assert!(created
-        .configuration
-        .dictionaries()
-        .iter()
-        .any(|dictionary| dictionary.id() == "dictionary.other"));
+    assert!(
+        created
+            .configuration
+            .dictionaries()
+            .iter()
+            .any(|dictionary| dictionary.id() == "dictionary.other")
+    );
 }

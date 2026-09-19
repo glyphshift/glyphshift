@@ -11,8 +11,8 @@ mod target;
 pub use acquisition::{DesktopAcquisitionCancellation, DesktopAcquisitionError};
 #[cfg(test)]
 use bundle::{
-    adapter_inspection_error, parse_documentation_url, parse_hash, AcquisitionSupportFileManifest,
-    AcquisitionWorkerCatalog, AcquisitionWorkerManifest, BundleManifest,
+    AcquisitionSupportFileManifest, AcquisitionWorkerCatalog, AcquisitionWorkerManifest,
+    BundleManifest, adapter_inspection_error, parse_documentation_url, parse_hash,
 };
 pub use bundle::{RuntimeAdapterOption, RuntimeBundle};
 use glyphshift_acquisition::{

@@ -51,13 +51,17 @@ fn one_logical_adapter_resolves_distinct_architecture_artifacts() {
         registry.resolve(&req, &TargetFacts::new("windows", "unknown")),
         Err(RegistryError::UnsupportedArchitecture { .. })
     ));
-    assert!(registry
-        .reload(AdapterPackageSet::new([make("x86", 1), make("x86", 2)]))
-        .is_err());
+    assert!(
+        registry
+            .reload(AdapterPackageSet::new([make("x86", 1), make("x86", 2)]))
+            .is_err()
+    );
     // A rejected reload does not destroy the previously verified x64 variant.
-    assert!(registry
-        .resolve(&req, &TargetFacts::new("windows", "x86_64"))
-        .is_ok());
+    assert!(
+        registry
+            .resolve(&req, &TargetFacts::new("windows", "x86_64"))
+            .is_ok()
+    );
 }
 
 const fn foundation_version() -> AdapterVersion {

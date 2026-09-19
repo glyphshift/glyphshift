@@ -1,9 +1,9 @@
 use glyphshift_domain::{Feature, Generation, RouteProgram};
 use glyphshift_translation::FontRule;
 use glyphshift_workflow::{
-    resolve, AdapterInput, AdapterPlan, CompositionDiagnostic, CompositionEnvironment, Dictionary,
+    AdapterInput, AdapterPlan, CompositionDiagnostic, CompositionEnvironment, Dictionary,
     DictionaryEntry, FontCoverage, ResolveError, SoftwareInput, TargetFontPolicy, Workflow,
-    WorkflowTarget,
+    WorkflowTarget, resolve,
 };
 
 fn software(generation: u64) -> SoftwareInput {
@@ -277,7 +277,12 @@ fn wf_007_empty_default_font_preserves_the_original_font() {
     );
 
     let compiled = result.expect("empty default means keep the original font");
-    assert_eq!(compiled.targets()[0].font_policy().lookup_entry_for_adapter("internal-default", "adapter-gdi", "File"), Some(FontRule::Unchanged));
+    assert_eq!(
+        compiled.targets()[0]
+            .font_policy()
+            .lookup_entry_for_adapter("internal-default", "adapter-gdi", "File"),
+        Some(FontRule::Unchanged)
+    );
 }
 
 #[test]
@@ -380,7 +385,15 @@ fn dictionary_fonts_follow_translation_precedence_and_workflow_mode() {
                 )
                 .with_font_policy(
                     TargetFontPolicy::new(["Workflow Sans"], FontCoverage::AllObservations)
-                        .with_dictionary_override("first", if prefer { vec!["Dictionary Sans"] } else { vec![] }, None),
+                        .with_dictionary_override(
+                            "first",
+                            if prefer {
+                                vec!["Dictionary Sans"]
+                            } else {
+                                vec![]
+                            },
+                            None,
+                        ),
                 )],
             ),
             &[software(1)],
@@ -449,9 +462,11 @@ fn dictionary_fonts_can_be_used_without_a_workflow_default() {
             )],
         ),
         &[software(1)],
-        &[
-            Dictionary::new("first", "zh-CN", [DictionaryEntry::new("File", "First")]),
-        ],
+        &[Dictionary::new(
+            "first",
+            "zh-CN",
+            [DictionaryEntry::new("File", "First")],
+        )],
         &CompositionEnvironment::new(
             [AdapterInput::new(
                 "font",
@@ -518,7 +533,9 @@ fn font_scaling_inherits_independently_and_is_scoped_to_capable_adapters() {
         policy.lookup_entry_for_adapter("internal-default", "family", "File"),
         Some(FontRule::Substitute("Sans".into()))
     );
-    assert!(compiled.targets()[0]
-        .requested_features()
-        .contains(&Feature::FontScale));
+    assert!(
+        compiled.targets()[0]
+            .requested_features()
+            .contains(&Feature::FontScale)
+    );
 }

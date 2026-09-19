@@ -252,14 +252,18 @@ fn iwh_004_adapter_host_supervises_generation_capture_health_and_stop() {
     sink.finish().expect("finish capture owner");
 
     let catalog = CaptureCatalog::read_current(&output).expect("capture checkpoint");
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Window title"));
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Handler removal tail"));
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Window title")
+    );
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Handler removal tail")
+    );
 }
 
 #[test]
@@ -346,10 +350,12 @@ fn iwh_006_supervisor_restarts_a_timed_out_worker_with_a_new_generation() {
     sink.finish().expect("finish capture owner");
 
     let catalog = CaptureCatalog::read_current(&output).expect("capture checkpoint");
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Window title"));
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Window title")
+    );
 }
 
 #[test]

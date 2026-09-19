@@ -7,11 +7,11 @@ mod software;
 mod storage;
 mod workflow;
 
-use dictionary::{dictionary_definition, read_dictionaries, read_dictionary_installations};
 pub use dictionary::{
     DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, DictionaryEntryView,
     DictionaryInstallationSummaryView, DictionaryMetadata, DictionarySummaryView, DictionaryView,
 };
+use dictionary::{dictionary_definition, read_dictionaries, read_dictionary_installations};
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_dictionary_distribution::{
     DictionaryInstallStore, DictionaryInstallationState, FileDictionaryInstallStore,
@@ -21,30 +21,30 @@ use glyphshift_domain::{AdapterId, Feature, Generation, RouteLimits, RouteOperat
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_workflow::{
-    resolve as resolve_workflow, AdapterInput, AdapterPlan, CompiledWorkflow,
-    CompositionEnvironment, Dictionary as WorkflowDictionary,
-    DictionaryEntry as WorkflowDictionaryEntry, FontCoverage as CompiledFontCoverage, ResolveError,
-    SoftwareInput, TargetFontPolicy as CompiledTargetFontPolicy, Workflow as WorkflowDefinition,
-    WorkflowTarget as WorkflowDefinitionTarget,
+    AdapterInput, AdapterPlan, CompiledWorkflow, CompositionEnvironment,
+    Dictionary as WorkflowDictionary, DictionaryEntry as WorkflowDictionaryEntry,
+    FontCoverage as CompiledFontCoverage, ResolveError, SoftwareInput,
+    TargetFontPolicy as CompiledTargetFontPolicy, Workflow as WorkflowDefinition,
+    WorkflowTarget as WorkflowDefinitionTarget, resolve as resolve_workflow,
 };
 use serde::{Deserialize, Serialize};
 pub use snapshot::DesktopSnapshot;
-use software::{runtime_route, DesktopSoftwareArtifact, SoftwareState};
 pub use software::{
     CapabilityView, DesktopRuntimeSpec, ExecutableSelection, SoftwareEdit, SoftwareView,
 };
+use software::{DesktopSoftwareArtifact, SoftwareState, runtime_route};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use storage::{dictionary_path, read_json, safe_identifier, workflow_path, write_atomic};
 use tempfile::NamedTempFile;
-use workflow::{read_workflow_state, read_workflows, WorkflowArtifact};
 pub use workflow::{
     EffectiveTargetIntent, EffectiveWorkflowIntent, FontCoverage, WorkflowActivationSnapshot,
     WorkflowAdapterPlan, WorkflowAdapterStrategy, WorkflowCreate, WorkflowEdit, WorkflowFontPolicy,
     WorkflowSummaryView, WorkflowTargetCreate, WorkflowTargetView, WorkflowView,
 };
+use workflow::{WorkflowArtifact, read_workflow_state, read_workflows};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendError {
@@ -176,9 +176,8 @@ impl DesktopEnvironment {
             .filter_map(|(language, family)| {
                 let language = language.as_ref().trim().to_ascii_lowercase();
                 let family = family.as_ref().trim();
-                (!language.is_empty() && !family.is_empty()).then(|| {
-                    (Box::<str>::from(language), Box::<str>::from(family))
-                })
+                (!language.is_empty() && !family.is_empty())
+                    .then(|| (Box::<str>::from(language), Box::<str>::from(family)))
             })
             .collect();
     }
@@ -238,8 +237,6 @@ pub struct DesktopBackend {
 }
 
 impl DesktopBackend {
-
-
     /// The dictionary directory of this workspace, including custom data roots.
     pub fn dictionary_directory(&self) -> PathBuf {
         self.root.join("dictionaries")

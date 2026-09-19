@@ -118,11 +118,7 @@ impl DesktopAiState {
                 None => TranslationItem::untranslated(item_id, source),
             }
             .with_translation_context(context, disambiguation);
-            if ignored {
-                item.ignored()
-            } else {
-                item
-            }
+            if ignored { item.ignored() } else { item }
         });
         self.plan_request(
             profile_id.as_deref(),
@@ -439,7 +435,10 @@ impl DesktopApplication {
             .cloned()
             .map_err(|_| CommandError::new("dictionary.not_found"))?;
         let snapshot = self.probe_entries_snapshot(&summary)?;
-        let rows = self.probe_runs.entries_snapshot(run_id, &snapshot).map_err(probe::probe_run_error)?;
+        let rows = self
+            .probe_runs
+            .entries_snapshot(run_id, &snapshot)
+            .map_err(probe::probe_run_error)?;
         let mut row_number = 0_usize;
         let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
         let mut items = Vec::with_capacity(rows.len());
@@ -456,20 +455,41 @@ impl DesktopApplication {
                 .and_then(|context| context.disambiguation())
                 .map(Box::<str>::from);
             let sources = resolver.collection_sources(row.source());
-            if row.state() == glyphshift_capture::ProbeEntryState::Ignored && sources != vec![Box::<str>::from(row.source())] { continue; }
+            if row.state() == glyphshift_capture::ProbeEntryState::Ignored
+                && sources != vec![Box::<str>::from(row.source())]
+            {
+                continue;
+            }
             for source in sources {
-                if !seen.insert(source.clone()) { continue; }
+                if !seen.insert(source.clone()) {
+                    continue;
+                }
                 row_number = row_number.saturating_add(1);
                 let item_id = format!("probe-row-{row_number}");
-                let translation = if source.as_ref() == row.source() { row.translation() }
-                    else { dictionary.entries().iter().find(|entry| entry.source() == source.as_ref()).map_or("", |entry| entry.translation()) };
+                let translation = if source.as_ref() == row.source() {
+                    row.translation()
+                } else {
+                    dictionary
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.source() == source.as_ref())
+                        .map_or("", |entry| entry.translation())
+                };
                 let item = if translation.trim().is_empty() {
                     TranslationItem::untranslated(item_id, source)
                 } else {
                     TranslationItem::translated(item_id, source, translation)
                 }
                 .with_translation_context(context.clone(), disambiguation.clone());
-                items.push(if row.state() == glyphshift_capture::ProbeEntryState::Ignored || row.has_translation_conflict() { item.ignored() } else { item });
+                items.push(
+                    if row.state() == glyphshift_capture::ProbeEntryState::Ignored
+                        || row.has_translation_conflict()
+                    {
+                        item.ignored()
+                    } else {
+                        item
+                    },
+                );
             }
         }
         Ok(TranslationPlanRequest::new(
@@ -498,10 +518,18 @@ impl DesktopApplication {
             return Err(CommandError::new("ai.writeback_revision_invalid"));
         }
         let dictionary_snapshot = self.probe_entries_snapshot(&summary)?;
-        let excluded_sources = self.probe_runs.excluded_sources_for(
-            &request.run_id, &dictionary_snapshot,
-            &request.results.iter().map(|result| Box::<str>::from(result.source.trim())).collect::<Vec<_>>(),
-        ).map_err(probe::probe_run_error)?;
+        let excluded_sources = self
+            .probe_runs
+            .excluded_sources_for(
+                &request.run_id,
+                &dictionary_snapshot,
+                &request
+                    .results
+                    .iter()
+                    .map(|result| Box::<str>::from(result.source.trim()))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(probe::probe_run_error)?;
         let resolver = crate::entry_resolution::EntryResolver::new(&self.backend, &summary);
         let mut observed_sources = BTreeSet::new();
         let mut protected_sources = BTreeSet::new();
@@ -556,8 +584,11 @@ impl DesktopApplication {
                 .entries()
                 .iter()
                 .any(|entry| entry.source() == source && !entry.translation().trim().is_empty());
-            if already_completed || protected_sources.contains(source) || excluded_sources.contains(source)
-                || resolver.collection_sources(source) != vec![Box::<str>::from(source)] {
+            if already_completed
+                || protected_sources.contains(source)
+                || excluded_sources.contains(source)
+                || resolver.collection_sources(source) != vec![Box::<str>::from(source)]
+            {
                 skipped_count = skipped_count.saturating_add(1);
             } else {
                 updates.push(DictionaryEntryCreate::new(source, translation));
@@ -679,27 +710,29 @@ fn sync_translation_task(
 }
 
 fn monitor_translation_task(app: tauri::AppHandle, job_id: TranslationJobId) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        let application_state = app.state::<Mutex<DesktopApplication>>();
-        let ai_state = app.state::<Mutex<DesktopAiState>>();
-        let Ok(mut application) = application_state.lock() else {
-            return;
-        };
-        let Ok(mut state) = ai_state.lock() else {
-            return;
-        };
-        if state
-            .active_task
-            .as_ref()
-            .is_none_or(|active| active.job_id != job_id)
-        {
-            return;
-        }
-        match sync_translation_task(&mut application, &mut state) {
-            Ok(Some(task)) if task.job.status().is_terminal() => return,
-            Ok(Some(_)) => {}
-            Ok(None) | Err(_) => return,
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let application_state = app.state::<Mutex<DesktopApplication>>();
+            let ai_state = app.state::<Mutex<DesktopAiState>>();
+            let Ok(mut application) = application_state.lock() else {
+                return;
+            };
+            let Ok(mut state) = ai_state.lock() else {
+                return;
+            };
+            if state
+                .active_task
+                .as_ref()
+                .is_none_or(|active| active.job_id != job_id)
+            {
+                return;
+            }
+            match sync_translation_task(&mut application, &mut state) {
+                Ok(Some(task)) if task.job.status().is_terminal() => return,
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => return,
+            }
         }
     });
 }
@@ -800,7 +833,13 @@ pub(super) fn desktop_plan_ai_translation(
     state: State<'_, Mutex<DesktopAiState>>,
     settings: State<'_, Mutex<AppSettingsStore>>,
 ) -> Result<TranslationPlan, CommandError> {
-    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
+    let policy = settings
+        .lock()
+        .map_err(|_| ai_state_unavailable())?
+        .current()
+        .map_err(|_| ai_state_unavailable())?
+        .text_filter_policy()
+        .clone();
     let mut ai = state.lock().map_err(|_| ai_state_unavailable())?;
     ai.filter_policy = policy;
     ai.plan_translation(request)
@@ -817,7 +856,13 @@ pub(super) fn desktop_plan_probe_ai_translation(
         .lock()
         .map_err(|_| workspace_unavailable())?
         .probe_ai_plan_request(&request.run_id)?;
-    let policy = settings.lock().map_err(|_| ai_state_unavailable())?.current().map_err(|_| ai_state_unavailable())?.text_filter_policy().clone();
+    let policy = settings
+        .lock()
+        .map_err(|_| ai_state_unavailable())?
+        .current()
+        .map_err(|_| ai_state_unavailable())?
+        .text_filter_policy()
+        .clone();
     let mut ai = state.lock().map_err(|_| ai_state_unavailable())?;
     ai.filter_policy = policy;
     ai.plan_request(request.profile_id.as_deref(), plan_request)
@@ -907,7 +952,9 @@ pub(super) fn desktop_ai_translation_tasks(
     })
 }
 
-pub(super) fn source_filter_cache() -> &'static Mutex<glyphshift_ai_translation::SourceFilterCache> {
-    static CACHE: std::sync::OnceLock<Mutex<glyphshift_ai_translation::SourceFilterCache>> = std::sync::OnceLock::new();
+pub(super) fn source_filter_cache() -> &'static Mutex<glyphshift_ai_translation::SourceFilterCache>
+{
+    static CACHE: std::sync::OnceLock<Mutex<glyphshift_ai_translation::SourceFilterCache>> =
+        std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(Default::default()))
 }

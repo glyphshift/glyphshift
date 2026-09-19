@@ -54,10 +54,12 @@ fn one_x64_session_translates_x86_and_x64_with_one_adapter_identity() {
         .find(|option| option.id() == TEST_ADAPTER_ID)
         .unwrap();
     assert!(option.architectures().iter().any(|a| a.as_ref() == "x86"));
-    assert!(option
-        .architectures()
-        .iter()
-        .any(|a| a.as_ref() == "x86_64"));
+    assert!(
+        option
+            .architectures()
+            .iter()
+            .any(|a| a.as_ref() == "x86_64")
+    );
     let mut runtime = bundle.discover(id.clone(), &spec).unwrap();
     let targets = runtime
         .targets()
@@ -109,14 +111,18 @@ fn one_x64_session_translates_x86_and_x64_with_one_adapter_identity() {
     assert_eq!(target64.render(), baseline64);
     assert_eq!(target64.render_command("render-child render"), baseline32);
     let catalog = CaptureCatalog::read_current(&capture_path).unwrap();
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Only x86"));
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Only x64"));
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Only x86")
+    );
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Only x64")
+    );
     // The controlling processes can be replaced without changing either target process.
     drop(runtime);
     let mut reconnected = bundle.discover(id, &spec).unwrap();

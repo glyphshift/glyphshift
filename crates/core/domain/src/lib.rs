@@ -7,8 +7,8 @@ mod source_text;
 pub use source_text::SourceTextPolicy;
 mod text_run;
 pub use text_run::{
-    ResolvedText, TextRunEvent, TextRunKey, TextRunOutcome, TextRunResolver, TextUse,
-    MAX_TEXT_RUN_UNITS,
+    MAX_TEXT_RUN_UNITS, ResolvedText, TextRunEvent, TextRunKey, TextRunOutcome, TextRunResolver,
+    TextUse,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -232,7 +232,6 @@ impl TranslationContext {
     pub const fn plural_n(&self) -> Option<i32> {
         self.plural_n
     }
-
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

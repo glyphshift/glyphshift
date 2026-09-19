@@ -194,7 +194,10 @@ fn microsoft_translator_profile_defaults_to_nmt_and_preserves_region_options() {
     assert_eq!(resolved.max_items_per_request(), 1_000);
     assert_eq!(resolved.effective_max_items_per_request(), 1_000);
     assert_eq!(resolved.provider_options().region(), Some("eastasia"));
-    assert_eq!(resolved.translation_prompt(), glyphshift_ai_translation::DEFAULT_TRANSLATION_PROMPT.trim());
+    assert_eq!(
+        resolved.translation_prompt(),
+        glyphshift_ai_translation::DEFAULT_TRANSLATION_PROMPT.trim()
+    );
 
     catalog
         .save_profile(
@@ -272,12 +275,18 @@ fn google_and_baidu_translation_profiles_keep_provider_specific_credentials_and_
         )
         .expect("save Baidu Translate profile");
     assert_eq!(baidu.model_id(), "general");
-    assert_eq!(baidu.provider_options().app_id(), Some("synthetic-baidu-app"));
+    assert_eq!(
+        baidu.provider_options().app_id(),
+        Some("synthetic-baidu-app")
+    );
     let resolved = catalog
         .resolve_profile("profile.baidu-translate")
         .expect("resolve Baidu Translate profile");
     assert_eq!(resolved.max_concurrency(), 1);
-    assert_eq!(resolved.provider_options().app_id(), Some("synthetic-baidu-app"));
+    assert_eq!(
+        resolved.provider_options().app_id(),
+        Some("synthetic-baidu-app")
+    );
 }
 
 #[test]

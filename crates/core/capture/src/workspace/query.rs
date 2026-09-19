@@ -386,31 +386,24 @@ impl ProbeRunStore {
             .iter()
             .map(|entry| (entry.source.as_ref(), entry.translation.as_ref()))
             .collect::<BTreeMap<_, _>>();
-        let mut aggregate = BTreeMap::<
-            (Box<str>, Option<CaptureTranslationContext>),
-            ProbeEntryRow,
-        >::new();
+        let mut aggregate =
+            BTreeMap::<(Box<str>, Option<CaptureTranslationContext>), ProbeEntryRow>::new();
         let observations = self.read_observations(document.summary.id()).ok();
         if let Some(observations) = &observations {
             for entry in observations.entries() {
-                let row_key = (
-                    entry.source().into(),
-                    entry.translation_context().cloned(),
-                );
-                let row = aggregate
-                    .entry(row_key)
-                    .or_insert_with(|| ProbeEntryRow {
-                        source: entry.source().into(),
-                        translation: "".into(),
-                        translation_context: entry.translation_context().cloned(),
-                        state: ProbeEntryState::Pending,
-                        adapter_ids: Vec::new(),
-                        count: 0,
-                        first_seen_ms: entry.first_seen_ms(),
-                        last_seen_ms: entry.last_seen_ms(),
-                        translation_variants: Vec::new(),
-                        resolution: None,
-                    });
+                let row_key = (entry.source().into(), entry.translation_context().cloned());
+                let row = aggregate.entry(row_key).or_insert_with(|| ProbeEntryRow {
+                    source: entry.source().into(),
+                    translation: "".into(),
+                    translation_context: entry.translation_context().cloned(),
+                    state: ProbeEntryState::Pending,
+                    adapter_ids: Vec::new(),
+                    count: 0,
+                    first_seen_ms: entry.first_seen_ms(),
+                    last_seen_ms: entry.last_seen_ms(),
+                    translation_variants: Vec::new(),
+                    resolution: None,
+                });
                 row.adapter_ids.push(entry.adapter_id().into());
                 row.count = row.count.saturating_add(entry.count());
                 row.first_seen_ms = row.first_seen_ms.min(entry.first_seen_ms());
@@ -451,20 +444,18 @@ impl ProbeRunStore {
             .filter(|_| document.summary.workflow_id.is_none())
         {
             let row_key = (entry.source.clone(), None);
-            aggregate
-                .entry(row_key)
-                .or_insert_with(|| ProbeEntryRow {
-                    source: entry.source.clone(),
-                    translation: entry.translation.clone(),
-                    translation_context: None,
-                    state: ProbeEntryState::Unobserved,
-                    adapter_ids: Vec::new(),
-                    count: 0,
-                    first_seen_ms: 0,
-                    last_seen_ms: 0,
-                    translation_variants: Vec::new(),
-                    resolution: None,
-                });
+            aggregate.entry(row_key).or_insert_with(|| ProbeEntryRow {
+                source: entry.source.clone(),
+                translation: entry.translation.clone(),
+                translation_context: None,
+                state: ProbeEntryState::Unobserved,
+                adapter_ids: Vec::new(),
+                count: 0,
+                first_seen_ms: 0,
+                last_seen_ms: 0,
+                translation_variants: Vec::new(),
+                resolution: None,
+            });
         }
         let keys = self.source_keys(document, observations.as_deref());
         let excluded = dictionary
@@ -476,10 +467,8 @@ impl ProbeRunStore {
         if keys.common == glyphshift_domain::SourceTextPolicy::Exact && keys.normalized.is_empty() {
             return Ok(aggregate.into_values().collect());
         }
-        let mut grouped = BTreeMap::<
-            (Box<str>, Option<CaptureTranslationContext>),
-            ProbeEntryRow,
-        >::new();
+        let mut grouped =
+            BTreeMap::<(Box<str>, Option<CaptureTranslationContext>), ProbeEntryRow>::new();
         for mut row in aggregate.into_values() {
             row.source = keys.key(&row.source).into();
             let key = (row.source.clone(), row.translation_context.clone());

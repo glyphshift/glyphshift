@@ -1,6 +1,6 @@
 use glyphshift_adapter_gdi::{
-    descriptor, draw_text_descriptor, text_out_descriptor, GdiCall, GdiFont, GdiGlyphMap,
-    GdiInlineAdapter, ADAPTER_ID, DRAW_TEXT_ADAPTER_ID, ETO_GLYPH_INDEX, TEXT_OUT_ADAPTER_ID,
+    ADAPTER_ID, DRAW_TEXT_ADAPTER_ID, ETO_GLYPH_INDEX, GdiCall, GdiFont, GdiGlyphMap,
+    GdiInlineAdapter, TEXT_OUT_ADAPTER_ID, descriptor, draw_text_descriptor, text_out_descriptor,
 };
 use glyphshift_adapter_sdk::{ActivationGrant, AdapterError, AdapterVersion};
 use glyphshift_domain::{

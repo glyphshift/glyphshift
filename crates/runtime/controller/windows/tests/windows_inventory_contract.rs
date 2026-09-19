@@ -46,9 +46,11 @@ fn ctl_windows_001_discovers_a_real_process_without_exposing_its_process_id() {
 
     assert_eq!(target.operating_system, "windows");
     assert!(["x86", "x86_64"].contains(&target.architecture.as_str()));
-    assert!(!target
-        .display_name
-        .contains(&std::process::id().to_string()));
+    assert!(
+        !target
+            .display_name
+            .contains(&std::process::id().to_string())
+    );
     assert_ne!(target.token, format!("process:{}", std::process::id()));
 }
 
@@ -71,31 +73,37 @@ fn ctl_windows_002_returns_only_configured_adapter_features_for_a_discovered_tar
 #[test]
 fn ctl_windows_003_rejects_paths_and_unknown_target_tokens() {
     let mut controller = WindowsController::new();
-    assert!(controller
-        .configure(
-            "org.example.windows-target",
-            &WireControllerConfiguration {
-                executable_names: Vec::new(),
-                executable_paths: vec!["relative/program.exe".into()],
-                descendant_executable_names: Vec::new(),
-                adapter_requirements: Vec::new(),
-            },
-        )
-        .is_err());
-    assert!(controller
-        .configure(
-            "org.example.windows-target",
-            &WireControllerConfiguration {
-                executable_names: vec!["folder/program.exe".into()],
-                executable_paths: Vec::new(),
-                descendant_executable_names: Vec::new(),
-                adapter_requirements: Vec::new(),
-            },
-        )
-        .is_err());
-    assert!(configured_controller()
-        .prepare("target:missing", &[WireFeature::TextReplace])
-        .is_err());
+    assert!(
+        controller
+            .configure(
+                "org.example.windows-target",
+                &WireControllerConfiguration {
+                    executable_names: Vec::new(),
+                    executable_paths: vec!["relative/program.exe".into()],
+                    descendant_executable_names: Vec::new(),
+                    adapter_requirements: Vec::new(),
+                },
+            )
+            .is_err()
+    );
+    assert!(
+        controller
+            .configure(
+                "org.example.windows-target",
+                &WireControllerConfiguration {
+                    executable_names: vec!["folder/program.exe".into()],
+                    executable_paths: Vec::new(),
+                    descendant_executable_names: Vec::new(),
+                    adapter_requirements: Vec::new(),
+                },
+            )
+            .is_err()
+    );
+    assert!(
+        configured_controller()
+            .prepare("target:missing", &[WireFeature::TextReplace])
+            .is_err()
+    );
 }
 
 #[test]
@@ -167,9 +175,11 @@ fn ctl_windows_005_mints_a_process_instance_grant_only_for_an_authorized_target(
         .expect("process instance payload");
     assert_eq!(process_id.parse::<u32>(), Ok(std::process::id()));
     assert!(started_at.parse::<u64>().is_ok_and(|value| value > 0));
-    assert!(controller
-        .authorize_worker_target("target:missing")
-        .is_err());
+    assert!(
+        controller
+            .authorize_worker_target("target:missing")
+            .is_err()
+    );
 }
 
 #[test]

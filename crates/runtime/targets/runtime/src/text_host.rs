@@ -2,7 +2,7 @@
 use super::*;
 use glyphshift_adapter_native_abi::*;
 use glyphshift_domain::{
-    TextRunEvent, TextRunKey, TextRunOutcome, TextUse, TranslationContext, MAX_TEXT_RUN_UNITS,
+    MAX_TEXT_RUN_UNITS, TextRunEvent, TextRunKey, TextRunOutcome, TextUse, TranslationContext,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -152,7 +152,10 @@ pub(super) extern "C" fn decide_text(
         _ => return reject_event(context),
     };
     if translation_context.is_some()
-        && !matches!(event.kind, TEXT_EVENT_DRAW | TEXT_EVENT_RETAINED | TEXT_EVENT_OBSERVE)
+        && !matches!(
+            event.kind,
+            TEXT_EVENT_DRAW | TEXT_EVENT_RETAINED | TEXT_EVENT_OBSERVE
+        )
     {
         return reject_event(context);
     }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::acquisition::{map_acquisition_host_error, source_policy_for, AcquisitionExecutor};
+use crate::acquisition::{AcquisitionExecutor, map_acquisition_host_error, source_policy_for};
 use glyphshift_acquisition::{
     AcquisitionAdapter, AcquisitionCandidate, AcquisitionError, DesktopRect, Granularity,
     InteractiveTextAcquisition, Provenance,

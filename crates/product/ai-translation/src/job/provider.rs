@@ -1,7 +1,7 @@
 use crate::ResolvedAiProfile;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 50;
 

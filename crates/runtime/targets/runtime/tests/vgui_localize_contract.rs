@@ -152,11 +152,13 @@ fn native_localize_uses_runtime_publications_and_retains_old_pointers() {
             "the localization table is never edited"
         );
         let records = query_observations().unwrap();
-        assert!(records
-            .records()
-            .iter()
-            .any(|record| record.source() == "Open"
-                && record.adapter_id() == "windows.vgui.localize-query"));
+        assert!(
+            records
+                .records()
+                .iter()
+                .any(|record| record.source() == "Open"
+                    && record.adapter_id() == "windows.vgui.localize-query")
+        );
         deactivate_runtime().unwrap();
         assert_eq!(text((fixture.name)(name)), "Open");
         assert_eq!(text((fixture.value)(0)), "Open");
@@ -268,13 +270,15 @@ fn native_localize_rejects_unproved_query_abi() {
         let table = (fixture.table)();
         let descriptor = LoadedNativeAdapter::inspect(&package()).unwrap();
         let adapter = LoadedNativeAdapter::load(&package(), &descriptor).unwrap();
-        assert!(adapter
-            .activate(
-                host(),
-                [Feature::TextObserve, Feature::TextReplace],
-                [Feature::TextObserve, Feature::TextReplace]
-            )
-            .is_err());
+        assert!(
+            adapter
+                .activate(
+                    host(),
+                    [Feature::TextObserve, Feature::TextReplace],
+                    [Feature::TextObserve, Feature::TextReplace]
+                )
+                .is_err()
+        );
         assert_eq!(
             (fixture.table)(),
             table,
@@ -380,12 +384,16 @@ fn native_localize_gates_reentrancy_errors_generations_and_inflight_calls() {
         let adapter = LoadedNativeAdapter::load(&package(), &descriptor).unwrap();
         let host = host();
         let features = [Feature::TextObserve, Feature::TextReplace];
-        assert!(adapter
-            .activate(host, features, [Feature::TextObserve])
-            .is_err());
-        assert!(adapter
-            .activate(host, [Feature::FontSubstitute], [Feature::FontSubstitute])
-            .is_err());
+        assert!(
+            adapter
+                .activate(host, features, [Feature::TextObserve])
+                .is_err()
+        );
+        assert!(
+            adapter
+                .activate(host, [Feature::FontSubstitute], [Feature::FontSubstitute])
+                .is_err()
+        );
         adapter
             .activate(host, [Feature::TextObserve], features)
             .unwrap();

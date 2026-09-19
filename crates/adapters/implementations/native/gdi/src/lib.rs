@@ -1,13 +1,13 @@
 //! First-party GDI inline-render Adapter.
 
 use glyphshift_adapter_sdk::{
-    authorize, ActivationGrant, AdapterDescriptor, AdapterError, AdapterVersion,
+    ActivationGrant, AdapterDescriptor, AdapterError, AdapterVersion, authorize,
 };
 use glyphshift_domain::{
     AdapterId, ApplyModel, Feature, FontDecision, Placement, RenderDecision, TextDecision,
 };
 use std::collections::BTreeMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub const ETO_GLYPH_INDEX: u32 = 0x0010;
 const MAX_TEXT_UNITS: usize = 16_384;

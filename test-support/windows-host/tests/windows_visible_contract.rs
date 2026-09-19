@@ -2,7 +2,7 @@
 
 use glyphshift_domain::{FontDecision, Generation, RenderDecision, TextDecision};
 use glyphshift_windows_host::{
-    render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus, PixelEvidence,
+    PixelEvidence, render_gdi_glyph_indices, render_gdi_unicode, render_gdiplus,
 };
 
 fn keep() -> RenderDecision {

@@ -2,19 +2,19 @@
 
 use glyphshift_adapter_gdi::DRAW_TEXT_ADAPTER_ID;
 use glyphshift_adapter_gdi_native_support::{
-    commit_activation, decide, is_active, prepare_activation, read_text, with_replacement_font,
-    CallbackGuard, SUPPORTED_FEATURES,
+    CallbackGuard, SUPPORTED_FEATURES, commit_activation, decide, is_active, prepare_activation,
+    read_text, with_replacement_font,
 };
 use glyphshift_adapter_native_abi::{
-    NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeNegotiationV1, NativeRuntimeHostV1,
-    ARCH_X86, ARCH_X86_64, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_OK,
+    ARCH_X86, ARCH_X86_64, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeNegotiationV1,
+    NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_OK,
 };
 use retour::GenericDetour;
 use std::sync::OnceLock;
-use windows::core::{s, w};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::HDC;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::core::{s, w};
 
 const DT_MODIFYSTRING: u32 = 0x0001_0000;
 

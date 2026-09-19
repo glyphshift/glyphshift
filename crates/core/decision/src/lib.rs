@@ -191,17 +191,29 @@ impl DecisionEngine {
         state: &mut DecisionState,
     ) -> DecisionResult {
         let mut result = self.decide_exact(observation, route, snapshot, font_policy, state);
-        if matches!(result.trace.status, DecisionTraceStatus::NoMatch | DecisionTraceStatus::Matched)
-            && observation
-                .translation_context()
-                .is_none_or(|context| context.plural_n().is_none())
+        if matches!(
+            result.trace.status,
+            DecisionTraceStatus::NoMatch | DecisionTraceStatus::Matched
+        ) && observation
+            .translation_context()
+            .is_none_or(|context| context.plural_n().is_none())
         {
             for (location, rules) in snapshot.dictionary_rules() {
-                if rules.matching_rule_index(observation.source_text()).is_none() { continue; }
-                let text = rules.replace(observation.source_text(), |source|
-                    snapshot.lookup_for_adapter(location, observation.adapter_id(), source));
+                if rules
+                    .matching_rule_index(observation.source_text())
+                    .is_none()
+                {
+                    continue;
+                }
+                let text = rules.replace(observation.source_text(), |source| {
+                    snapshot.lookup_for_adapter(location, observation.adapter_id(), source)
+                });
                 result.decision.text = text.map_or(TextDecision::Keep, TextDecision::Replace);
-                result.trace.text = if matches!(result.decision.text, TextDecision::Keep) { TextTrace::Unmatched } else { TextTrace::Replaced };
+                result.trace.text = if matches!(result.decision.text, TextDecision::Keep) {
+                    TextTrace::Unmatched
+                } else {
+                    TextTrace::Replaced
+                };
                 result.trace.status = DecisionTraceStatus::Matched;
                 break;
             }
@@ -264,12 +276,7 @@ impl DecisionEngine {
             }
             match operator {
                 RouteOperator::Direct { location } => {
-                    if let Some(matched) = decide_at(
-                        location,
-                        observation,
-                        snapshot,
-                        font_policy,
-                    ) {
+                    if let Some(matched) = decide_at(location, observation, snapshot, font_policy) {
                         return result(
                             matched.decision,
                             DecisionTraceStatus::Matched,
@@ -290,12 +297,9 @@ impl DecisionEngine {
                                 vec![DecisionDiagnostic::ExecutionLimitExceeded],
                             );
                         }
-                        if let Some(matched) = decide_at(
-                            location,
-                            observation,
-                            snapshot,
-                            font_policy,
-                        ) {
+                        if let Some(matched) =
+                            decide_at(location, observation, snapshot, font_policy)
+                        {
                             return result(
                                 matched.decision,
                                 DecisionTraceStatus::Matched,

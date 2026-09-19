@@ -1,6 +1,6 @@
 #![cfg(windows)]
 use glyphshift_adapter_native_abi::{
-    font_scale_bits, NativeDecisionV1, NativeRuntimeHostV1, STATUS_OK,
+    NativeDecisionV1, NativeRuntimeHostV1, STATUS_OK, font_scale_bits,
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_domain::Feature;

@@ -1,6 +1,5 @@
 use crate::{
-    AiProviderProtocol, AiTranslation, ResolvedAiProfile, TranslationCandidate,
-    TranslationPlan,
+    AiProviderProtocol, AiTranslation, ResolvedAiProfile, TranslationCandidate, TranslationPlan,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -10,12 +9,12 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 mod model;
 mod provider;
 
+pub(crate) use model::JobCell;
+use model::JobState;
 pub use model::{
     CancellationOutcome, TranslationBatchSnapshot, TranslationBatchStatus, TranslationJobError,
     TranslationJobId, TranslationJobSnapshot, TranslationJobStatus, ValidatedTranslation,
 };
-pub(crate) use model::JobCell;
-use model::JobState;
 pub use provider::*;
 
 impl AiTranslation {
@@ -199,60 +198,63 @@ fn run_job(
             let token = &token;
             let job_batches = &job_batches;
             let next_batch = &next_batch;
-            scope.spawn(move || loop {
-                if token.is_cancelled() {
-                    return;
-                }
-                let batch_index = next_batch.fetch_add(1, Ordering::AcqRel);
-                let Some(candidates) = job_batches.get(batch_index) else {
-                    return;
-                };
-                if !mark_batch_running(cell, batch_index, 1) {
-                    return;
-                }
-                let response = translate_batch(
-                    provider.as_ref(),
-                    profile,
-                    plan,
-                    candidates,
-                    token,
-                    |status, attempt_count, error| {
-                        update_batch_attempt(cell, batch_index, status, attempt_count, error);
-                    },
-                );
-                if token.is_cancelled() {
-                    return;
-                }
-                let Ok(mut state) = cell.state.lock() else {
-                    return;
-                };
-                let elapsed_ms = state.elapsed_ms();
-                let Some(batch) = state.snapshot.batches.get_mut(batch_index) else {
-                    return;
-                };
-                batch.elapsed_ms = elapsed_ms.saturating_sub(batch.started_after_ms.unwrap_or(0));
-                match response {
-                    Ok(results) => {
-                        batch.status = TranslationBatchStatus::Completed;
-                        batch.usage = results.usage;
-                        state.snapshot.completed_count += results.translations.len();
-                        state.snapshot.finished_batches += 1;
-                        if let Some(usage) = results.usage {
-                            state
-                                .snapshot
-                                .usage
-                                .get_or_insert_with(ProviderUsage::default)
-                                .merge(usage);
-                        }
-                        state.snapshot.results.extend(results.translations);
+            scope.spawn(move || {
+                loop {
+                    if token.is_cancelled() {
+                        return;
                     }
-                    Err(error) => {
-                        batch.status = TranslationBatchStatus::Failed;
-                        batch.last_error = Some(error.clone());
-                        state.snapshot.failed_count += candidates.len();
-                        state.snapshot.finished_batches += 1;
-                        state.snapshot.failed_batches += 1;
-                        state.snapshot.errors.push(error);
+                    let batch_index = next_batch.fetch_add(1, Ordering::AcqRel);
+                    let Some(candidates) = job_batches.get(batch_index) else {
+                        return;
+                    };
+                    if !mark_batch_running(cell, batch_index, 1) {
+                        return;
+                    }
+                    let response = translate_batch(
+                        provider.as_ref(),
+                        profile,
+                        plan,
+                        candidates,
+                        token,
+                        |status, attempt_count, error| {
+                            update_batch_attempt(cell, batch_index, status, attempt_count, error);
+                        },
+                    );
+                    if token.is_cancelled() {
+                        return;
+                    }
+                    let Ok(mut state) = cell.state.lock() else {
+                        return;
+                    };
+                    let elapsed_ms = state.elapsed_ms();
+                    let Some(batch) = state.snapshot.batches.get_mut(batch_index) else {
+                        return;
+                    };
+                    batch.elapsed_ms =
+                        elapsed_ms.saturating_sub(batch.started_after_ms.unwrap_or(0));
+                    match response {
+                        Ok(results) => {
+                            batch.status = TranslationBatchStatus::Completed;
+                            batch.usage = results.usage;
+                            state.snapshot.completed_count += results.translations.len();
+                            state.snapshot.finished_batches += 1;
+                            if let Some(usage) = results.usage {
+                                state
+                                    .snapshot
+                                    .usage
+                                    .get_or_insert_with(ProviderUsage::default)
+                                    .merge(usage);
+                            }
+                            state.snapshot.results.extend(results.translations);
+                        }
+                        Err(error) => {
+                            batch.status = TranslationBatchStatus::Failed;
+                            batch.last_error = Some(error.clone());
+                            state.snapshot.failed_count += candidates.len();
+                            state.snapshot.finished_batches += 1;
+                            state.snapshot.failed_batches += 1;
+                            state.snapshot.errors.push(error);
+                        }
                     }
                 }
             });

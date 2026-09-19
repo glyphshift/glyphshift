@@ -14,10 +14,9 @@ use glyphshift_target_runtime::{
     update_publication,
 };
 use glyphshift_target_runtime_contract::{
-    NativeAdapterDeployment, RuntimeCommandV1, RuntimeDiagnosticsControl,
+    MAX_RUNTIME_TRACE_BYTES, NativeAdapterDeployment, RuntimeCommandV1, RuntimeDiagnosticsControl,
     RuntimeDiagnosticsQueryV1, RuntimeTextOutcome, RuntimeTraceBatch, RuntimeTraceStatus,
-    TargetRuntimeDeployment, MAX_RUNTIME_TRACE_BYTES, STATUS_TARGET_RUNTIME_OK,
-    STATUS_TARGET_RUNTIME_UPDATE_REJECTED,
+    STATUS_TARGET_RUNTIME_OK, STATUS_TARGET_RUNTIME_UPDATE_REJECTED, TargetRuntimeDeployment,
 };
 use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 use glyphshift_windows_host::{render_gdiplus, render_gdiplus_text, render_raw_gdi_unicode};
@@ -29,7 +28,7 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Gdi::{
-    GetUpdateRect, RedrawWindow, ValidateRect, RDW_NOCHILDREN, RDW_NOFRAME, RDW_VALIDATE,
+    GetUpdateRect, RDW_NOCHILDREN, RDW_NOFRAME, RDW_VALIDATE, RedrawWindow, ValidateRect,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, WS_OVERLAPPED, WS_VISIBLE,
@@ -518,10 +517,12 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
         excluded_trace.records()[0].text(),
         RuntimeTextOutcome::Unmatched
     );
-    assert!(query_diagnostics()
-        .expect("trace query drains the bounded window")
-        .records()
-        .is_empty());
+    assert!(
+        query_diagnostics()
+            .expect("trace query drains the bounded window")
+            .records()
+            .is_empty()
+    );
 
     redraw_window.validate();
     update_publication(scoped_publication(

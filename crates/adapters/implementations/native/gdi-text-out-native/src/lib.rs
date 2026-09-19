@@ -2,19 +2,19 @@
 
 use glyphshift_adapter_gdi::TEXT_OUT_ADAPTER_ID;
 use glyphshift_adapter_gdi_native_support::{
-    commit_activation, decide, is_active, prepare_activation, read_text, with_replacement_font,
-    CallbackGuard, SUPPORTED_FEATURES,
+    CallbackGuard, SUPPORTED_FEATURES, commit_activation, decide, is_active, prepare_activation,
+    read_text, with_replacement_font,
 };
 use glyphshift_adapter_native_abi::{
-    NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeNegotiationV1, NativeRuntimeHostV1,
-    ARCH_X86, ARCH_X86_64, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_OK,
+    ARCH_X86, ARCH_X86_64, NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeNegotiationV1,
+    NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_ACTIVATION_FAILED, STATUS_OK,
 };
 use retour::GenericDetour;
 use std::sync::OnceLock;
-use windows::core::{s, w};
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::Graphics::Gdi::HDC;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::core::{s, w};
 
 type FnTextOutW = unsafe extern "system" fn(HDC, i32, i32, *const u16, i32) -> BOOL;
 

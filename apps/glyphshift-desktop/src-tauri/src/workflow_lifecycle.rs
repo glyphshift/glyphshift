@@ -17,19 +17,50 @@ pub(super) struct WorkflowLifecycle {
 }
 
 impl DesktopApplication {
-    pub(super) fn project_workflow_runtime(&self, mut runtime: WorkflowRuntimeView) -> WorkflowRuntimeView {
-        let enabled = self.backend.enabled_workflow_ids().iter().any(|id| id == &runtime.workflow_id);
+    pub(super) fn project_workflow_runtime(
+        &self,
+        mut runtime: WorkflowRuntimeView,
+    ) -> WorkflowRuntimeView {
+        let enabled = self
+            .backend
+            .enabled_workflow_ids()
+            .iter()
+            .any(|id| id == &runtime.workflow_id);
         let active = runtime.targets.iter().any(|target| target.active);
-        let actionable = runtime.errors.values().any(|error| error.code() != "runtime.target_not_found");
+        let actionable = runtime
+            .errors
+            .values()
+            .any(|error| error.code() != "runtime.target_not_found");
         let phase = if !enabled {
-            if active || actionable { "stop_failed" } else { "stopped" }
-        } else if actionable { "failed" }
-        else if active { "running" }
-        else { "waiting" };
-        let collect_new_sources = self.backend.workflow(&runtime.workflow_id).ok()
-            .is_some_and(|workflow| workflow.targets().iter().any(|target| target.collection_enabled()));
-        runtime.lifecycle = Some(WorkflowLifecycle { phase, enabled, collect_new_sources,
-            checked_at_ms: runtime.checked_at_ms, revision: runtime.revision });
+            if active || actionable {
+                "stop_failed"
+            } else {
+                "stopped"
+            }
+        } else if actionable {
+            "failed"
+        } else if active {
+            "running"
+        } else {
+            "waiting"
+        };
+        let collect_new_sources = self
+            .backend
+            .workflow(&runtime.workflow_id)
+            .ok()
+            .is_some_and(|workflow| {
+                workflow
+                    .targets()
+                    .iter()
+                    .any(|target| target.collection_enabled())
+            });
+        runtime.lifecycle = Some(WorkflowLifecycle {
+            phase,
+            enabled,
+            collect_new_sources,
+            checked_at_ms: runtime.checked_at_ms,
+            revision: runtime.revision,
+        });
         runtime
     }
 }
@@ -39,8 +70,21 @@ impl DesktopApplication {
 // starting, so component-load failures share the bounded activation retry policy.
 // Configuration, privilege and restart-required errors still wait for the user.
 pub(super) fn automatic_retry_allowed(runtime: &WorkflowRuntimeView, now: u64) -> bool {
-    if runtime.targets.iter().any(|target| target.active) { return true; }
-    let errors = runtime.errors.values().filter(|error| error.code() != "runtime.target_not_found").collect::<Vec<_>>();
-    errors.is_empty() || (runtime.retry_attempt < 3 && now >= runtime.retry_after_ms
-        && errors.iter().all(|error| matches!(error.code(), "runtime.activation_timed_out" | "runtime.component_load_failed")))
+    if runtime.targets.iter().any(|target| target.active) {
+        return true;
+    }
+    let errors = runtime
+        .errors
+        .values()
+        .filter(|error| error.code() != "runtime.target_not_found")
+        .collect::<Vec<_>>();
+    errors.is_empty()
+        || (runtime.retry_attempt < 3
+            && now >= runtime.retry_after_ms
+            && errors.iter().all(|error| {
+                matches!(
+                    error.code(),
+                    "runtime.activation_timed_out" | "runtime.component_load_failed"
+                )
+            }))
 }

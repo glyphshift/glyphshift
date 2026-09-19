@@ -1,8 +1,8 @@
 //! Synthetic native Adapter used to verify the target Runtime lifecycle seam.
 
 use glyphshift_adapter_native_abi::{
-    NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeNegotiationV1, NativeRuntimeHostV1,
-    ARCH_X86_64, FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS, STATUS_INVALID_HOST, STATUS_OK,
+    ARCH_X86_64, FEATURE_TEXT_REPLACE, NativeAdapterApiV1, NativeAdapterDescriptorV1,
+    NativeNegotiationV1, NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_INVALID_HOST, STATUS_OK,
     STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use glyphshift_adapter_sdk::AdapterDescriptor;

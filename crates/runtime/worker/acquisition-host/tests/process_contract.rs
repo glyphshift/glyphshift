@@ -59,10 +59,12 @@ fn acquisition_worker_001_returns_bounded_text_for_the_bound_target() {
 
     assert_eq!(result.blocks().len(), 1);
     assert_eq!(result.blocks()[0].source(), "synthetic worker text");
-    assert!(result.blocks()[0]
-        .anchors()
-        .iter()
-        .any(|anchor| anchor.contains(DesktopPoint::new(-20, 30))));
+    assert!(
+        result.blocks()[0]
+            .anchors()
+            .iter()
+            .any(|anchor| anchor.contains(DesktopPoint::new(-20, 30)))
+    );
 }
 
 #[test]

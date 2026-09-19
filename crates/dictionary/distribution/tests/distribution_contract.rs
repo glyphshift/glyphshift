@@ -341,17 +341,21 @@ fn file_install_store_persists_verified_provenance_and_active_content() {
             .expect("active dictionary"),
         payload
     );
-    assert!(directory
-        .path()
-        .join("dictionary-installations/dictionary.ui.json")
-        .is_file());
-    assert!(directory
-        .path()
-        .join(format!(
-            "dictionary-artifacts/sha256/{}.json",
-            release.artifact().digest().to_hex()
-        ))
-        .is_file());
+    assert!(
+        directory
+            .path()
+            .join("dictionary-installations/dictionary.ui.json")
+            .is_file()
+    );
+    assert!(
+        directory
+            .path()
+            .join(format!(
+                "dictionary-artifacts/sha256/{}.json",
+                release.artifact().digest().to_hex()
+            ))
+            .is_file()
+    );
 }
 
 fn distribution(
@@ -450,8 +454,10 @@ fn assert_install_error(
         ))
         .expect_err("reject invalid artifact");
     assert_eq!(error, expected);
-    assert!(distribution
-        .installations()
-        .expect("installation views")
-        .is_empty());
+    assert!(
+        distribution
+            .installations()
+            .expect("installation views")
+            .is_empty()
+    );
 }

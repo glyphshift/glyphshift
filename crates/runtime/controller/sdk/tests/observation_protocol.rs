@@ -1,7 +1,7 @@
 use glyphshift_controller_sdk::{
-    serve, ControllerPlugin, PluginError, Response, ResponseEnvelope, WireCaptureObservationBatch,
-    WireCaptureObservationRecord, WireCaptureTranslationContext, WireInventory, WireRecipe,
-    PROTOCOL_SCHEMA,
+    ControllerPlugin, PROTOCOL_SCHEMA, PluginError, Response, ResponseEnvelope,
+    WireCaptureObservationBatch, WireCaptureObservationRecord, WireCaptureTranslationContext,
+    WireInventory, WireRecipe, serve,
 };
 use std::io::Cursor;
 

@@ -289,41 +289,65 @@ impl DesktopApplication {
     }
 
     pub(super) fn update_dictionary_with_capture_clear(
-        &mut self, edit: DictionaryEdit, clear_captured: bool,
+        &mut self,
+        edit: DictionaryEdit,
+        clear_captured: bool,
     ) -> Result<DesktopProductSnapshot, CommandError> {
         self.ensure_ai_dictionary_writable(edit.id())?;
         let id = edit.id().to_owned();
-        self.backend.update_dictionary(edit)
+        self.backend
+            .update_dictionary(edit)
             .map_err(|_| CommandError::new("dictionary.invalid_update"))?;
         if clear_captured {
-            let records = self.probe_runs.list().map_err(crate::probe::probe_run_error)?;
+            let records = self
+                .probe_runs
+                .list()
+                .map_err(crate::probe::probe_run_error)?;
             let result = (|| {
                 let mut stopped = BTreeSet::new();
                 for run in records.iter().filter(|run| run.dictionary_id() == id) {
                     if let Some(owner) = run.workflow_id() {
                         if stopped.insert(owner.to_owned()) {
-                            let intent = self.backend.effective_workflow_intent(owner)
+                            let intent = self
+                                .backend
+                                .effective_workflow_intent(owner)
                                 .map_err(|_| CommandError::new("workflow.invalid"))?;
                             if let Some(runtimes) = self.runtimes.as_mut() {
                                 let runtime = runtimes.stop_workflow(&intent);
-                                let failed = !runtime.errors.is_empty() || runtime.targets.iter().any(|target| target.active);
+                                let failed = !runtime.errors.is_empty()
+                                    || runtime.targets.iter().any(|target| target.active);
                                 self.workflow_runtime_status.insert(owner.into(), runtime);
-                                if failed { return Err(CommandError::new("workflow.disable_failed")); }
+                                if failed {
+                                    return Err(CommandError::new("workflow.disable_failed"));
+                                }
                             }
                         }
                     } else if self.active_probe_run_id.as_deref() == Some(run.id()) {
-                        self.runtimes.as_mut().ok_or_else(|| CommandError::new("runtime.unavailable"))?
-                            .stop_capture(run.software_id()).map_err(|error| crate::workflow::runtime_command_error(error, false))?;
+                        self.runtimes
+                            .as_mut()
+                            .ok_or_else(|| CommandError::new("runtime.unavailable"))?
+                            .stop_capture(run.software_id())
+                            .map_err(|error| {
+                                crate::workflow::runtime_command_error(error, false)
+                            })?;
                         self.active_probe_run_id = None;
                         self.active_probe_capability = None;
                     }
-                    self.probe_runs.set_status(run.id(), glyphshift_capture::ProbeRunStatus::Ready).map_err(crate::probe::probe_run_error)?;
-                    self.probe_runs.clear_observations(run.id()).map_err(crate::probe::probe_run_error)?;
+                    self.probe_runs
+                        .set_status(run.id(), glyphshift_capture::ProbeRunStatus::Ready)
+                        .map_err(crate::probe::probe_run_error)?;
+                    self.probe_runs
+                        .clear_observations(run.id())
+                        .map_err(crate::probe::probe_run_error)?;
                     self.collection_versions.remove(run.id());
-                    if run.workflow_id().is_none() && run.status() == glyphshift_capture::ProbeRunStatus::Running {
+                    if run.workflow_id().is_none()
+                        && run.status() == glyphshift_capture::ProbeRunStatus::Running
+                    {
                         self.start_probe_run_runtime(run.id(), false)?;
                     } else {
-                        self.probe_runs.set_status(run.id(), run.status()).map_err(crate::probe::probe_run_error)?;
+                        self.probe_runs
+                            .set_status(run.id(), run.status())
+                            .map_err(crate::probe::probe_run_error)?;
                     }
                 }
                 Ok(())
@@ -365,9 +389,9 @@ impl DesktopApplication {
             .map_err(probe_run_error)?
             .into_iter()
             .filter(|run| {
-                dictionary_ids
-                    .iter()
-                    .any(|id| id.as_ref() == run.dictionary_id() || run.excluded_dictionary_ids().contains(id))
+                dictionary_ids.iter().any(|id| {
+                    id.as_ref() == run.dictionary_id() || run.excluded_dictionary_ids().contains(id)
+                })
             })
             .map(|run| Box::<str>::from(run.name()))
             .collect::<BTreeSet<_>>();

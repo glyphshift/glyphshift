@@ -6,10 +6,10 @@ use crate::platform::{
 use crate::remote;
 use glyphshift_controller_sdk::{
     ControllerPlugin, PluginError, WireAdapterRequirement, WireCaptureObservationBatch,
-    WireCaptureObservationRecord, WireCaptureTranslationContext, WireControllerConfiguration, WireControllerLossPolicy,
-    WireFeature, WireInventory, WireRecipe, WireRuntimeAck, WireRuntimeDeployment,
-    WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch, WireRuntimeTraceRecord,
-    WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
+    WireCaptureObservationRecord, WireCaptureTranslationContext, WireControllerConfiguration,
+    WireControllerLossPolicy, WireFeature, WireInventory, WireRecipe, WireRuntimeAck,
+    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch,
+    WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;

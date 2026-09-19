@@ -704,10 +704,12 @@ fn tph_006_capture_supervisor_recovers_after_one_query_failure() {
     sink.finish().expect("finish Desktop capture owner");
 
     let catalog = CaptureCatalog::read_current(&output).expect("recovered capture checkpoint");
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Open"));
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Open")
+    );
     let open = catalog
         .entries()
         .iter()
@@ -805,14 +807,18 @@ fn tph_004_owns_one_checkpoint_outside_the_target_and_drains_before_stop() {
     let catalog = CaptureCatalog::read_current(&output).expect("central capture checkpoint");
     assert_eq!(catalog.entries().len(), 2);
     assert_eq!(catalog.dropped_observations(), 1);
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "Open"));
-    assert!(catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.source() == "File"));
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Open")
+    );
+    assert!(
+        catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "File")
+    );
     let state = state.lock().expect("final capture state");
     assert!(state.queries >= 3);
     assert!(state.paused);

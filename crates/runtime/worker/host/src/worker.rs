@@ -4,8 +4,8 @@ use glyphshift_capture::{
 };
 use glyphshift_domain::AdapterId;
 use glyphshift_isolated_worker_sdk::{
-    Request, RequestEnvelope, Response, ResponseEnvelope, WireWorkerHealth, WireWorkerHealthReport,
-    WorkerActivation, WorkerTargetGrant, PROTOCOL_SCHEMA,
+    PROTOCOL_SCHEMA, Request, RequestEnvelope, Response, ResponseEnvelope, WireWorkerHealth,
+    WireWorkerHealthReport, WorkerActivation, WorkerTargetGrant,
 };
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};

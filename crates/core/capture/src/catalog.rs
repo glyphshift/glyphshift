@@ -1,4 +1,4 @@
-use crate::observation::{safe_identifier, MAX_ENTRIES, MAX_SOURCE_UNITS};
+use crate::observation::{MAX_ENTRIES, MAX_SOURCE_UNITS, safe_identifier};
 use crate::{
     CaptureConfiguration, CaptureError, CaptureIngressStatus, CaptureSessionId,
     CaptureTranslationContext,
@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -176,11 +176,14 @@ impl CaptureCatalog {
                 entry.adapter_id.clone(),
                 entry.translation_context.clone(),
             );
-            merged.entry(key).and_modify(|previous| {
-                previous.count = previous.count.saturating_add(entry.count);
-                previous.first_seen_ms = previous.first_seen_ms.min(entry.first_seen_ms);
-                previous.last_seen_ms = previous.last_seen_ms.max(entry.last_seen_ms);
-            }).or_insert(entry);
+            merged
+                .entry(key)
+                .and_modify(|previous| {
+                    previous.count = previous.count.saturating_add(entry.count);
+                    previous.first_seen_ms = previous.first_seen_ms.min(entry.first_seen_ms);
+                    previous.last_seen_ms = previous.last_seen_ms.max(entry.last_seen_ms);
+                })
+                .or_insert(entry);
         }
         self.entries = merged.into_values().collect();
         self
@@ -192,10 +195,7 @@ struct CaptureCatalogBuilder {
     started_at_ms: u64,
     max_entries: usize,
     revision: u64,
-    entries: BTreeMap<
-        (Box<str>, Box<str>, Option<CaptureTranslationContext>),
-        CaptureCatalogEntry,
-    >,
+    entries: BTreeMap<(Box<str>, Box<str>, Option<CaptureTranslationContext>), CaptureCatalogEntry>,
     fallback_adapters: BTreeSet<Box<str>>,
 }
 

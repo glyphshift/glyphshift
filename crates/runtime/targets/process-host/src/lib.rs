@@ -17,11 +17,11 @@ use glyphshift_session::{
     RuntimeTraceStatus, SessionId, TargetInstance, TargetInstanceId,
 };
 use glyphshift_target_runtime_contract::{
-    NativeAdapterDeployment, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
+    NativeAdapterDeployment, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT, TargetRuntimeDeployment,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -118,8 +118,13 @@ pub struct TargetProcessMonitor<T> {
     connection: Arc<Mutex<ControllerConnection<T>>>,
 }
 impl<T: ControllerTransport> TargetProcessMonitor<T> {
-    pub fn running_targets(&self, targets: &[OpaqueTargetId]) -> Result<std::collections::BTreeSet<OpaqueTargetId>, ControllerProtocolError> {
-        self.connection.lock().map_err(|_| ControllerProtocolError::Transport(TransportFailure::MalformedMessage))?
+    pub fn running_targets(
+        &self,
+        targets: &[OpaqueTargetId],
+    ) -> Result<std::collections::BTreeSet<OpaqueTargetId>, ControllerProtocolError> {
+        self.connection
+            .lock()
+            .map_err(|_| ControllerProtocolError::Transport(TransportFailure::MalformedMessage))?
             .running_targets(targets)
     }
 }
@@ -153,7 +158,9 @@ impl<T> TargetProcessHost<T> {
     }
 
     pub fn monitor(&self) -> TargetProcessMonitor<T> {
-        TargetProcessMonitor { connection: Arc::clone(&self.connection) }
+        TargetProcessMonitor {
+            connection: Arc::clone(&self.connection),
+        }
     }
 
     pub fn register_target(

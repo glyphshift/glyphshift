@@ -1,8 +1,8 @@
 use crate::{
-    model::DictionaryInstallationSourceParts, DictionaryInstallStore, DictionaryInstallationSource,
+    DICTIONARY_MEDIA_TYPE, DictionaryInstallStore, DictionaryInstallationSource,
     DictionaryInstallationState, DictionaryInstallationView, DictionaryReleaseKey,
     DictionaryReplacementPolicy, InstallStoreError, PublisherIdentity, Sha256Digest,
-    SignatureEnvelope, VerifiedDictionaryArtifact, DICTIONARY_MEDIA_TYPE,
+    SignatureEnvelope, VerifiedDictionaryArtifact, model::DictionaryInstallationSourceParts,
 };
 use glyphshift_dictionary_package::DictionaryPackage;
 use serde::{Deserialize, Serialize};
@@ -559,9 +559,11 @@ mod tests {
                     .release_version(),
                 expected_release
             );
-            assert!(json_files(&reopened.transaction_directory())
-                .expect("transaction directory")
-                .is_empty());
+            assert!(
+                json_files(&reopened.transaction_directory())
+                    .expect("transaction directory")
+                    .is_empty()
+            );
             let active = reopened
                 .active_payload("dictionary.ui")
                 .expect("read active")

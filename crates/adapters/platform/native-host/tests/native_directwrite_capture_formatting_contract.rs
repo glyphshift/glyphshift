@@ -1,14 +1,14 @@
 #![cfg(windows)]
 
 use glyphshift_adapter_native_abi::{
-    NativeDecisionV1, NativeRuntimeHostV1, NativeTextEventV1, NativeTextHostV1,
-    DECISION_TEXT_REPLACE, STATUS_INVALID_HOST, STATUS_OK, TEXT_EVENT_DRAW, TEXT_HOST_VERSION_V1,
+    DECISION_TEXT_REPLACE, NativeDecisionV1, NativeRuntimeHostV1, NativeTextEventV1,
+    NativeTextHostV1, STATUS_INVALID_HOST, STATUS_OK, TEXT_EVENT_DRAW, TEXT_HOST_VERSION_V1,
 };
 use glyphshift_adapter_native_host::LoadedNativeAdapter;
 use glyphshift_domain::Feature;
 use glyphshift_windows_host::{
-    render_raw_directwrite_formatted_layout, render_raw_directwrite_layout_sequence,
-    DirectWriteLayoutStyle,
+    DirectWriteLayoutStyle, render_raw_directwrite_formatted_layout,
+    render_raw_directwrite_layout_sequence,
 };
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 
@@ -208,8 +208,15 @@ fn formatted_layouts_observe_replace_uniform_typography_and_preserve_local_style
                 } else {
                     &baselines[index]
                 };
-                assert_eq!(&pixels, expected, "translated uniform typography must draw with the source layout's formatting: {style:?}, compatible={compatible}, mode={mode}");
-                assert_eq!(OBSERVED.load(Ordering::Acquire), 1, "draw must still publish its source: {style:?}, compatible={compatible}, mode={mode}");
+                assert_eq!(
+                    &pixels, expected,
+                    "translated uniform typography must draw with the source layout's formatting: {style:?}, compatible={compatible}, mode={mode}"
+                );
+                assert_eq!(
+                    OBSERVED.load(Ordering::Acquire),
+                    1,
+                    "draw must still publish its source: {style:?}, compatible={compatible}, mode={mode}"
+                );
                 assert_eq!(DEPTH.load(Ordering::Acquire), 0, "source scope must close");
                 assert_eq!(
                     SCOPES.load(Ordering::Acquire),
@@ -225,7 +232,11 @@ fn formatted_layouts_observe_replace_uniform_typography_and_preserve_local_style
                     MODE.store([1, 3, 0][frame], Ordering::Release);
                 })
                 .unwrap();
-            assert_eq!(frames, [translated[index], updated[index], baselines[index]], "the same target layout must support publication updates and removing a translation");
+            assert_eq!(
+                frames,
+                [translated[index], updated[index], baselines[index]],
+                "the same target layout must support publication updates and removing a translation"
+            );
         }
         let restored = render_raw_directwrite_layout_sequence(
             SOURCE,

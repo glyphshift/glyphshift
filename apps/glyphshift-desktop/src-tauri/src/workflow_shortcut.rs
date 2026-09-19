@@ -201,7 +201,9 @@ pub(super) fn desktop_set_shortcut_recording(
     recording: bool,
 ) -> Result<(), CommandError> {
     // Elevation can dispatch WebView IPC while setup is still waiting for UAC.
-    let state = app.try_state::<Mutex<WorkflowShortcuts>>().ok_or_else(runtime_unavailable)?;
+    let state = app
+        .try_state::<Mutex<WorkflowShortcuts>>()
+        .ok_or_else(runtime_unavailable)?;
     let mut state = state.lock().map_err(|_| runtime_unavailable())?;
     state.recording = recording;
     if recording {

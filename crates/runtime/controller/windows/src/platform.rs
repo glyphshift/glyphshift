@@ -1,5 +1,5 @@
-use crate::controller::{ProcessInstanceId, ProcessRecord};
 use crate::WindowsExecutable;
+use crate::controller::{ProcessInstanceId, ProcessRecord};
 use glyphshift_controller_sdk::PluginError;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -142,7 +142,7 @@ pub(super) fn pe_architecture(source: &[u8]) -> Option<&'static str> {
 pub(super) fn enumerate_processes() -> Result<Vec<ProcessRecord>, PluginError> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
         TH32CS_SNAPPROCESS,
     };
 
@@ -206,7 +206,7 @@ pub(super) fn process_started_at(process_id: u32) -> Option<u64> {
 pub(super) fn process_executable_path(process_id: u32) -> Option<String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     };
 
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };

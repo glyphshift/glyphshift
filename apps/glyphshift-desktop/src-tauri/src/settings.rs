@@ -1,5 +1,5 @@
-use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
 use glyphshift_ai_translation::FilterPolicy;
+use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Write};
@@ -13,7 +13,8 @@ const SETTINGS_FILE_NAME: &str = "app-settings.json";
 #[test]
 fn favorite_defaults_use_installed_aliases_once_and_preserve_explicit_choices() {
     let root = tempfile::tempdir().unwrap();
-    let installed = ["微软雅黑", "Microsoft YaHei", "arial", "Synthetic Serif"].map(Box::<str>::from);
+    let installed =
+        ["微软雅黑", "Microsoft YaHei", "arial", "Synthetic Serif"].map(Box::<str>::from);
     let mut store = AppSettingsStore::open(root.path()).unwrap();
     store.initialize_favorite_fonts(&installed).unwrap();
     assert_eq!(store.current.favorite_fonts, ["Microsoft YaHei", "arial"]);
@@ -30,33 +31,61 @@ fn favorite_defaults_use_installed_aliases_once_and_preserve_explicit_choices() 
 }
 
 fn default_translation_languages() -> Vec<String> {
-    ["zh-cn", "zh-tw", "en", "ja", "ko", "fr", "de", "es", "pt", "ru", "it", "ar", "th", "vi", "id", "tr", "pl", "uk", "hi", "nl"]
-        .into_iter().map(str::to_owned).collect()
+    [
+        "zh-cn", "zh-tw", "en", "ja", "ko", "fr", "de", "es", "pt", "ru", "it", "ar", "th", "vi",
+        "id", "tr", "pl", "uk", "hi", "nl",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
 }
 
 fn valid_language(language: &str) -> bool {
     let language = language.trim();
     let mut parts = language.split('-');
     let first = parts.next().unwrap_or_default();
-    let primary_valid = ((2..=8).contains(&first.len()) && first.bytes().all(|c| c.is_ascii_alphabetic())) || first.eq_ignore_ascii_case("x");
-    primary_valid && language.len() <= 63 && !language.eq_ignore_ascii_case("auto") && !language.eq_ignore_ascii_case("x")
-        && parts.all(|part| (1..=8).contains(&part.len()) && part.bytes().all(|c| c.is_ascii_alphanumeric()))
+    let primary_valid = ((2..=8).contains(&first.len())
+        && first.bytes().all(|c| c.is_ascii_alphabetic()))
+        || first.eq_ignore_ascii_case("x");
+    primary_valid
+        && language.len() <= 63
+        && !language.eq_ignore_ascii_case("auto")
+        && !language.eq_ignore_ascii_case("x")
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.bytes().all(|c| c.is_ascii_alphanumeric())
+        })
 }
 
 fn valid_catalog(values: &[String], limit: usize, max_length: usize) -> bool {
     let mut seen = std::collections::HashSet::new();
-    values.len() <= limit && values.iter().all(|value| !value.trim().is_empty()
-        && value.chars().count() <= max_length && !value.chars().any(char::is_control)
-        && seen.insert(value.trim().to_lowercase()))
+    values.len() <= limit
+        && values.iter().all(|value| {
+            !value.trim().is_empty()
+                && value.chars().count() <= max_length
+                && !value.chars().any(char::is_control)
+                && seen.insert(value.trim().to_lowercase())
+        })
 }
 
-fn normalize_catalog(value: Option<&serde_json::Value>, limit: usize, max_length: usize) -> Vec<String> {
+fn normalize_catalog(
+    value: Option<&serde_json::Value>,
+    limit: usize,
+    max_length: usize,
+) -> Vec<String> {
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
     if let Some(values) = value.and_then(serde_json::Value::as_array) {
-        for value in values.iter().take(limit).filter_map(serde_json::Value::as_str) {
+        for value in values
+            .iter()
+            .take(limit)
+            .filter_map(serde_json::Value::as_str)
+        {
             let value = value.trim();
-            if !value.is_empty() && value.chars().count() <= max_length && !value.chars().any(char::is_control) && seen.insert(value.to_lowercase()) {
+            if !value.is_empty()
+                && value.chars().count() <= max_length
+                && !value.chars().any(char::is_control)
+                && seen.insert(value.to_lowercase())
+            {
                 result.push(value.to_owned());
             }
         }
@@ -72,8 +101,12 @@ pub(crate) struct LanguageFallbackFont {
 }
 
 impl LanguageFallbackFont {
-    pub(crate) fn language(&self) -> &str { &self.language }
-    pub(crate) fn font_family(&self) -> &str { &self.font_family }
+    pub(crate) fn language(&self) -> &str {
+        &self.language
+    }
+    pub(crate) fn font_family(&self) -> &str {
+        &self.font_family
+    }
 
     fn normalized(mut self) -> Self {
         self.language = self.language.trim().to_ascii_lowercase();
@@ -83,14 +116,18 @@ impl LanguageFallbackFont {
 
     fn is_valid(&self) -> bool {
         valid_language(&self.language)
-            && !self.font_family.trim().is_empty() && self.font_family.trim().chars().count() <= 128
+            && !self.font_family.trim().is_empty()
+            && self.font_family.trim().chars().count() <= 128
             && !self.font_family.chars().any(char::is_control)
     }
 }
 
 fn valid_font_fallbacks(rows: &[LanguageFallbackFont]) -> bool {
     let mut languages = std::collections::HashSet::new();
-    rows.len() <= 64 && rows.iter().all(|row| row.is_valid() && languages.insert(row.language.trim().to_ascii_lowercase()))
+    rows.len() <= 64
+        && rows
+            .iter()
+            .all(|row| row.is_valid() && languages.insert(row.language.trim().to_ascii_lowercase()))
 }
 
 fn normalize_font_fallbacks(value: Option<&serde_json::Value>) -> Vec<LanguageFallbackFont> {
@@ -99,7 +136,11 @@ fn normalize_font_fallbacks(value: Option<&serde_json::Value>) -> Vec<LanguageFa
         for value in rows.iter().take(64) {
             if let Ok(row) = serde_json::from_value::<LanguageFallbackFont>(value.clone()) {
                 let row = row.normalized();
-                if row.is_valid() && !result.iter().any(|existing| existing.language == row.language) {
+                if row.is_valid()
+                    && !result
+                        .iter()
+                        .any(|existing| existing.language == row.language)
+                {
                     result.push(row);
                 }
             }
@@ -120,9 +161,20 @@ mod font_fallback_tests {
         }));
         assert!(settings.translation_languages.is_empty());
         assert_eq!(settings.recent_software_ids, Some(Vec::new()));
-        assert_eq!(settings.favorite_fonts, ["Synthetic Serif", "Synthetic Mono"]);
-        assert_eq!(normalize_persisted_settings(&serde_json::json!({})).translation_languages.len(), 20);
-        assert_eq!(normalize_persisted_settings(&serde_json::json!({})).recent_software_ids, None);
+        assert_eq!(
+            settings.favorite_fonts,
+            ["Synthetic Serif", "Synthetic Mono"]
+        );
+        assert_eq!(
+            normalize_persisted_settings(&serde_json::json!({}))
+                .translation_languages
+                .len(),
+            20
+        );
+        assert_eq!(
+            normalize_persisted_settings(&serde_json::json!({})).recent_software_ids,
+            None
+        );
     }
 
     #[test]
@@ -130,13 +182,20 @@ mod font_fallback_tests {
         let root = tempfile::tempdir().unwrap();
         let mut store = AppSettingsStore::open(root.path()).unwrap();
         let mut value = serde_json::to_value(AppSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("settingsSchemaVersion");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("settingsSchemaVersion");
         value["translationLanguages"] = serde_json::json!(["JA", "eo"]);
         value["favoriteFonts"] = serde_json::json!(["Synthetic Mono"]);
         value["recentSoftwareIds"] = serde_json::json!([]);
-        store.update(serde_json::from_value(value.clone()).unwrap()).unwrap();
+        store
+            .update(serde_json::from_value(value.clone()).unwrap())
+            .unwrap();
         value["themePreference"] = serde_json::json!("light");
-        store.update(serde_json::from_value(value).unwrap()).unwrap();
+        store
+            .update(serde_json::from_value(value).unwrap())
+            .unwrap();
         let restored = AppSettingsStore::open(root.path()).unwrap();
         assert_eq!(restored.current.translation_languages, ["ja", "eo"]);
         assert_eq!(restored.current.favorite_fonts, ["Synthetic Mono"]);
@@ -158,7 +217,10 @@ mod font_fallback_tests {
         assert_eq!(settings.theme_preference, ThemePreference::Light);
         assert_eq!(settings.language_fallback_fonts.len(), 2);
         assert_eq!(settings.language_fallback_fonts[0].language, "ja");
-        assert_eq!(settings.language_fallback_fonts[0].font_family, "Synthetic Sans");
+        assert_eq!(
+            settings.language_fallback_fonts[0].font_family,
+            "Synthetic Sans"
+        );
     }
 
     #[test]
@@ -166,21 +228,39 @@ mod font_fallback_tests {
         let root = tempfile::tempdir().unwrap();
         let mut store = AppSettingsStore::open(root.path()).unwrap();
         let mut value = serde_json::to_value(AppSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("settingsSchemaVersion");
-        value["languageFallbackFonts"] = serde_json::json!([{"language":"zh-CN","fontFamily":"Synthetic Sans"}]);
-        store.update(serde_json::from_value(value.clone()).unwrap()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("settingsSchemaVersion");
+        value["languageFallbackFonts"] =
+            serde_json::json!([{"language":"zh-CN","fontFamily":"Synthetic Sans"}]);
+        store
+            .update(serde_json::from_value(value.clone()).unwrap())
+            .unwrap();
         let reopened = AppSettingsStore::open(root.path()).unwrap();
-        assert_eq!(reopened.current.language_fallback_fonts[0].language, "zh-cn");
+        assert_eq!(
+            reopened.current.language_fallback_fonts[0].language,
+            "zh-cn"
+        );
         value["languageFallbackFonts"] = serde_json::json!([
             {"language":"ja","fontFamily":"Synthetic Sans"},
             {"language":"JA","fontFamily":"Synthetic Serif"}
         ]);
-        assert!(store.update(serde_json::from_value(value).unwrap()).is_err());
-        assert_eq!(store.current.language_fallback_fonts, reopened.current.language_fallback_fonts);
+        assert!(
+            store
+                .update(serde_json::from_value(value).unwrap())
+                .is_err()
+        );
+        assert_eq!(
+            store.current.language_fallback_fonts,
+            reopened.current.language_fallback_fonts
+        );
     }
 }
 
-fn default_check_updates() -> bool { true }
+fn default_check_updates() -> bool {
+    true
+}
 
 fn default_auto_complete_interval() -> u16 {
     10
@@ -283,12 +363,19 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
-    pub(crate) fn minimize_to_tray(&self) -> bool { self.minimize_to_tray }
-    pub(crate) fn always_on_top(&self) -> bool { self.always_on_top }
-    pub(crate) fn english(&self) -> bool { self.locale_preference == LocalePreference::EnUs }
+    pub(crate) fn minimize_to_tray(&self) -> bool {
+        self.minimize_to_tray
+    }
+    pub(crate) fn always_on_top(&self) -> bool {
+        self.always_on_top
+    }
+    pub(crate) fn english(&self) -> bool {
+        self.locale_preference == LocalePreference::EnUs
+    }
 
-
-    pub(crate) fn text_filter_policy(&self) -> &FilterPolicy { &self.text_filter_policy }
+    pub(crate) fn text_filter_policy(&self) -> &FilterPolicy {
+        &self.text_filter_policy
+    }
     pub(crate) fn language_fallback_fonts(&self) -> &[LanguageFallbackFont] {
         &self.language_fallback_fonts
     }
@@ -308,13 +395,17 @@ impl AppSettings {
         self.settings_schema_version == APP_SETTINGS_SCHEMA_VERSION
             && self.auto_complete_interval_seconds <= 60
             && self.text_filter_policy.hidden_sources(&[]).is_ok()
-
             && valid_font_fallbacks(&self.language_fallback_fonts)
             && valid_catalog(&self.favorite_fonts, 64, 128)
             && valid_catalog(&self.translation_languages, 128, 63)
-            && self.translation_languages.iter().all(|code| valid_language(code))
-            && self.recent_software_ids.as_ref().is_none_or(|ids| valid_catalog(ids, 20, 128))
-
+            && self
+                .translation_languages
+                .iter()
+                .all(|code| valid_language(code))
+            && self
+                .recent_software_ids
+                .as_ref()
+                .is_none_or(|ids| valid_catalog(ids, 20, 128))
     }
 }
 
@@ -371,15 +462,40 @@ fn normalize_persisted_settings(value: &serde_json::Value) -> AppSettings {
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
         close_behavior,
-        minimize_to_tray: object.get("minimizeToTray").and_then(serde_json::Value::as_bool).unwrap_or(false),
-        always_on_top: object.get("alwaysOnTop").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        minimize_to_tray: object
+            .get("minimizeToTray")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        always_on_top: object
+            .get("alwaysOnTop")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
         software_capture_shortcut,
         language_fallback_fonts: normalize_font_fallbacks(object.get("languageFallbackFonts")),
         favorite_fonts: normalize_catalog(object.get("favoriteFonts"), 64, 128),
-        translation_languages: object.get("translationLanguages").filter(|value| value.is_array()).map_or_else(default_translation_languages, |value| normalize_catalog(Some(value), 128, 63).into_iter().map(|code| code.to_ascii_lowercase()).filter(|code| valid_language(code)).collect()),
-        recent_software_ids: object.get("recentSoftwareIds").filter(|value| value.is_array()).map(|value| normalize_catalog(Some(value), 20, 128)),
-        text_filter_policy: object.get("textFilterPolicy").and_then(|value| serde_json::from_value(value.clone()).ok()).filter(|policy: &FilterPolicy| policy.hidden_sources(&[]).is_ok()).unwrap_or_default(),
-        check_updates_on_startup: object.get("checkUpdatesOnStartup").and_then(serde_json::Value::as_bool).unwrap_or(true),
+        translation_languages: object
+            .get("translationLanguages")
+            .filter(|value| value.is_array())
+            .map_or_else(default_translation_languages, |value| {
+                normalize_catalog(Some(value), 128, 63)
+                    .into_iter()
+                    .map(|code| code.to_ascii_lowercase())
+                    .filter(|code| valid_language(code))
+                    .collect()
+            }),
+        recent_software_ids: object
+            .get("recentSoftwareIds")
+            .filter(|value| value.is_array())
+            .map(|value| normalize_catalog(Some(value), 20, 128)),
+        text_filter_policy: object
+            .get("textFilterPolicy")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .filter(|policy: &FilterPolicy| policy.hidden_sources(&[]).is_ok())
+            .unwrap_or_default(),
+        check_updates_on_startup: object
+            .get("checkUpdatesOnStartup")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
         auto_complete_interval_seconds: object
             .get("autoCompleteIntervalSeconds")
             .and_then(serde_json::Value::as_u64)
@@ -429,7 +545,9 @@ pub(crate) struct AppSettingsUpdate {
 }
 
 impl AppSettingsUpdate {
-    pub(crate) fn always_on_top(&self) -> bool { self.always_on_top }
+    pub(crate) fn always_on_top(&self) -> bool {
+        self.always_on_top
+    }
 
     pub(crate) const fn launch_at_startup(&self) -> bool {
         self.launch_at_startup
@@ -461,9 +579,21 @@ impl From<AppSettingsUpdate> for AppSettings {
             auto_complete_interval_seconds: update.auto_complete_interval_seconds,
             check_updates_on_startup: update.check_updates_on_startup,
             text_filter_policy: update.text_filter_policy,
-            language_fallback_fonts: update.language_fallback_fonts.into_iter().map(LanguageFallbackFont::normalized).collect(),
-            favorite_fonts: update.favorite_fonts.into_iter().map(|font| font.trim().to_owned()).collect(),
-            translation_languages: update.translation_languages.into_iter().map(|code| code.trim().to_ascii_lowercase()).collect(),
+            language_fallback_fonts: update
+                .language_fallback_fonts
+                .into_iter()
+                .map(LanguageFallbackFont::normalized)
+                .collect(),
+            favorite_fonts: update
+                .favorite_fonts
+                .into_iter()
+                .map(|font| font.trim().to_owned())
+                .collect(),
+            translation_languages: update
+                .translation_languages
+                .into_iter()
+                .map(|code| code.trim().to_ascii_lowercase())
+                .collect(),
             recent_software_ids: update.recent_software_ids,
         }
     }
@@ -528,23 +658,40 @@ impl AppSettingsStore {
         } else {
             (AppSettings::default(), None)
         };
-        let initialize_favorite_fonts = !fs::read(&path).ok()
+        let initialize_favorite_fonts = !fs::read(&path)
+            .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|value| value.get("favoriteFonts").is_some_and(serde_json::Value::is_array));
-        let mut store = Self { path, current, load_error, initialize_favorite_fonts };
+            .is_some_and(|value| {
+                value
+                    .get("favoriteFonts")
+                    .is_some_and(serde_json::Value::is_array)
+            });
+        let mut store = Self {
+            path,
+            current,
+            load_error,
+            initialize_favorite_fonts,
+        };
         // Promote only the default profile's old policy once; profile selection no longer changes it.
-        let has_global_policy = fs::read(&store.path).ok()
+        let has_global_policy = fs::read(&store.path)
+            .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .is_some_and(|value| value.get("textFilterPolicy").is_some());
         if !has_global_policy {
-            let legacy = fs::read(data_root.as_ref().join("ai-profiles.json")).ok()
+            let legacy = fs::read(data_root.as_ref().join("ai-profiles.json"))
+                .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-            let policy = legacy.as_ref().and_then(|value| {
-                let default_id = value.get("defaultProfileId")?.as_str()?;
-                let profile = value.get("profiles")?.as_array()?.iter()
-                    .find(|profile| profile.get("id").and_then(|id| id.as_str()) == Some(default_id))?;
-                serde_json::from_value::<FilterPolicy>(profile.get("filterPolicy")?.clone()).ok()
-            }).filter(|policy| policy.hidden_sources(&[]).is_ok());
+            let policy = legacy
+                .as_ref()
+                .and_then(|value| {
+                    let default_id = value.get("defaultProfileId")?.as_str()?;
+                    let profile = value.get("profiles")?.as_array()?.iter().find(|profile| {
+                        profile.get("id").and_then(|id| id.as_str()) == Some(default_id)
+                    })?;
+                    serde_json::from_value::<FilterPolicy>(profile.get("filterPolicy")?.clone())
+                        .ok()
+                })
+                .filter(|policy| policy.hidden_sources(&[]).is_ok());
             if let Some(policy) = policy {
                 store.current.text_filter_policy = policy;
                 store.persist(&store.current)?;
@@ -558,14 +705,30 @@ impl AppSettingsStore {
             .map_or_else(|| Ok(self.current.clone()), Err)
     }
 
-    pub(crate) fn initialize_favorite_fonts(&mut self, installed: &[Box<str>]) -> Result<(), SettingsError> {
-        if !self.initialize_favorite_fonts || installed.is_empty() { return Ok(()); }
-        let groups: Vec<Vec<String>> = serde_json::from_str(include_str!("../../src/defaultFavoriteFonts.json"))
-            .map_err(|_| SettingsError::InvalidData)?;
+    pub(crate) fn initialize_favorite_fonts(
+        &mut self,
+        installed: &[Box<str>],
+    ) -> Result<(), SettingsError> {
+        if !self.initialize_favorite_fonts || installed.is_empty() {
+            return Ok(());
+        }
+        let groups: Vec<Vec<String>> =
+            serde_json::from_str(include_str!("../../src/defaultFavoriteFonts.json"))
+                .map_err(|_| SettingsError::InvalidData)?;
         let mut next = self.current.clone();
         for aliases in groups {
-            if next.favorite_fonts.iter().any(|font| aliases.iter().any(|alias| font.eq_ignore_ascii_case(alias))) { continue; }
-            if let Some(font) = aliases.iter().find_map(|alias| installed.iter().find(|font| font.eq_ignore_ascii_case(alias))) {
+            if next
+                .favorite_fonts
+                .iter()
+                .any(|font| aliases.iter().any(|alias| font.eq_ignore_ascii_case(alias)))
+            {
+                continue;
+            }
+            if let Some(font) = aliases.iter().find_map(|alias| {
+                installed
+                    .iter()
+                    .find(|font| font.eq_ignore_ascii_case(alias))
+            }) {
                 next.favorite_fonts.push(font.to_string());
             }
         }
@@ -657,9 +820,14 @@ mod tests {
         let root = tempdir().unwrap();
         let mut store = AppSettingsStore::open(root.path()).unwrap();
         let mut value = serde_json::to_value(AppSettings::default()).unwrap();
-        value.as_object_mut().unwrap().remove("settingsSchemaVersion");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("settingsSchemaVersion");
         value["checkUpdatesOnStartup"] = false.into();
-        store.update(serde_json::from_value(value).unwrap()).unwrap();
+        store
+            .update(serde_json::from_value(value).unwrap())
+            .unwrap();
         let restored = AppSettingsStore::open(root.path()).unwrap();
         assert!(!restored.current().unwrap().check_updates_on_startup);
     }
@@ -682,11 +850,11 @@ mod tests {
                 always_on_top: true,
                 auto_complete_interval_seconds: 10,
                 check_updates_on_startup: true,
-            text_filter_policy: FilterPolicy::default(),
-            language_fallback_fonts: Vec::new(),
-            favorite_fonts: Vec::new(),
-            translation_languages: default_translation_languages(),
-            recent_software_ids: None,
+                text_filter_policy: FilterPolicy::default(),
+                language_fallback_fonts: Vec::new(),
+                favorite_fonts: Vec::new(),
+                translation_languages: default_translation_languages(),
+                recent_software_ids: None,
                 software_capture_shortcut: "Ctrl+Alt+KeyS".into(),
             })
             .expect("save settings");
@@ -732,11 +900,11 @@ mod tests {
                 always_on_top: false,
                 auto_complete_interval_seconds: 10,
                 check_updates_on_startup: true,
-            text_filter_policy: FilterPolicy::default(),
-            language_fallback_fonts: Vec::new(),
-            favorite_fonts: Vec::new(),
-            translation_languages: default_translation_languages(),
-            recent_software_ids: None,
+                text_filter_policy: FilterPolicy::default(),
+                language_fallback_fonts: Vec::new(),
+                favorite_fonts: Vec::new(),
+                translation_languages: default_translation_languages(),
+                recent_software_ids: None,
                 software_capture_shortcut: DEFAULT_SOFTWARE_CAPTURE_SHORTCUT.into(),
             })
             .expect("replace invalid settings");
@@ -837,7 +1005,9 @@ mod auto_complete_tests {
             );
         }
         for value in [0, 1, 4, 60] {
-            let settings = normalize_persisted_settings(&serde_json::json!({"autoCompleteIntervalSeconds": value}));
+            let settings = normalize_persisted_settings(
+                &serde_json::json!({"autoCompleteIntervalSeconds": value}),
+            );
             assert_eq!(settings.auto_complete_interval_seconds, value);
             assert!(settings.is_valid());
         }
@@ -866,12 +1036,28 @@ mod global_filter_tests {
         ]});
         fs::write(root.path().join("ai-profiles.json"), legacy.to_string()).unwrap();
         let store = AppSettingsStore::open(root.path()).unwrap();
-        assert_eq!(store.current().unwrap().text_filter_policy().hidden_sources(&["Chapter 2".into()]).unwrap(), vec![true]);
+        assert_eq!(
+            store
+                .current()
+                .unwrap()
+                .text_filter_policy()
+                .hidden_sources(&["Chapter 2".into()])
+                .unwrap(),
+            vec![true]
+        );
         let mut changed = legacy;
         changed["defaultProfileId"] = serde_json::json!("other");
         fs::write(root.path().join("ai-profiles.json"), changed.to_string()).unwrap();
         let reopened = AppSettingsStore::open(root.path()).unwrap();
-        assert_eq!(reopened.current().unwrap().text_filter_policy().hidden_sources(&["Chapter 2".into()]).unwrap(), vec![true]);
+        assert_eq!(
+            reopened
+                .current()
+                .unwrap()
+                .text_filter_policy()
+                .hidden_sources(&["Chapter 2".into()])
+                .unwrap(),
+            vec![true]
+        );
     }
 }
 
@@ -880,9 +1066,11 @@ pub(crate) fn desktop_validate_regex_rule(rule: RegexTranslationRule) -> Result<
     RegexTranslationRules::compile(vec![rule]).map(|_| ())
 }
 
-
-
 #[tauri::command]
-pub(crate) fn desktop_test_regex_rule(rule: RegexTranslationRule, source: String, mock_translation: String) -> Result<glyphshift_translation::RegexRuleTestResult, String> {
+pub(crate) fn desktop_test_regex_rule(
+    rule: RegexTranslationRule,
+    source: String,
+    mock_translation: String,
+) -> Result<glyphshift_translation::RegexRuleTestResult, String> {
     glyphshift_translation::test_regex_rule(rule, &source, &mock_translation)
 }

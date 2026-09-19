@@ -126,11 +126,17 @@ pub struct DictionaryMetadata {
 }
 
 impl DictionaryMetadata {
-    pub fn text_rules(&self) -> &[glyphshift_translation::RegexTranslationRule] { &self.text_rules }
+    pub fn text_rules(&self) -> &[glyphshift_translation::RegexTranslationRule] {
+        &self.text_rules
+    }
     #[must_use]
-    pub fn font_scale_percent(&self) -> Option<u16> { self.font_scale_percent }
+    pub fn font_scale_percent(&self) -> Option<u16> {
+        self.font_scale_percent
+    }
     #[must_use]
-    pub fn font_families(&self) -> &[Box<str>] { &self.font_families }
+    pub fn font_families(&self) -> &[Box<str>] {
+        &self.font_families
+    }
 
     #[must_use]
     pub fn id(&self) -> &str {
@@ -182,8 +188,12 @@ pub struct DictionaryCreate {
 }
 
 impl DictionaryCreate {
-    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
-        self.metadata.text_rules = rules; self
+    pub fn with_text_rules(
+        mut self,
+        rules: Vec<glyphshift_translation::RegexTranslationRule>,
+    ) -> Self {
+        self.metadata.text_rules = rules;
+        self
     }
     #[must_use]
     pub fn new(
@@ -231,7 +241,10 @@ impl DictionaryCreate {
     }
 
     #[must_use]
-    pub fn with_font_families(mut self, families: impl IntoIterator<Item = impl Into<Box<str>>>) -> Self {
+    pub fn with_font_families(
+        mut self,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
         self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
@@ -279,8 +292,12 @@ pub struct DictionaryEdit {
 }
 
 impl DictionaryEdit {
-    pub fn with_text_rules(mut self, rules: Vec<glyphshift_translation::RegexTranslationRule>) -> Self {
-        self.metadata.text_rules = rules; self
+    pub fn with_text_rules(
+        mut self,
+        rules: Vec<glyphshift_translation::RegexTranslationRule>,
+    ) -> Self {
+        self.metadata.text_rules = rules;
+        self
     }
     #[must_use]
     pub fn from_dictionary(dictionary: &DictionaryView) -> Self {
@@ -340,7 +357,10 @@ impl DictionaryEdit {
     }
 
     #[must_use]
-    pub fn with_font_families(mut self, families: impl IntoIterator<Item = impl Into<Box<str>>>) -> Self {
+    pub fn with_font_families(
+        mut self,
+        families: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
         self.metadata.font_families = families.into_iter().map(Into::into).collect();
         self
     }
@@ -478,11 +498,19 @@ impl DesktopBackend {
         if !output_path.is_absolute() {
             return Err(BackendError::InvalidInput("dictionary-export-path"));
         }
-        let format = output_path.extension().and_then(|value| value.to_str())
+        let format = output_path
+            .extension()
+            .and_then(|value| value.to_str())
             .ok_or(BackendError::InvalidInput("dictionary-export-format"))?;
-        let entries = self.dictionary(dictionary_id)?.entries().iter().map(|entry| crate::dictionary_transfer::Entry {
-            source: entry.source().into(), translation: entry.translation().into(),
-        }).collect::<Vec<_>>();
+        let entries = self
+            .dictionary(dictionary_id)?
+            .entries()
+            .iter()
+            .map(|entry| crate::dictionary_transfer::Entry {
+                source: entry.source().into(),
+                translation: entry.translation().into(),
+            })
+            .collect::<Vec<_>>();
         let document = serde_json::from_slice(&self.dictionary_json(dictionary_id)?)
             .map_err(|_| BackendError::InvalidArtifact("dictionary-json"))?;
         let source = crate::dictionary_transfer::encode_entries(format, &entries, Some(&document))
@@ -858,7 +886,13 @@ pub(super) fn dictionary_definition(dictionary: &DictionaryView) -> WorkflowDict
         dictionary.id(),
         dictionary.metadata.target_locale.clone(),
         entries,
-    ).with_text_rules(glyphshift_translation::RegexTranslationRules::compile(dictionary.metadata.text_rules.clone()).expect("validated dictionary rules"))
+    )
+    .with_text_rules(
+        glyphshift_translation::RegexTranslationRules::compile(
+            dictionary.metadata.text_rules.clone(),
+        )
+        .expect("validated dictionary rules"),
+    )
 }
 
 pub(super) struct DictionaryLoad {

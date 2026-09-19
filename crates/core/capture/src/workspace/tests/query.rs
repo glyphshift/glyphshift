@@ -78,10 +78,12 @@ fn qt_translation_context_keeps_rows_distinct_but_dictionary_collection_source_o
 
     let generic = ProbeDictionarySnapshot::new(3, [ProbeDictionaryEntry::new("Open", "打开")])
         .expect("generic dictionary");
-    assert!(store
-        .uncollected_sources_mapped(summary.id(), &generic, |source| vec![source.into()])
-        .expect("generic fallback")
-        .is_empty());
+    assert!(
+        store
+            .uncollected_sources_mapped(summary.id(), &generic, |source| vec![source.into()])
+            .expect("generic fallback")
+            .is_empty()
+    );
 
     let page = store
         .query_entries(
@@ -93,7 +95,9 @@ fn qt_translation_context_keeps_rows_distinct_but_dictionary_collection_source_o
     assert_eq!(
         page.rows()
             .iter()
-            .filter(|row| row.translation_context().is_some_and(|context| context.plural_n().is_none()))
+            .filter(|row| row
+                .translation_context()
+                .is_some_and(|context| context.plural_n().is_none()))
             .map(|row| row.translation())
             .collect::<BTreeSet<_>>(),
         BTreeSet::from(["打开"])
@@ -164,10 +168,12 @@ fn query_filters_joined_rows_by_run_adapter_without_changing_full_exports() {
         )
         .expect("filtered page");
     assert_eq!(gdiplus_page.total, 2);
-    assert!(gdiplus_page
-        .rows
-        .iter()
-        .all(|row| row.source.as_ref() != "Imported"));
+    assert!(
+        gdiplus_page
+            .rows
+            .iter()
+            .all(|row| row.source.as_ref() != "Imported")
+    );
 
     let unknown_filter = ProbeQuery::new("", 1, 20)
         .expect("query")
@@ -286,10 +292,12 @@ fn translation_filter_runs_on_the_complete_joined_set_before_paging() {
         .expect("untranslated page");
     assert_eq!(untranslated.total, 50);
     assert_eq!(untranslated.rows.len(), 20);
-    assert!(untranslated
-        .rows
-        .iter()
-        .all(|row| row.translation().is_empty()));
+    assert!(
+        untranslated
+            .rows
+            .iter()
+            .all(|row| row.translation().is_empty())
+    );
 
     let translated = store
         .query_entries(
@@ -302,33 +310,64 @@ fn translation_filter_runs_on_the_complete_joined_set_before_paging() {
         .expect("translated page");
     assert_eq!(translated.total, 51);
     assert_eq!(translated.rows.len(), 20);
-    assert!(translated
-        .rows
-        .iter()
-        .all(|row| !row.translation().is_empty()));
+    assert!(
+        translated
+            .rows
+            .iter()
+            .all(|row| !row.translation().is_empty())
+    );
 }
 
 #[test]
 fn exclusions_apply_before_paging_and_export_without_removing_evidence() {
     let (root, mut store) = run_store();
-    let create = ProbeRunCreate::new("probe-exclusions", "Excluded work", "software", "main", ["synthetic.adapter"], false).unwrap()
-        .with_excluded_dictionaries(vec!["completed-one".into(), "completed-two".into()]).unwrap();
+    let create = ProbeRunCreate::new(
+        "probe-exclusions",
+        "Excluded work",
+        "software",
+        "main",
+        ["synthetic.adapter"],
+        false,
+    )
+    .unwrap()
+    .with_excluded_dictionaries(vec!["completed-one".into(), "completed-two".into()])
+    .unwrap();
     let run = store.create(create).unwrap();
     let sink = FileCaptureSink::start(store.capture_configuration(run.id(), 100).unwrap()).unwrap();
-    for source in ["Done one", "New one", "Done two", "New two"] { sink.observe("synthetic.adapter", source); }
+    for source in ["Done one", "New one", "Done two", "New two"] {
+        sink.observe("synthetic.adapter", source);
+    }
     sink.finish().unwrap();
-    let snapshot = ProbeDictionarySnapshot::new(1, [ProbeDictionaryEntry::new("Imported pending", "")]).unwrap()
-        .with_excluded_sources(["Done one".to_owned(), "Done two".to_owned()].into());
-    let page = store.query_entries(run.id(), &ProbeQuery::new("", 1, 1).unwrap(), &snapshot).unwrap();
+    let snapshot =
+        ProbeDictionarySnapshot::new(1, [ProbeDictionaryEntry::new("Imported pending", "")])
+            .unwrap()
+            .with_excluded_sources(["Done one".to_owned(), "Done two".to_owned()].into());
+    let page = store
+        .query_entries(run.id(), &ProbeQuery::new("", 1, 1).unwrap(), &snapshot)
+        .unwrap();
     assert_eq!(page.total, 3);
     assert_eq!(page.rows.len(), 1);
-    for format in [ProbeExportFormat::EntriesCsv, ProbeExportFormat::EntriesJson] {
+    for format in [
+        ProbeExportFormat::EntriesCsv,
+        ProbeExportFormat::EntriesJson,
+    ] {
         let output = String::from_utf8(store.export(run.id(), format, &snapshot).unwrap()).unwrap();
         assert!(!output.contains("Done one") && !output.contains("Done two"));
         assert!(output.contains("Imported pending"));
     }
-    assert!(store.preview_entries(run.id(), &snapshot).unwrap().is_empty());
+    assert!(
+        store
+            .preview_entries(run.id(), &snapshot)
+            .unwrap()
+            .is_empty()
+    );
     let mut reopened = ProbeRunStore::open(root.path()).unwrap();
-    assert_eq!(reopened.summary(run.id()).unwrap().excluded_dictionary_ids(), &[Box::<str>::from("completed-one"), "completed-two".into()]);
+    assert_eq!(
+        reopened
+            .summary(run.id())
+            .unwrap()
+            .excluded_dictionary_ids(),
+        &[Box::<str>::from("completed-one"), "completed-two".into()]
+    );
     assert_eq!(reopened.summary(run.id()).unwrap().observed_count, 4);
 }

@@ -1,9 +1,9 @@
 use crate::controller::ProcessRecord;
 use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_target_runtime_contract::{
+    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1, RuntimeDiagnosticsControl,
     RuntimeDiagnosticsQueryV1, RuntimeObservationQueryV1, RuntimeTraceBatch,
-    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     STATUS_TARGET_RUNTIME_OK,
 };
 use std::ffi::c_void;
@@ -11,26 +11,26 @@ use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::null_mut;
-use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W, TH32CS_SNAPMODULE,
+    CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE,
     TH32CS_SNAPMODULE32,
 };
 use windows::Win32::System::LibraryLoader::{
-    GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress, LoadLibraryExW,
     DONT_RESOLVE_DLL_REFERENCES, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleFileNameW, GetModuleHandleExW,
+    GetModuleHandleW, GetProcAddress, LoadLibraryExW,
 };
 use windows::Win32::System::Memory::{
-    VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
+    MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx,
 };
 use windows::Win32::System::Threading::{
-    CreateRemoteThread, GetExitCodeThread, OpenProcess, WaitForSingleObject,
-    LPTHREAD_START_ROUTINE, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
-    PROCESS_VM_READ, PROCESS_VM_WRITE,
+    CreateRemoteThread, GetExitCodeThread, LPTHREAD_START_ROUTINE, OpenProcess,
+    PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
+    PROCESS_VM_WRITE, WaitForSingleObject,
 };
+use windows::core::{PCWSTR, s, w};
 
 const REMOTE_TIMEOUT_MS: u32 = 15_000;
 
@@ -84,7 +84,7 @@ impl ProcessHandle {
         let mut user = created;
         let mut machine = 0u16;
         let mut native = 0u16;
-        let handle = process.0 .0;
+        let handle = process.0.0;
         let valid = unsafe {
             windows_sys::Win32::System::Threading::GetProcessTimes(
                 handle,

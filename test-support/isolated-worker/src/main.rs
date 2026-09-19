@@ -2,7 +2,7 @@ use glyphshift_capture::{
     CaptureBatchIngress, CaptureBatchProducer, CaptureProducerConfiguration, CaptureProducerId,
 };
 use glyphshift_isolated_worker_sdk::{
-    serve_stdio, IsolatedWorker, WireWorkerHealthReport, WorkerActivation, WorkerError,
+    IsolatedWorker, WireWorkerHealthReport, WorkerActivation, WorkerError, serve_stdio,
 };
 
 #[derive(Default)]

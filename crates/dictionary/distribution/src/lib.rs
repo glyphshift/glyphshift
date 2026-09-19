@@ -13,11 +13,11 @@ pub use memory::{
 };
 pub use model::{
     ArtifactPresentation, ArtifactStatement, CatalogContractError, CatalogPage, CatalogQuery,
-    CatalogRelease, CatalogReleaseSummary, CatalogSourcePage, DictionaryArtifactDescriptor,
-    DictionaryInstallationSource, DictionaryInstallationState, DictionaryInstallationView,
-    DictionaryReleaseKey, DictionaryReplacementPolicy, InstallRequest, PublisherIdentity,
-    Sha256Digest, SignatureEnvelope, VerifiedDictionaryArtifact,
-    DICTIONARY_ARTIFACT_STATEMENT_SCHEMA, DICTIONARY_MEDIA_TYPE,
+    CatalogRelease, CatalogReleaseSummary, CatalogSourcePage, DICTIONARY_ARTIFACT_STATEMENT_SCHEMA,
+    DICTIONARY_MEDIA_TYPE, DictionaryArtifactDescriptor, DictionaryInstallationSource,
+    DictionaryInstallationState, DictionaryInstallationView, DictionaryReleaseKey,
+    DictionaryReplacementPolicy, InstallRequest, PublisherIdentity, Sha256Digest,
+    SignatureEnvelope, VerifiedDictionaryArtifact,
 };
 pub use ports::{
     ArtifactTrustVerifier, CatalogPortError, DictionaryDistributionPort, DictionaryInstallStore,

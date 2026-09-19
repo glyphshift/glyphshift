@@ -546,23 +546,53 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
 #[test]
 fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     let (mut app, calls, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.writer", "Writer", "en-US", "zh-CN")).unwrap();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.pending", "Pending", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Owned elsewhere", "")])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.collect", "Collect").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer", "dictionary.pending"])
-            .with_write_dictionary("dictionary.writer"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.writer",
+            "Writer",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.pending", "Pending", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Owned elsewhere", "")]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.collect", "Collect").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id,
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.writer", "dictionary.pending"],
+                )
+                .with_write_dictionary("dictionary.writer"),
+            ]),
+        )
+        .unwrap();
     let ready = app.workflow_collection_view("workflow.collect").unwrap();
     assert_eq!(ready.summary.status(), ProbeRunStatus::Ready);
     app.resume_probe_run(ready.summary.id()).unwrap();
-    let run = app.probe_runs.summary("collection-workflow.collect-0").unwrap();
+    let run = app
+        .probe_runs
+        .summary("collection-workflow.collect-0")
+        .unwrap();
     assert_eq!(run.dictionary_id(), "dictionary.writer");
-    assert_eq!(run.excluded_dictionary_ids(), &[Box::<str>::from("dictionary.pending")]);
+    assert_eq!(
+        run.excluded_dictionary_ids(),
+        &[Box::<str>::from("dictionary.pending")]
+    );
     assert_eq!(run.status(), ProbeRunStatus::Running);
     assert!(calls.lock().unwrap().captures_started.is_empty());
     assert_eq!(run.workflow_id(), Some("workflow.collect"));
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(run.id(), DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Owned elsewhere");
     sink.observe(TEST_ADAPTER_ID, "New source");
     sink.finish().unwrap();
@@ -570,8 +600,19 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     app.probe_run_summary(run.id()).unwrap();
     let paused = app.set_probe_run_paused(run.id(), true).unwrap();
     assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
-    assert!(app.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == "workflow.collect"));
-    assert_eq!(app.set_probe_run_paused(run.id(), false).unwrap().summary.status(), ProbeRunStatus::Running);
+    assert!(
+        app.backend
+            .enabled_workflow_ids()
+            .iter()
+            .any(|id| id.as_ref() == "workflow.collect")
+    );
+    assert_eq!(
+        app.set_probe_run_paused(run.id(), false)
+            .unwrap()
+            .summary
+            .status(),
+        ProbeRunStatus::Running
+    );
     app.refresh_probe_text(run.id()).unwrap();
     assert_eq!(calls.lock().unwrap().capture_publications.len(), 1);
     let writer = app.backend.dictionary("dictionary.writer").unwrap();
@@ -579,42 +620,118 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     assert_eq!(writer.entries()[0].source(), "New source");
     assert!(writer.entries()[0].translation().is_empty());
     app.edit_probe_translation(ProbeTranslationEditRequest {
-        run_id: run.id().into(), source: "New source".into(), translation: "Translated source".into(),
+        run_id: run.id().into(),
+        source: "New source".into(),
+        translation: "Translated source".into(),
         translation_context: None,
-    }).unwrap();
-    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries()[0].translation(), "Translated source");
+    })
+    .unwrap();
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .entries()[0]
+            .translation(),
+        "Translated source"
+    );
     assert!(!calls.lock().unwrap().refreshed.is_empty());
     let current = app.backend.workflow("workflow.collect").unwrap();
-    assert!(app.backend.update_workflow(WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
-        WorkflowTargetCreate::new(run.software_id(), [TEST_ADAPTER_ID], ["dictionary.writer", "dictionary.pending"])
-            .with_write_dictionary("dictionary.pending"),
-    ])).is_err());
-    assert_eq!(app.backend.workflow("workflow.collect").unwrap().targets()[0].write_dictionary_id(), Some("dictionary.writer"));
+    assert!(
+        app.backend
+            .update_workflow(
+                WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+                    WorkflowTargetCreate::new(
+                        run.software_id(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.writer", "dictionary.pending"]
+                    )
+                    .with_write_dictionary("dictionary.pending"),
+                ])
+            )
+            .is_err()
+    );
+    assert_eq!(
+        app.backend.workflow("workflow.collect").unwrap().targets()[0].write_dictionary_id(),
+        Some("dictionary.writer")
+    );
     app.disconnect_probe_run(run.id()).unwrap();
-    assert_eq!(app.probe_runs.summary(run.id()).unwrap().status(), ProbeRunStatus::Ready);
+    assert_eq!(
+        app.probe_runs.summary(run.id()).unwrap().status(),
+        ProbeRunStatus::Ready
+    );
     assert!(app.refresh_probe_text(run.id()).is_err());
-    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries().len(), 1);
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .entries()
+            .len(),
+        1
+    );
     let current = app.backend.workflow("workflow.collect").unwrap();
-    app.backend.update_workflow(WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
-        WorkflowTargetCreate::new(run.software_id(), [TEST_ADAPTER_ID], ["dictionary.pending"]).with_write_dictionary("dictionary.pending"),
-    ])).unwrap();
+    app.backend
+        .update_workflow(
+            WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+                WorkflowTargetCreate::new(
+                    run.software_id(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.pending"],
+                )
+                .with_write_dictionary("dictionary.pending"),
+            ]),
+        )
+        .unwrap();
     let switched = app.workflow_collection_view("workflow.collect").unwrap();
     assert_ne!(switched.summary.id(), run.id());
-    assert_eq!(app.backend.dictionary("dictionary.pending").unwrap().entries().len(), 1);
-    assert_eq!(app.probe_runs.summary(run.id()).unwrap().dictionary_id(), "dictionary.writer");
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.pending")
+            .unwrap()
+            .entries()
+            .len(),
+        1
+    );
+    assert_eq!(
+        app.probe_runs.summary(run.id()).unwrap().dictionary_id(),
+        "dictionary.writer"
+    );
     app.delete_workflows(&["workflow.collect".into()]).unwrap();
-    assert!(!app.probe_runs.list().unwrap().iter().any(|record| record.workflow_id() == Some("workflow.collect")));
-    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().entries().len(), 1);
+    assert!(
+        !app.probe_runs
+            .list()
+            .unwrap()
+            .iter()
+            .any(|record| record.workflow_id() == Some("workflow.collect"))
+    );
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .entries()
+            .len(),
+        1
+    );
 }
 
 #[test]
 fn workflow_collection_start_reports_runtime_failure() {
     let (mut app, _calls, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.writer", "Writer", "en-US", "zh-CN")).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.collect", "Collect").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer"])
-            .with_write_dictionary("dictionary.writer"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.writer",
+            "Writer",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.collect", "Collect").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer"])
+                    .with_write_dictionary("dictionary.writer"),
+            ]),
+        )
+        .unwrap();
     let ready = app.workflow_collection_view("workflow.collect").unwrap();
     app.runtimes = None;
     let result = serde_json::to_value(app.resume_probe_run(ready.summary.id()).unwrap()).unwrap();
@@ -626,7 +743,8 @@ fn workflow_collection_start_reports_runtime_failure() {
 fn missing_software_binding_has_a_specific_repair_message() {
     let error = serde_json::to_value(workflow_activation_command_error(
         BackendError::SoftwareBindingMissing("software.synthetic".into()),
-    )).unwrap();
+    ))
+    .unwrap();
     assert_eq!(error["code"], "software.binding_missing");
     assert_eq!(error["args"]["softwareId"], "software.synthetic");
 }
@@ -634,23 +752,55 @@ fn missing_software_binding_has_a_specific_repair_message() {
 #[test]
 fn collection_summaries_are_read_only_and_locked_final_batches_retry() {
     let (mut app, _calls, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.writer", "Writer", "en-US", "zh-CN")).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.batch", "Batch").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer"])
-            .with_write_dictionary("dictionary.writer"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.writer",
+            "Writer",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.batch", "Batch").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.writer"])
+                    .with_write_dictionary("dictionary.writer"),
+            ]),
+        )
+        .unwrap();
     let ready = app.workflow_collection_view("workflow.batch").unwrap();
     let id = ready.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for index in 0..500 { sink.observe(TEST_ADAPTER_ID, format!("New source {index}")); }
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for index in 0..500 {
+        sink.observe(TEST_ADAPTER_ID, format!("New source {index}"));
+    }
     sink.finish().unwrap();
-    for _ in 0..5 { app.probe_run_summary(id).unwrap(); }
-    assert!(app.backend.dictionary("dictionary.writer").unwrap().entries().is_empty());
+    for _ in 0..5 {
+        app.probe_run_summary(id).unwrap();
+    }
+    assert!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
     app.ai_locked_dictionary_id = Some("dictionary.writer".into());
     app.disable_workflow("workflow.batch").unwrap();
     assert!(app.pending_collection_runs.contains(id));
-    assert!(app.backend.dictionary("dictionary.writer").unwrap().entries().is_empty());
+    assert!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
     app.ai_locked_dictionary_id = None;
     app.collect_workflow_sources(id).unwrap();
     assert!(!app.pending_collection_runs.contains(id));
@@ -659,9 +809,20 @@ fn collection_summaries_are_read_only_and_locked_final_batches_retry() {
     let revision = dictionary.revision();
     let summary = app.probe_runs.summary(id).unwrap();
     let snapshot = app.probe_entries_snapshot(&summary).unwrap();
-    for _ in 0..20 { app.collect_workflow_sources(id).unwrap(); }
-    assert_eq!(app.backend.dictionary("dictionary.writer").unwrap().revision(), revision);
-    assert!(Arc::ptr_eq(&snapshot, &app.probe_entries_snapshot(&summary).unwrap()));
+    for _ in 0..20 {
+        app.collect_workflow_sources(id).unwrap();
+    }
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.writer")
+            .unwrap()
+            .revision(),
+        revision
+    );
+    assert!(Arc::ptr_eq(
+        &snapshot,
+        &app.probe_entries_snapshot(&summary).unwrap()
+    ));
     let plan = app.probe_ai_plan_request(id).unwrap();
     let _ = plan;
 }
@@ -669,34 +830,89 @@ fn collection_summaries_are_read_only_and_locked_final_batches_retry() {
 #[test]
 fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
     let (mut app, calls, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.lifecycle", "Writer", "en-US", "zh-CN")).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.lifecycle", "Lifecycle").with_targets([
-        WorkflowTargetCreate::new(software_id.clone(), [TEST_ADAPTER_ID], ["dictionary.lifecycle"])
-            .with_write_dictionary("dictionary.lifecycle"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.lifecycle",
+            "Writer",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.lifecycle", "Lifecycle").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.clone(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.lifecycle"],
+                )
+                .with_write_dictionary("dictionary.lifecycle"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.lifecycle").unwrap();
     app.enable_workflow("workflow.lifecycle", false).unwrap();
     app.set_probe_run_paused(run.summary.id(), true).unwrap();
     app.disable_workflow("workflow.lifecycle").unwrap();
     let started = app.enable_workflow("workflow.lifecycle", false).unwrap();
     assert_eq!(started.runtime.lifecycle.as_ref().unwrap().phase, "running");
-    assert!(!started.runtime.lifecycle.as_ref().unwrap().collect_new_sources);
-    assert_eq!(app.probe_runs.summary(run.summary.id()).unwrap().status(), ProbeRunStatus::Paused);
+    assert!(
+        !started
+            .runtime
+            .lifecycle
+            .as_ref()
+            .unwrap()
+            .collect_new_sources
+    );
+    assert_eq!(
+        app.probe_runs.summary(run.summary.id()).unwrap().status(),
+        ProbeRunStatus::Paused
+    );
     assert!(calls.lock().unwrap().capture_controls.last().unwrap().1);
     let mut runtime = started.runtime;
-    runtime.errors.insert(software_id.into(), CommandError::new("runtime.stop_unconfirmed"));
+    runtime.errors.insert(
+        software_id.into(),
+        CommandError::new("runtime.stop_unconfirmed"),
+    );
     app.backend.disable_workflow("workflow.lifecycle").unwrap();
-    assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "stop_failed");
+    assert_eq!(
+        app.project_workflow_runtime(runtime.clone())
+            .lifecycle
+            .unwrap()
+            .phase,
+        "stop_failed"
+    );
     runtime.errors.clear();
-    for target in &mut runtime.targets { target.active = false; }
-    assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "stopped");
+    for target in &mut runtime.targets {
+        target.active = false;
+    }
+    assert_eq!(
+        app.project_workflow_runtime(runtime.clone())
+            .lifecycle
+            .unwrap()
+            .phase,
+        "stopped"
+    );
     app.backend.enable_workflow("workflow.lifecycle").unwrap();
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_not_found"));
-    assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "waiting");
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.component_load_failed"));
+    runtime.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.target_not_found"),
+    );
+    assert_eq!(
+        app.project_workflow_runtime(runtime.clone())
+            .lifecycle
+            .unwrap()
+            .phase,
+        "waiting"
+    );
+    runtime.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.component_load_failed"),
+    );
     runtime.retry_attempt = 0;
     runtime.retry_after_ms = 0;
-    app.workflow_runtime_status.insert("workflow.lifecycle".into(), runtime);
+    app.workflow_runtime_status
+        .insert("workflow.lifecycle".into(), runtime);
     let before = calls.lock().unwrap().refreshed.len();
     app.refresh_workflows_with_retry(false).unwrap();
     assert_eq!(calls.lock().unwrap().refreshed.len(), before + 1);
@@ -704,9 +920,16 @@ fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
     assert!(recovered.targets.iter().any(|target| target.active));
     assert!(recovered.errors.is_empty());
 
-    recovered.targets.iter_mut().for_each(|target| target.active = false);
-    recovered.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
-    app.workflow_runtime_status.insert("workflow.lifecycle".into(), recovered);
+    recovered
+        .targets
+        .iter_mut()
+        .for_each(|target| target.active = false);
+    recovered.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.target_restart_required"),
+    );
+    app.workflow_runtime_status
+        .insert("workflow.lifecycle".into(), recovered);
     app.refresh_workflows_with_retry(false).unwrap();
     assert_eq!(calls.lock().unwrap().refreshed.len(), before + 1);
     app.refresh_workflows_with_retry(true).unwrap();
@@ -716,131 +939,264 @@ fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
 #[test]
 fn workflow_reports_no_compatibility_signal_after_five_seconds_and_clears_it_after_observation() {
     let (mut app, _calls, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new(
-        "dictionary.compatibility",
-        "Compatibility",
-        "en-US",
-        "zh-CN",
-    )).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.compatibility", "Compatibility").with_targets([
-        WorkflowTargetCreate::new(
-            software_id.clone(),
-            [TEST_ADAPTER_ID],
-            ["dictionary.compatibility"],
-        ).with_write_dictionary("dictionary.compatibility"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.compatibility",
+            "Compatibility",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.compatibility", "Compatibility").with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.clone(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.compatibility"],
+                )
+                .with_write_dictionary("dictionary.compatibility"),
+            ]),
+        )
+        .unwrap();
 
-    let run = app.workflow_collection_view("workflow.compatibility").unwrap();
-    let started = app.enable_workflow("workflow.compatibility", false).unwrap();
+    let run = app
+        .workflow_collection_view("workflow.compatibility")
+        .unwrap();
+    let started = app
+        .enable_workflow("workflow.compatibility", false)
+        .unwrap();
     assert_eq!(started.runtime.lifecycle.as_ref().unwrap().phase, "running");
 
     let summary = app.probe_runs.summary(run.summary.id()).unwrap();
-    app.workflow_compatibility_checks.insert(run.summary.id().to_owned(), WorkflowCompatibilityCheck {
-        started_at_ms: glyphshift_capture::unix_time_millis().saturating_sub(5_000),
-        baseline_observation_revision: summary.observation_revision(),
-        matched: false,
-    });
-    app.update_workflow_collection_status("workflow.compatibility", true).unwrap();
+    app.workflow_compatibility_checks.insert(
+        run.summary.id().to_owned(),
+        WorkflowCompatibilityCheck {
+            started_at_ms: glyphshift_capture::unix_time_millis().saturating_sub(5_000),
+            baseline_observation_revision: summary.observation_revision(),
+            matched: false,
+        },
+    );
+    app.update_workflow_collection_status("workflow.compatibility", true)
+        .unwrap();
 
     let runtime = app.workflow_runtime_status["workflow.compatibility"].clone();
-    assert_eq!(app.project_workflow_runtime(runtime.clone()).lifecycle.unwrap().phase, "running");
     assert_eq!(
-        runtime.warnings.get(software_id.as_ref()).map(CommandError::code),
+        app.project_workflow_runtime(runtime.clone())
+            .lifecycle
+            .unwrap()
+            .phase,
+        "running"
+    );
+    assert_eq!(
+        runtime
+            .warnings
+            .get(software_id.as_ref())
+            .map(CommandError::code),
         Some("runtime.no_compatibility_signal"),
     );
 
     let sink = glyphshift_capture::FileCaptureSink::start(
-        app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap(),
-    ).unwrap();
+        app.probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Open menu");
     sink.finish().unwrap();
     app.collect_workflow_sources(run.summary.id()).unwrap();
-    app.update_workflow_collection_status("workflow.compatibility", true).unwrap();
+    app.update_workflow_collection_status("workflow.compatibility", true)
+        .unwrap();
 
-    assert!(app.workflow_runtime_status["workflow.compatibility"].warnings.is_empty());
+    assert!(
+        app.workflow_runtime_status["workflow.compatibility"]
+            .warnings
+            .is_empty()
+    );
     assert!(app.workflow_compatibility_checks[run.summary.id()].matched);
 }
 
 #[test]
 fn workflow_legacy_pause_migrates_and_survives_backend_reopen() {
     let (mut app, _calls, software_id, root) = workflow_application();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.legacy", "Legacy").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"])
-            .with_write_dictionary("dictionary.product"),
-    ])).unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.legacy", "Legacy").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"])
+                    .with_write_dictionary("dictionary.product"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.legacy").unwrap();
-    app.probe_runs.set_status(run.summary.id(), ProbeRunStatus::Paused).unwrap();
-    let path = root.path().join("workflows-v4").join("workflow.legacy.json");
-    let mut artifact: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    artifact["targets"][0].as_object_mut().unwrap().remove("collectNewSources");
+    app.probe_runs
+        .set_status(run.summary.id(), ProbeRunStatus::Paused)
+        .unwrap();
+    let path = root
+        .path()
+        .join("workflows-v4")
+        .join("workflow.legacy.json");
+    let mut artifact: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    artifact["targets"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("collectNewSources");
     std::fs::write(&path, serde_json::to_vec(&artifact).unwrap()).unwrap();
-    app.backend = DesktopBackend::open_with_environment(root.path(), test_desktop_environment()).unwrap();
+    app.backend =
+        DesktopBackend::open_with_environment(root.path(), test_desktop_environment()).unwrap();
     app.prepare_workflow_collection("workflow.legacy").unwrap();
     assert!(!app.backend.workflow("workflow.legacy").unwrap().targets()[0].collection_enabled());
-    app.backend = DesktopBackend::open_with_environment(root.path(), test_desktop_environment()).unwrap();
-    assert_eq!(app.backend.workflow("workflow.legacy").unwrap().targets()[0].collection_preference(), Some(false));
+    app.backend =
+        DesktopBackend::open_with_environment(root.path(), test_desktop_environment()).unwrap();
+    assert_eq!(
+        app.backend.workflow("workflow.legacy").unwrap().targets()[0].collection_preference(),
+        Some(false)
+    );
 }
 
 #[test]
 fn workflow_transient_retry_is_bounded_and_hard_failure_requires_manual_retry() {
     let (mut app, _calls, _software_id, _root) = workflow_application();
-    let mut runtime = app.enable_workflow("workflow.product", false).unwrap().runtime;
-    runtime.targets.iter_mut().for_each(|target| target.active = false);
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.activation_timed_out"));
+    let mut runtime = app
+        .enable_workflow("workflow.product", false)
+        .unwrap()
+        .runtime;
+    runtime
+        .targets
+        .iter_mut()
+        .for_each(|target| target.active = false);
+    runtime.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.activation_timed_out"),
+    );
     runtime.retry_attempt = 2;
     runtime.retry_after_ms = 100;
-    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 99));
-    assert!(crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 100));
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 99
+    ));
+    assert!(crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 100
+    ));
     runtime.retry_attempt = 3;
-    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 200));
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 200
+    ));
     runtime.retry_attempt = 0;
     runtime.errors.clear();
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.component_load_failed"));
+    runtime.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.component_load_failed"),
+    );
     runtime.retry_after_ms = 300;
-    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 299));
-    assert!(crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 300));
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 299
+    ));
+    assert!(crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 300
+    ));
     runtime.retry_attempt = 3;
-    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 400));
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 400
+    ));
     runtime.retry_attempt = 0;
     runtime.errors.clear();
-    runtime.errors.insert("synthetic".into(), CommandError::new("runtime.target_restart_required"));
-    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(&runtime, 200));
+    runtime.errors.insert(
+        "synthetic".into(),
+        CommandError::new("runtime.target_restart_required"),
+    );
+    assert!(!crate::workflow_lifecycle::automatic_retry_allowed(
+        &runtime, 200
+    ));
 }
 
 #[test]
 fn collection_filters_before_dictionary_write_and_rechecks_changed_policy() {
     let (mut app, _, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.filtered", "Filtered", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("42", "既有数字")])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.filtered", "Filtered").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.filtered"])
-            .with_write_dictionary("dictionary.filtered"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.filtered", "Filtered", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("42", "既有数字")]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.filtered", "Filtered").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.filtered"])
+                    .with_write_dictionary("dictionary.filtered"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.filtered").unwrap();
-    app.set_collection_filter_policy(glyphshift_ai_translation::FilterPolicy::default().with_excluded_patterns(["^Debug"]));
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for source in ["1234", "0.1818", "100 px", "https://example.invalid", "Ctrl+S", "Debug text", "Selected:0", "Open menu"] { sink.observe(TEST_ADAPTER_ID, source); }
+    app.set_collection_filter_policy(
+        glyphshift_ai_translation::FilterPolicy::default().with_excluded_patterns(["^Debug"]),
+    );
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(run.summary.id(), DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for source in [
+        "1234",
+        "0.1818",
+        "100 px",
+        "https://example.invalid",
+        "Ctrl+S",
+        "Debug text",
+        "Selected:0",
+        "Open menu",
+    ] {
+        sink.observe(TEST_ADAPTER_ID, source);
+    }
     sink.finish().unwrap();
     app.collect_workflow_sources(run.summary.id()).unwrap();
     let dictionary = app.backend.dictionary("dictionary.filtered").unwrap();
-    assert_eq!(dictionary.entries().iter().map(|entry| entry.source()).collect::<Vec<_>>(), vec!["42", "Open menu", "Selected:0"]);
+    assert_eq!(
+        dictionary
+            .entries()
+            .iter()
+            .map(|entry| entry.source())
+            .collect::<Vec<_>>(),
+        vec!["42", "Open menu", "Selected:0"]
+    );
     assert_eq!(dictionary.entries()[0].translation(), "既有数字");
     let revision = dictionary.revision();
     app.collect_workflow_sources(run.summary.id()).unwrap();
-    assert_eq!(app.backend.dictionary("dictionary.filtered").unwrap().revision(), revision);
-    let mut policy = serde_json::to_value(glyphshift_ai_translation::FilterPolicy::default()).unwrap();
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.filtered")
+            .unwrap()
+            .revision(),
+        revision
+    );
+    let mut policy =
+        serde_json::to_value(glyphshift_ai_translation::FilterPolicy::default()).unwrap();
     policy["skipPureNumbersOrSymbols"] = false.into();
     app.set_collection_filter_policy(serde_json::from_value(policy).unwrap());
     // Policy changes recheck persisted observations even when no new observation arrives.
     app.collect_workflow_sources(run.summary.id()).unwrap();
-    let sources = app.backend.dictionary("dictionary.filtered").unwrap().entries().iter().map(|entry| entry.source()).collect::<Vec<_>>();
+    let sources = app
+        .backend
+        .dictionary("dictionary.filtered")
+        .unwrap()
+        .entries()
+        .iter()
+        .map(|entry| entry.source())
+        .collect::<Vec<_>>();
     assert!(sources.contains(&"1234"));
     assert!(sources.contains(&"Debug text"));
     assert!(!sources.contains(&"https://example.invalid"));
     assert!(!sources.contains(&"100 px"));
     app.set_collection_filter_policy(glyphshift_ai_translation::FilterPolicy::default());
     app.collect_workflow_sources(run.summary.id()).unwrap();
-    assert!(app.backend.dictionary("dictionary.filtered").unwrap().entries().iter().any(|entry| entry.source() == "1234"));
+    assert!(
+        app.backend
+            .dictionary("dictionary.filtered")
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "1234")
+    );
 }
 
 #[test]
@@ -850,7 +1206,14 @@ fn exit_stops_runtime_without_erasing_saved_intent_or_restarting_on_poll() {
     let desired = app.backend.enabled_workflow_ids().to_vec();
     let activations = calls.lock().unwrap().enabled.len();
     app.prepare_exit().unwrap();
-    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.product"));
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .disabled
+            .iter()
+            .any(|id| id.as_ref() == "workflow.product")
+    );
     assert_eq!(app.backend.enabled_workflow_ids(), desired);
     app.refresh_workflows().unwrap();
     app.reconcile_enabled_workflows().unwrap();
@@ -862,70 +1225,169 @@ fn exit_stops_runtime_without_erasing_saved_intent_or_restarting_on_poll() {
 fn exit_failure_still_stops_other_workflows_and_allows_retry() {
     let (mut app, calls, software_id, _root) = workflow_application();
     app.enable_workflow("workflow.product", false).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.second", "Second").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"]),
-    ])).unwrap();
-    let intent = app.backend.effective_workflow_intent("workflow.second").unwrap();
-    app.workflow_runtime_status.insert("workflow.second".into(), idle_workflow_runtime_view(&intent, false));
-    calls.lock().unwrap().stop_failure_ids.insert("workflow.product".into());
-    assert_eq!(serde_json::to_value(app.prepare_exit().unwrap_err()).unwrap()["code"], "runtime.exit_stop_failed");
-    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.second"));
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.second", "Second").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"]),
+            ]),
+        )
+        .unwrap();
+    let intent = app
+        .backend
+        .effective_workflow_intent("workflow.second")
+        .unwrap();
+    app.workflow_runtime_status.insert(
+        "workflow.second".into(),
+        idle_workflow_runtime_view(&intent, false),
+    );
+    calls
+        .lock()
+        .unwrap()
+        .stop_failure_ids
+        .insert("workflow.product".into());
+    assert_eq!(
+        serde_json::to_value(app.prepare_exit().unwrap_err()).unwrap()["code"],
+        "runtime.exit_stop_failed"
+    );
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .disabled
+            .iter()
+            .any(|id| id.as_ref() == "workflow.second")
+    );
     assert!(app.exiting);
     calls.lock().unwrap().stop_failure_ids.clear();
     app.prepare_exit().unwrap();
 }
 
-
 #[test]
 fn dictionary_rules_collect_one_label_and_ai_ignores_dynamic_counts() {
     let (mut app, _, software_id, _root) = workflow_application();
-    let rule = glyphshift_translation::RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true };
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN")
-        .with_text_rules(vec![rule.clone()])
-        .with_entries([DictionaryEntryCreate::new("Total:18", "旧译文")])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.counter", "Counter").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"]).with_write_dictionary("dictionary.counter"),
-    ])).unwrap();
+    let rule = glyphshift_translation::RegexTranslationRule {
+        pattern: r"^(.+?)(:[0-9]+)$".into(),
+        replacement: "{{TR}}$2".into(),
+        enabled: true,
+    };
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN")
+                .with_text_rules(vec![rule.clone()])
+                .with_entries([DictionaryEntryCreate::new("Total:18", "旧译文")]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.counter", "Counter").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"])
+                    .with_write_dictionary("dictionary.counter"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.counter").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for n in 0..101 { sink.observe(TEST_ADAPTER_ID, format!("Total:{n}")); }
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for n in 0..101 {
+        sink.observe(TEST_ADAPTER_ID, format!("Total:{n}"));
+    }
     sink.finish().unwrap();
     app.collect_workflow_sources(id).unwrap();
-    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .clone();
     assert_eq!(dictionary.entries().len(), 2);
-    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Total" && entry.translation().is_empty()));
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Total" && entry.translation().is_empty())
+    );
     let request = app.probe_ai_plan_request(id).unwrap();
-    let plan = glyphshift_ai_translation::AiTranslation::new().plan_translation(request).unwrap();
+    let plan = glyphshift_ai_translation::AiTranslation::new()
+        .plan_translation(request)
+        .unwrap();
     assert_eq!(plan.candidates().len(), 1);
     assert_eq!(plan.candidates()[0].source(), "Total");
-    let applied = app.apply_probe_ai_results(ai::ProbeAiApplyRequest {
-        run_id: id.into(), snapshot_revision: dictionary.revision(), results: vec![
-            ai::ProbeAiTranslationResult { item_id: plan.candidates()[0].item_id().into(), source: "Total".into(), translation: "总计".into(), context: None, disambiguation: None },
-        ],
-    }).unwrap();
+    let applied = app
+        .apply_probe_ai_results(ai::ProbeAiApplyRequest {
+            run_id: id.into(),
+            snapshot_revision: dictionary.revision(),
+            results: vec![ai::ProbeAiTranslationResult {
+                item_id: plan.candidates()[0].item_id().into(),
+                source: "Total".into(),
+                translation: "总计".into(),
+                context: None,
+                disambiguation: None,
+            }],
+        })
+        .unwrap();
     assert_eq!(applied.applied_count, 1);
-    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
-    let mut disabled = rule; disabled.enabled = false;
-    app.backend.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled])).unwrap();
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .clone();
+    let mut disabled = rule;
+    disabled.enabled = false;
+    app.backend
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled]),
+        )
+        .unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert_eq!(app.backend.dictionary("dictionary.counter").unwrap().entries().len(), 102);
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.counter")
+            .unwrap()
+            .entries()
+            .len(),
+        102
+    );
 }
 
 #[test]
 fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
     let (mut app, _, software_id, _root) = workflow_application();
-    let rule = glyphshift_translation::RegexTranslationRule { pattern: r"^(.+?)(:[0-9]+)$".into(), replacement: "{{TR}}$2".into(), enabled: true };
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN").with_text_rules(vec![rule])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.counter", "Counter").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"]).with_write_dictionary("dictionary.counter"),
-    ])).unwrap();
+    let rule = glyphshift_translation::RegexTranslationRule {
+        pattern: r"^(.+?)(:[0-9]+)$".into(),
+        replacement: "{{TR}}$2".into(),
+        enabled: true,
+    };
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.counter", "Counter", "en-US", "zh-CN")
+                .with_text_rules(vec![rule]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.counter", "Counter").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.counter"])
+                    .with_write_dictionary("dictionary.counter"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.counter").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for n in 0..101 { sink.observe(TEST_ADAPTER_ID, format!("Total:{n}")); }
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for n in 0..101 {
+        sink.observe(TEST_ADAPTER_ID, format!("Total:{n}"));
+    }
     sink.finish().unwrap();
     app.collect_workflow_sources(id).unwrap();
     let rows = |app: &mut DesktopApplication| {
@@ -936,7 +1398,13 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
     assert_eq!(pending["rows"][0]["resolution"]["editable"], true);
     assert_eq!(pending["rows"][0]["resolution"]["editSource"], "Total");
     for text in ["总计", "合计"] {
-        app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:text.into(), translation_context: None }).unwrap();
+        app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest {
+            run_id: id.into(),
+            source: "Total:18".into(),
+            translation: text.into(),
+            translation_context: None,
+        })
+        .unwrap();
         let dictionary = app.backend.dictionary("dictionary.counter").unwrap();
         assert_eq!(dictionary.entries().len(), 1);
         assert_eq!(dictionary.entries()[0].source(), "Total");
@@ -945,118 +1413,330 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
         assert_eq!(page["rows"][0]["translation"], format!("{text}:18"));
         assert_eq!(page["rows"][0]["resolution"]["editTranslation"], text);
     }
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:0".into(), translation:"".into(), translation_context: None }).unwrap();
-    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
-    assert_eq!(rows(&mut app)["rows"][0]["resolution"]["kind"], "rule_pending");
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:100".into(), translation:"总数".into(), translation_context: None }).unwrap();
-    app.bulk_probe_entries(super::super::probe::ProbeBulkRequest { run_id:id.into(), sources:vec!["Total:0".into(),"Total:18".into()], action:"clear_translations".into() }).unwrap();
-    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
-    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest { run_id:id.into(), source:"Total:18".into(), translation:"总数".into(), translation_context: None }).unwrap();
-    let dictionary = app.backend.dictionary("dictionary.counter").unwrap().clone();
-    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest {
+        run_id: id.into(),
+        source: "Total:0".into(),
+        translation: "".into(),
+        translation_context: None,
+    })
+    .unwrap();
+    assert!(
+        app.backend
+            .dictionary("dictionary.counter")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
+    assert_eq!(
+        rows(&mut app)["rows"][0]["resolution"]["kind"],
+        "rule_pending"
+    );
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest {
+        run_id: id.into(),
+        source: "Total:100".into(),
+        translation: "总数".into(),
+        translation_context: None,
+    })
+    .unwrap();
+    app.bulk_probe_entries(super::super::probe::ProbeBulkRequest {
+        run_id: id.into(),
+        sources: vec!["Total:0".into(), "Total:18".into()],
+        action: "clear_translations".into(),
+    })
+    .unwrap();
+    assert!(
+        app.backend
+            .dictionary("dictionary.counter")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
+    app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest {
+        run_id: id.into(),
+        source: "Total:18".into(),
+        translation: "总数".into(),
+        translation_context: None,
+    })
+    .unwrap();
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .clone();
+    app.update_dictionary_with_capture_clear(
+        DictionaryEdit::from_dictionary(&dictionary).with_entries([]),
+        true,
+    )
+    .unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(app.backend.dictionary("dictionary.counter").unwrap().entries().is_empty());
+    assert!(
+        app.backend
+            .dictionary("dictionary.counter")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
     assert_eq!(rows(&mut app)["total"], 0);
-
 }
 
 #[test]
 fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
     let (mut app, calls, software_id, root) = workflow_application();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.clear", "Clear").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"]).with_write_dictionary("dictionary.product"),
-    ])).unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.clear", "Clear").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.product"])
+                    .with_write_dictionary("dictionary.product"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.clear").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Captured entry");
     sink.finish().unwrap();
     app.collect_workflow_sources(id).unwrap();
-    let dictionary = app.backend.dictionary("dictionary.product").unwrap().clone();
-    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Captured entry"));
-    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
-    assert!(calls.lock().unwrap().disabled.iter().any(|id| id.as_ref() == "workflow.clear"));
-    assert!(app.backend.enabled_workflow_ids().iter().any(|id| id.as_ref() == "workflow.clear"));
-    assert!(calls.lock().unwrap().enabled.iter().filter(|(id, _, _)| id.as_ref() == "workflow.clear").count() >= 2);
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .clone();
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Captured entry")
+    );
+    app.update_dictionary_with_capture_clear(
+        DictionaryEdit::from_dictionary(&dictionary).with_entries([]),
+        true,
+    )
+    .unwrap();
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .disabled
+            .iter()
+            .any(|id| id.as_ref() == "workflow.clear")
+    );
+    assert!(
+        app.backend
+            .enabled_workflow_ids()
+            .iter()
+            .any(|id| id.as_ref() == "workflow.clear")
+    );
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .enabled
+            .iter()
+            .filter(|(id, _, _)| id.as_ref() == "workflow.clear")
+            .count()
+            >= 2
+    );
     app.workflow_collection_view("workflow.clear").unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(app.backend.dictionary("dictionary.product").unwrap().entries().is_empty());
-    let request = serde_json::from_value(serde_json::json!({"runId":id,"search":"Captured entry","page":1,"pageSize":50})).unwrap();
+    assert!(
+        app.backend
+            .dictionary("dictionary.product")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
+    let request = serde_json::from_value(
+        serde_json::json!({"runId":id,"search":"Captured entry","page":1,"pageSize":50}),
+    )
+    .unwrap();
     assert_eq!(app.probe_run_entries(request).unwrap().total(), 0);
     app.probe_runs = ProbeRunStore::open(root.path().join("probe-runs")).unwrap();
     app.collection_versions.clear();
     app.collect_workflow_sources(id).unwrap();
-    assert!(app.backend.dictionary("dictionary.product").unwrap().entries().is_empty());
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    assert!(
+        app.backend
+            .dictionary("dictionary.product")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Captured entry");
     sink.observe(TEST_ADAPTER_ID, "Fresh entry");
     sink.finish().unwrap();
     app.collect_workflow_sources(id).unwrap();
     let dictionary = app.backend.dictionary("dictionary.product").unwrap();
     assert_eq!(dictionary.entries().len(), 2);
-    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Captured entry"));
-    assert!(dictionary.entries().iter().any(|entry| entry.source() == "Fresh entry"));
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Captured entry")
+    );
+    assert!(
+        dictionary
+            .entries()
+            .iter()
+            .any(|entry| entry.source() == "Fresh entry")
+    );
 }
 
 #[test]
 fn clearing_dynamic_source_resets_capture_without_blocking_rule_key() {
     let (mut app, _, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.dynamic", "Dynamic", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Total:18", "总计")])
-        .with_text_rules(vec![glyphshift_translation::RegexTranslationRule { pattern:r"^(.+?)(:[0-9]+)$".into(), replacement:"{{TR}}$2".into(), enabled:true }])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.dynamic", "Dynamic").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.dynamic"]).with_write_dictionary("dictionary.dynamic"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.dynamic", "Dynamic", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Total:18", "总计")])
+                .with_text_rules(vec![glyphshift_translation::RegexTranslationRule {
+                    pattern: r"^(.+?)(:[0-9]+)$".into(),
+                    replacement: "{{TR}}$2".into(),
+                    enabled: true,
+                }]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.dynamic", "Dynamic").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.dynamic"])
+                    .with_write_dictionary("dictionary.dynamic"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.dynamic").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Total:18");
     sink.finish().unwrap();
-    let dictionary = app.backend.dictionary("dictionary.dynamic").unwrap().clone();
-    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
+    let dictionary = app
+        .backend
+        .dictionary("dictionary.dynamic")
+        .unwrap()
+        .clone();
+    app.update_dictionary_with_capture_clear(
+        DictionaryEdit::from_dictionary(&dictionary).with_entries([]),
+        true,
+    )
+    .unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(app.backend.dictionary("dictionary.dynamic").unwrap().entries().is_empty());
+    assert!(
+        app.backend
+            .dictionary("dictionary.dynamic")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
 }
 
 #[test]
 fn clearing_empty_dictionary_hides_uncollected_workflow_rows() {
     let (mut app, _, software_id, _root) = workflow_application();
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.empty", "Empty", "en-US", "zh-CN")).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.empty", "Empty").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.empty"]).with_write_dictionary("dictionary.empty"),
-    ])).unwrap();
+    app.backend
+        .create_dictionary(DictionaryCreate::new(
+            "dictionary.empty",
+            "Empty",
+            "en-US",
+            "zh-CN",
+        ))
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.empty", "Empty").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.empty"])
+                    .with_write_dictionary("dictionary.empty"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.empty").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
     sink.observe(TEST_ADAPTER_ID, "Uncollected entry");
     sink.finish().unwrap();
     let dictionary = app.backend.dictionary("dictionary.empty").unwrap().clone();
-    app.update_dictionary_with_capture_clear(DictionaryEdit::from_dictionary(&dictionary).with_entries([]), true).unwrap();
-    let request = serde_json::from_value(serde_json::json!({"runId":id,"search":"","page":1,"pageSize":50})).unwrap();
+    app.update_dictionary_with_capture_clear(
+        DictionaryEdit::from_dictionary(&dictionary).with_entries([]),
+        true,
+    )
+    .unwrap();
+    let request =
+        serde_json::from_value(serde_json::json!({"runId":id,"search":"","page":1,"pageSize":50}))
+            .unwrap();
     assert_eq!(app.probe_run_entries(request).unwrap().total(), 0);
-    assert_eq!(serde_json::to_value(app.probe_runs.summary(id).unwrap()).unwrap()["observedCount"], 0);
+    assert_eq!(
+        serde_json::to_value(app.probe_runs.summary(id).unwrap()).unwrap()["observedCount"],
+        0
+    );
     app.collect_workflow_sources(id).unwrap();
-    assert!(app.backend.dictionary("dictionary.empty").unwrap().entries().is_empty());
+    assert!(
+        app.backend
+            .dictionary("dictionary.empty")
+            .unwrap()
+            .entries()
+            .is_empty()
+    );
 }
 
 #[test]
 fn rule_rows_merge_by_owner_rule_and_fixed_source_before_pagination() {
     let (mut app, _, software_id, _root) = workflow_application();
-    let rule = glyphshift_translation::RegexTranslationRule { pattern:r"^(.+?)(:[0-9]+)$".into(), replacement:"{{TR}}$2".into(), enabled:true };
-    app.backend.create_dictionary(DictionaryCreate::new("dictionary.groups", "Groups", "en-US", "zh-CN")
-        .with_entries([DictionaryEntryCreate::new("Selected", "选择"), DictionaryEntryCreate::new("Total", "总计")])
-        .with_text_rules(vec![rule.clone()])).unwrap();
-    app.backend.create_workflow(WorkflowCreate::new("workflow.groups", "Groups").with_targets([
-        WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.groups"]).with_write_dictionary("dictionary.groups"),
-    ])).unwrap();
+    let rule = glyphshift_translation::RegexTranslationRule {
+        pattern: r"^(.+?)(:[0-9]+)$".into(),
+        replacement: "{{TR}}$2".into(),
+        enabled: true,
+    };
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.groups", "Groups", "en-US", "zh-CN")
+                .with_entries([
+                    DictionaryEntryCreate::new("Selected", "选择"),
+                    DictionaryEntryCreate::new("Total", "总计"),
+                ])
+                .with_text_rules(vec![rule.clone()]),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.groups", "Groups").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.groups"])
+                    .with_write_dictionary("dictionary.groups"),
+            ]),
+        )
+        .unwrap();
     let run = app.workflow_collection_view("workflow.groups").unwrap();
     let id = run.summary.id();
     app.resume_probe_run(id).unwrap();
-    let sink = glyphshift_capture::FileCaptureSink::start(app.probe_runs.capture_configuration(id, DEFAULT_MAX_ENTRIES).unwrap()).unwrap();
-    for n in 0..20 { sink.observe(TEST_ADAPTER_ID, format!("Selected:{n}")); }
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    for n in 0..20 {
+        sink.observe(TEST_ADAPTER_ID, format!("Selected:{n}"));
+    }
     sink.observe(TEST_ADAPTER_ID, "Total:20");
     sink.finish().unwrap();
     let rows = |app: &mut DesktopApplication, merge: bool, search: &str, size: usize| {
@@ -1071,9 +1751,16 @@ fn rule_rows_merge_by_owner_rule_and_fixed_source_before_pagination() {
     assert_eq!(selected["total"], 1);
     assert_eq!(selected["rows"][0]["count"], 20);
     assert_eq!(selected["rows"][0]["resolution"]["editSource"], "Selected");
-    assert_eq!(rows(&mut app, true, "Selected:18", 50)["rows"][0]["source"], "Selected:18");
+    assert_eq!(
+        rows(&mut app, true, "Selected:18", 50)["rows"][0]["source"],
+        "Selected:18"
+    );
     let dictionary = app.backend.dictionary("dictionary.groups").unwrap().clone();
-    let mut disabled = rule; disabled.enabled = false;
-    app.update_dictionary(DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled])).unwrap();
+    let mut disabled = rule;
+    disabled.enabled = false;
+    app.update_dictionary(
+        DictionaryEdit::from_dictionary(&dictionary).with_text_rules(vec![disabled]),
+    )
+    .unwrap();
     assert_eq!(rows(&mut app, true, "", 50)["total"], 21);
 }

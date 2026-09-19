@@ -41,10 +41,16 @@ pub(super) fn load(root: &Path) -> Result<LoadedSoftware, BackendError> {
         }
         if artifact.runtime.as_ref().is_some_and(|runtime| {
             runtime.capabilities.is_empty()
-                || runtime.capabilities.iter().any(|capability| runtime_requirement(capability).is_err())
+                || runtime
+                    .capabilities
+                    .iter()
+                    .any(|capability| runtime_requirement(capability).is_err())
                 || runtime_route(&runtime.route, &artifact.locations).is_err()
         }) {
-            warnings.push(ArtifactWarningView::software(artifact_id, "invalid_runtime"));
+            warnings.push(ArtifactWarningView::software(
+                artifact_id,
+                "invalid_runtime",
+            ));
             continue;
         }
         if software.contains_key(&artifact.id) {
@@ -337,8 +343,12 @@ impl DesktopRuntimeSpec {
     }
 }
 impl DesktopBackend {
-    pub(super) fn software_binding_paths(&self, software_id: &str) -> Result<Vec<Box<str>>, BackendError> {
-        self.local_software.get(software_id)
+    pub(super) fn software_binding_paths(
+        &self,
+        software_id: &str,
+    ) -> Result<Vec<Box<str>>, BackendError> {
+        self.local_software
+            .get(software_id)
             .map(|software| vec![software.executable_path.clone()])
             .ok_or_else(|| BackendError::SoftwareBindingMissing(software_id.into()))
     }

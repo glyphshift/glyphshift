@@ -4,8 +4,8 @@ mod model;
 mod persistence;
 
 pub use model::*;
-pub(super) use persistence::{read_workflow_state, read_workflows};
 use persistence::write_workflow_state;
+pub(super) use persistence::{read_workflow_state, read_workflows};
 
 const WORKFLOW_SCHEMA: &str = "glyphshift.workflow/4";
 const WORKFLOW_STATE_SCHEMA: &str = "glyphshift.workflow-state/1";
@@ -119,10 +119,23 @@ impl DesktopBackend {
         };
         validate_workflow(&artifact, None)?;
         if self.enabled_workflows.contains_key(&artifact.id)
-            && current.targets.iter().chain(&artifact.targets).any(|target| target.write_dictionary_id.is_some())
-            && (current.targets.len() != artifact.targets.len() || current.targets.iter().zip(&artifact.targets).any(|(old, new)|
-                old.software_id != new.software_id || old.adapter_plan != new.adapter_plan
-                || old.dictionary_ids != new.dictionary_ids || old.write_dictionary_id != new.write_dictionary_id)) {
+            && current
+                .targets
+                .iter()
+                .chain(&artifact.targets)
+                .any(|target| target.write_dictionary_id.is_some())
+            && (current.targets.len() != artifact.targets.len()
+                || current
+                    .targets
+                    .iter()
+                    .zip(&artifact.targets)
+                    .any(|(old, new)| {
+                        old.software_id != new.software_id
+                            || old.adapter_plan != new.adapter_plan
+                            || old.dictionary_ids != new.dictionary_ids
+                            || old.write_dictionary_id != new.write_dictionary_id
+                    }))
+        {
             return Err(BackendError::InvalidArtifact("workflow-collection-active"));
         }
         if self.enabled_workflows.contains_key(&artifact.id) {
@@ -146,18 +159,46 @@ impl DesktopBackend {
         Ok(view)
     }
 
-    pub fn set_workflow_collection_enabled(&mut self, workflow_id: &str, enabled: bool) -> Result<WorkflowView, BackendError> {
-        let source = self.workflows.get(workflow_id).cloned()
+    pub fn set_workflow_collection_enabled(
+        &mut self,
+        workflow_id: &str,
+        enabled: bool,
+    ) -> Result<WorkflowView, BackendError> {
+        let source = self
+            .workflows
+            .get(workflow_id)
+            .cloned()
             .ok_or_else(|| BackendError::UnknownWorkflow(workflow_id.into()))?;
-        if enabled && source.targets.iter().any(|target| target.write_dictionary_id.is_none()) {
+        if enabled
+            && source
+                .targets
+                .iter()
+                .any(|target| target.write_dictionary_id.is_none())
+        {
             return Err(BackendError::InvalidArtifact("workflow-collection-writer"));
         }
-        let targets = source.targets.iter().map(|target| WorkflowTargetCreate::new(
-            target.software_id.clone(), target.adapter_plan.adapter_ids.iter().cloned(), target.dictionary_ids.iter().cloned())
-            .with_optional_write_dictionary(target.write_dictionary_id.clone())
-            .with_collection_enabled(Some(enabled)).with_optional_font_policy(target.font_policy.clone())).collect();
-        self.update_workflow(WorkflowEdit { id: source.id, name: source.name, description: source.description,
-            global_shortcut: source.global_shortcut, base_revision: source.revision, targets })
+        let targets = source
+            .targets
+            .iter()
+            .map(|target| {
+                WorkflowTargetCreate::new(
+                    target.software_id.clone(),
+                    target.adapter_plan.adapter_ids.iter().cloned(),
+                    target.dictionary_ids.iter().cloned(),
+                )
+                .with_optional_write_dictionary(target.write_dictionary_id.clone())
+                .with_collection_enabled(Some(enabled))
+                .with_optional_font_policy(target.font_policy.clone())
+            })
+            .collect();
+        self.update_workflow(WorkflowEdit {
+            id: source.id,
+            name: source.name,
+            description: source.description,
+            global_shortcut: source.global_shortcut,
+            base_revision: source.revision,
+            targets,
+        })
     }
 
     pub fn copy_workflow(
@@ -293,18 +334,20 @@ impl DesktopBackend {
                     target.software_id.clone(),
                     AdapterPlan::parallel(target.adapter_plan.adapter_ids.iter().cloned()),
                     target.dictionary_ids.iter().cloned(),
-                ).with_collection(target.write_dictionary_id.is_some());
+                )
+                .with_collection(target.write_dictionary_id.is_some());
                 let target_locale = self.target_locale(target, dictionary_override);
                 let fallback_policy = target_locale
                     .as_deref()
                     .and_then(|locale| self.environment.fallback_font_for_locale(locale))
-                    .map(|family| WorkflowFontPolicy::new(
-                        [family],
-                        FontCoverage::DictionaryMatches,
-                    ));
-                target.font_policy.as_ref().or(fallback_policy.as_ref()).map_or(
-                    definition_target.clone(),
-                    |policy| {
+                    .map(|family| {
+                        WorkflowFontPolicy::new([family], FontCoverage::DictionaryMatches)
+                    });
+                target
+                    .font_policy
+                    .as_ref()
+                    .or(fallback_policy.as_ref())
+                    .map_or(definition_target.clone(), |policy| {
                         let mut compiled = CompiledTargetFontPolicy::new(
                             policy.families.iter().cloned(),
                             match policy.coverage {
@@ -315,13 +358,17 @@ impl DesktopBackend {
                                     CompiledFontCoverage::AllObservations
                                 }
                             },
-                        ).with_scale_percent(policy.scale_percent);
+                        )
+                        .with_scale_percent(policy.scale_percent);
                         for (id, font) in &policy.dictionary_overrides {
-                            compiled = compiled.with_dictionary_override(id.clone(), font.families.iter().cloned(), font.scale_percent);
+                            compiled = compiled.with_dictionary_override(
+                                id.clone(),
+                                font.families.iter().cloned(),
+                                font.scale_percent,
+                            );
                         }
                         definition_target.with_font_policy(compiled)
-                    },
-                )
+                    })
             }),
         );
         let software = artifact
@@ -536,14 +583,17 @@ fn workflow_view(artifact: &WorkflowArtifact) -> WorkflowView {
                 adapter_plan: target.adapter_plan.clone(),
                 dictionary_ids: target.dictionary_ids.clone(),
                 write_dictionary_id: target.write_dictionary_id.clone(),
-                    collect_new_sources: target.collect_new_sources,
+                collect_new_sources: target.collect_new_sources,
                 font_policy: target.font_policy.clone(),
             })
             .collect(),
     }
 }
 
-pub(super) fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>) -> Result<(), BackendError> {
+pub(super) fn validate_workflow(
+    artifact: &WorkflowArtifact,
+    path: Option<&Path>,
+) -> Result<(), BackendError> {
     let unique_software = artifact
         .targets
         .iter()
@@ -585,16 +635,26 @@ pub(super) fn validate_workflow(artifact: &WorkflowArtifact, path: Option<&Path>
                     .dictionary_ids
                     .iter()
                     .any(|dictionary_id| !safe_identifier(dictionary_id))
-                || target.write_dictionary_id.as_ref().is_some_and(|id| !target.dictionary_ids.contains(id))
+                || target
+                    .write_dictionary_id
+                    .as_ref()
+                    .is_some_and(|id| !target.dictionary_ids.contains(id))
                 || target.font_policy.as_ref().is_some_and(|policy| {
                     (!(50..=200).contains(&policy.scale_percent))
                         || policy.dictionary_overrides.len() > target.dictionary_ids.len()
                         || policy.dictionary_overrides.iter().any(|(id, font)| {
                             !target.dictionary_ids.contains(id)
-                                || font.scale_percent.is_some_and(|scale| !(50..=200).contains(&scale))
+                                || font
+                                    .scale_percent
+                                    .is_some_and(|scale| !(50..=200).contains(&scale))
                                 || font.families.len() > 16
-                                || font.families.iter().any(|family| family.trim().is_empty() || family.len() > 512 || family.chars().any(char::is_control))
-                                || font.families.iter().collect::<BTreeSet<_>>().len() != font.families.len()
+                                || font.families.iter().any(|family| {
+                                    family.trim().is_empty()
+                                        || family.len() > 512
+                                        || family.chars().any(char::is_control)
+                                })
+                                || font.families.iter().collect::<BTreeSet<_>>().len()
+                                    != font.families.len()
                         })
                         || policy
                             .families
