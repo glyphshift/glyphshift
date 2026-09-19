@@ -21,8 +21,10 @@ watch(() => appSettings.settings.value.checkUpdatesOnStartup, enabled => {
       <UButton variant="link" size="xs" :label="t('updates.notes')" />
       <template #content><p class="m-0 max-h-64 max-w-96 overflow-auto whitespace-pre-wrap break-words p-4 text-sm">{{ update.release.value?.releaseNotes }}</p></template>
     </UPopover>
-    <span v-if="update.openFailed.value" class="type-caption text-[var(--text-secondary)]">{{ t('updates.openFailed') }}</span>
-    <UButton class="ml-auto shrink-0" size="xs" :label="t('updates.download')" :loading="update.opening.value" @click="update.download" />
+    <span v-if="update.openFailed.value" class="type-caption text-[var(--text-secondary)]">{{ t(update.selectedSource.value?.action === 'install' ? 'updates.installFailed' : 'updates.openFailed') }}</span>
+    <span v-if="update.selectedSource.value?.extractionCode" class="type-caption text-[var(--text-secondary)]">{{ t('updates.extractionCode', { code: update.selectedSource.value.extractionCode }) }}</span>
+    <USelect v-model="update.selectedSourceId.value" :items="update.sourceItems.value" value-key="value" label-key="label" :aria-label="t('updates.source')" class="ml-auto w-44 shrink-0" />
+    <UButton class="shrink-0" size="xs" :disabled="!update.selectedSource.value" :label="t(update.selectedSource.value?.action === 'install' ? 'updates.install' : 'updates.download')" :loading="update.opening.value" @click="update.download" />
     <UButton icon="i-tabler-x" color="neutral" variant="ghost" size="xs" :aria-label="t('updates.dismiss')" :title="t('updates.dismiss')" @click="update.dismiss" />
   </div>
 </template>

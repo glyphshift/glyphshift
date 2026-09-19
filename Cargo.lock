@@ -1929,6 +1929,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "winreg",
+ "yueli-distribution-sdk",
 ]
 
 [[package]]
@@ -6098,6 +6099,15 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "synstructure",
+]
+
+[[package]]
+name = "yueli-distribution-sdk"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "sha2",
 ]
 
 [[package]]

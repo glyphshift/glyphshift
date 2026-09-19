@@ -804,6 +804,8 @@ pub fn run() {
             desktop_status,
             desktop_settings,
             updates::desktop_check_update,
+            updates::desktop_install_update,
+            updates::desktop_open_update_source,
             desktop_update_settings,
             settings::desktop_validate_regex_rule,
             settings::desktop_test_regex_rule,

@@ -244,8 +244,8 @@ test('adapter documentation opens through a scoped system-browser capability', (
       { url: 'https://www.raylib.com/*' },
       { url: 'https://github.com/*' },
       { url: 'https://pan.quark.cn/*' },
-      { url: 'https://www.yuelili.com/*' },
       { url: 'https://docs.yuelili.com/glyphshift' },
+      { url: 'https://apps.yuelili.com/software/glyphshift' },
       { url: 'https://space.bilibili.com/*' },
     ],
   })

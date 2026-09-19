@@ -135,7 +135,7 @@ export default {
     too_large: "The file exceeds 16 MiB. Split it into smaller files before importing.",
     encoding: "The file is not UTF-8. Save it as UTF-8 CSV or UTF-8 JSON and import again.",
   },
-  updates: { title: 'App updates', autoCheck: 'Check for updates at startup', autoHint: 'Notify me when a newer version is available. Turn off to stop automatic checks.', current: 'Current version: {version}', check: 'Check for updates', available: 'Version {version} is available', notes: 'Release notes', download: 'Download', dismiss: 'Dismiss update notice', latestStatus: 'You are up to date.', availableStatus: 'A new version is available. Use the notice above to download.', failedStatus: 'Could not check for updates. Try again later.', openFailed: 'Could not open the download page. Try again later.' },
+  updates: { title: 'App updates', autoCheck: 'Check for updates at startup', autoHint: 'Notify me when a newer version is available. Turn off to stop automatic checks.', current: 'Current version: {version}', check: 'Check for updates', available: 'Version {version} is available', notes: 'Release notes', source: 'Update source', extractionCode: 'Extraction code: {code}', install: 'Download & install', download: 'Open download page', dismiss: 'Dismiss update notice', latestStatus: 'You are up to date.', availableStatus: 'A new version is available. Use the notice above to update.', failedStatus: 'Could not check for updates. Try again later.', installFailed: 'Could not download or launch the installer. Try again later.', openFailed: 'Could not open the download page. Try again later.' },
   common: {
     fieldHelp: 'About {label}',
     copy: 'Copy',

@@ -63,5 +63,5 @@ test('about links open the supplied documentation and release pages', async ({ p
   await page.getByRole('tab', { name: '关于', exact: true }).click()
   await page.getByRole('button', { name: '打开在线文档', exact: true }).click()
   await page.getByRole('button', { name: '打开软件发布页面', exact: true }).click()
-  expect(await page.evaluate(() => (window as any).__openedLinks)).toEqual(['https://docs.yuelili.com/glyphshift', 'https://www.yuelili.com/apps/glyphshift'])
+  expect(await page.evaluate(() => (window as any).__openedLinks)).toEqual(['https://docs.yuelili.com/glyphshift', 'https://apps.yuelili.com/software/glyphshift'])
 })

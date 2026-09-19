@@ -29,8 +29,10 @@ glyphshift-domain = { path = "../../../crates/core/domain" }
 glyphshift-runtime-contract = { path = "../../../crates/runtime/contract" }
 glyphshift-translation = { path = "../../../crates/core/translation" }
 glyphshift-workflow = { path = "../../../crates/core/workflow" }
+yueli-distribution-sdk = { path = "../../../vendor/yueli-distribution-sdk" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 tauri = { version = "2.11.3", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-global-shortcut = "2.3.2"
@@ -43,7 +45,6 @@ winreg = "0.55.0"
 [dev-dependencies]
 glyphshift-adapter-registry = { path = "../../../crates/adapters/platform/registry" }
 glyphshift-dictionary-package = { path = "../../../crates/dictionary/package" }
-sha2 = "0.10"
 
 [lints]
 workspace = true

@@ -80,6 +80,7 @@ members = [
 ]
 exclude = [
     "vendor/retour",
+    "vendor/yueli-distribution-sdk",
     "crates/adapters/implementations/accessibility/uia",
     "crates/adapters/implementations/accessibility/uia-worker",
     "crates/adapters/implementations/fallback/ocr-worker",

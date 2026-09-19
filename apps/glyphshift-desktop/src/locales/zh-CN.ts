@@ -129,7 +129,7 @@ export default {
     too_large: "文件超过 16 MiB，请拆成小一些的文件后再导入。",
     encoding: "文件不是 UTF-8 编码。请另存为 UTF-8 CSV、JSON 或 SRT 后再导入。",
   },
-  updates: { title: '软件更新', autoCheck: '启动时检查更新', autoHint: '发现新版时提醒你，关闭后就不自动检查了。', current: '当前版本：{version}', check: '检查更新', available: '发现新版本 {version}', notes: '更新内容', download: '前往下载', dismiss: '关闭更新提示', latestStatus: '已经是最新版了。', availableStatus: '有新版本，可以点击上方提示下载。', failedStatus: '没能检查更新，请稍后再试。', openFailed: '没能打开下载页面，请稍后重试。' },
+  updates: { title: '软件更新', autoCheck: '启动时检查更新', autoHint: '发现新版时提醒你，关闭后就不自动检查了。', current: '当前版本：{version}', check: '检查更新', available: '发现新版本 {version}', notes: '更新内容', source: '更新方式', extractionCode: '提取码：{code}', install: '下载并安装', download: '前往下载', dismiss: '关闭更新提示', latestStatus: '已经是最新版了。', availableStatus: '有新版本，可以点击上方提示更新。', failedStatus: '没能检查更新，请稍后再试。', installFailed: '没能下载或启动安装程序，请稍后重试。', openFailed: '没能打开下载页面，请稍后重试。' },
   common: {
     fieldHelp: '{label}说明',
     copy: '复制',
