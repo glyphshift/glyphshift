@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AiTranslationBatchStatus, AiTranslationJob } from '../useAiTranslation'
+import type { AiProviderUsage, AiTranslationBatchStatus, AiTranslationJob } from '../useAiTranslation'
 
 const props = withDefaults(defineProps<{
   job: AiTranslationJob
@@ -76,6 +76,28 @@ function statusTone(status: AiTranslationBatchStatus) {
   if (status === 'completed') return 'success'
   if (status === 'failed') return 'error'
   return 'neutral'
+}
+
+function usageDetail(usage: AiProviderUsage) {
+  const characters = usage.sourceCharacters ?? 0
+  if (characters > 0 && usage.totalTokens > 0) {
+    return t('ai.batchUsageMixed', {
+      characters: characters.toLocaleString(),
+      input: usage.inputTokens.toLocaleString(),
+      cached: usage.cachedInputTokens.toLocaleString(),
+      output: usage.outputTokens.toLocaleString(),
+      reasoning: usage.reasoningTokens.toLocaleString(),
+      total: usage.totalTokens.toLocaleString(),
+    })
+  }
+  if (characters > 0) return t('ai.batchUsageCharacters', { characters: characters.toLocaleString() })
+  return t('ai.batchUsage', {
+    input: usage.inputTokens.toLocaleString(),
+    cached: usage.cachedInputTokens.toLocaleString(),
+    output: usage.outputTokens.toLocaleString(),
+    reasoning: usage.reasoningTokens.toLocaleString(),
+    total: usage.totalTokens.toLocaleString(),
+  })
 }
 </script>
 
@@ -154,8 +176,8 @@ function statusTone(status: AiTranslationBatchStatus) {
               <p v-if="batch.lastError && (batch.attemptCount > 1 || ['retrying', 'failed'].includes(batch.status))" class="type-metadata col-start-2 col-end-5 m-0 truncate pb-1 text-[var(--text-muted)]" :title="batch.lastError.safeMessage">
                 {{ batch.lastError.safeMessage }}
               </p>
-              <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate pb-1 tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() })">
-                {{ t('ai.batchUsage', { input: batch.usage.inputTokens.toLocaleString(), cached: batch.usage.cachedInputTokens.toLocaleString(), output: batch.usage.outputTokens.toLocaleString(), reasoning: batch.usage.reasoningTokens.toLocaleString(), total: batch.usage.totalTokens.toLocaleString() }) }}
+              <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate pb-1 tabular-nums text-[var(--text-muted)]" :title="usageDetail(batch.usage)">
+                {{ usageDetail(batch.usage) }}
               </p>
             </li>
           </ol>

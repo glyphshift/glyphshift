@@ -8,6 +8,7 @@ pub const DEFAULT_MAX_ITEMS_PER_REQUEST: u16 = 50;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TranslationBatchPolicy {
     pub(super) max_items_per_request: u16,
+    pub(super) max_source_chars_per_request: Option<usize>,
 }
 
 impl TranslationBatchPolicy {
@@ -18,13 +19,25 @@ impl TranslationBatchPolicy {
         } else {
             Some(Self {
                 max_items_per_request,
+                max_source_chars_per_request: None,
             })
         }
     }
 
     #[must_use]
+    pub const fn with_max_source_chars_per_request(mut self, max_source_chars: usize) -> Self {
+        self.max_source_chars_per_request = Some(max_source_chars);
+        self
+    }
+
+    #[must_use]
     pub const fn max_items_per_request(self) -> u16 {
         self.max_items_per_request
+    }
+
+    #[must_use]
+    pub const fn max_source_chars_per_request(self) -> Option<usize> {
+        self.max_source_chars_per_request
     }
 }
 
@@ -32,6 +45,7 @@ impl Default for TranslationBatchPolicy {
     fn default() -> Self {
         Self {
             max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
+            max_source_chars_per_request: None,
         }
     }
 }
@@ -69,6 +83,8 @@ pub struct ProviderError {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsage {
+    #[serde(default)]
+    pub(super) source_characters: u64,
     pub(super) input_tokens: u64,
     pub(super) output_tokens: u64,
     pub(super) reasoning_tokens: u64,
@@ -86,12 +102,24 @@ impl ProviderUsage {
         total_tokens: u64,
     ) -> Self {
         Self {
+            source_characters: 0,
             input_tokens,
             output_tokens,
             reasoning_tokens,
             cached_input_tokens,
             total_tokens,
         }
+    }
+
+    #[must_use]
+    pub const fn with_source_characters(mut self, source_characters: u64) -> Self {
+        self.source_characters = source_characters;
+        self
+    }
+
+    #[must_use]
+    pub const fn source_characters(self) -> u64 {
+        self.source_characters
     }
 
     #[must_use]
@@ -120,6 +148,9 @@ impl ProviderUsage {
     }
 
     pub(super) fn merge(&mut self, other: Self) {
+        self.source_characters = self
+            .source_characters
+            .saturating_add(other.source_characters);
         self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
         self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
@@ -312,6 +343,11 @@ impl CancellationToken {
 }
 
 pub trait TranslationProvider: Send + Sync + 'static {
+    fn batch_policy(&self, profile: &ResolvedAiProfile) -> TranslationBatchPolicy {
+        TranslationBatchPolicy::new(profile.effective_max_items_per_request())
+            .expect("resolved translation profile must contain a valid batch size")
+    }
+
     fn translate(
         &self,
         request: &ProviderRequest<'_>,

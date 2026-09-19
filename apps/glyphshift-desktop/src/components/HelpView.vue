@@ -30,7 +30,7 @@ const helpTabs = computed(() => [
 ])
 const aboutLinks = computed(() => [
   { id: 'docs' as const, label: t('help.about.docs'), icon: 'i-tabler-book', url: 'https://docs.yuelili.com/glyphshift' },
-  { id: 'release' as const, label: t('help.about.release'), icon: 'i-tabler-download', url: 'https://www.yuelili.com/apps/glyphshift' },
+  { id: 'release' as const, label: t('help.about.release'), icon: 'i-tabler-download', url: 'https://apps.yuelili.com/software/glyphshift' },
   { id: 'github' as const, label: t('help.about.github'), icon: 'i-tabler-brand-github', url: 'https://github.com/Yuelioi/glyphshift' },
   { id: 'bilibili' as const, label: t('help.about.bilibili'), icon: 'i-tabler-brand-bilibili', url: 'https://space.bilibili.com/4279370' },
 ])
@@ -54,6 +54,7 @@ const aiSteps = computed(() => ([
   { id: 'review', title: t('help.aiGuide.steps.review.title'), description: t('help.aiGuide.steps.review.description'), action: t('help.aiGuide.steps.review.action'), view: 'translation-tasks' as const },
 ]))
 const usageTerms = computed(() => [
+  { id: 'sourceCharacters', term: t('help.aiGuide.usage.sourceCharacters.term'), description: t('help.aiGuide.usage.sourceCharacters.description') },
   { id: 'input', term: t('help.aiGuide.usage.input.term'), description: t('help.aiGuide.usage.input.description') },
   { id: 'cached', term: t('help.aiGuide.usage.cached.term'), description: t('help.aiGuide.usage.cached.description') },
   { id: 'output', term: t('help.aiGuide.usage.output.term'), description: t('help.aiGuide.usage.output.description') },

@@ -15,6 +15,3 @@ apps/glyphshift-desktop/src-tauri/gen
 
 # Miscellaneous generated files
 *.tmp
-
-# Local visual evidence is never a repository resource.
-/flightdeck/work/**/references/**/*.png

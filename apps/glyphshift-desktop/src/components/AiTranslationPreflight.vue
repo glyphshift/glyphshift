@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { estimateAiTranslationInput, type AiProfile, type AiTranslationPlan } from '../useAiTranslation'
+import { estimateTranslationInput, providerCapabilities, type AiProfile, type AiTranslationPlan } from '../useAiTranslation'
 
 const props = defineProps<{
   open: boolean
@@ -16,9 +16,13 @@ const emit = defineEmits<{
 
 const { n, t } = useI18n()
 const estimate = computed(() => props.plan
-  ? estimateAiTranslationInput(props.plan, props.profile?.maxItemsPerRequest ?? 50)
-  : { estimatedInputTokens: 0, totalBatches: 0 })
+  ? estimateTranslationInput(props.plan, props.profile)
+  : { estimatedInputTokens: 0, sourceCharacters: 0, totalBatches: 0, batchSize: 50, characterMetered: false })
 const formattedTokens = computed(() => n(estimate.value.estimatedInputTokens))
+const formattedCharacters = computed(() => n(estimate.value.sourceCharacters))
+const supportsReasoning = computed(() => props.profile
+  ? providerCapabilities[props.profile.protocol].reasoning
+  : false)
 const reasoningLabel = computed(() => {
   const effort = props.profile?.reasoningEffort ?? 'automatic'
   return t(`ai.reasoningOption.${effort}`)
@@ -33,6 +37,10 @@ const profileLabel = computed(() => {
     anthropic_messages: 'anthropic',
     gemini_generate_content: 'gemini',
     ollama_chat: 'ollama',
+    microsoft_translator: 'microsoftTranslator',
+    libre_translate: 'libreTranslate',
+    google_translate: 'googleTranslate',
+    baidu_translate: 'baiduTranslate',
   }
   return `${props.profile.name} · ${t(`ai.protocol.${protocolKeys[props.profile.protocol]}`)}`
 })
@@ -59,7 +67,7 @@ function proceed() {
   >
     <template #body>
       <dl class="m-0 divide-y divide-[var(--border)] border-y border-[var(--border)]">
-        <div class="flex items-center justify-between gap-4 py-2.5">
+        <div v-if="!profile || providerCapabilities[profile.protocol].modelField" class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightProfile') }}</dt>
           <dd class="m-0 min-w-0 truncate text-right text-[12px] font-semibold text-[var(--text)]" :title="profileLabel">{{ profileLabel }}</dd>
         </div>
@@ -73,15 +81,19 @@ function proceed() {
         </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.estimatedInput') }}</dt>
-          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.estimatedTokens', { tokens: formattedTokens }) }}</dd>
+          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">
+            {{ estimate.characterMetered
+              ? t('ai.estimatedCharacters', { characters: formattedCharacters })
+              : t('ai.estimatedTokens', { tokens: formattedTokens }) }}
+          </dd>
         </div>
-        <div class="flex items-center justify-between gap-4 py-2.5">
+        <div v-if="supportsReasoning" class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightReasoning') }}</dt>
           <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ reasoningLabel }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightBatchPolicy') }}</dt>
-          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.preflightBatchPolicyValue', { batchSize: profile?.maxItemsPerRequest ?? 50, concurrency: profile?.maxConcurrency ?? 1 }) }}</dd>
+          <dd class="m-0 text-[12px] font-semibold text-[var(--text)]">{{ t('ai.preflightBatchPolicyValue', { batchSize: estimate.batchSize, concurrency: profile?.maxConcurrency ?? 1 }) }}</dd>
         </div>
         <div class="flex items-center justify-between gap-4 py-2.5">
           <dt class="type-metadata text-[var(--text-muted)]">{{ t('ai.preflightFailurePolicy') }}</dt>

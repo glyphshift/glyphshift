@@ -92,8 +92,8 @@ test('desktop copy uses novice task language and keeps implementation terms out 
   }
   expect(chineseValues).toContain('适配器')
   expect(englishValues).toContain('Adapters')
-  expect(chinese).toContain("profilesTitle: 'AI 配置'")
-  expect(english).toContain("profilesTitle: 'AI connections'")
+  expect(chinese).toContain("profilesTitle: '翻译配置'")
+  expect(english).toContain("profilesTitle: 'Translation connections'")
   for (const redundant of [
     '这些偏好会立即应用，并保存在当前设备上',
     '设置翻译前确认，以及翻译时要使用的 AI 服务和模型',
@@ -114,6 +114,27 @@ test('desktop copy uses novice task language and keeps implementation terms out 
     "t('capture.description')",
     "t('ai.tasks.description')",
   ]) expect(routineSurfaces).not.toContain(redundantKey)
+})
+
+test('translation preset documentation URLs are allowed by the desktop opener capability', () => {
+  const presets = readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src', 'aiPresets.ts'), 'utf8')
+  const capability = JSON.parse(readFileSync(join(repositoryRoot, 'apps', 'glyphshift-desktop', 'src-tauri', 'capabilities', 'default.json'), 'utf8'))
+  const opener = capability.permissions.find((permission: unknown) => (
+    typeof permission === 'object'
+    && permission !== null
+    && 'identifier' in permission
+    && permission.identifier === 'opener:allow-open-url'
+  )) as { allow?: Array<{ url: string }> } | undefined
+  const allowedUrls = opener?.allow?.map(entry => entry.url) ?? []
+  const documentationUrls = [...presets.matchAll(/documentationUrl:\s*'([^']+)'/g)].map(match => match[1])
+
+  expect(documentationUrls.length).toBeGreaterThan(0)
+  for (const url of documentationUrls) {
+    expect(allowedUrls.some(allowed => (
+      allowed === url
+      || (allowed.endsWith('/*') && url.startsWith(allowed.slice(0, -1)))
+    )), `desktop opener capability does not allow ${url}`).toBe(true)
+  }
 })
 
 test('root documents separate domain language, product truth, and the implemented design system', () => {
@@ -161,7 +182,7 @@ test('root documents separate domain language, product truth, and the implemente
   expect(positions.every(position => position >= 0)).toBe(true)
   expect(positions).toEqual([...positions].sort((left, right) => left - right))
   expect(design).toContain('Windows Translation Workbench')
-  expect(design).toContain('Settings 使用通用、AI 配置、文字处理、软件管理、字体管理、语言管理六个局部导航')
-  expect(design).toContain('使用指南 / AI 翻译 / 故障排查 / 技术与兼容')
+  expect(design).toContain('Settings 使用通用、翻译配置、文字处理、软件管理、字体管理、语言管理六个局部导航')
+  expect(design).toContain('使用指南 / 自动翻译 / 故障排查 / 技术与兼容')
   expect(design).not.toContain('AI 翻译执行')
 })

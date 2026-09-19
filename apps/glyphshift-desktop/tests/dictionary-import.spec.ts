@@ -8,8 +8,8 @@ async function setup(page: import('@playwright/test').Page) {
     const detail = structuredClone(snapshot.dictionaryDetails['dictionary-proof'])
     detail.entries = [{ source: 'Same', translation: 'Original' }, { source: 'Keep', translation: 'Keep translation' }]
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_privilege_status') return { elevated: false }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_dictionary') return detail
@@ -33,7 +33,7 @@ test('CSV is validated before metadata confirmation and invalid CSV creates noth
   await setup(page)
   await page.evaluate(() => { (window as any).__invalidImport = true })
   await page.getByRole('button', { name: '导入', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('文件格式无效')
+  await expect(page.getByRole('alert')).toContainText('没能读懂这个文件')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await page.evaluate(() => { (window as any).__invalidImport = false })
   await page.getByRole('button', { name: '导入', exact: true }).click()
@@ -75,9 +75,9 @@ test('icons render with external icon APIs blocked and actions expose hover labe
   await expect(edit).toHaveAttribute('title', /界面基础词典/)
   await expect(edit.locator('svg path').first()).toBeAttached()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toHaveCount(1)
-  await expect(page.getByRole('button', { name: '添加 AI 配置' }).locator('svg path').first()).toBeAttached()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: '翻译配置', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '翻译配置', exact: true })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '添加翻译配置' }).locator('svg path').first()).toBeAttached()
   expect(requests).toEqual([])
   await expect(page.getByRole('alert')).toHaveCount(0)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/settings-bundled-icons.png' })

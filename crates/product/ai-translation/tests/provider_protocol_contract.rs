@@ -317,6 +317,388 @@ fn first_release_protocols_use_distinct_wire_shapes_and_decode_structured_result
 }
 
 #[test]
+fn microsoft_translator_nmt_uses_native_wire_shape_region_and_character_usage() {
+    let root = tempdir().expect("Microsoft Translator profile root");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.microsoft-nmt",
+                "Microsoft Translator",
+                AiProviderProtocol::MicrosoftTranslator,
+                "",
+            )
+            .with_provider_region("eastasia")
+            .with_credential(CredentialUpdate::replace("synthetic-translator-key")),
+        )
+        .expect("save Microsoft Translator profile");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = Arc::new(RecordingTransport {
+        requests: requests.clone(),
+        response: HttpResponse::new(
+            200,
+            [
+                ("content-type", "application/json"),
+                ("sourceCharactersCharged", "9"),
+            ],
+            r#"{"value":[{"translations":[{"language":"zh-Hans","sourceCharacters":4,"text":"打开"}]},{"translations":[{"language":"zh-Hans","sourceCharacters":5,"text":"关闭"}]}]}"#.as_bytes(),
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::MicrosoftTranslator, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.microsoft-nmt",
+            1,
+            "en-US",
+            "zh-CN",
+            [
+                TranslationItem::untranslated("open", "Open"),
+                TranslationItem::untranslated("close", "Close"),
+            ],
+        ))
+        .expect("plan Microsoft Translator request");
+    let job = translation
+        .start_translation(
+            plan.token(),
+            profiles
+                .resolve_profile("profile.microsoft-nmt")
+                .expect("resolve Microsoft Translator profile"),
+        )
+        .expect("start Microsoft Translator request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let completed = loop {
+        let snapshot = translation.translation_job(&job).expect("query job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.results()[0].translation(), "打开");
+    assert_eq!(completed.results()[1].translation(), "关闭");
+    let usage = completed.usage().expect("Microsoft Translator usage");
+    assert_eq!(usage.source_characters(), 9);
+    assert_eq!(usage.total_tokens(), 0);
+    let captured = requests.lock().expect("captured request");
+    let request = captured.first().expect("one captured request");
+    assert_eq!(
+        request.url(),
+        "https://api.cognitive.microsofttranslator.com/translate?api-version=2026-06-06"
+    );
+    assert_eq!(
+        request.header("ocp-apim-subscription-key"),
+        Some("synthetic-translator-key")
+    );
+    assert_eq!(
+        request.header("ocp-apim-subscription-region"),
+        Some("eastasia")
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(request.body()).expect("Microsoft Translator request JSON");
+    assert_eq!(body.pointer("/inputs/0/language"), Some(&serde_json::json!("en")));
+    assert_eq!(
+        body.pointer("/inputs/0/targets/0/language"),
+        Some(&serde_json::json!("zh-Hans"))
+    );
+    assert!(body.pointer("/inputs/0/targets/0/deploymentName").is_none());
+    assert_eq!(body.pointer("/inputs/1/text"), Some(&serde_json::json!("Close")));
+}
+
+#[test]
+fn libretranslate_uses_batch_wire_shape_without_requiring_a_key() {
+    let root = tempdir().expect("LibreTranslate profile root");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
+    profiles
+        .save_profile(AiProfileDraft::new(
+            "profile.libretranslate",
+            "LibreTranslate",
+            AiProviderProtocol::LibreTranslate,
+            "",
+        ))
+        .expect("save LibreTranslate profile");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = Arc::new(RecordingTransport {
+        requests: requests.clone(),
+        response: HttpResponse::new(
+            200,
+            [("content-type", "application/json")],
+            r#"{"translatedText":["打开","关闭"]}"#.as_bytes(),
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::LibreTranslate, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.libretranslate",
+            1,
+            "en-US",
+            "zh-CN",
+            [
+                TranslationItem::untranslated("open", "Open"),
+                TranslationItem::untranslated("close", "Close"),
+            ],
+        ))
+        .expect("plan LibreTranslate request");
+    let job = translation
+        .start_translation(
+            plan.token(),
+            profiles
+                .resolve_profile("profile.libretranslate")
+                .expect("resolve LibreTranslate profile"),
+        )
+        .expect("start LibreTranslate request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let completed = loop {
+        let snapshot = translation.translation_job(&job).expect("query job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.results()[0].translation(), "打开");
+    assert_eq!(completed.results()[1].translation(), "关闭");
+    assert!(completed.usage().is_none());
+    let captured = requests.lock().expect("captured request");
+    let request = captured.first().expect("one captured request");
+    assert_eq!(request.url(), "http://127.0.0.1:5000/translate");
+    let body: serde_json::Value =
+        serde_json::from_slice(request.body()).expect("LibreTranslate request JSON");
+    assert_eq!(body.get("q"), Some(&serde_json::json!(["Open", "Close"])));
+    assert_eq!(body.get("source"), Some(&serde_json::json!("en")));
+    assert_eq!(body.get("target"), Some(&serde_json::json!("zh")));
+    assert_eq!(body.get("format"), Some(&serde_json::json!("text")));
+    assert!(body.get("api_key").is_none());
+}
+
+#[test]
+fn google_translate_sends_multiple_sources_in_one_request() {
+    let root = tempdir().expect("Google Translate profile root");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.google-translate",
+                "Google Translate",
+                AiProviderProtocol::GoogleTranslate,
+                "",
+            )
+            .with_credential(CredentialUpdate::replace("synthetic-google-key")),
+        )
+        .expect("save Google Translate profile");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = Arc::new(RecordingTransport {
+        requests: requests.clone(),
+        response: HttpResponse::json(
+            200,
+            r#"{"data":{"translations":[{"translatedText":"打开"},{"translatedText":"关闭"}]}}"#,
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::GoogleTranslate, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.google-translate",
+            1,
+            "en-US",
+            "zh-CN",
+            [
+                TranslationItem::untranslated("open", "Open"),
+                TranslationItem::untranslated("close", "Close"),
+            ],
+        ))
+        .expect("plan Google Translate request");
+    let job = translation
+        .start_translation(
+            plan.token(),
+            profiles
+                .resolve_profile("profile.google-translate")
+                .expect("resolve Google Translate profile"),
+        )
+        .expect("start Google Translate request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let completed = loop {
+        let snapshot = translation.translation_job(&job).expect("query job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.results()[0].translation(), "打开");
+    assert_eq!(completed.results()[1].translation(), "关闭");
+    let captured = requests.lock().expect("captured request");
+    assert_eq!(captured.len(), 1);
+    let request = &captured[0];
+    assert!(request.url().starts_with("https://translation.googleapis.com/language/translate/v2?"));
+    assert!(request.url().contains("key=synthetic-google-key"));
+    let body: serde_json::Value = serde_json::from_slice(request.body()).expect("Google Translate request JSON");
+    assert_eq!(body.get("q"), Some(&serde_json::json!(["Open", "Close"])));
+    assert_eq!(body.get("source"), Some(&serde_json::json!("en")));
+    assert_eq!(body.get("target"), Some(&serde_json::json!("zh-CN")));
+}
+
+#[test]
+fn baidu_translate_batches_sources_into_one_signed_request() {
+    let root = tempdir().expect("Baidu Translate profile root");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.baidu-translate",
+                "Baidu Translate",
+                AiProviderProtocol::BaiduTranslate,
+                "",
+            )
+            .with_provider_app_id("synthetic-baidu-app")
+            .with_credential(CredentialUpdate::replace("synthetic-baidu-secret")),
+        )
+        .expect("save Baidu Translate profile");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = Arc::new(RecordingTransport {
+        requests: requests.clone(),
+        response: HttpResponse::json(
+            200,
+            r#"{"from":"en","to":"zh","trans_result":[{"src":"Open","dst":"打开"},{"src":"Close","dst":"关闭"}]}"#,
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::BaiduTranslate, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.baidu-translate",
+            1,
+            "en-US",
+            "zh-CN",
+            [
+                TranslationItem::untranslated("open", "Open"),
+                TranslationItem::untranslated("close", "Close"),
+            ],
+        ))
+        .expect("plan Baidu Translate request");
+    let job = translation
+        .start_translation(
+            plan.token(),
+            profiles
+                .resolve_profile("profile.baidu-translate")
+                .expect("resolve Baidu Translate profile"),
+        )
+        .expect("start Baidu Translate request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let completed = loop {
+        let snapshot = translation.translation_job(&job).expect("query job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    assert_eq!(completed.results()[0].translation(), "打开");
+    assert_eq!(completed.results()[1].translation(), "关闭");
+    let captured = requests.lock().expect("captured request");
+    assert_eq!(captured.len(), 1);
+    let request = &captured[0];
+    assert_eq!(request.url(), "https://fanyi-api.baidu.com/api/trans/vip/translate");
+    assert_eq!(request.header("content-type"), Some("application/x-www-form-urlencoded"));
+    let body = String::from_utf8_lossy(request.body());
+    assert!(body.contains("q=Open%0AClose"));
+    assert!(body.contains("from=en"));
+    assert!(body.contains("to=zh"));
+    assert!(body.contains("appid=synthetic-baidu-app"));
+    assert!(body.contains("sign="));
+    assert!(!body.contains("synthetic-baidu-secret"));
+}
+
+#[test]
+fn microsoft_translator_llm_uses_custom_endpoint_deployment_and_token_usage() {
+    let root = tempdir().expect("Microsoft Translator LLM profile root");
+    let mut profiles = AiProfileCatalog::open(root.path()).expect("open profiles");
+    profiles
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.microsoft-llm",
+                "Microsoft Translator LLM",
+                AiProviderProtocol::MicrosoftTranslator,
+                "my-gpt-deployment",
+            )
+            .with_base_url("https://synthetic.cognitiveservices.azure.com")
+            .with_credential(CredentialUpdate::replace("synthetic-translator-key")),
+        )
+        .expect("save Microsoft Translator LLM profile");
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let transport = Arc::new(RecordingTransport {
+        requests: requests.clone(),
+        response: HttpResponse::new(
+            200,
+            [
+                ("content-type", "application/json"),
+                ("sourceCharactersCharged", "72"),
+                ("sourceTokensCharged", "26"),
+                ("targetTokensCharged", "16"),
+            ],
+            r#"{"value":[{"translations":[{"language":"zh-Hans","instructionTokens":12,"sourceTokens":14,"targetTokens":16,"text":"医生下周一有空。"}]}]}"#.as_bytes(),
+        ),
+    });
+    let mut translation = AiTranslation::new();
+    translation.register_http_provider(AiProviderProtocol::MicrosoftTranslator, transport);
+    let plan = translation
+        .plan_translation(TranslationPlanRequest::new(
+            "dictionary.microsoft-llm",
+            1,
+            "en-US",
+            "zh-CN",
+            [TranslationItem::untranslated(
+                "doctor",
+                "Doctor is available next Monday.",
+            )],
+        ))
+        .expect("plan Microsoft Translator LLM request");
+    let job = translation
+        .start_translation(
+            plan.token(),
+            profiles
+                .resolve_profile("profile.microsoft-llm")
+                .expect("resolve Microsoft Translator LLM profile"),
+        )
+        .expect("start Microsoft Translator LLM request");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let completed = loop {
+        let snapshot = translation.translation_job(&job).expect("query job");
+        if snapshot.status().is_terminal() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    };
+
+    assert_eq!(completed.status(), TranslationJobStatus::Completed);
+    let usage = completed.usage().expect("Microsoft Translator LLM usage");
+    assert_eq!(usage.source_characters(), 72);
+    assert_eq!(usage.input_tokens(), 26);
+    assert_eq!(usage.output_tokens(), 16);
+    assert_eq!(usage.total_tokens(), 42);
+    let captured = requests.lock().expect("captured request");
+    let request = captured.first().expect("one captured request");
+    assert_eq!(
+        request.url(),
+        "https://synthetic.cognitiveservices.azure.com/translator/text/translate?api-version=2026-06-06"
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(request.body()).expect("Microsoft Translator LLM request JSON");
+    assert_eq!(
+        body.pointer("/inputs/0/targets/0/deploymentName"),
+        Some(&serde_json::json!("my-gpt-deployment"))
+    );
+}
+
+#[test]
 fn deepseek_chat_profiles_map_reasoning_without_fake_low_levels() {
     let cases = [
         (AiReasoningEffort::Disabled, "disabled", None),

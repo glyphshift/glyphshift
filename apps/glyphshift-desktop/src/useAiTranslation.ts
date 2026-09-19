@@ -7,7 +7,7 @@ import { isCommandError, translateCommandError } from './commandError'
 import type { DictionaryDetail, ProbeRunSummary } from './model'
 import { hasDesktopRuntime } from './workspace/state'
 
-export type AiProviderProtocol
+export type TranslationProviderProtocol
   = 'codex_subscription'
     | 'open_ai_responses'
     | 'open_ai_chat_completions'
@@ -15,9 +15,30 @@ export type AiProviderProtocol
     | 'anthropic_messages'
     | 'gemini_generate_content'
     | 'ollama_chat'
+    | 'microsoft_translator'
+    | 'libre_translate'
+    | 'google_translate'
+    | 'baidu_translate'
+
+// Compatibility alias for the original AI-only surface while callers migrate.
+export type AiProviderProtocol = TranslationProviderProtocol
 
 export type AiReasoningEffort
   = 'disabled' | 'automatic' | 'low' | 'medium' | 'high' | 'maximum'
+
+export interface TranslationProviderOptions {
+  region?: string | null
+  appId?: string | null
+}
+
+export interface TranslationProviderCapabilities {
+  translationPrompt: boolean
+  reasoning: boolean
+  modelDiscovery: boolean
+  region: boolean
+  modelField: boolean
+  appId: boolean
+}
 
 export interface AiProfile {
   id: string
@@ -32,6 +53,7 @@ export interface AiProfile {
   maxConcurrency: number
   maxRetries: number
   filterPolicy: AiFilterPolicy
+  providerOptions?: TranslationProviderOptions
   credential?: string | null
   hasCredential: boolean
   credentialRequired: boolean
@@ -110,6 +132,7 @@ export interface AiProviderError {
 }
 
 export interface AiProviderUsage {
+  sourceCharacters?: number
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
@@ -226,14 +249,32 @@ export interface AiConnectionReport {
   safeMessage: string
 }
 
-export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; modelId: string; concurrency: number; credentialRequired: boolean }> = {
-  codex_subscription: { baseUrl: 'codex://local', modelId: '', concurrency: 1, credentialRequired: false },
-  open_ai_responses: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
-  open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, credentialRequired: true },
-  open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', modelId: '', concurrency: 2, credentialRequired: false },
-  anthropic_messages: { baseUrl: 'https://api.anthropic.com', modelId: '', concurrency: 2, credentialRequired: true },
-  gemini_generate_content: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelId: '', concurrency: 2, credentialRequired: true },
-  ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', modelId: '', concurrency: 1, credentialRequired: false },
+export const providerDefaults: Record<AiProviderProtocol, { baseUrl: string; modelId: string; concurrency: number; maxItemsPerRequest: number; credentialRequired: boolean }> = {
+  codex_subscription: { baseUrl: 'codex://local', modelId: '', concurrency: 1, maxItemsPerRequest: 50, credentialRequired: false },
+  open_ai_responses: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: true },
+  open_ai_chat_completions: { baseUrl: 'https://api.openai.com/v1', modelId: '', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: true },
+  open_ai_compatible: { baseUrl: 'http://127.0.0.1:8000/v1', modelId: '', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: false },
+  anthropic_messages: { baseUrl: 'https://api.anthropic.com', modelId: '', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: true },
+  gemini_generate_content: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', modelId: '', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: true },
+  ollama_chat: { baseUrl: 'http://127.0.0.1:11434/api', modelId: '', concurrency: 1, maxItemsPerRequest: 50, credentialRequired: false },
+  microsoft_translator: { baseUrl: 'https://api.cognitive.microsofttranslator.com', modelId: 'general', concurrency: 4, maxItemsPerRequest: 1000, credentialRequired: true },
+  libre_translate: { baseUrl: 'http://127.0.0.1:5000', modelId: 'default', concurrency: 2, maxItemsPerRequest: 50, credentialRequired: false },
+  google_translate: { baseUrl: 'https://translation.googleapis.com/language/translate/v2', modelId: 'nmt', concurrency: 4, maxItemsPerRequest: 128, credentialRequired: true },
+  baidu_translate: { baseUrl: 'https://fanyi-api.baidu.com/api/trans/vip/translate', modelId: 'general', concurrency: 1, maxItemsPerRequest: 50, credentialRequired: true },
+}
+
+export const providerCapabilities: Record<AiProviderProtocol, TranslationProviderCapabilities> = {
+  codex_subscription: { translationPrompt: true, reasoning: true, modelDiscovery: false, region: false, modelField: true, appId: false },
+  open_ai_responses: { translationPrompt: true, reasoning: true, modelDiscovery: true, region: false, modelField: true, appId: false },
+  open_ai_chat_completions: { translationPrompt: true, reasoning: true, modelDiscovery: true, region: false, modelField: true, appId: false },
+  open_ai_compatible: { translationPrompt: true, reasoning: true, modelDiscovery: true, region: false, modelField: true, appId: false },
+  anthropic_messages: { translationPrompt: true, reasoning: false, modelDiscovery: true, region: false, modelField: true, appId: false },
+  gemini_generate_content: { translationPrompt: true, reasoning: false, modelDiscovery: true, region: false, modelField: true, appId: false },
+  ollama_chat: { translationPrompt: true, reasoning: false, modelDiscovery: true, region: false, modelField: true, appId: false },
+  microsoft_translator: { translationPrompt: false, reasoning: false, modelDiscovery: false, region: true, modelField: true, appId: false },
+  libre_translate: { translationPrompt: false, reasoning: false, modelDiscovery: false, region: false, modelField: false, appId: false },
+  google_translate: { translationPrompt: false, reasoning: false, modelDiscovery: false, region: false, modelField: false, appId: false },
+  baidu_translate: { translationPrompt: false, reasoning: false, modelDiscovery: false, region: false, modelField: false, appId: true },
 }
 
 export function defaultAiReasoningEffort(protocol: AiProviderProtocol): AiReasoningEffort {
@@ -266,6 +307,51 @@ export function estimateAiTranslationInput(plan: AiTranslationPlan, maxItemsPerR
   return {
     estimatedInputTokens: totalBatches * REQUEST_TOKEN_RESERVE + itemTokens,
     totalBatches,
+  }
+}
+
+export function estimateTranslationInput(plan: AiTranslationPlan, profile: AiProfile | null) {
+  const protocol = profile?.protocol
+  const modelId = profile?.modelId?.trim() ?? ''
+  const requestedBatchSize = Math.max(1, Math.floor(profile?.maxItemsPerRequest ?? 50))
+  const maxItems = protocol === 'microsoft_translator' && modelId.toLocaleLowerCase() !== 'general'
+    ? Math.min(requestedBatchSize, 50)
+    : protocol === 'google_translate'
+      ? Math.min(requestedBatchSize, 128)
+      : protocol === 'baidu_translate'
+        ? Math.min(requestedBatchSize, 50)
+        : requestedBatchSize
+  const maxSourceChars = protocol === 'microsoft_translator'
+    ? 50_000
+    : protocol === 'google_translate'
+      ? 5_000
+      : protocol === 'baidu_translate'
+        ? 950
+        : null
+  let totalBatches = 0
+  let batchItems = 0
+  let batchChars = 0
+  let sourceCharacters = 0
+  for (const candidate of plan.candidates) {
+    const chars = [...candidate.source].length
+    sourceCharacters += chars
+    if (batchItems > 0 && (batchItems >= maxItems || (maxSourceChars !== null && batchChars + chars > maxSourceChars))) {
+      totalBatches += 1
+      batchItems = 0
+      batchChars = 0
+    }
+    batchItems += 1
+    batchChars += chars
+  }
+  if (batchItems > 0) totalBatches += 1
+  const tokenEstimate = estimateAiTranslationInput(plan, maxItems)
+  return {
+    estimatedInputTokens: tokenEstimate.estimatedInputTokens,
+    sourceCharacters,
+    totalBatches,
+    batchSize: maxItems,
+    characterMetered: (protocol === 'microsoft_translator' && modelId.toLocaleLowerCase() === 'general')
+      || ['libre_translate', 'google_translate', 'baidu_translate'].includes(protocol ?? ''),
   }
 }
 
@@ -317,7 +403,10 @@ function normalizeProfile(profile: AiProfile): AiProfile {
     ...profile,
     modelId: profile.protocol === 'codex_subscription' && profile.modelId === 'gpt-sol-5.6'
       ? 'gpt-5.6-sol'
-      : profile.modelId,
+      : !profile.modelId?.trim() && providerDefaults[profile.protocol].modelId
+        ? providerDefaults[profile.protocol].modelId
+        : profile.modelId,
+    providerOptions: profile.providerOptions ?? {},
     credential,
     hasCredential: Boolean(credential),
     reasoningEffort: profile.reasoningEffort ?? defaultAiReasoningEffort(profile.protocol),
@@ -330,7 +419,7 @@ function normalizeProfile(profile: AiProfile): AiProfile {
       && profile.maxItemsPerRequest >= 1
       && profile.maxItemsPerRequest <= 1_000
       ? profile.maxItemsPerRequest
-      : 50,
+      : providerDefaults[profile.protocol].maxItemsPerRequest,
     maxRetries: Number.isInteger(profile.maxRetries) && profile.maxRetries >= 0 && profile.maxRetries <= 10
       ? profile.maxRetries
       : 2,

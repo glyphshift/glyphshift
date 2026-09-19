@@ -5,13 +5,15 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
-  await page.getByRole('button', { name: '添加 AI 配置', exact: true }).click()
-  await page.getByRole('dialog', { name: '添加 AI 配置' }).getByRole('button', { name: '选择自定义 AI 服务' }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: '翻译配置', exact: true }).click()
+  await page.getByRole('button', { name: '添加翻译配置', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await dialog.getByRole('tab', { name: 'AI 翻译' }).click()
+  await dialog.getByRole('button', { name: '选择自定义翻译服务' }).click()
 })
 
 test('model picker accepts free typing and fetched choices, with aligned key guidance', async ({ page }, info) => {
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
   const input = dialog.getByRole('combobox', { name: '模型', exact: true })
   const key = dialog.getByRole('textbox', { name: 'API Key（密钥）' })
   await input.fill('manual-model')
@@ -54,7 +56,7 @@ test('model picker accepts free typing and fetched choices, with aligned key gui
 })
 
 test('authentication errors preserve input and changing the service discards stale results', async ({ page }) => {
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
   const input = dialog.getByRole('combobox', { name: '模型', exact: true })
   await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-key')
   await input.fill('keep-this-model')

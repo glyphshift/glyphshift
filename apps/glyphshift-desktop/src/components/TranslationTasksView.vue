@@ -3,6 +3,7 @@ import type { TableColumn } from '@nuxt/ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
+  providerCapabilities,
   useAiTranslation,
   type AiProviderUsage,
   type AiProviderProtocol,
@@ -127,7 +128,7 @@ const modelStats = computed(() => {
       tasks: 0,
       texts: 0,
       elapsedMs: 0,
-      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 },
+      usage: { sourceCharacters: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningTokens: 0, totalTokens: 0 },
       usageAvailable: false,
     }
     group.tasks += 1
@@ -135,6 +136,7 @@ const modelStats = computed(() => {
     group.elapsedMs += record.elapsedMs
     if (record.usage) {
       group.usageAvailable = true
+      group.usage.sourceCharacters = (group.usage.sourceCharacters ?? 0) + (record.usage.sourceCharacters ?? 0)
       group.usage.inputTokens += record.usage.inputTokens
       group.usage.cachedInputTokens += record.usage.cachedInputTokens
       group.usage.outputTokens += record.usage.outputTokens
@@ -155,7 +157,7 @@ const filteredModelStats = computed(() => {
   const needle = statisticsQuery.value.trim().toLocaleLowerCase()
   return modelStats.value.filter(group => (
     (statisticsProfile.value === 'all' || group.profileName === statisticsProfile.value)
-    && (!needle || `${group.profileName} ${group.modelId} ${reasoningLabel(group.reasoningEffort)}`.toLocaleLowerCase().includes(needle))
+    && (!needle || `${group.profileName} ${group.modelId} ${reasoningLabel(group.reasoningEffort, group.protocol)}`.toLocaleLowerCase().includes(needle))
   ))
 })
 const statisticsPageItems = computed(() => filteredModelStats.value.slice(
@@ -200,6 +202,36 @@ const historyColumns = computed<TableColumn<AiTranslationRunRecord>[]>(() => [
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat(locale.value).format(value)
+}
+
+function usageDetail(usage: AiProviderUsage) {
+  const characters = usage.sourceCharacters ?? 0
+  if (characters > 0 && usage.totalTokens > 0) {
+    return t('ai.batchUsageMixed', {
+      characters: formatNumber(characters),
+      input: formatNumber(usage.inputTokens),
+      cached: formatNumber(usage.cachedInputTokens),
+      output: formatNumber(usage.outputTokens),
+      reasoning: formatNumber(usage.reasoningTokens),
+      total: formatNumber(usage.totalTokens),
+    })
+  }
+  if (characters > 0) {
+    return t('ai.batchUsageCharacters', { characters: formatNumber(characters) })
+  }
+  return t('ai.batchUsage', {
+    input: formatNumber(usage.inputTokens),
+    cached: formatNumber(usage.cachedInputTokens),
+    output: formatNumber(usage.outputTokens),
+    reasoning: formatNumber(usage.reasoningTokens),
+    total: formatNumber(usage.totalTokens),
+  })
+}
+
+function usagePrimary(usage: AiProviderUsage) {
+  return usage.totalTokens > 0
+    ? t('ai.usageTokens', { count: formatNumber(usage.totalTokens) })
+    : t('ai.usageCharacters', { count: formatNumber(usage.sourceCharacters ?? 0) })
 }
 
 function formatDuration(milliseconds: number) {
@@ -262,9 +294,14 @@ function scopeLabel(record: AiTranslationRunRecord) {
   return t(`ai.tasks.origin.${record.scopeKind === 'probe' ? 'probe' : record.scopeKind === 'connection' ? 'connection' : 'dictionary'}`)
 }
 
-function reasoningLabel(effort: AiReasoningEffort | undefined) {
+function reasoningLabel(effort: AiReasoningEffort | undefined, protocol?: AiProviderProtocol) {
+  if (protocol && !providerCapabilities[protocol].reasoning) return '—'
   const value = effort ?? 'automatic'
   return t(`ai.reasoningOption.${value}`)
+}
+
+function supportsReasoning(protocol: AiProviderProtocol) {
+  return providerCapabilities[protocol].reasoning
 }
 
 function protocolLabel(protocol: AiProviderProtocol) {
@@ -276,6 +313,10 @@ function protocolLabel(protocol: AiProviderProtocol) {
     anthropic_messages: 'anthropic',
     gemini_generate_content: 'gemini',
     ollama_chat: 'ollama',
+    microsoft_translator: 'microsoftTranslator',
+    libre_translate: 'libreTranslate',
+    google_translate: 'googleTranslate',
+    baidu_translate: 'baiduTranslate',
   }
   return t(`ai.protocol.${labels[protocol]}`)
 }
@@ -336,7 +377,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                   <UBadge v-if="current.dictionaryLocked" color="warning" variant="subtle" size="sm" icon="i-tabler-lock" :label="t('ai.tasks.dictionaryLocked')" />
                 </div>
                 <p class="type-metadata m-0 mt-1 truncate text-[var(--text-muted)]">
-                  {{ t(`ai.tasks.origin.${current.origin}`) }} · {{ current.profileName }} · {{ current.modelId }} · {{ t('ai.tasks.reasoningUsed', { effort: reasoningLabel(current.reasoningEffort) }) }}
+                  {{ t(`ai.tasks.origin.${current.origin}`) }} · {{ current.profileName }} · {{ current.modelId }}<template v-if="supportsReasoning(current.protocol)"> · {{ t('ai.tasks.reasoningUsed', { effort: reasoningLabel(current.reasoningEffort, current.protocol) }) }}</template>
                 </p>
               </div>
               <UButton
@@ -371,12 +412,12 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
             <div class="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] px-4 py-3">
               <div class="min-w-0">
                 <strong class="type-label block font-semibold text-[var(--text)]">{{ t('ai.tasks.reportedUsage') }}</strong>
-                <p v-if="current.usage" class="type-metadata m-0 mt-0.5 truncate tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(current.usage.inputTokens), cached: formatNumber(current.usage.cachedInputTokens), output: formatNumber(current.usage.outputTokens), reasoning: formatNumber(current.usage.reasoningTokens), total: formatNumber(current.usage.totalTokens) })">
-                  {{ t('ai.tasks.usageBreakdown', { input: formatNumber(current.usage.inputTokens), cached: formatNumber(current.usage.cachedInputTokens), output: formatNumber(current.usage.outputTokens), reasoning: formatNumber(current.usage.reasoningTokens) }) }}
+                <p v-if="current.usage" class="type-metadata m-0 mt-0.5 truncate tabular-nums text-[var(--text-muted)]" :title="usageDetail(current.usage)">
+                  {{ usageDetail(current.usage) }}
                 </p>
                 <p v-else class="type-metadata m-0 mt-0.5 text-[var(--text-muted)]">{{ t('ai.tasks.usagePending') }}</p>
               </div>
-              <strong v-if="current.usage" class="shrink-0 text-[16px] font-semibold tabular-nums text-[var(--text)]">{{ formatNumber(current.usage.totalTokens) }} <small class="type-caption font-normal text-[var(--text-muted)]">Token</small></strong>
+              <strong v-if="current.usage" class="shrink-0 text-[16px] font-semibold tabular-nums text-[var(--text)]">{{ usagePrimary(current.usage) }}</strong>
             </div>
 
             <UAlert v-if="current.writebackError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('ai.tasks.writebackFailed')" :description="t('ai.tasks.writebackFailedDescription')" class="m-3" />
@@ -398,7 +439,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                     <span class="type-metadata min-w-0 truncate text-[var(--text-muted)]">{{ t('ai.batchItems', { count: batch.itemCount }) }} · {{ t(batch.status === 'retrying' ? 'ai.batchRetryAttempt' : 'ai.batchAttempt', { attempt: batch.attemptCount }) }}</span>
                     <time class="type-metadata tabular-nums text-[var(--text-muted)]">{{ formatDuration(batch.elapsedMs) }}</time>
                     <p v-if="batch.lastError" class="type-metadata col-start-2 col-end-5 m-0 truncate text-[var(--danger)]" :title="batch.lastError.safeMessage">{{ batch.lastError.safeMessage }}</p>
-                    <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate tabular-nums text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(batch.usage.inputTokens), cached: formatNumber(batch.usage.cachedInputTokens), output: formatNumber(batch.usage.outputTokens), reasoning: formatNumber(batch.usage.reasoningTokens), total: formatNumber(batch.usage.totalTokens) })">{{ t('ai.batchUsage', { input: formatNumber(batch.usage.inputTokens), cached: formatNumber(batch.usage.cachedInputTokens), output: formatNumber(batch.usage.outputTokens), reasoning: formatNumber(batch.usage.reasoningTokens), total: formatNumber(batch.usage.totalTokens) }) }}</p>
+                    <p v-if="batch.usage" class="type-caption col-start-2 col-end-5 m-0 truncate tabular-nums text-[var(--text-muted)]" :title="usageDetail(batch.usage)">{{ usageDetail(batch.usage) }}</p>
                   </li>
                 </ol>
               </template>
@@ -449,12 +490,12 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
                 <div class="min-w-0"><strong class="block truncate text-[var(--text)]">{{ row.original.modelId }}</strong><span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.profileName }}</span></div>
               </template>
               <template #protocol-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ protocolLabel(row.original.protocol) }}</span></template>
-              <template #reasoning-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ reasoningLabel(row.original.reasoningEffort) }}</span></template>
+              <template #reasoning-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ reasoningLabel(row.original.reasoningEffort, row.original.protocol) }}</span></template>
               <template #tasks-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.tasks) }}</span></template>
               <template #texts-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.texts) }}</span></template>
               <template #elapsedMs-cell="{ row }"><span class="tabular-nums">{{ formatDuration(row.original.elapsedMs) }}</span></template>
               <template #tokens-cell="{ row }">
-                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usageAvailable ? formatNumber(row.original.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usageAvailable" class="type-caption block truncate text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) })">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens) }) }}</span></div>
+                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usageAvailable ? usagePrimary(row.original.usage) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usageAvailable" class="type-caption block truncate text-[var(--text-muted)]" :title="usageDetail(row.original.usage)">{{ usageDetail(row.original.usage) }}</span></div>
               </template>
               <template #empty>
                 <UEmpty icon="i-tabler-chart-bar" :title="modelStats.length ? t('ai.tasks.noStatisticsMatch') : t('ai.tasks.noModelStats')" :description="modelStats.length ? t('ai.tasks.adjustStatisticsFilters') : undefined" />
@@ -496,7 +537,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
               :ui="{ root: 'h-full overflow-auto [scrollbar-gutter:stable]', base: 'min-w-[900px]' }"
             >
               <template #model-cell="{ row }">
-                <div class="min-w-0"><strong class="block truncate text-[var(--text)]">{{ row.original.modelId }}</strong><span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.profileName }} · {{ reasoningLabel(row.original.reasoningEffort) }}</span></div>
+                <div class="min-w-0"><strong class="block truncate text-[var(--text)]">{{ row.original.modelId }}</strong><span class="type-metadata mt-0.5 block truncate text-[var(--text-muted)]">{{ row.original.profileName }}<template v-if="supportsReasoning(row.original.protocol)"> · {{ reasoningLabel(row.original.reasoningEffort, row.original.protocol) }}</template></span></div>
               </template>
               <template #startedAtMs-cell="{ row }"><time class="type-metadata whitespace-nowrap text-[var(--text-muted)]">{{ formatDate(row.original.startedAtMs) }}</time></template>
               <template #source-cell="{ row }"><span class="text-[var(--text-secondary)]">{{ scopeLabel(row.original) }}</span></template>
@@ -504,7 +545,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
               <template #texts-cell="{ row }"><span class="tabular-nums">{{ formatNumber(row.original.appliedCount) }}/{{ formatNumber(row.original.totalCount) }}</span></template>
               <template #elapsedMs-cell="{ row }"><span class="tabular-nums">{{ formatDuration(row.original.elapsedMs) }}</span></template>
               <template #tokens-cell="{ row }">
-                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usage ? formatNumber(row.original.usage.totalTokens) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usage" class="type-caption block truncate text-[var(--text-muted)]" :title="t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) })">{{ t('ai.tasks.usageBreakdown', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens) }) }}</span></div>
+                <div class="min-w-0 text-right tabular-nums"><strong class="block font-semibold text-[var(--text)]">{{ row.original.usage ? usagePrimary(row.original.usage) : t('ai.tasks.notReported') }}</strong><span v-if="row.original.usage" class="type-caption block truncate text-[var(--text-muted)]" :title="usageDetail(row.original.usage)">{{ usageDetail(row.original.usage) }}</span></div>
               </template>
               <template #actions-cell="{ row }">
                 <UButton :title="row.getIsExpanded() ? t('ai.tasks.hideTaskDetails', { model: row.original.modelId }) : t('ai.tasks.viewTaskDetails', { model: row.original.modelId })" color="neutral" variant="ghost" size="xs" :icon="row.getIsExpanded() ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" :aria-label="row.getIsExpanded() ? t('ai.tasks.hideTaskDetails', { model: row.original.modelId }) : t('ai.tasks.viewTaskDetails', { model: row.original.modelId })" :aria-expanded="row.getIsExpanded()" @click="row.toggleExpanded()" />
@@ -512,7 +553,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
               <template #expanded="{ row }">
                 <div class="bg-[var(--surface-subtle)] px-4 py-3" role="region" :aria-label="t('ai.tasks.taskDetailsFor', { model: row.original.modelId })">
                   <p class="type-metadata m-0 text-[var(--text-muted)]">{{ t('ai.tasks.requestSummary', { attempts: row.original.requestAttempts, retries: row.original.retryAttempts, peak: row.original.peakConcurrency, written: row.original.appliedCount, skipped: row.original.skippedCount }) }}</p>
-                  <p v-if="row.original.usage" class="type-metadata m-0 mt-1 tabular-nums text-[var(--text-muted)]">{{ t('ai.batchUsage', { input: formatNumber(row.original.usage.inputTokens), cached: formatNumber(row.original.usage.cachedInputTokens), output: formatNumber(row.original.usage.outputTokens), reasoning: formatNumber(row.original.usage.reasoningTokens), total: formatNumber(row.original.usage.totalTokens) }) }}</p>
+                  <p v-if="row.original.usage" class="type-metadata m-0 mt-1 tabular-nums text-[var(--text-muted)]">{{ usageDetail(row.original.usage) }}</p>
                   <p v-else class="type-metadata m-0 mt-1 text-[var(--text-muted)]">{{ t('ai.tasks.usageNotReported') }}</p>
                   <ol class="m-0 mt-3 max-h-48 list-none divide-y divide-[var(--border)] overflow-y-auto border-y border-[var(--border)] p-0 [scrollbar-gutter:stable]">
                     <li v-for="batch in orderedBatches(row.original.batches)" :key="batch.batchNumber" class="grid min-h-9 grid-cols-[3.5rem_5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5">

@@ -2,7 +2,7 @@ import type { AiProviderProtocol, AiReasoningEffort } from './useAiTranslation'
 
 interface AiPreset {
   id: string
-  documentationUrl: string
+  documentationUrl?: string
   name: string
   protocol: AiProviderProtocol
   baseUrl: string
@@ -13,6 +13,10 @@ interface AiPreset {
 // Service defaults are editable drafts, not persisted provider identities.
 export const aiPresets: readonly AiPreset[] = [
   { id: 'deepseek', documentationUrl: 'https://api-docs.deepseek.com/zh-cn/', name: 'DeepSeek', protocol: 'open_ai_responses', baseUrl: 'https://api.deepseek.com', modelId: '', reasoningEffort: 'disabled' },
+  { id: 'codex', name: 'Codex', protocol: 'codex_subscription', baseUrl: 'codex://local', modelId: '', reasoningEffort: 'disabled' },
+  { id: 'libretranslate', documentationUrl: 'https://docs.libretranslate.com/', name: 'LibreTranslate', protocol: 'libre_translate', baseUrl: 'http://127.0.0.1:5000', modelId: 'default', reasoningEffort: 'automatic' },
+  { id: 'baidu', documentationUrl: 'https://fanyi-api.baidu.com/product/11', name: 'Baidu Translate', protocol: 'baidu_translate', baseUrl: 'https://fanyi-api.baidu.com/api/trans/vip/translate', modelId: 'general', reasoningEffort: 'automatic' },
+  { id: 'googletranslate', documentationUrl: 'https://docs.cloud.google.com/translate/docs/reference/rest/v2/translate', name: 'Google Translate', protocol: 'google_translate', baseUrl: 'https://translation.googleapis.com/language/translate/v2', modelId: 'nmt', reasoningEffort: 'automatic' },
   { id: 'qwen', documentationUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key/', name: 'Qwen', protocol: 'open_ai_chat_completions', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'siliconflow', documentationUrl: 'https://docs.siliconflow.cn/docs/userguide/quickstart', name: 'SiliconFlow', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.siliconflow.cn/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'openai', documentationUrl: 'https://platform.openai.com/docs/api-reference/models', name: 'OpenAI', protocol: 'open_ai_responses', baseUrl: 'https://api.openai.com/v1', modelId: '', reasoningEffort: 'automatic' },
@@ -23,4 +27,5 @@ export const aiPresets: readonly AiPreset[] = [
   { id: 'mistral', documentationUrl: 'https://docs.mistral.ai/api/endpoint/models', name: 'Mistral', protocol: 'open_ai_chat_completions', baseUrl: 'https://api.mistral.ai/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'xai', documentationUrl: 'https://docs.x.ai/developers/rest-api-reference/inference/models', name: 'xAI', protocol: 'open_ai_responses', baseUrl: 'https://api.x.ai/v1', modelId: '', reasoningEffort: 'automatic' },
   { id: 'ollama', documentationUrl: 'https://docs.ollama.com/api/tags', name: 'Ollama', protocol: 'ollama_chat', baseUrl: 'http://127.0.0.1:11434/api', modelId: '', reasoningEffort: 'automatic' },
+  { id: 'microsoft', documentationUrl: 'https://learn.microsoft.com/azure/ai-services/translator/text-translation/overview', name: 'Microsoft Translator', protocol: 'microsoft_translator', baseUrl: 'https://api.cognitive.microsofttranslator.com', modelId: 'general', reasoningEffort: 'automatic' },
 ]

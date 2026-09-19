@@ -77,7 +77,7 @@ fn profiles_persist_plaintext_credentials_and_expose_them_for_editing() {
     );
     let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
         .expect("read persisted profiles");
-    assert!(persisted.contains("glyphshift.ai-profiles/4"));
+    assert!(persisted.contains("glyphshift.translation-profiles/1"));
     assert!(persisted.contains(r#""reasoningEffort": "disabled""#));
     assert!(!persisted.contains("credentialRef"));
     assert!(persisted.contains("maxItemsPerRequest"));
@@ -129,6 +129,155 @@ fn profiles_persist_plaintext_credentials_and_expose_them_for_editing() {
         reopened.profiles().expect("list remaining profiles").len(),
         1
     );
+}
+
+#[test]
+fn legacy_ai_profile_artifact_migrates_without_losing_the_credential() {
+    let root = tempdir().expect("legacy profile root");
+    std::fs::write(
+        root.path().join("ai-profiles.json"),
+        r#"{
+  "schema": "glyphshift.ai-profiles/4",
+  "defaultProfileId": "profile.legacy",
+  "profiles": [{
+    "id": "profile.legacy",
+    "name": "Legacy",
+    "protocol": "open_ai_responses",
+    "baseUrl": "https://api.openai.com/v1",
+    "modelId": "gpt-synthetic",
+    "reasoningEffort": "disabled",
+    "credential": "legacy-secret",
+    "timeoutMs": 1800000,
+    "maxItemsPerRequest": 50,
+    "maxConcurrency": 2,
+    "maxRetries": 2,
+    "filterPolicy": {}
+  }]
+}"#,
+    )
+    .expect("write legacy profile artifact");
+
+    let catalog = AiProfileCatalog::open(root.path()).expect("migrate legacy profile artifact");
+    let profile = catalog
+        .resolve_profile("profile.legacy")
+        .expect("resolve migrated profile");
+    assert_eq!(profile.credential(), Some("legacy-secret"));
+    assert_eq!(catalog.default_profile_id(), Some("profile.legacy"));
+    let persisted = std::fs::read_to_string(root.path().join("ai-profiles.json"))
+        .expect("read migrated profile artifact");
+    assert!(persisted.contains("glyphshift.translation-profiles/1"));
+    assert!(persisted.contains("legacy-secret"));
+}
+
+#[test]
+fn microsoft_translator_profile_defaults_to_nmt_and_preserves_region_options() {
+    let root = tempdir().expect("Microsoft Translator profile root");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
+    let profile = catalog
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.microsoft",
+                "Microsoft Translator",
+                AiProviderProtocol::MicrosoftTranslator,
+                "",
+            )
+            .with_provider_region("eastasia")
+            .with_credential(CredentialUpdate::replace("synthetic-translator-key")),
+        )
+        .expect("save Microsoft Translator profile");
+
+    assert_eq!(profile.model_id(), "general");
+    assert_eq!(profile.provider_options().region(), Some("eastasia"));
+    let resolved = catalog
+        .resolve_profile("profile.microsoft")
+        .expect("resolve Microsoft Translator profile");
+    assert_eq!(resolved.max_items_per_request(), 1_000);
+    assert_eq!(resolved.effective_max_items_per_request(), 1_000);
+    assert_eq!(resolved.provider_options().region(), Some("eastasia"));
+    assert_eq!(resolved.translation_prompt(), glyphshift_ai_translation::DEFAULT_TRANSLATION_PROMPT.trim());
+
+    catalog
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.microsoft-llm",
+                "Microsoft Translator LLM",
+                AiProviderProtocol::MicrosoftTranslator,
+                "my-gpt-deployment",
+            )
+            .with_credential(CredentialUpdate::replace("synthetic-translator-key")),
+        )
+        .expect("save Microsoft Translator LLM profile");
+    let llm = catalog
+        .resolve_profile("profile.microsoft-llm")
+        .expect("resolve Microsoft Translator LLM profile");
+    assert_eq!(llm.effective_max_items_per_request(), 50);
+}
+
+#[test]
+fn libretranslate_profile_defaults_to_local_keyless_service() {
+    let root = tempdir().expect("LibreTranslate profile root");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
+    let profile = catalog
+        .save_profile(AiProfileDraft::new(
+            "profile.libretranslate",
+            "LibreTranslate",
+            AiProviderProtocol::LibreTranslate,
+            "",
+        ))
+        .expect("save LibreTranslate profile");
+
+    assert_eq!(profile.base_url(), "http://127.0.0.1:5000");
+    assert_eq!(profile.model_id(), "default");
+    assert!(!profile.credential_required());
+    let resolved = catalog
+        .resolve_profile("profile.libretranslate")
+        .expect("resolve LibreTranslate profile");
+    assert_eq!(resolved.credential(), None);
+    assert_eq!(resolved.max_items_per_request(), 50);
+}
+
+#[test]
+fn google_and_baidu_translation_profiles_keep_provider_specific_credentials_and_options() {
+    let root = tempdir().expect("dedicated translation profile root");
+    let mut catalog = AiProfileCatalog::open(root.path()).expect("open profile catalog");
+
+    let google = catalog
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.google-translate",
+                "Google Translate",
+                AiProviderProtocol::GoogleTranslate,
+                "",
+            )
+            .with_credential(CredentialUpdate::replace("synthetic-google-key")),
+        )
+        .expect("save Google Translate profile");
+    assert_eq!(google.model_id(), "nmt");
+    assert!(google.credential_required());
+    let google_resolved = catalog
+        .resolve_profile("profile.google-translate")
+        .expect("resolve Google Translate profile");
+    assert_eq!(google_resolved.max_items_per_request(), 128);
+
+    let baidu = catalog
+        .save_profile(
+            AiProfileDraft::new(
+                "profile.baidu-translate",
+                "Baidu Translate",
+                AiProviderProtocol::BaiduTranslate,
+                "",
+            )
+            .with_provider_app_id("synthetic-baidu-app")
+            .with_credential(CredentialUpdate::replace("synthetic-baidu-secret")),
+        )
+        .expect("save Baidu Translate profile");
+    assert_eq!(baidu.model_id(), "general");
+    assert_eq!(baidu.provider_options().app_id(), Some("synthetic-baidu-app"));
+    let resolved = catalog
+        .resolve_profile("profile.baidu-translate")
+        .expect("resolve Baidu Translate profile");
+    assert_eq!(resolved.max_concurrency(), 1);
+    assert_eq!(resolved.provider_options().app_id(), Some("synthetic-baidu-app"));
 }
 
 #[test]

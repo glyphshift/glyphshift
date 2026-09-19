@@ -97,21 +97,29 @@ _Avoid_: 成功审计、像素验证
 目标确认应用的一份完整运行配置代次。
 _Avoid_: 词典版本、工作流 revision
 
-## AI 翻译
+## 自动翻译
 
-**AI Profile**：
-可复用的 AI 翻译连接与请求策略，包含供应商协议、服务地址、模型、可选明文 API Key、推理强度、分批、
-超时、并发、重试和本机过滤规则。
+**Translation Profile（翻译配置）**：
+可复用的翻译 Provider 连接与请求策略，包含协议、服务地址、可选模型或部署、可选明文 API Key、
+Provider 专属参数、分批、超时、并发、重试和本机过滤规则。具备大模型能力的 Provider 还可包含提示词与
+推理强度。旧代码中的 AI Profile 是这一概念的兼容名称。
 _Avoid_: App Settings、一次翻译任务
 
 ### Translation Task（翻译任务）
 
-全局唯一的后台 AI 执行对象，绑定一次候选快照、一个目标词典和启动时的 Profile；拥有批次状态、写回、
-取消、终态与实报 Token。任务期间目标词典只读，应用与目标软件不被锁定。
+全局唯一的后台翻译执行对象，绑定一次候选快照、一个目标词典和启动时的 Profile；拥有批次状态、写回、
+取消、终态与 Provider 实报 usage。任务期间目标词典只读，应用与目标软件不被锁定。
 _Avoid_: Provider 请求、前端进度弹窗、工作流任务、探针任务
 
+**Translation Provider**：
+把统一翻译请求转换为具体服务通信的 Adapter。当前可由大模型协议（OpenAI Responses、Anthropic
+Messages、Gemini、Ollama、Codex）或专用机器翻译协议（Microsoft Translator）实现。任务层只依赖统一
+请求、结果、批量策略和 usage，不根据 Provider 是否为 AI 决定调度或写回。
+_Avoid_: 模型名称、服务地址、Translation Job
+
 **Provider Protocol**：
-AI Profile 选择的供应商通信合同，例如 OpenAI Responses、Anthropic Messages、Gemini 或 Ollama。
+Translation Profile 选择的供应商通信合同，例如 OpenAI Responses、Anthropic Messages、Gemini、
+Ollama 或 Microsoft Translator。
 _Avoid_: 模型名称、服务地址
 
 **Translation Plan**：
@@ -119,11 +127,12 @@ _Avoid_: 模型名称、服务地址
 _Avoid_: Dictionary、任务结果
 
 **Translation Batch Policy**：
-AI Profile 拥有的单批条目上限。超出上限的候选由 Translation Job 自动继续处理。
+Provider 根据 Profile 声明的单批限制，可同时包含条目数和源字符数。超出上限的候选由 Translation Job
+自动继续处理；不同 Provider 可以有不同限制。
 _Avoid_: 全局 App Settings、Token 限额
 
 **Translation Job**：
-使用一个 AI Profile 执行 Translation Plan 的可查询、可取消运行。它保留已完成结果，并只把仍为空白且未变化的译文写回。
+使用一个 Translation Profile 执行 Translation Plan 的可查询、可取消运行。它保留已完成结果，并只把仍为空白且未变化的译文写回。
 _Avoid_: Workflow、持续 Runtime 翻译
 
 **翻译运行记录（Translation Run Record）**：
@@ -163,7 +172,7 @@ _Avoid_: Author、Vendor display name
 _Avoid_: AI Profile、Workflow、Software、Dictionary
 
 **工作区数据根（Workspace Data Root）**：
-当前用户本机保存软件、词典、工作流、探针、AI 配置与 App Settings 的品牌目录。读取采用字段、记录、
+当前用户本机保存软件、词典、工作流、探针、翻译配置与 App Settings 的品牌目录。读取采用字段、记录、
 文件三级容错；bundle identifier 与隔离测试根不属于产品工作区身份。
 _Avoid_: bundle identifier 目录、测试证据目录、整份配置一次性拒绝
 

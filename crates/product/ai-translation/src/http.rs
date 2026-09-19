@@ -1,12 +1,12 @@
 use crate::{
     AiProviderProtocol, AiTranslation, CancellationToken, ProviderBatchResult, ProviderError,
     ProviderErrorCategory, ProviderRequest, ProviderTranslation, ProviderUsage,
-    TranslationProvider,
+    TranslationBatchPolicy, TranslationProvider,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub struct HttpRequest {
     method: &'static str,
@@ -209,6 +209,10 @@ impl AiTranslation {
             AiProviderProtocol::AnthropicMessages,
             AiProviderProtocol::GeminiGenerateContent,
             AiProviderProtocol::OllamaChat,
+            AiProviderProtocol::MicrosoftTranslator,
+            AiProviderProtocol::LibreTranslate,
+            AiProviderProtocol::GoogleTranslate,
+            AiProviderProtocol::BaiduTranslate,
         ] {
             self.register_http_provider(protocol, transport.clone());
         }
@@ -216,6 +220,23 @@ impl AiTranslation {
 }
 
 impl TranslationProvider for HttpTranslationProvider {
+    fn batch_policy(&self, profile: &crate::ResolvedAiProfile) -> TranslationBatchPolicy {
+        let policy = TranslationBatchPolicy::new(profile.effective_max_items_per_request())
+            .expect("resolved translation profile must contain a valid batch size");
+        match self.protocol {
+            AiProviderProtocol::MicrosoftTranslator => {
+                policy.with_max_source_chars_per_request(50_000)
+            }
+            AiProviderProtocol::GoogleTranslate => {
+                policy.with_max_source_chars_per_request(5_000)
+            }
+            AiProviderProtocol::BaiduTranslate => {
+                policy.with_max_source_chars_per_request(950)
+            }
+            _ => policy,
+        }
+    }
+
     fn translate(
         &self,
         request: &ProviderRequest<'_>,
@@ -250,6 +271,18 @@ fn build_request(
         return Err(invalid_request(
             "provider credentials require HTTPS or a loopback endpoint",
         ));
+    }
+    if protocol == AiProviderProtocol::MicrosoftTranslator {
+        return build_microsoft_translator_request(request, base_url);
+    }
+    if protocol == AiProviderProtocol::LibreTranslate {
+        return build_libretranslate_request(request, base_url);
+    }
+    if protocol == AiProviderProtocol::GoogleTranslate {
+        return build_google_translate_request(request, base_url);
+    }
+    if protocol == AiProviderProtocol::BaiduTranslate {
+        return build_baidu_translate_request(request, base_url);
     }
     let schema = translation_schema(request.items().len());
     let input = json!({
@@ -333,6 +366,12 @@ fn build_request(
                 "format": schema,
             }),
         ),
+        AiProviderProtocol::MicrosoftTranslator
+        | AiProviderProtocol::LibreTranslate
+        | AiProviderProtocol::GoogleTranslate
+        | AiProviderProtocol::BaiduTranslate => {
+            unreachable!("handled above")
+        }
     };
     apply_reasoning_policy(protocol, profile, &mut body);
     let url = format!("{}/{}", profile.base_url().trim_end_matches('/'), endpoint);
@@ -375,6 +414,12 @@ fn build_request(
                     format!("Bearer {credential}").into(),
                 ));
             }
+        }
+        AiProviderProtocol::MicrosoftTranslator
+        | AiProviderProtocol::LibreTranslate
+        | AiProviderProtocol::GoogleTranslate
+        | AiProviderProtocol::BaiduTranslate => {
+            unreachable!("handled above")
         }
     }
     let body = serde_json::to_vec(&body)
@@ -428,7 +473,388 @@ fn apply_reasoning_policy(
         AiProviderProtocol::CodexSubscription
         | AiProviderProtocol::AnthropicMessages
         | AiProviderProtocol::GeminiGenerateContent
-        | AiProviderProtocol::OllamaChat => {}
+        | AiProviderProtocol::OllamaChat
+        | AiProviderProtocol::MicrosoftTranslator
+        | AiProviderProtocol::LibreTranslate
+        | AiProviderProtocol::GoogleTranslate
+        | AiProviderProtocol::BaiduTranslate => {}
+    }
+}
+
+fn build_google_translate_request(
+    request: &ProviderRequest<'_>,
+    mut base_url: reqwest::Url,
+) -> Result<HttpRequest, ProviderError> {
+    let profile = request.profile();
+    if base_url.path().trim_matches('/').is_empty() {
+        base_url.set_path("/language/translate/v2");
+    }
+    let credential = profile
+        .credential()
+        .ok_or_else(|| invalid_request("missing provider credential"))?;
+    base_url.query_pairs_mut().append_pair("key", credential);
+    let body = json!({
+        "q": request.items().iter().map(|item| item.source()).collect::<Vec<_>>(),
+        "source": google_translate_locale(request.source_locale()),
+        "target": google_translate_locale(request.target_locale()),
+        "format": "text",
+    });
+    Ok(HttpRequest {
+        method: "POST",
+        url: base_url.to_string().into(),
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: serde_json::to_vec(&body)
+            .map_err(|_| invalid_request("could not encode provider request"))?,
+        timeout_ms: profile.timeout_ms(),
+    })
+}
+
+fn google_translate_locale(locale: &str) -> Box<str> {
+    match locale.to_ascii_lowercase().as_str() {
+        "zh-cn" | "zh-hans" | "zh-sg" => "zh-CN".into(),
+        "zh-tw" | "zh-hant" | "zh-hk" | "zh-mo" => "zh-TW".into(),
+        _ => locale
+            .split(['-', '_'])
+            .next()
+            .unwrap_or(locale)
+            .to_ascii_lowercase()
+            .into_boxed_str(),
+    }
+}
+
+fn build_baidu_translate_request(
+    request: &ProviderRequest<'_>,
+    mut base_url: reqwest::Url,
+) -> Result<HttpRequest, ProviderError> {
+    let profile = request.profile();
+    if base_url.path().trim_matches('/').is_empty() {
+        base_url.set_path("/api/trans/vip/translate");
+    }
+    let app_id = profile
+        .provider_options()
+        .app_id()
+        .ok_or_else(|| invalid_request("missing provider app id"))?;
+    let credential = profile
+        .credential()
+        .ok_or_else(|| invalid_request("missing provider credential"))?;
+    let query = request
+        .items()
+        .iter()
+        .map(|item| item.source())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if query.chars().count() > 1_000 {
+        return Err(invalid_request(
+            "provider batch exceeds the source character limit",
+        ));
+    }
+    let salt = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| invalid_request("could not create provider request salt"))?
+        .as_nanos()
+        .to_string();
+    let sign_input = format!("{app_id}{query}{salt}{credential}");
+    let sign = md5_hex(sign_input.as_bytes());
+    let source = baidu_translate_locale(request.source_locale());
+    let target = baidu_translate_locale(request.target_locale());
+    let body = form_urlencoded_body(&[
+        ("q", query.as_str()),
+        ("from", source.as_ref()),
+        ("to", target.as_ref()),
+        ("appid", app_id),
+        ("salt", salt.as_str()),
+        ("sign", sign.as_str()),
+    ]);
+    Ok(HttpRequest {
+        method: "POST",
+        url: base_url.to_string().into(),
+        headers: vec![(
+            "content-type".into(),
+            "application/x-www-form-urlencoded".into(),
+        )],
+        body,
+        timeout_ms: profile.timeout_ms(),
+    })
+}
+
+fn baidu_translate_locale(locale: &str) -> Box<str> {
+    let base = locale
+        .split(['-', '_'])
+        .next()
+        .unwrap_or(locale)
+        .to_ascii_lowercase();
+    match locale.to_ascii_lowercase().as_str() {
+        "zh-tw" | "zh-hant" | "zh-hk" | "zh-mo" => "cht".into(),
+        "zh-cn" | "zh-hans" | "zh-sg" => "zh".into(),
+        _ => match base.as_str() {
+            "ja" => "jp".into(),
+            "ko" => "kor".into(),
+            "fr" => "fra".into(),
+            "es" => "spa".into(),
+            "ar" => "ara".into(),
+            "vi" => "vie".into(),
+            _ => base.into_boxed_str(),
+        },
+    }
+}
+
+fn form_urlencoded_body(fields: &[(&str, &str)]) -> Vec<u8> {
+    let mut output = String::new();
+    for (index, (name, value)) in fields.iter().enumerate() {
+        if index > 0 {
+            output.push('&');
+        }
+        encode_form_component(name, &mut output);
+        output.push('=');
+        encode_form_component(value, &mut output);
+    }
+    output.into_bytes()
+}
+
+fn encode_form_component(value: &str, output: &mut String) {
+    use std::fmt::Write as _;
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                output.push(char::from(byte));
+            }
+            b' ' => output.push('+'),
+            _ => {
+                let _ = write!(output, "%{byte:02X}");
+            }
+        }
+    }
+}
+
+fn md5_hex(input: &[u8]) -> String {
+    const S: [u32; 64] = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14,
+        20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
+        16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    const K: [u32; 64] = [
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613,
+        0xfd469501, 0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193,
+        0xa679438e, 0x49b40821, 0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d,
+        0x02441453, 0xd8a1e681, 0xe7d3fbc8, 0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+        0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a, 0xfffa3942, 0x8771f681, 0x6d9d6122,
+        0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70, 0x289b7ec6, 0xeaa127fa,
+        0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665, 0xf4292244,
+        0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb,
+        0xeb86d391,
+    ];
+
+    let bit_len = (input.len() as u64).wrapping_mul(8);
+    let mut data = input.to_vec();
+    data.push(0x80);
+    while data.len() % 64 != 56 {
+        data.push(0);
+    }
+    data.extend_from_slice(&bit_len.to_le_bytes());
+
+    let mut state = [0x67452301_u32, 0xefcdab89, 0x98badcfe, 0x10325476];
+    for chunk in data.chunks_exact(64) {
+        let mut words = [0_u32; 16];
+        for (index, word) in words.iter_mut().enumerate() {
+            let offset = index * 4;
+            *word = u32::from_le_bytes([
+                chunk[offset],
+                chunk[offset + 1],
+                chunk[offset + 2],
+                chunk[offset + 3],
+            ]);
+        }
+        let [mut a, mut b, mut c, mut d] = state;
+        for index in 0..64 {
+            let (f, g) = match index {
+                0..=15 => ((b & c) | (!b & d), index),
+                16..=31 => ((d & b) | (!d & c), (5 * index + 1) % 16),
+                32..=47 => (b ^ c ^ d, (3 * index + 5) % 16),
+                _ => (c ^ (b | !d), (7 * index) % 16),
+            };
+            let next = a
+                .wrapping_add(f)
+                .wrapping_add(K[index])
+                .wrapping_add(words[g])
+                .rotate_left(S[index]);
+            a = d;
+            d = c;
+            c = b;
+            b = b.wrapping_add(next);
+        }
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+    }
+
+    let mut digest = String::with_capacity(32);
+    use std::fmt::Write as _;
+    for word in state {
+        for byte in word.to_le_bytes() {
+            let _ = write!(digest, "{byte:02x}");
+        }
+    }
+    digest
+}
+
+fn build_libretranslate_request(
+    request: &ProviderRequest<'_>,
+    mut base_url: reqwest::Url,
+) -> Result<HttpRequest, ProviderError> {
+    let profile = request.profile();
+    let base_path = base_url.path().trim_end_matches('/');
+    let path = if base_path.ends_with("/translate") {
+        base_path.to_owned()
+    } else if base_path.is_empty() {
+        "/translate".to_owned()
+    } else {
+        format!("{base_path}/translate")
+    };
+    base_url.set_path(&path);
+
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "q".to_owned(),
+        Value::Array(
+            request
+                .items()
+                .iter()
+                .map(|item| Value::String(item.source().to_owned()))
+                .collect(),
+        ),
+    );
+    body.insert(
+        "source".to_owned(),
+        json!(libretranslate_locale(request.source_locale())),
+    );
+    body.insert(
+        "target".to_owned(),
+        json!(libretranslate_locale(request.target_locale())),
+    );
+    body.insert("format".to_owned(), json!("text"));
+    if let Some(credential) = profile.credential() {
+        body.insert("api_key".to_owned(), json!(credential));
+    }
+
+    Ok(HttpRequest {
+        method: "POST",
+        url: base_url.to_string().into(),
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: serde_json::to_vec(&Value::Object(body))
+            .map_err(|_| invalid_request("could not encode provider request"))?,
+        timeout_ms: profile.timeout_ms(),
+    })
+}
+
+fn libretranslate_locale(locale: &str) -> Box<str> {
+    locale
+        .split(['-', '_'])
+        .next()
+        .unwrap_or(locale)
+        .to_ascii_lowercase()
+        .into_boxed_str()
+}
+
+fn build_microsoft_translator_request(
+    request: &ProviderRequest<'_>,
+    mut base_url: reqwest::Url,
+) -> Result<HttpRequest, ProviderError> {
+    let profile = request.profile();
+    let deployment = profile.model_id().trim();
+    let nmt = deployment.eq_ignore_ascii_case("general");
+    let max_item_chars = if nmt { 50_000 } else { 5_000 };
+    if request
+        .items()
+        .iter()
+        .any(|item| item.source().chars().count() > max_item_chars)
+    {
+        return Err(invalid_request(
+            "provider source item exceeds the selected deployment limit",
+        ));
+    }
+    let source_chars = request
+        .items()
+        .iter()
+        .map(|item| item.source().chars().count())
+        .sum::<usize>();
+    if source_chars > 50_000 {
+        return Err(invalid_request(
+            "provider batch exceeds the source character limit",
+        ));
+    }
+
+    let source_locale = microsoft_translator_locale(request.source_locale());
+    let target_locale = microsoft_translator_locale(request.target_locale());
+    let inputs = request
+        .items()
+        .iter()
+        .map(|item| {
+            let mut target = serde_json::Map::new();
+            target.insert("language".to_owned(), json!(target_locale));
+            if !nmt {
+                target.insert("deploymentName".to_owned(), json!(deployment));
+            }
+            json!({
+                "text": item.source(),
+                "language": source_locale,
+                "targets": [Value::Object(target)],
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let base_path = base_url.path().trim_end_matches('/');
+    let path = if base_path.is_empty() {
+        if base_url
+            .host_str()
+            .is_some_and(|host| host.ends_with(".cognitiveservices.azure.com"))
+        {
+            "/translator/text/translate".to_owned()
+        } else {
+            "/translate".to_owned()
+        }
+    } else if base_path.ends_with("/translate") {
+        base_path.to_owned()
+    } else {
+        format!("{base_path}/translate")
+    };
+    base_url.set_path(&path);
+    base_url.set_query(Some("api-version=2026-06-06"));
+
+    let credential = profile
+        .credential()
+        .ok_or_else(|| invalid_request("missing provider credential"))?;
+    let mut headers = vec![
+        (Box::<str>::from("content-type"), Box::<str>::from("application/json")),
+        (
+            Box::<str>::from("ocp-apim-subscription-key"),
+            Box::<str>::from(credential),
+        ),
+    ];
+    if let Some(region) = profile.provider_options().region() {
+        headers.push((
+            "ocp-apim-subscription-region".into(),
+            Box::<str>::from(region),
+        ));
+    }
+    let body = serde_json::to_vec(&json!({"inputs": inputs}))
+        .map_err(|_| invalid_request("could not encode provider request"))?;
+    Ok(HttpRequest {
+        method: "POST",
+        url: base_url.to_string().into(),
+        headers,
+        body,
+        timeout_ms: profile.timeout_ms(),
+    })
+}
+
+fn microsoft_translator_locale(locale: &str) -> Box<str> {
+    match locale.to_ascii_lowercase().as_str() {
+        "en-us" => "en".into(),
+        "zh-cn" | "zh-sg" => "zh-Hans".into(),
+        "zh-tw" | "zh-hk" | "zh-mo" => "zh-Hant".into(),
+        _ => locale.into(),
     }
 }
 
@@ -458,6 +884,18 @@ fn decode_response(
     }
     let value: Value = serde_json::from_slice(&response.body)
         .map_err(|_| malformed_response("provider returned invalid JSON"))?;
+    if protocol == AiProviderProtocol::MicrosoftTranslator {
+        return decode_microsoft_translator_response(&response, &value, request);
+    }
+    if protocol == AiProviderProtocol::LibreTranslate {
+        return decode_libretranslate_response(&value, request);
+    }
+    if protocol == AiProviderProtocol::GoogleTranslate {
+        return decode_google_translate_response(&value, request);
+    }
+    if protocol == AiProviderProtocol::BaiduTranslate {
+        return decode_baidu_translate_response(&value, request);
+    }
     let usage = decode_usage(protocol, &value);
     if let Some(error) = incomplete_response_error(protocol, &value) {
         return Err(error);
@@ -485,6 +923,12 @@ fn decode_response(
             .pointer("/candidates/0/content/parts/0/text")
             .and_then(Value::as_str),
         AiProviderProtocol::OllamaChat => value.pointer("/message/content").and_then(Value::as_str),
+        AiProviderProtocol::MicrosoftTranslator
+        | AiProviderProtocol::LibreTranslate
+        | AiProviderProtocol::GoogleTranslate
+        | AiProviderProtocol::BaiduTranslate => {
+            unreachable!("handled above")
+        }
     }
     .ok_or_else(|| malformed_response("provider response did not contain text output"))?;
     let structured = decode_translation_text(text)?;
@@ -559,6 +1003,10 @@ fn decode_usage(protocol: AiProviderProtocol, value: &Value) -> Option<ProviderU
             0,
             0,
         ),
+        AiProviderProtocol::MicrosoftTranslator
+        | AiProviderProtocol::LibreTranslate
+        | AiProviderProtocol::GoogleTranslate
+        | AiProviderProtocol::BaiduTranslate => return None,
     };
     if input == 0 && output == 0 && reasoning == 0 && cached == 0 && explicit_total == 0 {
         return None;
@@ -569,6 +1017,176 @@ fn decode_usage(protocol: AiProviderProtocol, value: &Value) -> Option<ProviderU
         reasoning,
         cached,
         explicit_total.max(input.saturating_add(output)),
+    ))
+}
+
+fn decode_libretranslate_response(
+    value: &Value,
+    request: &ProviderRequest<'_>,
+) -> Result<ProviderBatchResult, ProviderError> {
+    let translated = value
+        .get("translatedText")
+        .ok_or_else(|| malformed_response("provider response did not contain translatedText"))?;
+    let texts = if let Some(items) = translated.as_array() {
+        items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| malformed_response("provider returned invalid translation text"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else if request.items().len() == 1 {
+        vec![translated
+            .as_str()
+            .ok_or_else(|| malformed_response("provider returned invalid translation text"))?
+            .to_owned()]
+    } else {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    };
+    if texts.len() != request.items().len() {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    }
+    Ok(ProviderBatchResult::new(
+        request
+            .items()
+            .iter()
+            .zip(texts)
+            .map(|(item, text)| ProviderTranslation::new(item.item_id(), text)),
+    ))
+}
+
+fn decode_google_translate_response(
+    value: &Value,
+    request: &ProviderRequest<'_>,
+) -> Result<ProviderBatchResult, ProviderError> {
+    let rows = value
+        .pointer("/data/translations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed_response("provider response did not contain translations"))?;
+    if rows.len() != request.items().len() {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    }
+    let translations = request
+        .items()
+        .iter()
+        .zip(rows)
+        .map(|(item, row)| {
+            let text = row
+                .get("translatedText")
+                .and_then(Value::as_str)
+                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+            Ok(ProviderTranslation::new(item.item_id(), text))
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    Ok(ProviderBatchResult::new(translations))
+}
+
+fn decode_baidu_translate_response(
+    value: &Value,
+    request: &ProviderRequest<'_>,
+) -> Result<ProviderBatchResult, ProviderError> {
+    if let Some(code) = value.get("error_code").and_then(Value::as_str) {
+        let (category, retryable) = match code {
+            "52001" => (ProviderErrorCategory::Timeout, true),
+            "52002" => (ProviderErrorCategory::ProviderInternal, true),
+            "52003" | "54001" => (ProviderErrorCategory::Authentication, false),
+            "54003" => (ProviderErrorCategory::RateLimited, true),
+            "54004" => (ProviderErrorCategory::QuotaOrBilling, false),
+            "58000" => (ProviderErrorCategory::Permission, false),
+            _ => (ProviderErrorCategory::InvalidRequest, false),
+        };
+        return Err(ProviderError::new(
+            category,
+            retryable,
+            "provider rejected the request",
+        ));
+    }
+    let rows = value
+        .get("trans_result")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed_response("provider response did not contain translations"))?;
+    if rows.len() != request.items().len() {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    }
+    let translations = request
+        .items()
+        .iter()
+        .zip(rows)
+        .map(|(item, row)| {
+            let text = row
+                .get("dst")
+                .and_then(Value::as_str)
+                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+            Ok(ProviderTranslation::new(item.item_id(), text))
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    Ok(ProviderBatchResult::new(translations))
+}
+
+fn decode_microsoft_translator_response(
+    response: &HttpResponse,
+    value: &Value,
+    request: &ProviderRequest<'_>,
+) -> Result<ProviderBatchResult, ProviderError> {
+    let rows = value
+        .get("value")
+        .and_then(Value::as_array)
+        .ok_or_else(|| malformed_response("provider response did not contain translations"))?;
+    if rows.len() != request.items().len() {
+        return Err(malformed_response(
+            "provider returned a mismatched translation count",
+        ));
+    }
+    let translations = request
+        .items()
+        .iter()
+        .zip(rows)
+        .map(|(item, row)| {
+            let text = row
+                .get("translations")
+                .and_then(Value::as_array)
+                .and_then(|translations| translations.first())
+                .and_then(|translation| translation.get("text"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| malformed_response("provider response did not contain translation text"))?;
+            Ok(ProviderTranslation::new(item.item_id(), text))
+        })
+        .collect::<Result<Vec<_>, ProviderError>>()?;
+    let source_characters = response
+        .header("sourceCharactersCharged")
+        .or_else(|| response.header("x-metered-usage"))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let input_tokens = response
+        .header("sourceTokensCharged")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let output_tokens = response
+        .header("targetTokensCharged")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    let result = ProviderBatchResult::new(translations);
+    if source_characters == 0 && input_tokens == 0 && output_tokens == 0 {
+        return Ok(result);
+    }
+    Ok(result.with_usage(
+        ProviderUsage::new(
+            input_tokens,
+            output_tokens,
+            0,
+            0,
+            input_tokens.saturating_add(output_tokens),
+        )
+        .with_source_characters(source_characters),
     ))
 }
 
@@ -753,6 +1371,11 @@ fn encode_path_segment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn baidu_signature_md5_matches_the_standard_vector() {
+        assert_eq!(super::md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
+    }
+
     #[test]
     fn complete_json_fences_are_unwrapped_without_salvaging_ambiguous_text() {
         for text in [

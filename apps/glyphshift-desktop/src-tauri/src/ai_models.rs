@@ -1,4 +1,4 @@
-use glyphshift_ai_translation::AiProviderProtocol;
+use glyphshift_ai_translation::{AiProviderProtocol, TranslationProviderProtocol};
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,8 +16,11 @@ pub(crate) struct ModelListRequest {
 }
 
 fn endpoint(request: &ModelListRequest) -> Result<Url, &'static str> {
-    use AiProviderProtocol::*;
-    if request.protocol == CodexSubscription {
+    use TranslationProviderProtocol::*;
+    if matches!(
+        request.protocol,
+        CodexSubscription | MicrosoftTranslator | LibreTranslate | GoogleTranslate | BaiduTranslate
+    ) {
         return Err("unsupported");
     }
     let mut url = Url::parse(request.base_url.trim()).map_err(|_| "invalid_url")?;
@@ -57,7 +60,7 @@ fn parse_page(
     protocol: AiProviderProtocol,
     value: &Value,
 ) -> Result<(Vec<String>, Option<String>), &'static str> {
-    use AiProviderProtocol::*;
+    use TranslationProviderProtocol::*;
     let array_key = if matches!(protocol, GeminiGenerateContent | OllamaChat) {
         "models"
     } else {
@@ -124,7 +127,7 @@ async fn fetch_models(
     request: &ModelListRequest,
     url: Url,
 ) -> Result<Vec<String>, &'static str> {
-    use AiProviderProtocol::*;
+    use TranslationProviderProtocol::*;
     let mut models = BTreeSet::new();
     let mut cursor: Option<String> = None;
     let mut cursors = BTreeSet::new();
@@ -261,7 +264,7 @@ mod tests {
 
     #[test]
     fn model_list_validates_credentials_and_preserves_provider_paths() {
-        use AiProviderProtocol::*;
+        use TranslationProviderProtocol::*;
         assert_eq!(
             endpoint(&request(OpenAiResponses, "https://service.example/v1", "")).unwrap_err(),
             "missing_key"
@@ -317,7 +320,7 @@ mod tests {
 
     #[test]
     fn model_list_native_providers_paginate_and_filter() {
-        use AiProviderProtocol::*;
+        use TranslationProviderProtocol::*;
         let (base, rx, thread) = server(vec![
             (
                 200,

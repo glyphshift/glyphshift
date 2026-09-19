@@ -13,7 +13,7 @@ test('settings uses wide descriptions and optional help without duplicate shortc
   const description = page.getByText('打开本机保存字典的文件夹。', { exact: true })
   await expect(description).toBeVisible()
   expect((await description.boundingBox())!.height).toBeLessThanOrEqual(20)
-  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: '翻译配置', exact: true }).click()
   const help = page.getByRole('button', { name: '自动补全间隔（秒）说明', exact: true })
   await help.hover()
   await expect(page.getByText(/^0 秒时每 250 毫秒检查/)).toBeVisible()

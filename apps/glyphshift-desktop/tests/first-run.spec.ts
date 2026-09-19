@@ -36,7 +36,7 @@ async function finishSettingsTour(page: import('@playwright/test').Page, testInf
   await guide.getByRole('button', { name: '下一步' }).click()
   for (const [heading, selector] of [
     ['部分软件需要管理员权限', '[data-tour="settings-admin"]'],
-    ['配置 AI 翻译', '.tour-settings-ai'],
+    ['配置自动翻译', '.tour-settings-ai'],
     ['设置文字处理', '.tour-settings-rules'],
     ['管理最近选过的软件', '.tour-settings-software'],
     ['准备常用字体', '.tour-settings-fonts'],
@@ -44,7 +44,7 @@ async function finishSettingsTour(page: import('@playwright/test').Page, testInf
   ]) {
     await expect(guide.getByRole('heading', { name: heading, exact: true })).toBeVisible()
     await expectFrameAround(page, selector!)
-    if (testInfo && ['部分软件需要管理员权限', '配置 AI 翻译', '设置文字处理'].includes(heading!)) {
+    if (testInfo && ['部分软件需要管理员权限', '配置自动翻译', '设置文字处理'].includes(heading!)) {
       await page.screenshot({ path: testInfo.outputPath(`settings-${heading}.png`) })
     }
     await guide.getByRole('button', { name: '下一步' }).click()

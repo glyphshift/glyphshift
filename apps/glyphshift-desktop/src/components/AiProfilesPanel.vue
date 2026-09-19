@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import {
   defaultAiFilterPolicy,
   defaultAiReasoningEffort,
+  providerCapabilities,
   providerDefaults,
   useAiTranslation,
   type AiFilterPolicy,
@@ -26,6 +27,8 @@ interface ProfileForm {
   protocol: AiProviderProtocol
   baseUrl: string
   modelId: string
+  region: string
+  appId: string
   translationPrompt: string
   reasoningEffort: AiReasoningEffort
   timeoutMinutes: number
@@ -46,7 +49,19 @@ const excludedPatternsText = ref('')
 const advancedOpen = ref(false)
 const secretVisible = ref(false)
 const presetId = ref('')
+const serviceKind = ref<'traditional' | 'ai'>('ai')
 const createStep = ref<'service' | 'config'>('service')
+const serviceKindItems = computed(() => [
+  { value: 'ai' as const, label: t('ai.serviceKinds.ai') },
+  { value: 'traditional' as const, label: t('ai.serviceKinds.traditional') },
+])
+const traditionalPresetIds = ['libretranslate', 'baidu', 'googletranslate', 'microsoft'] as const
+const aiPresetIds = ['ollama', 'codex', 'deepseek', 'qwen', 'siliconflow', 'openai', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral', 'xai'] as const
+const presetsByIds = (ids: readonly string[]) => ids
+  .map(id => aiPresets.find(preset => preset.id === id))
+  .filter((preset): preset is (typeof aiPresets)[number] => Boolean(preset))
+const traditionalPresets = computed(() => presetsByIds(traditionalPresetIds))
+const aiServicePresets = computed(() => presetsByIds(aiPresetIds))
 const createStepItems = computed(() => [
   { value: 'service' as const, label: t('ai.createSteps.service') },
   { value: 'config' as const, label: t('ai.createSteps.config'), disabled: !presetId.value },
@@ -67,6 +82,9 @@ function choosePreset(id: string) {
     form.value.baseUrl = preset.baseUrl
     form.value.modelId = preset.modelId
     form.value.reasoningEffort = preset.reasoningEffort
+    form.value.maxItemsPerRequest = providerDefaults[preset.protocol].maxItemsPerRequest
+    form.value.region = ''
+    form.value.appId = ''
   } else {
     const makeDefault = form.value.makeDefault
     form.value = { ...newProfileForm(), makeDefault }
@@ -85,6 +103,10 @@ const providerItems = computed(() => ([
   { value: 'anthropic_messages' as const, label: t('ai.protocol.anthropic') },
   { value: 'gemini_generate_content' as const, label: t('ai.protocol.gemini') },
   { value: 'ollama_chat' as const, label: t('ai.protocol.ollama') },
+  { value: 'microsoft_translator' as const, label: t('ai.protocol.microsoftTranslator') },
+  { value: 'libre_translate' as const, label: t('ai.protocol.libreTranslate') },
+  { value: 'google_translate' as const, label: t('ai.protocol.googleTranslate') },
+  { value: 'baidu_translate' as const, label: t('ai.protocol.baiduTranslate') },
 ]))
 
 function newProfileForm(): ProfileForm {
@@ -95,10 +117,12 @@ function newProfileForm(): ProfileForm {
     protocol,
     baseUrl: providerDefaults[protocol].baseUrl,
     modelId: providerDefaults[protocol].modelId,
+    region: '',
+    appId: '',
     translationPrompt: defaultTranslationPrompt.trim(),
     reasoningEffort: defaultAiReasoningEffort(protocol),
     timeoutMinutes: 30,
-    maxItemsPerRequest: 50,
+    maxItemsPerRequest: providerDefaults[protocol].maxItemsPerRequest,
     maxConcurrency: providerDefaults[protocol].concurrency,
     maxRetries: 2,
     filterPolicy: defaultAiFilterPolicy(),
@@ -126,6 +150,7 @@ watch(() => [form.value.protocol, form.value.baseUrl, form.value.secret, editorO
 }, { flush: 'sync' })
 async function fetchModels() {
   if (modelsLoading.value) return
+  if (!providerCapabilities[form.value.protocol].modelDiscovery) return
   modelsError.value = ''
   if (credentialRequired.value && !form.value.secret.trim()) {
     modelsError.value = t('ai.modelErrors.missing_key')
@@ -152,20 +177,30 @@ async function fetchModels() {
 const documentationUrl = computed(() => aiPresets.find(preset => preset.baseUrl === form.value.baseUrl.trim().replace(/\/$/, ''))?.documentationUrl)
 async function openDocumentation() {
   if (!documentationUrl.value) return
+  ai.clearError()
   try {
     if ('__TAURI_INTERNALS__' in window) await openUrl(documentationUrl.value)
     else window.open(documentationUrl.value, '_blank', 'noopener,noreferrer')
   } catch { ai.error.value = t('ai.documentationFailed') }
 }
 const usesCodexSubscription = computed(() => form.value.protocol === 'codex_subscription')
+const usesMicrosoftTranslator = computed(() => form.value.protocol === 'microsoft_translator')
+const usesLibreTranslate = computed(() => form.value.protocol === 'libre_translate')
+const usesBaiduTranslate = computed(() => form.value.protocol === 'baidu_translate')
 const showsCredential = computed(() => !['ollama_chat', 'codex_subscription'].includes(form.value.protocol))
 const credentialRequired = computed(() => providerDefaults[form.value.protocol].credentialRequired)
-const reasoningConfigurable = computed(() => [
-  'codex_subscription',
-  'open_ai_responses',
-  'open_ai_chat_completions',
-  'open_ai_compatible',
-].includes(form.value.protocol))
+const reasoningConfigurable = computed(() => providerCapabilities[form.value.protocol].reasoning)
+const supportsModelDiscovery = computed(() => providerCapabilities[form.value.protocol].modelDiscovery)
+const supportsTranslationPrompt = computed(() => providerCapabilities[form.value.protocol].translationPrompt)
+const supportsRegion = computed(() => providerCapabilities[form.value.protocol].region)
+const supportsModelField = computed(() => providerCapabilities[form.value.protocol].modelField)
+const supportsAppId = computed(() => providerCapabilities[form.value.protocol].appId)
+const credentialLabel = computed(() => usesBaiduTranslate.value ? t('ai.secretKey') : t('ai.apiKey'))
+const credentialHint = computed(() => usesLibreTranslate.value
+  ? t('ai.libreTranslateKeyHint')
+  : usesBaiduTranslate.value
+    ? t('ai.baiduCredentialHint')
+    : t('ai.plainCredentialHint'))
 const usesDeepSeek = computed(() => (
   form.value.modelId.trim().toLocaleLowerCase().startsWith('deepseek-')
   || form.value.baseUrl.toLocaleLowerCase().includes('deepseek.com')
@@ -198,8 +233,10 @@ const reasoningHint = computed(() => {
 const formValid = computed(() => Boolean(
   form.value.name.trim()
   && form.value.baseUrl.trim()
-  && form.value.translationPrompt.length <= 16_000
-  && form.value.modelId.trim()
+  && (!supportsTranslationPrompt.value || form.value.translationPrompt.length <= 16_000)
+  && (!supportsModelField.value || form.value.modelId.trim())
+  && (!supportsRegion.value || form.value.region.length <= 128)
+  && (!supportsAppId.value || Boolean(form.value.appId.trim()))
   && Number.isInteger(form.value.timeoutMinutes)
   && form.value.timeoutMinutes >= 1
   && form.value.timeoutMinutes <= 60
@@ -226,7 +263,10 @@ watch(() => form.value.protocol, (protocol, previous) => {
     form.value.modelId = providerDefaults[protocol].modelId
   }
   form.value.maxConcurrency = providerDefaults[protocol].concurrency
+  form.value.maxItemsPerRequest = providerDefaults[protocol].maxItemsPerRequest
   form.value.reasoningEffort = defaultAiReasoningEffort(protocol)
+  if (!providerCapabilities[protocol].region) form.value.region = ''
+  if (!providerCapabilities[protocol].appId) form.value.appId = ''
   if (protocol === 'ollama_chat' || protocol === 'codex_subscription') {
     form.value.secret = ''
   }
@@ -240,8 +280,21 @@ function reasoningLabel(profile: AiProfile) {
   return t(`ai.reasoningOption.${profile.reasoningEffort}`)
 }
 
+function profileRequestPolicyLabel(profile: AiProfile) {
+  const values = {
+    batchSize: profile.maxItemsPerRequest,
+    timeout: Math.ceil(profile.timeoutMs / 60_000),
+    concurrency: profile.maxConcurrency,
+    retries: profile.maxRetries,
+  }
+  return providerCapabilities[profile.protocol].reasoning
+    ? t('ai.profileRequestPolicy', { ...values, reasoning: reasoningLabel(profile) })
+    : t('ai.profileRequestPolicyNoReasoning', values)
+}
+
 function openCreate() {
   presetId.value = ''
+  serviceKind.value = 'ai'
   createStep.value = 'service'
   editingProfile.value = null
   form.value = newProfileForm()
@@ -260,6 +313,8 @@ function openEdit(profile: AiProfile) {
     protocol: profile.protocol,
     baseUrl: profile.baseUrl,
     modelId: profile.modelId,
+    region: profile.providerOptions?.region ?? '',
+    appId: profile.providerOptions?.appId ?? '',
     translationPrompt: profile.translationPrompt ?? defaultTranslationPrompt.trim(),
     reasoningEffort: profile.reasoningEffort,
     timeoutMinutes: Math.ceil(profile.timeoutMs / 60_000),
@@ -295,6 +350,10 @@ async function save() {
     maxItemsPerRequest: Number(value.maxItemsPerRequest),
     maxConcurrency: Number(value.maxConcurrency),
     maxRetries: Number(value.maxRetries),
+    providerOptions: {
+      region: value.region.trim() || null,
+      appId: value.appId.trim() || null,
+    },
     filterPolicy: {
       ...value.filterPolicy,
       maxSourceChars: Number(value.filterPolicy.maxSourceChars) > 0
@@ -327,19 +386,23 @@ onMounted(() => void ai.connect())
     </div>
 
     <UAlert
-      v-if="ai.error.value"
+      v-if="ai.error.value && !editorOpen"
       role="alert"
       color="error"
       variant="soft"
       :title="t('ai.errorTitle')"
       :description="ai.error.value"
       class="mt-4"
-    />
+    >
+      <template #actions>
+        <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" />
+      </template>
+    </UAlert>
 
     <div v-if="ai.profiles.value.length" class="mt-3 divide-y divide-[var(--border)]">
       <div v-for="profile in ai.profiles.value" :key="profile.id" class="flex min-h-[76px] items-center gap-4 py-3">
         <div class="grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--accent-soft)] text-[var(--accent-strong)]">
-          <UIcon :name="profile.protocol === 'ollama_chat' ? 'i-tabler-server-2' : profile.protocol === 'codex_subscription' ? 'i-tabler-brand-openai' : 'i-tabler-sparkles'" class="size-5" aria-hidden="true" />
+          <UIcon :name="['ollama_chat', 'libre_translate'].includes(profile.protocol) ? 'i-tabler-server-2' : profile.protocol === 'codex_subscription' ? 'i-tabler-brand-openai' : 'i-tabler-sparkles'" class="size-5" aria-hidden="true" />
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex min-w-0 items-center gap-2">
@@ -347,10 +410,10 @@ onMounted(() => void ai.connect())
             <UBadge v-if="ai.catalog.value.defaultProfileId === profile.id" color="primary" variant="soft" size="sm" :label="t('ai.defaultProfile')" />
           </div>
           <p class="type-metadata m-0 mt-1 truncate leading-4 text-[var(--text-muted)]">
-            {{ protocolLabel(profile.protocol) }} · {{ profile.modelId }}<template v-if="profile.protocol !== 'codex_subscription'"> · {{ profile.baseUrl }}</template>
+            {{ protocolLabel(profile.protocol) }}<template v-if="providerCapabilities[profile.protocol].modelField"> · {{ profile.modelId }}</template><template v-if="profile.protocol !== 'codex_subscription'"> · {{ profile.baseUrl }}</template>
           </p>
           <p class="type-metadata m-0 mt-0.5 truncate leading-4 text-[var(--text-muted)]">
-            {{ t('ai.profileRequestPolicy', { reasoning: reasoningLabel(profile), batchSize: profile.maxItemsPerRequest, timeout: Math.ceil(profile.timeoutMs / 60_000), concurrency: profile.maxConcurrency, retries: profile.maxRetries }) }}
+            {{ profileRequestPolicyLabel(profile) }}
           </p>
           <div v-if="ai.connectionReports.value[profile.id]" class="type-metadata mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 leading-4">
             <span :class="ai.connectionReports.value[profile.id]?.status === 'passed' ? 'text-[var(--success)]' : 'text-[var(--danger)]'">
@@ -400,15 +463,39 @@ onMounted(() => void ai.connect())
       :aria-label="t('ai.createSteps.label')"
     />
 
+    <UAlert
+      v-if="ai.error.value"
+      role="alert"
+      color="error"
+      variant="soft"
+      :title="t('ai.errorTitle')"
+      :description="ai.error.value"
+      class="mb-4"
+    >
+      <template #actions>
+        <UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="ai.clearError()" />
+      </template>
+    </UAlert>
+
     <div v-if="!editingProfile && createStep === 'service'">
       <div class="mb-4">
         <p class="type-label m-0 text-[var(--text)]">{{ t('ai.chooseServiceTitle') }}</p>
         <p class="type-metadata mb-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.chooseServiceHint') }}</p>
       </div>
 
-      <div class="grid grid-cols-3 gap-2 @max-[560px]:grid-cols-2 @max-[380px]:grid-cols-1" role="group" :aria-label="t('ai.chooseServiceTitle')">
+      <UTabs
+        v-model="serviceKind"
+        :content="false"
+        :items="serviceKindItems"
+        value-key="value"
+        label-key="label"
+        class="mb-3"
+        :aria-label="t('ai.serviceKinds.label')"
+      />
+
+      <div v-if="serviceKind === 'traditional'" class="grid grid-cols-3 gap-2 @max-[560px]:grid-cols-2 @max-[380px]:grid-cols-1" role="group" :aria-label="t('ai.serviceKinds.traditional')">
         <button
-          v-for="preset in aiPresets"
+          v-for="preset in traditionalPresets"
           :key="preset.id"
           type="button"
           :aria-label="t('ai.choosePreset', { name: t(`ai.presetNames.${preset.id}`) })"
@@ -425,7 +512,9 @@ onMounted(() => void ai.connect())
           </span>
           <UBadge color="neutral" variant="soft" size="sm" class="mt-2 max-w-full" :label="protocolLabel(preset.protocol)" />
         </button>
+      </div>
 
+      <div v-else class="grid grid-cols-3 gap-2 @max-[560px]:grid-cols-2 @max-[380px]:grid-cols-1" role="group" :aria-label="t('ai.serviceKinds.ai')">
         <button
           type="button"
           :aria-label="t('ai.chooseCustomPreset')"
@@ -441,6 +530,25 @@ onMounted(() => void ai.connect())
             <UIcon name="i-tabler-adjustments" class="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
           </span>
           <span class="type-caption mt-2 block leading-4 text-[var(--text-muted)]">{{ t('ai.customPresetHint') }}</span>
+        </button>
+
+        <button
+          v-for="preset in aiServicePresets"
+          :key="preset.id"
+          type="button"
+          :aria-label="t('ai.choosePreset', { name: t(`ai.presetNames.${preset.id}`) })"
+          :aria-pressed="presetId === preset.id"
+          class="group min-h-[76px] rounded-[var(--radius-control)] border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          :class="presetId === preset.id
+            ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+            : 'border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]'"
+          @click="choosePreset(preset.id)"
+        >
+          <span class="flex items-center justify-between gap-2">
+            <strong class="type-label truncate text-[var(--text)]">{{ t(`ai.presetNames.${preset.id}`) }}</strong>
+            <UIcon name="i-tabler-chevron-right" class="size-3.5 shrink-0 text-[var(--text-muted)] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </span>
+          <UBadge color="neutral" variant="soft" size="sm" class="mt-2 max-w-full" :label="protocolLabel(preset.protocol)" />
         </button>
       </div>
     </div>
@@ -471,11 +579,14 @@ onMounted(() => void ai.connect())
           </UTooltip>
         </div>
       </UFormField>
-      <UFormField v-if="showsCredential" :label="t('ai.apiKey')" :required="credentialRequired && !editingProfile?.hasCredential">
+      <UFormField v-if="supportsAppId" :label="t('ai.appId')" required>
+        <UInput v-model="form.appId" :aria-label="t('ai.appId')" :maxlength="128" spellcheck="false" class="w-full" />
+      </UFormField>
+      <UFormField v-if="showsCredential" :label="credentialLabel" :required="credentialRequired && !editingProfile?.hasCredential">
         <UInput
           v-model="form.secret"
           :type="secretVisible ? 'text' : 'password'"
-          :aria-label="t('ai.apiKey')"
+          :aria-label="credentialLabel"
           autocomplete="off"
           class="w-full"
         >
@@ -492,19 +603,25 @@ onMounted(() => void ai.connect())
             />
           </template>
         </UInput>
-        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.plainCredentialHint') }}</p>
+        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ credentialHint }}</p>
+      </UFormField>
+      <UFormField v-if="supportsRegion" :label="t('ai.azureRegion')">
+        <UInput v-model="form.region" :aria-label="t('ai.azureRegion')" :placeholder="t('ai.azureRegionPlaceholder')" :maxlength="128" spellcheck="false" class="w-full" />
+        <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.azureRegionHint') }}</p>
       </UFormField>
       <UFormField v-if="reasoningConfigurable" :label="t('ai.reasoningEffort')">
         <USelect v-model="form.reasoningEffort" :items="reasoningItems" value-key="value" label-key="label" :aria-label="t('ai.reasoningEffort')" class="w-full" />
         <p class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ reasoningHint }}</p>
       </UFormField>
-      <UFormField :label="t('ai.modelId')" required class="col-span-2 @max-[560px]:col-span-1">
+      <UFormField v-if="supportsModelField" :label="usesMicrosoftTranslator ? t('ai.deploymentName') : t('ai.modelId')" required class="col-span-2 @max-[560px]:col-span-1">
         <div class="flex items-start gap-2">
-          <UInputMenu v-model="form.modelId" v-model:open="modelMenuOpen" mode="autocomplete" :items="modelItems" :ignore-filter="!modelFilterActive" @input="modelFilterActive = true" :aria-label="t('ai.modelId')" :placeholder="t('ai.modelPlaceholder')" :reset-search-term-on-blur="false" :open-on-focus="false" spellcheck="false" class="min-w-0 flex-1">
+          <UInputMenu v-if="supportsModelDiscovery" v-model="form.modelId" v-model:open="modelMenuOpen" mode="autocomplete" :items="modelItems" :ignore-filter="!modelFilterActive" @input="modelFilterActive = true" :aria-label="t('ai.modelId')" :placeholder="t('ai.modelPlaceholder')" :reset-search-term-on-blur="false" :open-on-focus="false" spellcheck="false" class="min-w-0 flex-1">
             <template #empty>{{ t('ai.modelListEmpty') }}</template>
           </UInputMenu>
-          <UButton v-if="!usesCodexSubscription" color="neutral" variant="soft" icon="i-tabler-refresh" :label="t('ai.fetchModels')" :loading="modelsLoading" class="shrink-0" @click="fetchModels" />
+          <UInput v-else v-model="form.modelId" :aria-label="usesMicrosoftTranslator ? t('ai.deploymentName') : t('ai.modelId')" :placeholder="usesMicrosoftTranslator ? t('ai.deploymentPlaceholder') : t('ai.modelPlaceholder')" spellcheck="false" class="min-w-0 flex-1" />
+          <UButton v-if="supportsModelDiscovery" color="neutral" variant="soft" icon="i-tabler-refresh" :label="t('ai.fetchModels')" :loading="modelsLoading" class="shrink-0" @click="fetchModels" />
         </div>
+        <p v-if="usesMicrosoftTranslator" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.microsoftDeploymentHint') }}</p>
         <p v-if="modelsError" role="alert" class="type-caption m-0 mt-1 leading-4 text-[var(--danger)]">{{ modelsError }}</p>
         <p v-else-if="modelsFetched" role="status" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.modelsFetched', { count: modelItems.length }) }}</p>
       </UFormField>
@@ -536,7 +653,7 @@ onMounted(() => void ai.connect())
             </UFormField>
           </div>
 
-          <div class="mt-5 border-t border-[var(--border)] pt-4">
+          <div v-if="supportsTranslationPrompt" class="mt-5 border-t border-[var(--border)] pt-4">
             <div class="mb-2 flex items-center justify-between gap-2">
               <label for="ai-translation-prompt" class="text-[12px] font-semibold text-[var(--text)]">{{ t('ai.translationPrompt') }}</label>
               <UButton color="neutral" variant="ghost" size="xs" :label="t('ai.restorePrompt')" :title="t('ai.restorePrompt')" @click="form.translationPrompt = defaultTranslationPrompt.trim()" />
@@ -548,7 +665,7 @@ onMounted(() => void ai.connect())
       </template>
       </UCollapsible>
 
-      <div class="mt-4 flex flex-wrap items-center gap-5 border-t border-[var(--border)] pt-4">
+      <div class="mt-4 flex flex-wrap items-center gap-5 pt-4">
         <UCheckbox v-model="form.makeDefault" :label="t('ai.useAsDefault')" />
       </div>
     </template>

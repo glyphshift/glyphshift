@@ -50,8 +50,7 @@ impl AiTranslation {
             .get(&profile.protocol())
             .cloned()
             .ok_or(TranslationJobError::MissingProvider(profile.protocol()))?;
-        let batch_policy = TranslationBatchPolicy::new(profile.max_items_per_request())
-            .expect("resolved AI profile must contain a valid batch size");
+        let batch_policy = provider.batch_policy(&profile);
         self.next_job_id = self.next_job_id.saturating_add(1);
         let job_id: Box<str> = format!("job-{}", self.next_job_id).into();
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -421,10 +420,28 @@ fn batches(
     candidates: &[TranslationCandidate],
     policy: TranslationBatchPolicy,
 ) -> Vec<Vec<TranslationCandidate>> {
-    candidates
-        .chunks(usize::from(policy.max_items_per_request()))
-        .map(<[TranslationCandidate]>::to_vec)
-        .collect()
+    let max_items = usize::from(policy.max_items_per_request());
+    let max_source_chars = policy.max_source_chars_per_request();
+    let mut result = Vec::new();
+    let mut current = Vec::new();
+    let mut current_source_chars = 0_usize;
+    for candidate in candidates {
+        let source_chars = candidate.source.chars().count();
+        let exceeds_items = current.len() >= max_items;
+        let exceeds_source_chars = max_source_chars.is_some_and(|limit| {
+            !current.is_empty() && current_source_chars.saturating_add(source_chars) > limit
+        });
+        if exceeds_items || exceeds_source_chars {
+            result.push(std::mem::take(&mut current));
+            current_source_chars = 0;
+        }
+        current.push(candidate.clone());
+        current_source_chars = current_source_chars.saturating_add(source_chars);
+    }
+    if !current.is_empty() {
+        result.push(current);
+    }
+    result
 }
 
 fn validate_response(

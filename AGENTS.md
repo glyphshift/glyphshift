@@ -1,6 +1,5 @@
 # Repository instructions
 
-- Route durable multi-session work through `flightdeck/deck.md` and the focused Work page.
 - Collaborate with project contributors in Chinese.
 - When running from Codex CLI, validate local GUI surfaces with the repository's Playwright CLI/test runner. Do not search for or depend on an in-app browser.
 - For every request to build or launch the latest desktop app for review, use `scripts/review-app.ps1`.
@@ -25,7 +24,7 @@
 ## Build cache and local organization
 
 - Use the global `CARGO_TARGET_DIR` as the cache root and isolate this application in its `glyphshift` child directory. Repository build/test scripts initialize this through `scripts/cargo-target.ps1`; direct Cargo commands must dot-source that helper and call `Get-GlyphshiftCargoTargetDirectory` first. Explicit target-directory overrides remain exact. Never clean the shared global root as if it belonged only to this project.
-- Keep `local-test/` root limited to navigation and machine configuration. Place reusable local tools under `tools/`, software-specific experiments under `software/<name>/`, disposable caches under `cache/`, and evidence under `evidence/<topic>/`. After an experiment, promote verified portable conclusions to Flightdeck and retain only useful local reproductions/evidence.
+- Keep `local-test/` root limited to navigation and machine configuration. Place reusable local tools under `tools/`, software-specific experiments under `software/<name>/`, disposable caches under `cache/`, and evidence under `evidence/<topic>/`. After an experiment, promote verified portable conclusions to tracked project documentation and retain only useful local reproductions/evidence.
 
 ## Local testing and privacy
 
@@ -37,8 +36,8 @@
   `GLYPHSHIFT_QQ_EXE`, attached PIDs, and temporary data roots.
 - Put machine-specific screenshots, videos, raw logs, runtime descriptors, process/module dumps,
   captured text, temporary catalogs/packages, copied dictionaries/plugins, WebView profiles, and
-  real AE/PR/QQ smoke-test results under `local-test/evidence/`; do not put them in Flightdeck or
-  any other tracked directory.
+  real AE/PR/QQ smoke-test results under `local-test/evidence/`; do not put them in any tracked
+  directory.
 - User-approved release screenshots may live under `preview/` and be referenced by README files only
   after a privacy review confirms they contain no local paths, usernames, PIDs, window titles, or
   other machine-specific evidence. All other screenshots remain local-only.
@@ -50,8 +49,9 @@
   PIDs, window titles, or temporary-directory names into tracked source, tests, docs, comments,
   snapshots, or commit messages. Use placeholders such as `<repo>`, `<authorized-executable>`, and
   `<local-test-root>` when an example needs a path.
-- Flightdeck may record portable conclusions, commands, pass/fail counts, and residual risks, but not
-  raw local evidence or enough machine-specific detail to reconstruct the local environment.
+- Tracked project documentation may record portable conclusions, commands, pass/fail counts, and
+  residual risks, but not raw local evidence or enough machine-specific detail to reconstruct the
+  local environment.
 - Before every commit, inspect staged paths and staged text for local artifacts. At minimum, reject
   anything under `local-test/` and scan for absolute drive paths, usernames, PIDs, and links to
   local screenshots.

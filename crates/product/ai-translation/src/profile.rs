@@ -9,7 +9,7 @@ use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
-const PROFILE_SCHEMA: &str = "glyphshift.ai-profiles/4";
+const PROFILE_SCHEMA: &str = "glyphshift.translation-profiles/1";
 pub const DEFAULT_TIMEOUT_MS: u64 = 1_800_000;
 pub const MAX_TIMEOUT_MS: u64 = 3_600_000;
 pub const DEFAULT_MAX_RETRIES: u16 = 2;
@@ -26,7 +26,7 @@ const PROFILE_FILE_NAME: &str = "ai-profiles.json";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
-pub enum AiProviderProtocol {
+pub enum TranslationProviderProtocol {
     CodexSubscription,
     OpenAiResponses,
     OpenAiChatCompletions,
@@ -34,9 +34,16 @@ pub enum AiProviderProtocol {
     AnthropicMessages,
     GeminiGenerateContent,
     OllamaChat,
+    MicrosoftTranslator,
+    LibreTranslate,
+    GoogleTranslate,
+    BaiduTranslate,
 }
 
-impl AiProviderProtocol {
+/// Backward-compatible name kept while callers migrate from the original AI-only surface.
+pub type AiProviderProtocol = TranslationProviderProtocol;
+
+impl TranslationProviderProtocol {
     #[must_use]
     pub const fn default_base_url(self) -> &'static str {
         match self {
@@ -46,6 +53,10 @@ impl AiProviderProtocol {
             Self::AnthropicMessages => "https://api.anthropic.com",
             Self::GeminiGenerateContent => "https://generativelanguage.googleapis.com/v1beta",
             Self::OllamaChat => "http://127.0.0.1:11434/api",
+            Self::MicrosoftTranslator => "https://api.cognitive.microsofttranslator.com",
+            Self::LibreTranslate => "http://127.0.0.1:5000",
+            Self::GoogleTranslate => "https://translation.googleapis.com/language/translate/v2",
+            Self::BaiduTranslate => "https://fanyi-api.baidu.com/api/trans/vip/translate",
         }
     }
 
@@ -53,7 +64,21 @@ impl AiProviderProtocol {
     pub const fn default_concurrency(self) -> u16 {
         match self {
             Self::CodexSubscription | Self::OllamaChat => 1,
+            Self::MicrosoftTranslator => 4,
+            Self::LibreTranslate => 2,
+            Self::GoogleTranslate => 4,
+            Self::BaiduTranslate => 1,
             _ => 2,
+        }
+    }
+
+    #[must_use]
+    pub const fn default_max_items_per_request(self) -> u16 {
+        match self {
+            Self::MicrosoftTranslator => 1_000,
+            Self::GoogleTranslate => 128,
+            Self::BaiduTranslate => 50,
+            _ => DEFAULT_MAX_ITEMS_PER_REQUEST,
         }
     }
 
@@ -61,8 +86,39 @@ impl AiProviderProtocol {
     pub const fn credential_required(self) -> bool {
         !matches!(
             self,
-            Self::CodexSubscription | Self::OllamaChat | Self::OpenAiCompatible
+            Self::CodexSubscription
+                | Self::OllamaChat
+                | Self::OpenAiCompatible
+                | Self::LibreTranslate
         )
+    }
+
+    #[must_use]
+    pub const fn supports_translation_prompt(self) -> bool {
+        !matches!(
+            self,
+            Self::MicrosoftTranslator
+                | Self::LibreTranslate
+                | Self::GoogleTranslate
+                | Self::BaiduTranslate
+        )
+    }
+
+    #[must_use]
+    pub const fn supports_model_discovery(self) -> bool {
+        !matches!(
+            self,
+            Self::CodexSubscription
+                | Self::MicrosoftTranslator
+                | Self::LibreTranslate
+                | Self::GoogleTranslate
+                | Self::BaiduTranslate
+        )
+    }
+
+    #[must_use]
+    pub const fn supports_region(self) -> bool {
+        matches!(self, Self::MicrosoftTranslator)
     }
 
     #[must_use]
@@ -83,6 +139,51 @@ impl AiProviderProtocol {
         } else {
             AiReasoningEffort::Automatic
         }
+    }
+
+    #[must_use]
+    pub fn effective_max_items_per_request(self, model_id: &str, requested: u16) -> u16 {
+        let provider_limit = match self {
+            Self::MicrosoftTranslator if !model_id.eq_ignore_ascii_case("general") => 50,
+            Self::MicrosoftTranslator => 1_000,
+            Self::GoogleTranslate => 128,
+            Self::BaiduTranslate => 50,
+            _ => 1_000,
+        };
+        requested.min(provider_limit).max(1)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TranslationProviderOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    region: Option<Box<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_id: Option<Box<str>>,
+}
+
+impl TranslationProviderOptions {
+    #[must_use]
+    pub fn region(&self) -> Option<&str> {
+        self.region.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_region(mut self, region: impl Into<Box<str>>) -> Self {
+        self.region = Some(region.into());
+        self
+    }
+
+    #[must_use]
+    pub fn app_id(&self) -> Option<&str> {
+        self.app_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_app_id(mut self, app_id: impl Into<Box<str>>) -> Self {
+        self.app_id = Some(app_id.into());
+        self
     }
 }
 
@@ -174,6 +275,8 @@ pub struct AiProfileDraft {
     max_retries: u16,
     filter_policy: FilterPolicy,
     #[serde(default)]
+    provider_options: TranslationProviderOptions,
+    #[serde(default)]
     credential: CredentialUpdate,
 }
 
@@ -194,10 +297,11 @@ impl AiProfileDraft {
             translation_prompt: None,
             reasoning_effort: protocol.default_reasoning_effort(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
-            max_items_per_request: DEFAULT_MAX_ITEMS_PER_REQUEST,
+            max_items_per_request: protocol.default_max_items_per_request(),
             max_concurrency: protocol.default_concurrency(),
             max_retries: DEFAULT_MAX_RETRIES,
             filter_policy: FilterPolicy::default(),
+            provider_options: TranslationProviderOptions::default(),
             credential: CredentialUpdate::Keep,
         }
     }
@@ -223,6 +327,18 @@ impl AiProfileDraft {
     #[must_use]
     pub fn with_filter_policy(mut self, filter_policy: FilterPolicy) -> Self {
         self.filter_policy = filter_policy;
+        self
+    }
+
+    #[must_use]
+    pub fn with_provider_region(mut self, region: impl Into<Box<str>>) -> Self {
+        self.provider_options = self.provider_options.with_region(region);
+        self
+    }
+
+    #[must_use]
+    pub fn with_provider_app_id(mut self, app_id: impl Into<Box<str>>) -> Self {
+        self.provider_options = self.provider_options.with_app_id(app_id);
         self
     }
 
@@ -277,6 +393,8 @@ struct StoredAiProfile {
     #[serde(default = "default_max_retries")]
     max_retries: u16,
     filter_policy: FilterPolicy,
+    #[serde(default)]
+    provider_options: TranslationProviderOptions,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -312,6 +430,7 @@ pub struct AiProfileView {
     max_concurrency: u16,
     max_retries: u16,
     filter_policy: FilterPolicy,
+    provider_options: TranslationProviderOptions,
     credential: Option<Box<str>>,
     has_credential: bool,
     credential_required: bool,
@@ -330,6 +449,7 @@ pub struct ResolvedAiProfile {
     max_items_per_request: u16,
     max_concurrency: u16,
     max_retries: u16,
+    provider_options: TranslationProviderOptions,
 }
 
 impl ResolvedAiProfile {
@@ -399,8 +519,19 @@ impl ResolvedAiProfile {
     }
 
     #[must_use]
+    pub fn effective_max_items_per_request(&self) -> u16 {
+        self.protocol
+            .effective_max_items_per_request(&self.model_id, self.max_items_per_request)
+    }
+
+    #[must_use]
     pub const fn max_retries(&self) -> u16 {
         self.max_retries
+    }
+
+    #[must_use]
+    pub const fn provider_options(&self) -> &TranslationProviderOptions {
+        &self.provider_options
     }
 }
 
@@ -453,6 +584,11 @@ impl AiProfileView {
     #[must_use]
     pub const fn filter_policy(&self) -> &FilterPolicy {
         &self.filter_policy
+    }
+
+    #[must_use]
+    pub const fn provider_options(&self) -> &TranslationProviderOptions {
+        &self.provider_options
     }
 }
 
@@ -546,6 +682,7 @@ impl AiProfileCatalog {
             max_items_per_request: profile.max_items_per_request,
             max_concurrency: profile.max_concurrency,
             max_retries: profile.max_retries,
+            provider_options: profile.provider_options.clone(),
         })
     }
 
@@ -658,6 +795,7 @@ fn stored_profile(
         max_concurrency,
         max_retries,
         filter_policy,
+        provider_options,
         credential,
     } = draft;
     let translation_prompt = translation_prompt.filter(|value| !value.trim().is_empty());
@@ -670,6 +808,7 @@ fn stored_profile(
     let name = name.trim();
     let base_url = base_url.trim().trim_end_matches('/');
     let model_id = normalized_model_id(protocol, model_id.trim());
+    let provider_options = normalize_provider_options(provider_options)?;
     if !safe_identifier(&id) {
         return Err(AiProfileError::InvalidProfile("id"));
     }
@@ -678,6 +817,9 @@ fn stored_profile(
     }
     if model_id.is_empty() || model_id.chars().count() > 256 {
         return Err(AiProfileError::InvalidProfile("model"));
+    }
+    if protocol == AiProviderProtocol::BaiduTranslate && provider_options.app_id().is_none() {
+        return Err(AiProfileError::InvalidProfile("app-id"));
     }
     let valid_base_url = if protocol == AiProviderProtocol::CodexSubscription {
         base_url == protocol.default_base_url()
@@ -710,6 +852,7 @@ fn stored_profile(
             max_concurrency,
             max_retries,
             filter_policy,
+            provider_options,
         },
         credential,
     ))
@@ -729,6 +872,7 @@ fn profile_view(profile: &StoredAiProfile) -> AiProfileView {
         max_concurrency: profile.max_concurrency,
         max_retries: profile.max_retries,
         filter_policy: profile.filter_policy.clone(),
+        provider_options: profile.provider_options.clone(),
         credential: profile.credential.clone(),
         has_credential: profile.credential.is_some(),
         credential_required: profile.protocol.credential_required(),
@@ -860,6 +1004,10 @@ fn stored_profile_from_value(value: &serde_json::Value) -> Option<StoredAiProfil
         max_concurrency,
         max_retries,
         filter_policy: FilterPolicy::from_persisted_value(object.get("filterPolicy")),
+        provider_options: object
+            .get("providerOptions")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .unwrap_or_default(),
     })
 }
 
@@ -890,6 +1038,9 @@ fn stored_profile_is_valid(profile: &StoredAiProfile) -> bool {
         && profile.max_concurrency > 0
         && (1..=1_000).contains(&profile.max_items_per_request)
         && profile.max_retries <= MAX_MAX_RETRIES
+        && provider_options_are_valid(&profile.provider_options)
+        && (profile.protocol != AiProviderProtocol::BaiduTranslate
+            || profile.provider_options.app_id().is_some())
 }
 
 fn normalize_artifact(artifact: &mut ProfileArtifact) {
@@ -912,9 +1063,52 @@ fn normalized_model_id(protocol: AiProviderProtocol, model_id: &str) -> Box<str>
         && model_id.eq_ignore_ascii_case("gpt-sol-5.6")
     {
         "gpt-5.6-sol".into()
+    } else if protocol == AiProviderProtocol::MicrosoftTranslator && model_id.trim().is_empty() {
+        "general".into()
+    } else if protocol == AiProviderProtocol::LibreTranslate && model_id.trim().is_empty() {
+        "default".into()
+    } else if protocol == AiProviderProtocol::GoogleTranslate && model_id.trim().is_empty() {
+        "nmt".into()
+    } else if protocol == AiProviderProtocol::BaiduTranslate && model_id.trim().is_empty() {
+        "general".into()
     } else {
         model_id.into()
     }
+}
+
+fn normalize_provider_options(
+    mut options: TranslationProviderOptions,
+) -> Result<TranslationProviderOptions, AiProfileError> {
+    options.region = options
+        .region
+        .take()
+        .map(|region| region.trim().to_owned().into_boxed_str())
+        .filter(|region| !region.is_empty());
+    options.app_id = options
+        .app_id
+        .take()
+        .map(|app_id| app_id.trim().to_owned().into_boxed_str())
+        .filter(|app_id| !app_id.is_empty());
+    if !provider_options_are_valid(&options) {
+        return Err(AiProfileError::InvalidProfile("provider-options"));
+    }
+    Ok(options)
+}
+
+fn provider_options_are_valid(options: &TranslationProviderOptions) -> bool {
+    let region_valid = options.region.as_deref().is_none_or(|region| {
+        region.chars().count() <= 128
+            && region.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
+    });
+    let app_id_valid = options.app_id.as_deref().is_none_or(|app_id| {
+        app_id.chars().count() <= 128
+            && app_id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
+    });
+    region_valid && app_id_valid
 }
 
 fn safe_identifier(value: &str) -> bool {

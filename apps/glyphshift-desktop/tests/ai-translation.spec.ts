@@ -17,20 +17,21 @@ const filterPolicy = {
 }
 
 async function startFromAiPreflight(page: Page) {
-  await page.getByRole('dialog', { name: '确认 AI 翻译' })
+  await page.getByRole('dialog', { name: '确认自动翻译' })
     .getByRole('button', { name: '开始翻译' })
     .click()
 }
 
 async function openAiSettings(page: Page) {
-  await page.getByTestId('settings-tabs').getByRole('tab', { name: 'AI 配置', exact: true }).click()
+  await page.getByTestId('settings-tabs').getByRole('tab', { name: '翻译配置', exact: true }).click()
 }
 
 async function openCustomAiCreate(page: Page) {
   await openAiSettings(page)
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
-  await dialog.getByRole('button', { name: '选择自定义 AI 服务' }).click()
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await dialog.getByRole('tab', { name: 'AI 翻译' }).click()
+  await dialog.getByRole('button', { name: '选择自定义翻译服务' }).click()
   return dialog
 }
 
@@ -42,7 +43,9 @@ test.beforeEach(async ({ page }) => {
 
 test('translation task empty state uses the shared management surface', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: '翻译任务' }).click()
+  await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('tab', { name: '自动翻译' }).click()
+  await page.getByRole('button', { name: '查看翻译任务' }).click()
 
   const currentTask = page.getByTestId('translation-task-current')
   const surface = currentTask.getByTestId('management-workspace-surface')
@@ -60,10 +63,10 @@ test('settings creates a default Ollama AI profile without asking for an API key
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译配置', exact: true })).toBeVisible()
   const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('本地 Ollama')
-  await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
+  await dialog.getByRole('combobox', { name: '翻译服务' }).click()
   await page.getByRole('option', { name: 'Ollama（本机）', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: 'API Key（密钥）' })).toHaveCount(0)
   await expect(dialog.getByRole('spinbutton', { name: '每次请求超时（分钟）' })).toHaveCount(0)
@@ -87,23 +90,27 @@ test('settings creates a default Ollama AI profile without asking for an API key
 test('settings creates a Codex subscription profile without endpoint or credential fields', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
-  const dialog = await openCustomAiCreate(page)
-  await dialog.getByRole('textbox', { name: '配置名称' }).fill('我的 Codex')
-  await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
-  await page.getByRole('option', { name: 'Codex 订阅', exact: true }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await expect(dialog.getByRole('tab', { name: 'AI 翻译' })).toHaveAttribute('aria-selected', 'true')
+  await expect(dialog.getByRole('tab', { name: '传统翻译' })).toHaveAttribute('aria-selected', 'false')
+  await dialog.getByRole('button', { name: '选择 Codex（本机）' }).click()
 
+  await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('Codex（本机）')
+  await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText('Codex 订阅')
   await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveCount(0)
   await expect(dialog.getByRole('textbox', { name: 'API Key（密钥）' })).toHaveCount(0)
   await expect(dialog.getByText(/使用这台电脑上已经登录的 Codex/)).toBeVisible()
   await expect(dialog.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
-  await expect(dialog.getByRole('combobox', { name: '模型' })).toHaveValue('')
+  await expect(dialog.getByRole('textbox', { name: '模型' })).toHaveValue('')
   await expect(dialog.getByRole('button', { name: '保存配置' })).toBeDisabled()
-  await dialog.getByRole('combobox', { name: '模型' }).fill('gpt-5.6-sol')
+  await dialog.getByRole('textbox', { name: '模型' }).fill('gpt-5.6-sol')
   await dialog.getByRole('button', { name: '高级设置' }).click()
   await expect(dialog.getByRole('spinbutton', { name: '同时请求数' })).toHaveValue('1')
   await dialog.getByRole('button', { name: '保存配置' }).click()
 
-  await expect(page.getByText('我的 Codex', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('ai-profile-settings').getByText('Codex（本机）', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Codex 订阅', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/Codex 订阅 · gpt-5\.6-sol/)).toBeVisible()
 })
@@ -125,8 +132,8 @@ test('settings stores an API key in the profile and can reveal or hide it', asyn
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '编辑 AI 配置：可见密钥' }).click()
-  const dialog = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await page.getByRole('button', { name: '编辑翻译配置：可见密钥' }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑翻译配置' })
   const keyInput = dialog.getByRole('textbox', { name: 'API Key（密钥）' })
 
   await expect(keyInput).toHaveAttribute('type', 'password')
@@ -141,8 +148,8 @@ test('settings stores an API key in the profile and can reveal or hide it', asyn
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '编辑 AI 配置：可见密钥' }).click()
-  await expect(page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await page.getByRole('button', { name: '编辑翻译配置：可见密钥' }).click()
+  await expect(page.getByRole('dialog', { name: '编辑翻译配置' })
     .getByRole('textbox', { name: 'API Key（密钥）' })).toHaveValue('synthetic-visible-key')
 })
 
@@ -174,8 +181,8 @@ test('DeepSeek profile defaults reasoning off and exposes only truthful effort l
   await page.reload()
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '编辑 AI 配置：DeepSeek 翻译' }).click()
-  const editor = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await page.getByRole('button', { name: '编辑翻译配置：DeepSeek 翻译' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑翻译配置' })
   await expect(editor.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
   await expect(editor.getByText('删除已保存的凭据', { exact: true })).toHaveCount(0)
   if (process.env.GLYPHSHIFT_PROFILE_EDIT_SCREENSHOT) {
@@ -186,8 +193,8 @@ test('DeepSeek profile defaults reasoning off and exposes only truthful effort l
     await page.screenshot({ path: process.env.GLYPHSHIFT_PROFILE_EDIT_SCREENSHOT, fullPage: true })
   }
   await editor.getByRole('button', { name: '取消' }).click()
-  await page.getByRole('button', { name: '删除 AI 配置：DeepSeek 翻译' }).click()
-  const deleteDialog = page.getByRole('dialog', { name: '删除 AI 配置？' })
+  await page.getByRole('button', { name: '删除翻译配置：DeepSeek 翻译' }).click()
+  const deleteDialog = page.getByRole('dialog', { name: '删除翻译配置？' })
   await expect(deleteDialog).toContainText('将从本机配置文件删除“DeepSeek 翻译”及其明文 API Key')
   await deleteDialog.getByRole('button', { name: '取消' }).click()
 })
@@ -209,16 +216,16 @@ test('AI profile connection test reports model invocation separately from option
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
 
-  await page.getByRole('button', { name: '测试 AI 配置“本地 Ollama”' }).click()
+  await page.getByRole('button', { name: '测试翻译配置“本地 Ollama”' }).click()
 
   await expect(page.getByText('连接成功，可以开始翻译')).toBeVisible()
   await expect(page.getByText(/模型发现|结构化输出/)).toHaveCount(0)
-  const testButton = page.getByRole('button', { name: '测试 AI 配置“本地 Ollama”' })
+  const testButton = page.getByRole('button', { name: '测试翻译配置“本地 Ollama”' })
   await expect(testButton).toBeEnabled()
   await testButton.click()
   await expect(testButton).toBeEnabled()
-  await page.getByRole('button', { name: '编辑 AI 配置：本地 Ollama' }).click()
-  const editor = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await page.getByRole('button', { name: '编辑翻译配置：本地 Ollama' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑翻译配置' })
   await editor.getByRole('combobox', { name: '模型', exact: true }).fill('synthetic-new-model')
   await editor.getByRole('button', { name: '保存配置', exact: true }).click()
   await expect(page.getByText('连接成功，可以开始翻译')).toHaveCount(0)
@@ -239,16 +246,16 @@ test('settings keeps AI profiles without a translation confirmation toggle', asy
   const aiSection = page.getByTestId('settings-section-ai')
   await expect(aiSection).toBeVisible()
   await expect(page.getByRole('heading', { name: 'AI 翻译执行' })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'AI 配置', exact: true })).toHaveCount(1)
-  await expect(aiSection.getByRole('heading', { name: 'AI 配置' })).toBeVisible()
-  await expect(aiSection.getByRole('button', { name: '添加 AI 配置' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '翻译配置', exact: true })).toHaveCount(1)
+  await expect(aiSection.getByRole('heading', { name: '翻译配置' })).toBeVisible()
+  await expect(aiSection.getByRole('button', { name: '添加翻译配置' })).toBeVisible()
   await expect(page.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveCount(0)
   await expect(aiSection.getByRole('switch', { name: '翻译前询问' })).toHaveCount(0)
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
 
   const dialog = await openCustomAiCreate(page)
   await dialog.getByRole('textbox', { name: '配置名称' }).fill('自定义批次')
-  await dialog.getByRole('combobox', { name: 'AI 服务' }).click()
+  await dialog.getByRole('combobox', { name: '翻译服务' }).click()
   await page.getByRole('option', { name: 'Ollama（本机）', exact: true }).click()
   await dialog.getByRole('combobox', { name: '模型' }).fill('local-model')
   await dialog.getByRole('button', { name: '高级设置' }).click()
@@ -265,8 +272,8 @@ test('settings keeps AI profiles without a translation confirmation toggle', asy
   await expect(page.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveCount(0)
   await expect(page.getByRole('switch', { name: '翻译前询问' })).toHaveCount(0)
   await expect(page.getByRole('spinbutton', { name: '单批输入 Token 预算' })).toHaveCount(0)
-  await page.getByRole('button', { name: '编辑 AI 配置：自定义批次' }).click()
-  const editor = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  await page.getByRole('button', { name: '编辑翻译配置：自定义批次' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑翻译配置' })
   await editor.getByRole('button', { name: '高级设置' }).click()
   await expect(editor.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveValue('75')
   await expect(editor.getByRole('spinbutton', { name: '同时请求数' })).toHaveValue('3')
@@ -301,23 +308,23 @@ test('AI fill asks with token and request policy before submitting', async ({ pa
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
-  const preflight = page.getByRole('dialog', { name: '确认 AI 翻译' })
-  await expect(preflight.getByText('AI 配置', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
+  const preflight = page.getByRole('dialog', { name: '确认自动翻译' })
+  await expect(preflight.getByText('翻译配置', { exact: true })).toBeVisible()
   await expect(preflight.getByText('本地 Ollama · Ollama（本机）', { exact: true })).toBeVisible()
-  await expect(preflight.getByText('模型', { exact: true })).toBeVisible()
+  await expect(preflight.getByText('模型 / 部署', { exact: true })).toBeVisible()
   await expect(preflight.getByText('qwen3:8b', { exact: true })).toBeVisible()
   await expect(preflight.getByText('1 条待翻译文本 · 1 批')).toBeVisible()
   await expect(preflight.getByText('约 389 个输入 Token')).toBeVisible()
   await expect(preflight.getByText(/这里只估算发送的原文/)).toBeVisible()
   await expect(preflight.getByText('每批最多 25 条 · 同时处理 1 批')).toBeVisible()
-  await expect(preflight.getByText('由 AI 服务决定')).toBeVisible()
+  await expect(preflight.getByText('思考模式', { exact: true })).toHaveCount(0)
   await expect(preflight.getByText('每次请求最多 1 分钟 · 失败后重试 2 次')).toBeVisible()
   await expect(preflight.getByText(/秒后自动开始/)).toHaveCount(0)
   await preflight.getByRole('button', { name: '取消' }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Close' })).toHaveValue('')
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await preflight.getByRole('button', { name: '开始翻译' }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Close' })).toHaveValue('关闭')
 })
@@ -355,8 +362,8 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
     })
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails['dictionary-proof']
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -383,8 +390,9 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await page.goto('/')
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
+  await page.getByRole('button', { name: '查看任务', exact: true }).click()
 
   await expect(page.getByRole('tab', { name: /当前任务/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByText('运行中', { exact: true }).first()).toBeVisible()
@@ -403,7 +411,7 @@ test('stopping an AI job immediately leaves the running state', async ({ page })
   await expect(page.getByTestId('ai-batch-4')).toContainText('排队')
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
-  await expect(page.getByText('AI 正在写这个字典，暂时不能手动修改。任务结束或停止后就能改，其他字典照常使用。')).toBeVisible()
+  await expect(page.getByText('字典正在翻译', { exact: true })).toBeVisible()
   await expect(page.getByRole('textbox', { name: '编辑译文：Pending source' })).toBeDisabled()
   await page.getByRole('button', { name: '查看任务' }).first().click()
   await page.getByRole('button', { name: '停止翻译' }).click()
@@ -442,9 +450,9 @@ test('dictionary AI fill translates only eligible blank entries', async ({ page 
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  await page.getByRole('button', { name: 'AI 翻译选项' }).click()
+  await page.getByRole('button', { name: '自动翻译选项' }).click()
   await page.getByRole('menuitem', { name: '预览待翻译内容' }).click()
-  const preview = page.getByRole('dialog', { name: 'AI 翻译预览' })
+  const preview = page.getByRole('dialog', { name: '自动翻译预览' })
   await expect(preview.getByText('将翻译 1 条，跳过 3 条')).toBeVisible()
   await expect(preview.getByText('Close', { exact: true })).toBeVisible()
   await preview.getByRole('button', { name: '翻译 1 条' }).click()
@@ -489,12 +497,12 @@ test('dictionary AI fill reports all candidates completed across automatic batch
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
 
   await expect(page.getByText(/已补全全部 51 条译文，自动完成 3 批；用时 \d+:\d{2}。/)).toBeVisible()
-  await expect(page.getByText('AI 翻译批次详情')).toBeVisible()
-  const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
+  await expect(page.getByText('翻译批次详情')).toBeVisible()
+  const progress = page.getByRole('region', { name: '自动翻译实时进度' })
   await expect(progress.getByRole('button', { name: '展开批次详情' })).toHaveAttribute('aria-expanded', 'false')
   await expect(page.getByTestId('ai-batch-3')).toHaveCount(0)
   await progress.getByRole('button', { name: '展开批次详情' }).click()
@@ -503,7 +511,7 @@ test('dictionary AI fill reports all candidates completed across automatic batch
   await progress.getByRole('button', { name: '收起批次详情' }).click()
   await expect(page.getByTestId('ai-batch-3')).toHaveCount(0)
   await page.getByRole('button', { name: '关闭批次详情' }).click()
-  await expect(page.getByRole('region', { name: 'AI 翻译实时进度' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '自动翻译实时进度' })).toHaveCount(0)
   await page.getByRole('button', { name: '下一页', exact: true }).click()
   await expect(page.getByRole('textbox', { name: '编辑译文：Source 51' })).toHaveValue('AI · Source 51')
 })
@@ -532,8 +540,8 @@ test('closing a terminal batch report survives desktop task polling for the same
     })
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails[args?.dictionaryId as string]
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -548,7 +556,7 @@ test('closing a terminal batch report survives desktop task polling for the same
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
+  const progress = page.getByRole('region', { name: '自动翻译实时进度' })
   await expect(progress).toBeVisible()
   await progress.getByRole('button', { name: '关闭批次详情' }).click()
   await page.waitForTimeout(800)
@@ -590,10 +598,10 @@ test('dictionary AI fill shows live and final elapsed time', async ({ page }) =>
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
 
-  const progress = page.getByRole('region', { name: 'AI 翻译实时进度' })
+  const progress = page.getByRole('region', { name: '自动翻译实时进度' })
   await expect(progress.getByText(/已完成 \d+\/60 条 · 已用时 0:01/)).toBeVisible()
   await expect(progress.getByText('当前请求 1/1 · 最高同时 1 个请求')).toBeVisible()
   await expect(page.getByText(/已补全全部 60 条译文，自动完成 60 批；用时 0:0[4-9]。/)).toBeVisible({ timeout: 10_000 })
@@ -641,8 +649,8 @@ test('background translation task reports partial batches, writeback, usage, and
     }]
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails[args?.dictionaryId as string]
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -667,12 +675,14 @@ test('background translation task reports partial batches, writeback, usage, and
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '编辑 界面基础词典' }).click()
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
 
   await expect(page.getByRole('heading', { name: '界面基础词典', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '翻译任务' })).toHaveCount(0)
-  await page.getByRole('button', { name: '翻译任务', exact: true }).click()
+  await page.getByRole('button', { name: '帮助' }).click()
+  await page.getByRole('tab', { name: '自动翻译' }).click()
+  await page.getByRole('button', { name: '查看翻译任务' }).click()
   await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
   await expect(page.getByText('部分完成', { exact: true })).toBeVisible()
   await expect(page.getByTestId('ai-batch-2')).toContainText('失败')
@@ -688,17 +698,17 @@ test('background translation task reports partial batches, writeback, usage, and
   await expect(page.getByText('模型统计', { exact: true })).toHaveCount(0)
   await expect(statistics.getByTestId('translation-statistics-table')).toBeVisible()
   await expect.poll(async () => (await statistics.boundingBox())?.width ?? 0).toBeGreaterThan(1100)
-  await expect(statistics.getByText('200', { exact: true })).toBeVisible()
-  await expect(statistics.getByRole('button', { name: '筛选 AI 配置' })).toBeVisible()
+  await expect(statistics.getByText('200 Token', { exact: true })).toBeVisible()
+  await expect(statistics.getByRole('button', { name: '筛选翻译配置' })).toBeVisible()
   await expect(statistics.getByRole('button', { name: '显示列' })).toBeVisible()
   await expect(statistics.getByRole('combobox', { name: '每页数量' })).toBeVisible()
   await expect(statistics.getByRole('columnheader', { name: '连接方式', exact: true })).toHaveCount(0)
-  await statistics.getByRole('button', { name: '筛选 AI 配置' }).click()
+  await statistics.getByRole('button', { name: '筛选翻译配置' }).click()
   await page.getByRole('menuitem', { name: '本地 Ollama', exact: true }).click()
   await expect(statistics.getByText('qwen3:8b', { exact: true })).toBeVisible()
-  await statistics.getByRole('textbox', { name: '搜索模型或 AI 配置' }).fill('missing-model')
+  await statistics.getByRole('textbox', { name: '搜索模型、部署或翻译配置' }).fill('missing-model')
   await expect(statistics.getByText('没有符合条件的模型统计')).toBeVisible()
-  await statistics.getByRole('textbox', { name: '搜索模型或 AI 配置' }).fill('qwen3')
+  await statistics.getByRole('textbox', { name: '搜索模型、部署或翻译配置' }).fill('qwen3')
   await statistics.getByRole('button', { name: '显示列' }).click()
   await expect(page.getByRole('menuitemcheckbox', { name: '连接方式', exact: true })).toHaveAttribute('aria-checked', 'false')
   await page.keyboard.press('Escape')
@@ -759,8 +769,8 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
     }
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', confirmAiTranslation: false }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_probe_run_summary') return summary
@@ -828,7 +838,7 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
   await page.goto('/')
   await page.getByRole('button', { name: '探针', exact: true }).click()
 
-  await page.getByRole('button', { name: 'AI 补全' }).click()
+  await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
 
   await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
@@ -871,8 +881,8 @@ test('probe shows only compact AI task status and links to full task details', a
     }
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [run]
         if (command === 'desktop_probe_run_summary') return run
@@ -895,7 +905,7 @@ test('probe shows only compact AI task status and links to full task details', a
   const status = page.getByRole('status').filter({ hasText: 'AI 正在翻译' })
   await expect(status).toContainText('已完成 2/10 条')
   await expect(status.getByRole('button', { name: '查看任务' })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'AI 翻译实时进度' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '自动翻译实时进度' })).toHaveCount(0)
   await expect(page.getByText('当前请求 1/1 · 最高同时 1 个请求')).toHaveCount(0)
   if (process.env.GLYPHSHIFT_PROBE_AI_STATUS_SCREENSHOT) {
     await page.setViewportSize({
@@ -914,25 +924,39 @@ test('service presets fill editable drafts, clear keys between services and pres
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
-  await expect(dialog.getByText('先选择你要使用的 AI 服务', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await expect(dialog.getByText('先选择你要使用的翻译服务', { exact: true })).toBeVisible()
   await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveCount(0)
   await expect(dialog.getByRole('button', { name: '选择 DeepSeek' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择 Codex（本机）' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择 Ollama' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: '选择 OpenAI' })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: '选择自定义 AI 服务' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择自定义翻译服务' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择 LibreTranslate（本机）' })).toHaveCount(0)
+  await dialog.getByRole('tab', { name: '传统翻译' }).click()
+  await expect(dialog.getByRole('button', { name: '选择 LibreTranslate（本机）' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '选择 DeepSeek' })).toHaveCount(0)
+  await dialog.getByRole('tab', { name: 'AI 翻译' }).click()
   if (process.env.GLYPHSHIFT_PRESET_CHOOSER_SCREENSHOT) {
     await page.screenshot({ path: process.env.GLYPHSHIFT_PRESET_CHOOSER_SCREENSHOT, fullPage: true })
   }
   const choose = async (name: string) => {
     const serviceTab = dialog.getByRole('tab', { name: '1 选择服务' })
     if (await serviceTab.getAttribute('data-state') !== 'active') await serviceTab.click()
-    await dialog.getByRole('button', { name: `选择 ${name}` }).click()
+    const target = dialog.getByRole('button', { name: `选择 ${name}` })
+    if (!await target.isVisible()) {
+      const traditional = dialog.getByRole('tab', { name: '传统翻译' })
+      const aiTab = dialog.getByRole('tab', { name: 'AI 翻译' })
+      if (['LibreTranslate（本机）', '百度翻译', 'Google Translate', 'Microsoft Translator'].includes(name)) await traditional.click()
+      else await aiTab.click()
+    }
+    await target.click()
   }
   await choose('DeepSeek')
   await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('DeepSeek')
   await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
-  await expect(dialog.getByRole('combobox', { name: 'AI 服务' })).toContainText('OpenAI（Responses）')
+  await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText('OpenAI（Responses）')
   await expect(dialog.getByRole('combobox', { name: '模型', exact: true })).toHaveValue('')
   await expect(dialog.getByRole('combobox', { name: '思考模式' })).toContainText('关闭')
   await expect(dialog.getByRole('button', { name: '保存配置' })).toBeDisabled()
@@ -954,7 +978,7 @@ test('service presets fill editable drafts, clear keys between services and pres
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
   await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
-  const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  const edit = page.getByRole('dialog', { name: '编辑翻译配置' })
   await expect(edit.getByRole('tab', { name: '1 选择服务' })).toHaveCount(0)
   await expect(edit.getByRole('combobox', { name: '模型', exact: true })).toHaveValue('deepseek-custom-model')
   await expect(edit.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.deepseek.com')
@@ -964,10 +988,13 @@ test('service presets use audited provider protocols and base URLs', async ({ pa
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
   const cases = [
     ['DeepSeek', 'OpenAI（Responses）', 'https://api.deepseek.com'],
+    ['LibreTranslate（本机）', 'LibreTranslate', 'http://127.0.0.1:5000'],
+    ['百度翻译', '百度翻译', 'https://fanyi-api.baidu.com/api/trans/vip/translate'],
+    ['Google Translate', 'Google Translate', 'https://translation.googleapis.com/language/translate/v2'],
     ['通义千问（北京）', 'OpenAI（Chat Completions）', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
     ['硅基流动', 'OpenAI（Chat Completions）', 'https://api.siliconflow.cn/v1'],
     ['OpenAI', 'OpenAI（Responses）', 'https://api.openai.com/v1'],
@@ -982,10 +1009,192 @@ test('service presets use audited provider protocols and base URLs', async ({ pa
 
   for (const [index, [name, protocol, baseUrl]] of cases.entries()) {
     if (index > 0) await dialog.getByRole('tab', { name: '1 选择服务' }).click()
-    await dialog.getByRole('button', { name: `选择 ${name}` }).click()
-    await expect(dialog.getByRole('combobox', { name: 'AI 服务' })).toContainText(protocol)
+    const target = dialog.getByRole('button', { name: `选择 ${name}` })
+    if (!await target.isVisible()) {
+      const tabName = ['LibreTranslate（本机）', '百度翻译', 'Google Translate', 'Microsoft Translator'].includes(name)
+        ? '传统翻译'
+        : 'AI 翻译'
+      await dialog.getByRole('tab', { name: tabName }).click()
+    }
+    await target.click()
+    await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText(protocol)
     await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue(baseUrl)
   }
+})
+
+test('Baidu and Google Translate presets expose dedicated translation fields', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+
+  await dialog.getByRole('tab', { name: '传统翻译' }).click()
+  await dialog.getByRole('button', { name: '选择 百度翻译' }).click()
+  await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText('百度翻译')
+  await expect(dialog.getByRole('textbox', { name: 'APP ID' })).toBeVisible()
+  await expect(dialog.getByRole('textbox', { name: 'Secret Key（密钥）' })).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: '模型', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('combobox', { name: '思考模式' })).toHaveCount(0)
+  await dialog.getByRole('textbox', { name: 'APP ID' }).fill('synthetic-baidu-app')
+  await dialog.getByRole('textbox', { name: 'Secret Key（密钥）' }).fill('synthetic-baidu-secret')
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('glyphshift.ai-profiles.v2') ?? '{"profiles":[]}')
+    const profile = saved.profiles.find((item: any) => item.name === '百度翻译')
+    return profile ? {
+      protocol: profile.protocol,
+      modelId: profile.modelId,
+      appId: profile.providerOptions?.appId ?? null,
+    } : null
+  })).toEqual({ protocol: 'baidu_translate', modelId: 'general', appId: 'synthetic-baidu-app' })
+
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const googleDialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await googleDialog.getByRole('tab', { name: '传统翻译' }).click()
+  await googleDialog.getByRole('button', { name: '选择 Google Translate' }).click()
+  await expect(googleDialog.getByRole('combobox', { name: '翻译服务' })).toContainText('Google Translate')
+  await expect(googleDialog.getByRole('textbox', { name: 'API Key（密钥）' })).toBeVisible()
+  await expect(googleDialog.getByRole('combobox', { name: '模型', exact: true })).toHaveCount(0)
+  await expect(googleDialog.getByRole('button', { name: '获取模型列表' })).toHaveCount(0)
+  await googleDialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-google-key')
+  await googleDialog.getByRole('button', { name: '保存配置' }).click()
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('glyphshift.ai-profiles.v2') ?? '{"profiles":[]}')
+    const profile = saved.profiles.find((item: any) => item.name === 'Google Translate')
+    return profile ? { protocol: profile.protocol, modelId: profile.modelId } : null
+  })).toEqual({ protocol: 'google_translate', modelId: 'nmt' })
+})
+
+test('LibreTranslate preset supports a local keyless translation service', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+
+  await dialog.getByRole('tab', { name: '传统翻译' }).click()
+  await dialog.getByRole('button', { name: '选择 LibreTranslate（本机）' }).click()
+  await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('LibreTranslate（本机）')
+  await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText('LibreTranslate')
+  await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('http://127.0.0.1:5000')
+  await expect(dialog.getByRole('textbox', { name: 'API Key（密钥）' })).toBeVisible()
+  await expect(dialog.getByText(/本机自建 LibreTranslate 默认不需要 Key/)).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: '模型', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('textbox', { name: '模型', exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('combobox', { name: '思考模式' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '获取模型列表' })).toHaveCount(0)
+
+  await dialog.getByRole('button', { name: '高级设置' }).click()
+  await expect(dialog.getByRole('textbox', { name: '翻译提示词' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+
+  await expect(page.getByTestId('ai-profile-settings').getByText('LibreTranslate（本机）', { exact: true }).first()).toBeVisible()
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('glyphshift.ai-profiles.v2') ?? '{"profiles":[]}')
+    const profile = saved.profiles.find((item: any) => item.name === 'LibreTranslate（本机）')
+    return profile ? {
+      protocol: profile.protocol,
+      modelId: profile.modelId,
+      credential: profile.credential ?? null,
+    } : null
+  })).toEqual({
+    protocol: 'libre_translate',
+    modelId: 'default',
+    credential: null,
+  })
+})
+
+test('LibreTranslate, Baidu and Google presets expose their configuration documentation', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.open = ((url: string) => {
+      ;(window as unknown as { openedTranslationDocs: string }).openedTranslationDocs = url
+      return null
+    }) as typeof window.open
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  const cases = [
+    ['LibreTranslate（本机）', 'https://docs.libretranslate.com/'],
+    ['百度翻译', 'https://fanyi-api.baidu.com/product/11'],
+    ['Google Translate', 'https://docs.cloud.google.com/translate/docs/reference/rest/v2/translate'],
+  ] as const
+
+  for (const [index, [name, expectedUrl]] of cases.entries()) {
+    if (index > 0) await dialog.getByRole('tab', { name: '1 选择服务' }).click()
+    await dialog.getByRole('tab', { name: '传统翻译' }).click()
+    await dialog.getByRole('button', { name: `选择 ${name}` }).click()
+    const docs = dialog.getByRole('button', { name: '查看配置文档' })
+    await expect(docs).toBeVisible()
+    await docs.click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { openedTranslationDocs: string }).openedTranslationDocs)).toBe(expectedUrl)
+  }
+})
+
+test('translation configuration documentation errors can be dismissed', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.open = (() => { throw new Error('synthetic blocked popup') }) as typeof window.open
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+  await dialog.getByRole('tab', { name: '传统翻译' }).click()
+  await dialog.getByRole('button', { name: '选择 LibreTranslate（本机）' }).click()
+  await dialog.getByRole('button', { name: '查看配置文档' }).click()
+
+  const alert = page.getByRole('alert').filter({ hasText: '无法打开文档，请稍后重试。' })
+  await expect(alert).toBeVisible()
+  await alert.getByRole('button', { name: '关闭提示' }).click()
+  await expect(alert).toHaveCount(0)
+})
+
+test('Microsoft Translator preset exposes translation-provider capabilities and persists Region', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '设置' }).click()
+  await openAiSettings(page)
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
+
+  await dialog.getByRole('tab', { name: '传统翻译' }).click()
+  await dialog.getByRole('button', { name: '选择 Microsoft Translator' }).click()
+  await expect(dialog.getByRole('textbox', { name: '配置名称' })).toHaveValue('Microsoft Translator')
+  await expect(dialog.getByRole('combobox', { name: '翻译服务' })).toContainText('Microsoft Translator')
+  await expect(dialog.getByRole('textbox', { name: '服务地址' })).toHaveValue('https://api.cognitive.microsofttranslator.com')
+  await expect(dialog.getByRole('textbox', { name: '部署名称' })).toHaveValue('general')
+  await expect(dialog.getByRole('textbox', { name: 'Azure 区域' })).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: '思考模式' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '获取模型列表' })).toHaveCount(0)
+
+  await dialog.getByRole('textbox', { name: 'API Key（密钥）' }).fill('synthetic-microsoft-key')
+  await dialog.getByRole('textbox', { name: 'Azure 区域' }).fill('eastasia')
+  await dialog.getByRole('button', { name: '高级设置' }).click()
+  await expect(dialog.getByRole('spinbutton', { name: '每批最多翻译' })).toHaveValue('1000')
+  await expect(dialog.getByRole('textbox', { name: '翻译提示词' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+
+  await expect(page.getByTestId('ai-profile-settings').getByText('Microsoft Translator', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/每批最多 1000 条/)).toBeVisible()
+  await expect(page.getByText(/思考 自动/)).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('glyphshift.ai-profiles.v2') ?? '{"profiles":[]}')
+    const profile = saved.profiles.find((item: any) => item.name === 'Microsoft Translator')
+    return profile ? {
+      protocol: profile.protocol,
+      modelId: profile.modelId,
+      region: profile.providerOptions?.region ?? null,
+      maxItemsPerRequest: profile.maxItemsPerRequest,
+    } : null
+  })).toEqual({
+    protocol: 'microsoft_translator',
+    modelId: 'general',
+    region: 'eastasia',
+    maxItemsPerRequest: 1000,
+  })
 })
 
 
@@ -994,8 +1203,8 @@ test('AI setup guide and custom translation prompt support saving and restoring 
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
-  await page.getByRole('button', { name: '添加 AI 配置' }).click()
-  const dialog = page.getByRole('dialog', { name: '添加 AI 配置' })
+  await page.getByRole('button', { name: '添加翻译配置' }).click()
+  const dialog = page.getByRole('dialog', { name: '添加翻译配置' })
   await dialog.getByRole('button', { name: '选择 DeepSeek' }).click()
   await dialog.getByRole('button', { name: '查看配置文档' }).click()
   await expect.poll(() => page.evaluate(() => (window as unknown as { openedGuide: string }).openedGuide)).toBe('https://api-docs.deepseek.com/zh-cn/')
@@ -1015,7 +1224,7 @@ test('AI setup guide and custom translation prompt support saving and restoring 
   await page.getByRole('button', { name: '设置' }).click()
   await openAiSettings(page)
   await page.getByRole('button', { name: /编辑.*DeepSeek/ }).click()
-  const edit = page.getByRole('dialog', { name: '编辑 AI 配置' })
+  const edit = page.getByRole('dialog', { name: '编辑翻译配置' })
   await expect(edit.getByRole('button', { name: '查看配置文档' })).toBeVisible()
   await edit.getByRole('button', { name: '高级设置' }).click()
   await expect(edit.getByRole('textbox', { name: '翻译提示词' })).toHaveValue('使用简洁的航海术语。')
