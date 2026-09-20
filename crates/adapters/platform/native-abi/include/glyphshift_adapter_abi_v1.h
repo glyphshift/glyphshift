@@ -97,6 +97,8 @@ struct TextHost {
 
 constexpr uint64_t GS_FEATURE_TEXT_OBSERVE = 1ull << 0;
 constexpr uint64_t GS_FEATURE_TEXT_REPLACE = 1ull << 1;
+constexpr uint64_t GS_FEATURE_FONT_SUBSTITUTE = 1ull << 2;
+constexpr uint32_t GS_DECISION_FONT_SUBSTITUTE = 1u << 1;
 constexpr uint32_t GS_PLATFORM_WINDOWS = 1u << 0;
 constexpr uint32_t GS_ARCH_X86 = 1u << 0;
 constexpr uint32_t GS_ARCH_X86_64 = 1u << 1;

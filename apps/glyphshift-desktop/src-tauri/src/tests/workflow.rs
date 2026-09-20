@@ -436,6 +436,48 @@ fn updating_an_enabled_workflow_reconciles_its_new_generation() {
 }
 
 #[test]
+fn editing_an_enabled_workflow_dictionary_reconciles_its_new_generation() {
+    let (mut application, calls, _software_id, _data_root) = workflow_application();
+    let enabled = application
+        .enable_workflow("workflow.product", false)
+        .expect("enable workflow");
+    let previous_generation = enabled.runtime.targets[0]
+        .applied_generation
+        .expect("initial applied generation");
+    let dictionary = application
+        .backend
+        .dictionary("dictionary.product")
+        .expect("product dictionary")
+        .clone();
+
+    let snapshot = application
+        .update_dictionary(
+            DictionaryEdit::from_dictionary(&dictionary).with_entries([
+                DictionaryEntryCreate::new("Open", "立即打开"),
+            ]),
+        )
+        .expect("edit enabled workflow dictionary");
+
+    assert!(
+        snapshot.workflow_runtime_status["workflow.product"].targets[0]
+            .applied_generation
+            .is_some_and(|generation| generation > previous_generation),
+        "manual dictionary edits must publish a newer runtime generation"
+    );
+    assert_eq!(
+        calls
+            .lock()
+            .expect("runtime call log")
+            .enabled
+            .iter()
+            .filter(|(id, _, _)| id.as_ref() == "workflow.product")
+            .count(),
+        2,
+        "the enabled workflow is reconciled immediately after the dictionary edit"
+    );
+}
+
+#[test]
 fn workflow_copy_and_batch_delete_return_the_updated_product_snapshot() {
     let (mut application, _calls, _software_id, _data_root) = workflow_application();
 
