@@ -107,7 +107,10 @@ if ($LASTEXITCODE -ne 0) { throw 'The x86 Runtime components did not build.' }
 $profileDirectory = $Profile.ToLowerInvariant()
 $x86ProfileRoot = Join-Path $CargoTargetDir "i686-pc-windows-msvc\$profileDirectory"
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
+& (Join-Path $PSScriptRoot 'build-renpy-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
+& (Join-Path $PSScriptRoot 'build-tyranoscript-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -Architecture x86 -OutputRoot $x86ProfileRoot
+& (Join-Path $PSScriptRoot 'build-rpgmaker-mv-native.ps1') -OutputRoot $x86ProfileRoot
 $stagingRoot = "$OutputRoot.staging"
 Assert-LocalTestPath $stagingRoot 'Runtime Bundle staging output'
 if (Test-Path -LiteralPath $stagingRoot) {
@@ -165,6 +168,10 @@ $unityIl2CppStandardUiBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_unity_il2cpp_standard_ui_native.dll' 'adapter-unity-il2cpp-standard-ui' 'dll'
 $monoGameBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_monogame_native.dll' 'adapter-monogame' 'dll'
+$renPyBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_renpy_native.dll' 'adapter-renpy' 'dll'
+$tyranoScriptBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_tyranoscript_native.dll' 'adapter-tyranoscript' 'dll'
 
 $x86Controller = Copy-VersionedBundleArtifact 'glyphshift-controller-windows.exe' 'controller-x86' 'exe' $x86ProfileRoot
 $x86Runtime = Copy-VersionedBundleArtifact 'glyphshift_target_runtime.dll' 'runtime-x86' 'dll' $x86ProfileRoot
@@ -178,6 +185,7 @@ $x86QtPainter = Copy-VersionedBundleArtifact 'glyphshift_adapter_qt_painter_nati
 $x86Raylib = Copy-VersionedBundleArtifact 'glyphshift_adapter_raylib_native.dll' 'adapter-raylib-x86' 'dll' $x86ProfileRoot
 $x86Unity = Copy-VersionedBundleArtifact 'glyphshift_adapter_unity_mono_standard_ui_native.dll' 'adapter-unity-mono-x86' 'dll' $x86ProfileRoot
 $x86MonoGame = Copy-VersionedBundleArtifact 'glyphshift_adapter_monogame_native.dll' 'adapter-monogame-x86' 'dll' $x86ProfileRoot
+$x86RpgMakerMv = Copy-VersionedBundleArtifact 'glyphshift_adapter_rpgmaker_mv_native.dll' 'adapter-rpgmaker-mv-x86' 'dll' $x86ProfileRoot
 $x86VguiLocalize = Copy-VersionedBundleArtifact 'glyphshift_adapter_vgui_localize_native.dll' 'adapter-vgui-localize-x86' 'dll' $x86ProfileRoot
 $x86CatSystem2 = Copy-VersionedBundleArtifact 'glyphshift_adapter_catsystem2_native.dll' 'adapter-catsystem2-x86' 'dll' $x86ProfileRoot
 
@@ -227,6 +235,9 @@ $sidefxCvPaintBufferPresentation = Get-AdapterPresentation 'windows.sidefx.cv-pa
 $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.standard-ui'
 $unityIl2CppStandardUiPresentation = Get-AdapterPresentation 'windows.unity.il2cpp.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
+$renPyPresentation = Get-AdapterPresentation 'windows.renpy.message'
+$rpgMakerMvPresentation = Get-AdapterPresentation 'windows.rpgmaker-mv.message'
+$tyranoScriptPresentation = Get-AdapterPresentation 'windows.tyranoscript.message'
 $vguiLocalizePresentation = Get-AdapterPresentation 'windows.vgui.localize-query'
 $catSystem2Presentation = Get-AdapterPresentation 'windows.catsystem2.utf8-text'
 
@@ -253,6 +264,26 @@ $runtimeManifest = [ordered]@{
             technology = $monoGamePresentation.technology
             technicalTarget = $monoGamePresentation.technicalTarget
             documentationUrl = $monoGamePresentation.documentationUrl
+            process_resident_after_deactivate = $true
+        },
+        [ordered]@{
+            file = $renPyBundle.file
+            sha256 = $renPyBundle.sha256
+            name = $renPyPresentation.name
+            summary = $renPyPresentation.summary
+            technology = $renPyPresentation.technology
+            technicalTarget = $renPyPresentation.technicalTarget
+            documentationUrl = $renPyPresentation.documentationUrl
+            process_resident_after_deactivate = $true
+        },
+        [ordered]@{
+            file = $tyranoScriptBundle.file
+            sha256 = $tyranoScriptBundle.sha256
+            name = $tyranoScriptPresentation.name
+            summary = $tyranoScriptPresentation.summary
+            technology = $tyranoScriptPresentation.technology
+            technicalTarget = $tyranoScriptPresentation.technicalTarget
+            documentationUrl = $tyranoScriptPresentation.documentationUrl
             process_resident_after_deactivate = $true
         },
         [ordered]@{
@@ -392,12 +423,14 @@ foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOut
     @($x86GdiPlus, $gdiPlusPresentation), @($x86DirectWrite, $directWritePresentation), @($x86Gtk, $gtk3PangoPresentation),
     @($x86QtPainter, $qtPainterPresentation), @($x86Raylib, $raylibPresentation),
     @($x86Unity, $unityMonoStandardUiPresentation), @($x86MonoGame, $monoGamePresentation),
+    @($x86RpgMakerMv, $rpgMakerMvPresentation),
     @($x86VguiLocalize, $vguiLocalizePresentation), @($x86CatSystem2, $catSystem2Presentation))) {
     $artifact = $pair[0]; $presentation = $pair[1]
     $x86Adapters += [ordered]@{ file=$artifact.file; sha256=$artifact.sha256; name=$presentation.name;
         summary=$presentation.summary; technology=$presentation.technology; technicalTarget=$presentation.technicalTarget;
         documentationUrl=$presentation.documentationUrl }
     if ($artifact.file -eq $x86MonoGame.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
+    if ($artifact.file -eq $x86RpgMakerMv.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
     if ($artifact.file -eq $x86VguiLocalize.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
     if ($artifact.file -eq $x86CatSystem2.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
 }

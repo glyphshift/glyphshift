@@ -1700,6 +1700,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-renpy"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-adapter-rpgmaker-mv"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
+]
+
+[[package]]
 name = "glyphshift-adapter-sdk"
 version = "0.1.0"
 dependencies = [
@@ -1722,6 +1738,14 @@ dependencies = [
  "glyphshift-adapter-sidefx-cv-paint-buffer",
  "retour",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "glyphshift-adapter-tyranoscript"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-sdk",
+ "glyphshift-domain",
 ]
 
 [[package]]

@@ -24,6 +24,30 @@
     "documentationUrl": "https://docs.monogame.net/api/Microsoft.Xna.Framework.Graphics.SpriteBatch.html"
   },
   {
+    "id": "windows.renpy.message",
+    "name": "Ren'Py 对话文字（实验）",
+    "summary": "适合已验证的 Windows x64 Ren'Py 8.5.2 / 8.5.3 官方运行时，通过 CPython 3.12 在完整对白进入实际显示时采集和替换。带 Ren'Py text tag 的原文会以完整文本作为查找键，仅在返回安全纯文本译文时替换；不安全控制字符会保留原文。未知 build 拒绝激活；停用后新对白恢复原路径，组件保留到游戏退出。Katawa Shoujo: Re-Engineered 2.0.4 已确认使用 Ren'Py 8.5.2，但该真实游戏的生产 Runtime 像素闭环仍待补齐。",
+    "technology": "Ren'Py 8.5.2 / 8.5.3 / CPython 3.12（x64）",
+    "technicalTarget": "renpy.character.ADVCharacter.do_display",
+    "documentationUrl": "https://www.renpy.org/doc/html/dialogue.html"
+  },
+  {
+    "id": "windows.rpgmaker-mv.message",
+    "name": "RPG Maker MV 对话文字（实验）",
+    "summary": "适合已验证的 Windows x86 RPG Maker MV 1.6.x / NW.js 0.29.x 普通运行器；覆盖完整对白进入显示前的消息文字。带转义控制符的文本当前只采集不替换，未知版本拒绝激活。停用后新对白恢复原路径，组件保留到游戏退出；选择项、MZ、其他 NW.js 版本和当前对白即时刷新尚未覆盖。",
+    "technology": "RPG Maker MV / NW.js 0.29.x（x86）",
+    "technicalTarget": "Window_Message.startMessage + Node 9.7.1 / V8 6.5.254.31",
+    "documentationUrl": "https://github.com/rpgtkoolmv/corescript/blob/master/js/rpg_windows/Window_Message.js"
+  },
+  {
+    "id": "windows.tyranoscript.message",
+    "name": "TyranoScript 对话文字（实验）",
+    "summary": "适合已验证的 Windows x64 TyranoScript V6.03 导出运行时（引擎版本 520 / Electron 24.1.2）。在完整主消息进入 backlog、语音、HTML 构造和打字机渲染前采集；纯文本可替换，HTML 敏感文本或控制文本只采集不替换。未知运行时拒绝激活；停用后恢复自身包装，组件保留到游戏退出。",
+    "technology": "TyranoScript V6.03 / Electron 24.1.2 / V8 11.2.214.9-electron.0（x64）",
+    "technicalTarget": "TYRANO.kag.ftag.master_tag.text.showMessage",
+    "documentationUrl": "https://tyrano.jp/"
+  },
+  {
     "id": "windows.gdi.ext-text-out",
     "name": "ExtTextOutW",
     "summary": "适合使用传统 Windows GDI 绘制文字的软件，支持字距、裁剪和部分字形索引",
