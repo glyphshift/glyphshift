@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openFile } from '@tauri-apps/plugin-dialog'
@@ -120,7 +121,7 @@ async function confirm() {
         <span class="type-metadata text-[var(--text-muted)]">{{ t('workflowSoftware.captureHint', { shortcut: workspace.softwareCaptureShortcut.value }) }}</span>
         <UButton color="neutral" variant="outline" size="sm" :disabled="busy" :icon="workspace.softwareCaptureArmed.value ? 'i-tabler-x' : 'i-tabler-focus-centered'" :label="workspace.softwareCaptureArmed.value ? t('software.cancelCapture') : t('software.quickCapture')" @click="workspace.softwareCaptureArmed.value ? workspace.cancelSoftwareCapture() : workspace.armSoftwareCapture()" />
       </div>
-      <p v-if="error || workspace.messages.value.software" role="alert" class="type-metadata text-error">{{ error || workspace.messages.value.software }}</p>
+      <DismissibleAlert v-if="error || workspace.messages.value.software" role="alert" color="error" variant="soft" :description="error || workspace.messages.value.software" :dismiss-key="error || workspace.messages.value.software" @dismiss="error = ''" />
     </div>
   </ManagementFormModal>
 </template>

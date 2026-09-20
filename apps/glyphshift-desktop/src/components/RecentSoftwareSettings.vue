@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useWorkspace } from '../useWorkspace'
 import { useAppSettings } from '../appSettings'
 import { useRecentSoftware } from '../useRecentSoftware'
+import DismissibleAlert from './DismissibleAlert.vue'
 const { t } = useI18n()
 const workspace = useWorkspace()
 const app = useAppSettings()
@@ -28,6 +29,6 @@ async function change(action: () => Promise<void>) {
       </li>
     </ul>
     <p v-if="!filtered.length" class="type-metadata my-5 text-[var(--text-muted)]">{{ t(query ? 'settingsManager.noMatch' : 'settingsManager.noRecent') }}</p>
-    <p v-if="error" role="alert" class="type-metadata my-3 text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="my-3" @dismiss="error = ''" />
   </ManagementFormSection>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { testRegexRule, type RegexRule, type RegexRuleTestResult } from '../regexRules'
@@ -39,7 +40,7 @@ async function run() {
       <UButton type="button" :label="t('regexRules.test')" :loading="busy" class="justify-center" @click="run" />
     </div>
     <p class="type-metadata text-[var(--text-muted)]">{{ t('regexRules.testHint', { translation: translationToken }) }}</p>
-    <p v-if="error" role="alert" class="type-metadata text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" @dismiss="error = ''" />
     <div v-if="result" role="status" class="space-y-2 text-sm" data-testid="regex-test-result">
       <p>{{ t(result.matched ? 'regexRules.matched' : 'regexRules.notMatched') }}</p>
       <dl v-if="result.matched" class="flex flex-wrap gap-x-5 gap-y-2">

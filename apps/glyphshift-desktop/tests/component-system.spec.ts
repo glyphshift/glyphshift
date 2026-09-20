@@ -44,6 +44,38 @@ test('Vue surfaces use Nuxt UI for controls, tables, and overlays', () => {
   expect(packageJson.dependencies).not.toHaveProperty('@tabler/icons-vue')
 })
 
+test('error alerts always expose a dismiss control', () => {
+  const alertPattern = /<UAlert\b([^>]*\bcolor="error"[^>]*)\/>|<UAlert\b([^>]*\bcolor="error"[^>]*)>([\s\S]*?)<\/UAlert>/g
+  const violations = vueSources().flatMap(path => {
+    const source = readFileSync(path, 'utf8')
+    return [...source.matchAll(alertPattern)].flatMap(match => {
+      const attrs = match[1] ?? match[2] ?? ''
+      const body = match[3] ?? ''
+      const dismissible = /(?:^|\s)close(?:\s|=|$)/.test(attrs)
+        || body.includes("t('common.dismissMessage')")
+      return dismissible ? [] : [relative(sourceRoot, path).replaceAll('\\', '/')]
+    })
+  })
+
+  expect(violations, 'Every error alert must let the user dismiss it.').toEqual([])
+
+  const dismissibleAlert = readFileSync(join(sourceRoot, 'components', 'DismissibleAlert.vue'), 'utf8')
+  expect(dismissibleAlert).toContain('close')
+  expect(dismissibleAlert).toContain('@update:open="updateOpen"')
+
+  const captureView = readFileSync(join(sourceRoot, 'components', 'CaptureView.vue'), 'utf8')
+  expect(captureView).toContain('<DismissibleAlert v-if="selectedRun && autoComplete.stopped.value[selectedRun.id]"')
+  expect(captureView).toContain('@dismiss="autoComplete.stopped.value[selectedRun!.id] = false"')
+
+  const plainAlertParagraphs = vueSources().flatMap(path => {
+    const source = readFileSync(path, 'utf8')
+    return [...source.matchAll(/<p\b[^>]*role=["']alert["'][^>]*>/g)].map(() => (
+      relative(sourceRoot, path).replaceAll('\\', '/')
+    ))
+  })
+  expect(plainAlertParagraphs, 'Error messages must use a dismissible alert surface.').toEqual([])
+})
+
 test('management pages share the project management-page modules', () => {
   const pages = ['WorkflowTable.vue', 'SoftwareTable.vue', 'DictionaryLibrary.vue', 'CaptureView.vue']
   const pageHeaderPages = [...pages, 'TranslationTasksView.vue']

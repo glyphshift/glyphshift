@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
@@ -30,5 +31,5 @@ function create(code: string) {
   <USelectMenu v-model:open="open" v-model:search-term="search" v-bind="$attrs" :model-value="value || undefined" :items="allowAuto ? [{ label: t('settingsManager.autoLanguage'), value: 'auto' }, ...items.filter(item => item.value !== 'auto')] : items" value-key="value" create-item :placeholder="t('fontFallbacks.languagePlaceholder')" class="w-full" @update:model-value="value = $event ?? ''; error = false" @create="create">
     <template #create-item-label="{ item }">{{ t('fontFallbacks.useCustom', { code: item }) }}</template>
   </USelectMenu>
-  <p v-if="error" role="alert" class="type-metadata mt-1 text-error">{{ t('fontFallbacks.invalidLanguage') }}</p>
+  <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="t('fontFallbacks.invalidLanguage')" :dismiss-key="modelValue" class="mt-1" />
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -69,9 +70,7 @@ const exceptions = computed(() => [
         <p class="m-0 type-metadata leading-5 text-[var(--text-muted)]">
           {{ t('firstRun.safety.disclaimer') }}
         </p>
-        <p v-if="props.error" role="alert" class="m-0 type-metadata leading-5 text-[var(--danger)]">
-          {{ props.error }}
-        </p>
+        <DismissibleAlert v-if="props.error" role="alert" color="error" variant="soft" :description="props.error" :dismiss-key="props.error" />
       </div>
     </template>
     <template #footer>

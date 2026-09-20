@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './components/DismissibleAlert.vue'
 import { markLibraryUsed } from './useLibrarySort'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -447,7 +448,7 @@ onBeforeUnmount(() => {
         @close="requestWindowClose"
       />
       <AppUpdateNotice />
-      <UAlert v-if="exitError" role="alert" color="error" :description="exitError" class="shrink-0" />
+      <DismissibleAlert v-if="exitError" role="alert" color="error" :description="exitError" :dismiss-key="exitError" class="shrink-0" @dismiss="exitError = ''" />
       <main id="main-content" ref="mainContent" tabindex="-1" class="flex min-h-0 flex-1 overflow-hidden outline-none" :aria-label="t('app.mainContent')">
       <section v-if="shellCompatibilityError && view !== 'help'" class="grid min-h-0 flex-1 place-items-center bg-[var(--app-bg)] p-6" role="alert">
         <h1 class="sr-only">{{ t('app.desktopReloadTitle') }}</h1>

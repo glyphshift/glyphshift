@@ -5,6 +5,7 @@ import { useAppSettings } from '../appSettings'
 import { preferredFonts } from '../settingsCatalogs'
 import { useWorkspace } from '../useWorkspace'
 import { normalizeFontLanguage, type LanguageFallbackFont } from '../fontFallbacks'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const { t, locale } = useI18n()
 const app = useAppSettings()
@@ -60,7 +61,7 @@ function updateFont(code: string, family: string) {
       </UFormField>
       <UButton :label="t('fontFallbacks.add')" icon="i-tabler-plus" :disabled="!language || !fontFamily || rows.length >= 64 || app.settingsBusy.value" @click="add" />
     </div>
-    <p v-if="error" role="alert" class="type-metadata mb-4 text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="mb-4" @dismiss="error = ''" />
     <p v-else-if="saved" role="status" class="type-metadata mb-4 text-[var(--text-muted)]">{{ t('fontFallbacks.saved') }}</p>
   </ManagementFormSection>
 </template>

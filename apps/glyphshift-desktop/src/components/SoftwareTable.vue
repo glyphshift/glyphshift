@@ -14,6 +14,7 @@ import {
 } from '../tableInteraction'
 import { usePageEscape } from '../usePageEscape'
 import { useTableColumns } from '../useTableColumns'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const props = defineProps<{
   items: SoftwareRecord[]
@@ -354,9 +355,7 @@ function softwareMetadata(item: { vendor: string; version: string }) {
       </template>
     </ManagementPageHeader>
 
-    <div v-if="messages.software" :aria-label="t('software.error')" class="mb-3" role="alert">
-      <UAlert color="error" variant="soft" :title="t('software.error')" :description="messages.software" />
-    </div>
+    <DismissibleAlert v-if="messages.software" role="alert" color="error" variant="soft" :title="t('software.error')" :description="messages.software" :dismiss-key="messages.software" class="mb-3" />
 
     <ManagementTableFrame
       v-model:query="query"
@@ -454,7 +453,7 @@ function softwareMetadata(item: { vendor: string; version: string }) {
             class="w-full"
             @update:model-value="chooseRunningTarget"
           />
-          <UAlert v-if="runningTargetsError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('software.error')" :description="runningTargetsError" />
+          <DismissibleAlert v-if="runningTargetsError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('software.error')" :description="runningTargetsError" :dismiss-key="runningTargetsError" @dismiss="runningTargetsError = ''" />
           <p v-else-if="runningTargetsLoaded && !runningTargets.length" class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('software.runningSoftwareEmpty') }}</p>
           <div class="flex items-center justify-between gap-3 pt-1">
             <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('software.captureWaitingDescription', { shortcut: captureShortcut }) }}</p>
@@ -487,7 +486,7 @@ function softwareMetadata(item: { vendor: string; version: string }) {
           :title="preflightPresentation.title"
           :description="preflightPresentation.description"
         />
-        <p v-else-if="messages.software" class="m-0 text-xs leading-5 text-[var(--error)]" role="alert">{{ messages.software }}</p>
+        <DismissibleAlert v-else-if="messages.software" role="alert" color="error" variant="soft" :description="messages.software" :dismiss-key="messages.software" />
         <p v-else class="m-0 text-xs leading-5 text-[var(--text-muted)]">{{ t('software.preflightRequired') }}</p>
       </div>
     </ManagementFormModal>

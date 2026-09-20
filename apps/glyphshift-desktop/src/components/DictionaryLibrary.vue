@@ -24,6 +24,7 @@ import {
   managementSelectionColumnMeta,
 } from '../tableInteraction'
 import { useTableColumns } from '../useTableColumns'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const props = defineProps<{
   items: DictionarySummary[]
@@ -364,7 +365,7 @@ async function chooseImport() { await importDialog.value?.choose() }
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="mode === 'local' && messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" class="mb-3" />
+    <DismissibleAlert v-if="mode === 'local' && messages.dictionaries" role="alert" color="error" variant="soft" :title="t('dictionaries.error')" :description="messages.dictionaries" :dismiss-key="messages.dictionaries" class="mb-3" />
     <UAlert
       v-if="mode === 'local' && dictionaryWarnings.length"
       role="status"

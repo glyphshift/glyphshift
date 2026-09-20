@@ -8,6 +8,7 @@ import type { DictionaryMetadata } from '../model'
 import { translateCommandError } from '../commandError'
 import { dictionaryFormats, previewImportFiles, emptyImportMetadata as emptyMetadata, type ImportFormat, type ImportFile } from '../dictionaryTransfer'
 import { combineImportEntries, type DictionaryImportData } from '../dictionaryImport'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const props = defineProps<{ existing?: boolean; apply: (data: DictionaryImportData) => Promise<boolean> }>()
 const { t } = useI18n()
@@ -79,7 +80,7 @@ defineExpose({ choose })
 </script>
 
 <template>
-  <UAlert v-if="error && !visible" role="alert" color="error" :title="t('dictionaryImport.failed')" :description="error" class="mb-3" />
+  <DismissibleAlert v-if="error && !visible" role="alert" color="error" :title="t('dictionaryImport.failed')" :description="error" :dismiss-key="error" class="mb-3" @dismiss="error = ''" />
   <ManagementFormModal :open="visible" :title="t(existing ? 'dictionaryImport.entriesTitle' : 'dictionaryImport.createTitle')" :confirm-label="t('dictionaryImport.confirm')" :confirm-disabled="!valid" :busy="busy" @update:open="visible = $event" @confirm="confirm">
     <p class="type-metadata mb-4">{{ t('dictionaryImport.count', { count: entries.length }) }}</p>
     <template v-if="existing">
@@ -115,6 +116,6 @@ defineExpose({ choose })
       <DictionaryImportMetadata v-else-if="!existing" v-model="metadata" />
     </fieldset>
     <p v-if="completed" class="type-metadata mt-3">{{ t('dictionaryImport.completed', { count: completed, total: outputs.length }) }}</p>
-    <UAlert v-if="error" role="alert" color="error" :title="t('dictionaryImport.failed')" :description="error" class="mt-3" />
+    <DismissibleAlert v-if="error" role="alert" color="error" :title="t('dictionaryImport.failed')" :description="error" :dismiss-key="error" class="mt-3" @dismiss="error = ''" />
   </ManagementFormModal>
 </template>

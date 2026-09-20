@@ -5,6 +5,7 @@ import FontFamilySelect from './FontFamilySelect.vue'
 import { useI18n } from 'vue-i18n'
 import type { DictionarySummary, WorkflowFontPolicy, WorkflowDictionaryFont } from '../model'
 import { useWorkspace } from '../useWorkspace'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const props = defineProps<{ dictionaries: DictionarySummary[]; workflowName: string }>()
 const ids = defineModel<string[]>('dictionaryIds', { required: true })
@@ -146,7 +147,7 @@ defineExpose({ showPicker })
             <UFormField :label="t('workflows.targetLocale')"><LanguageSelect v-model="targetLocale" class="w-full" :aria-label="t('workflows.targetLocale')" /></UFormField>
           </div>
         </template>
-        <p v-if="error" role="alert" class="type-metadata text-error">{{ error }}</p>
+        <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" @dismiss="error = ''" />
       </div>
     </ManagementFormModal>
   </div>

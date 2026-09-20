@@ -5,6 +5,7 @@ import { save, open as chooseDirectory } from '@tauri-apps/plugin-dialog'
 import { dictionaryFormats, exportDictionaryFile } from '../dictionaryTransfer'
 import { translateCommandError } from '../commandError'
 import ManagementFormModal from './ManagementFormModal.vue'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const { t } = useI18n()
 const visible = ref(false)
@@ -78,6 +79,6 @@ defineExpose({ openBatch, exportOne })
     <p v-if="!result" class="type-metadata mt-3">{{ t(`dictionaryExport.${format}Hint`) }}</p>
     <p v-if="batchIds.length && !result" class="type-metadata mt-3">{{ t('dictionaryExport.batchHint', { count: batchIds.length }) }}</p>
     <p v-if="result" class="type-metadata mt-3 break-all">{{ result }}</p>
-    <UAlert v-if="error" role="alert" color="error" :title="t('dictionaryExport.failed')" :description="error" class="mt-3" />
+    <DismissibleAlert v-if="error" role="alert" color="error" :title="t('dictionaryExport.failed')" :description="error" :dismiss-key="error" class="mt-3" @dismiss="error = ''" />
   </ManagementFormModal>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
@@ -70,6 +71,6 @@ onBeforeUnmount(stop)
     <button type="button" :disabled="disabled" :aria-label="t('workflows.globalShortcut')" :aria-pressed="recording" :data-shortcut-recording="recording" :style="recording ? { borderColor: 'var(--success)', backgroundColor: 'var(--success-soft)', color: 'var(--success)' } : undefined" class="type-body min-h-9 w-full rounded-[6px] border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50" :class="recording ? 'border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]' : 'border-[var(--border)] bg-[var(--field-bg)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]'" @click="start" @blur="stop">
       {{ recording ? (pending ? pending.split('+').map(displayShortcutToken).join(' + ') : t('workflows.shortcutRecording')) : (modelValue ? display : t('workflows.shortcutPlaceholder')) }}
     </button>
-    <p v-if="error" role="alert" class="type-metadata mb-0 mt-1 text-[var(--danger)]">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="mt-1" @dismiss="error = ''" />
   </div>
 </template>

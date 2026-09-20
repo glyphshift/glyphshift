@@ -6,6 +6,7 @@ import { translateCommandError } from '../commandError'
 import type { DictionarySummary, SoftwarePreflight, SoftwareRecord } from '../model'
 import { useProbeRuns } from '../useProbeRuns'
 import ManagementFormModal from './ManagementFormModal.vue'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 type TargetMode = 'library' | 'active'
 type DictionaryMode = 'library' | 'new'
@@ -281,7 +282,7 @@ async function start() {
             <UButton :title="t('capture.refreshRunningSoftware')" color="neutral" variant="outline" size="sm" icon="i-tabler-refresh" :aria-label="t('capture.refreshRunningSoftware')" :loading="runningTargetsLoading" @click="loadRunningTargets(true)" />
           </div>
           <p class="type-metadata m-0 leading-4 text-[var(--text-muted)]">{{ t('capture.runningSoftwareHint') }}</p>
-          <UAlert v-if="runningTargetsError" role="alert" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('capture.error')" :description="runningTargetsError" />
+          <DismissibleAlert v-if="runningTargetsError" role="alert" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('capture.error')" :description="runningTargetsError" :dismiss-key="runningTargetsError" @dismiss="runningTargetsError = ''" />
           <UAlert v-else-if="runningTargetsLoaded && !runningTargets.length" color="neutral" variant="soft" icon="i-tabler-apps-off" :title="t('capture.runningSoftwareEmptyTitle')" :description="t('capture.runningSoftwareEmptyDescription')" />
           <div class="flex items-center justify-between gap-3 rounded-[6px] border border-[var(--border)] bg-[var(--surface-subtle)] px-3 py-2.5">
             <p class="type-metadata m-0 min-w-0 leading-4 text-[var(--text-muted)]">{{ t('capture.shortcutCaptureHint', { shortcut: captureShortcut }) }}</p>
@@ -316,7 +317,7 @@ async function start() {
         </UFormField>
       </div>
 
-      <UAlert v-if="captureError || probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="captureError || probe.message.value" />
+      <DismissibleAlert v-if="captureError || probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="captureError || probe.message.value" :dismiss-key="captureError || probe.message.value" @dismiss="probe.clearMessage()" />
     </div>
   </ManagementFormModal>
 </template>

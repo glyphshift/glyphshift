@@ -43,7 +43,7 @@ async function toggle(page: Page) {
 
 }
 
-test('probe auto fill survives navigation, skips busy and empty cycles, and stops on failure', async ({ page }) => {
+test('probe auto fill survives navigation, skips busy and empty cycles, and exposes a dismissible stop notice', async ({ page }) => {
   await setup(page)
   await toggle(page)
   await page.clock.runFor(1200)
@@ -64,6 +64,10 @@ test('probe auto fill survives navigation, skips busy and empty cycles, and stop
   await page.getByRole('button', { name: '工作流', exact: true }).click()
   await page.getByRole('button', { name: '默认创作工作流', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'false')
+  const stoppedNotice = page.getByTestId('probe-auto-complete-stopped')
+  await expect(stoppedNotice).toBeVisible()
+  await stoppedNotice.getByRole('button').click()
+  await expect(stoppedNotice).toHaveCount(0)
 })
 
 test('unchecking auto fill while planning prevents a late request', async ({ page }) => {

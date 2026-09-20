@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { workflowLifecycle, workflowOperations, workflowStateColor } from '../workflowLifecycle'
 import { useWorkflowWorkspace } from '../workspace/workflows'
 import { model as workspaceModel, messages as workspaceMessages } from '../workspace/state'
@@ -1136,7 +1137,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="lifecycleMessage" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="lifecycleMessage" class="mb-3" />
+    <DismissibleAlert v-if="lifecycleMessage" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="lifecycleMessage" :dismiss-key="lifecycleMessage" class="mb-3" />
     <UAlert v-else-if="compatibilityMessage" data-testid="workflow-compatibility-warning" role="status" color="warning" variant="soft" icon="i-tabler-radar-off" :title="t('workflows.runtimeIssue.compatibilityTitle')" :description="compatibilityMessage" class="mb-3" />
     <UAlert v-if="probe.message.value" role="alert" color="error" variant="soft" :title="t('capture.error')" :description="probe.message.value" class="mb-3">
       <template #actions><UButton color="neutral" variant="ghost" size="xs" icon="i-tabler-x" :label="t('common.dismissMessage')" @click="probe.clearMessage()" /></template>
@@ -1348,7 +1349,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
       <p v-if="aiPlan?.skipped.length" class="type-metadata mb-0 mt-3 leading-4 text-[var(--text-muted)]">{{ t('ai.skippedHint', { count: aiPlan.skipped.length }) }}</p>
     </ManagementFormModal>
 
-    <UAlert v-if="selectedRun && autoComplete.stopped.value[selectedRun.id]" color="warning" :title="t('ai.autoStopped')" class="mt-2" @close="autoComplete.stopped.value[selectedRun!.id] = false" />
+    <DismissibleAlert v-if="selectedRun && autoComplete.stopped.value[selectedRun.id]" data-testid="probe-auto-complete-stopped" color="warning" :title="t('ai.autoStopped')" :dismiss-key="selectedRun.id" class="mt-2" @dismiss="autoComplete.stopped.value[selectedRun!.id] = false" />
     <AiTranslationPreflight
       v-model:open="aiPreflightOpen"
       :plan="aiPlan"
@@ -1401,7 +1402,7 @@ usePageEscape(() => Boolean(selectedRun.value), () => void closeDetail())
         <USelect v-model="importMode" :items="importModeItems" value-key="value" :aria-label="t('capture.importConflict')" class="w-full" />
       </UFormField>
       <p class="type-metadata text-[var(--text-muted)]">{{ t(importMode === 'replace' ? 'capture.importReplaceHint' : 'capture.importMergeHint') }}</p>
-      <UAlert v-if="probe.message.value" role="alert" color="error" :description="probe.message.value" />
+      <DismissibleAlert v-if="probe.message.value" role="alert" color="error" :description="probe.message.value" :dismiss-key="probe.message.value" @dismiss="probe.clearMessage()" />
     </ManagementFormModal>
 
     <ConfirmDialog :open="Boolean(pendingRemoval.length)" :title="t('capture.deleteTitle')" :description="t('capture.deleteDescription', { count: pendingRemoval.length })" :confirm-label="t('capture.deleteConfirm')" :busy="probe.busy.value" @update:open="$event || (pendingRemoval = [])" @confirm="confirmRemoval" />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -237,7 +238,7 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
             <span class="type-caption shrink-0 tabular-nums text-[var(--text-muted)]">{{ t('help.availableCount', { count: adapters.length }) }}</span>
           </div>
 
-          <p v-if="documentationError" class="type-metadata mb-2 mt-0 text-[var(--danger)]" role="alert">{{ documentationError }}</p>
+          <DismissibleAlert v-if="documentationError" role="alert" color="error" variant="soft" :description="documentationError" :dismiss-key="documentationError" class="mb-2" @dismiss="documentationError = ''" />
           <div v-if="adapters.length" data-testid="help-adapter-list" class="@container overflow-hidden rounded-[7px] border border-[var(--border)] bg-[var(--surface)]">
             <ul class="m-0 p-0" role="list">
               <li v-for="(adapter, index) in adapters" :key="adapter.id" data-testid="help-adapter-item" class="list-none border-b border-[var(--border)] last:border-b-0">
@@ -272,7 +273,7 @@ async function openAboutLink(link: { id: AboutLinkId; url: string }) {
           </div>
 
           <p class="type-body mt-4 text-[var(--text-secondary)]">{{ t('help.updates.license') }}</p>
-          <p v-if="aboutLinkError" class="type-metadata mb-2 mt-4 text-[var(--danger)]" role="alert">{{ aboutLinkError }}</p>
+          <DismissibleAlert v-if="aboutLinkError" role="alert" color="error" variant="soft" :description="aboutLinkError" :dismiss-key="aboutLinkError" class="mb-2 mt-4" @dismiss="aboutLinkError = ''" />
           <ul class="m-0 divide-y divide-[var(--border)] border-b border-[var(--border)] p-0" role="list">
             <li v-for="link in aboutLinks" :key="link.id" class="grid min-h-16 list-none grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 @max-[640px]:grid-cols-[32px_minmax(0,1fr)]">
               <UIcon :name="link.icon" class="size-5 justify-self-center text-[var(--text-secondary)]" aria-hidden="true" />

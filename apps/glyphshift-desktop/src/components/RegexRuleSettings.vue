@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import RegexRuleTester from './RegexRuleTester.vue'
 import { propertyNumberRule, validateRegexRule, type RegexRule } from '../regexRules'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const { t } = useI18n()
 const translationToken = '{{TR}}'
@@ -89,7 +90,7 @@ function move(index: number, offset: number) {
         <UButton :label="t('regexRules.cancel')" color="neutral" variant="ghost" :disabled="busy" @click="editor = null; error = ''" />
       </div>
     </div>
-    <p v-if="error" role="alert" class="type-metadata my-4 whitespace-pre-wrap break-words text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="my-4 whitespace-pre-wrap break-words" @dismiss="error = ''" />
     <p v-else-if="saved" role="status" class="type-metadata my-4 text-[var(--text-muted)]">{{ t('regexRules.saved') }}</p>
   </ManagementFormSection>
 </template>

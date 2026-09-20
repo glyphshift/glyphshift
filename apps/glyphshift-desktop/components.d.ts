@@ -24,6 +24,7 @@ declare module 'vue' {
     DictionaryLibrary: typeof import('./src/components/DictionaryLibrary.vue')['default']
     DictionaryMetadataForm: typeof import('./src/components/DictionaryMetadataForm.vue')['default']
     DictionaryProof: typeof import('./src/components/DictionaryProof.vue')['default']
+    DismissibleAlert: typeof import('./src/components/DismissibleAlert.vue')['default']
     FavoriteFontSettings: typeof import('./src/components/FavoriteFontSettings.vue')['default']
     FieldHelp: typeof import('./src/components/FieldHelp.vue')['default']
     FirstRunGuide: typeof import('./src/components/FirstRunGuide.vue')['default']

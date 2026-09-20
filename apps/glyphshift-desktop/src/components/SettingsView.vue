@@ -15,6 +15,7 @@ import RecentSoftwareSettings from './RecentSoftwareSettings.vue'
 import LanguageSettings from './LanguageSettings.vue'
 import AiProfilesPanel from './AiProfilesPanel.vue'
 import FirstRunSafetyNotice from './FirstRunSafetyNotice.vue'
+import DismissibleAlert from './DismissibleAlert.vue'
 import { useAppUpdate } from '../useAppUpdate'
 import { version as appVersion } from '../../package.json'
 import { displayShortcutToken, shortcutFromEvent } from '../shortcutKeys'
@@ -256,13 +257,14 @@ onBeforeUnmount(() => {
         :content="false" :aria-label="t('settingsManager.navigation')" data-testid="settings-tabs" color="neutral" variant="link" size="sm" activation-mode="manual"
         class="sticky top-0 z-20 w-full bg-[var(--app-bg)]"
         :ui="{ list: 'w-full justify-start gap-1 rounded-none border-b border-[var(--border)] bg-transparent p-0 overflow-x-auto', indicator: 'hidden', trigger: 'type-label relative h-10 flex-none gap-2 rounded-none px-3 text-[var(--text-secondary)] after:absolute after:inset-x-2 after:bottom-0 after:hidden after:h-0.5 after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0' }" />
-      <UAlert
+      <DismissibleAlert
         v-if="appSettings.settingsError.value"
         role="alert"
         color="error"
         variant="soft"
         :title="t('settings.saveFailed')"
         :description="appSettings.settingsError.value"
+        :dismiss-key="appSettings.settingsError.value"
         class="w-full"
       />
       <RecentSoftwareSettings v-if="section === 'software'" />
@@ -491,7 +493,7 @@ onBeforeUnmount(() => {
               />
             </div>
           </ManagementFormRow>
-          <p v-if="onboardingError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ onboardingError }}</p>
+          <DismissibleAlert v-if="onboardingError" role="alert" color="error" variant="soft" :description="onboardingError" :dismiss-key="onboardingError" class="mx-4 mb-3" @dismiss="onboardingError = ''" />
         </ManagementFormSection>
 
         <ManagementFormSection data-testid="settings-section-data" :title="t('settings.data.title')">
@@ -500,7 +502,7 @@ onBeforeUnmount(() => {
               <UButton color="neutral" variant="outline" icon="i-tabler-folder-open" :label="t('settings.data.open')" :title="t('settings.data.open')" :loading="openingDictionaryDirectory" @click="openDictionaryDirectory" />
             </div>
           </ManagementFormRow>
-          <p v-if="dictionaryDirectoryError" role="alert" class="type-metadata px-4 pb-3 text-error">{{ dictionaryDirectoryError }}</p>
+          <DismissibleAlert v-if="dictionaryDirectoryError" role="alert" color="error" variant="soft" :description="dictionaryDirectoryError" :dismiss-key="dictionaryDirectoryError" class="mx-4 mb-3" @dismiss="dictionaryDirectoryError = ''" />
         </ManagementFormSection>
       </div>
     </div>

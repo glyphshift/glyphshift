@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
 import { normalizeFontLanguage } from '../fontFallbacks'
 import { defaultTranslationLanguages, suggestedLanguageCodes, translationLanguageLabel } from '../settingsCatalogs'
+import DismissibleAlert from './DismissibleAlert.vue'
 const { t, locale } = useI18n()
 const app = useAppSettings()
 const query = ref('')
@@ -49,7 +50,7 @@ async function add() {
       <UButton v-for="item in suggestions" :key="item.value" color="neutral" variant="soft" size="sm" :label="item.label" :disabled="app.settingsBusy.value || app.settings.value.translationLanguages.includes(item.value)" :title="app.settings.value.translationLanguages.includes(item.value) ? t('settingsManager.duplicateLanguage') : item.label" @click="code = item.value; error = ''" />
     </div>
     <p class="type-metadata mb-3 text-[var(--text-muted)]">{{ t('settingsManager.languageSuggestionHint') }}</p>
-    <p v-if="error" role="alert" class="type-metadata mb-3 text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="mb-3" @dismiss="error = ''" />
     <p v-else-if="saved" role="status" class="type-metadata mb-3 text-[var(--text-muted)]">{{ t('fontFallbacks.saved') }}</p>
   </ManagementFormSection>
 </template>

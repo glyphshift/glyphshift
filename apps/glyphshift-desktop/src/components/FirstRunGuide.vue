@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toValue, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useGuidedTour, type GuidedTourStep } from '../useGuidedTour'
@@ -320,7 +321,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <p v-if="props.error" role="alert" class="mb-0 mt-3 type-metadata leading-5 text-[var(--danger)]">{{ props.error }}</p>
+        <DismissibleAlert v-if="props.error" role="alert" color="error" variant="soft" :description="props.error" :dismiss-key="props.error" class="mt-3" />
 
         <div class="mt-4 flex items-center gap-2 border-t border-[var(--border)] pt-3">
           <UButton color="neutral" variant="ghost" size="xs" :label="t('firstRun.guide.skip')" :disabled="busy" @click="skipGuide" />

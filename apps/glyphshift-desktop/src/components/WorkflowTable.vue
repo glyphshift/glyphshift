@@ -33,6 +33,7 @@ import { useTableColumns } from '../useTableColumns'
 import AdapterSelectionTable from './AdapterSelectionTable.vue'
 import SelectedFontTags from './SelectedFontTags.vue'
 import ShortcutRecorder from './ShortcutRecorder.vue'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 const props = defineProps<{
   items: WorkflowSummary[]
@@ -498,7 +499,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
       </template>
     </ManagementPageHeader>
 
-    <UAlert v-if="workflowMessage" role="alert" color="error" variant="soft" :title="t('workflows.error')" :description="workflowMessage" class="mb-3" />
+    <DismissibleAlert v-if="workflowMessage" role="alert" color="error" variant="soft" :title="t('workflows.error')" :description="workflowMessage" :dismiss-key="workflowMessage" class="mb-3" />
     <ManagementTableFrame v-model:query="query" v-model:filter-value="statusFilter" v-model:page="page" v-model:page-size="pageSize" :search-placeholder="t('workflows.searchPlaceholder')" :search-label="t('workflows.searchLabel')" :filter-label="statusFilterOptions.find(option => option.value === statusFilter)?.label" :filter-aria-label="t('workflows.filterLabel')" :filter-options="statusFilterOptions" :column-options="columnOptions" :columns-label="t('table.columns')" :selected-count="selected.size" :selected-label="t('workflows.itemLabel')" :total="filtered.length" :item-label="t('workflows.itemLabel')" @toggle-column="toggleColumn">
       <template #toolbar-actions><LibrarySortMenu v-model="sortMode" :options="sortOptions" /></template>
       <template #bulk-actions>
@@ -553,7 +554,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
           <UButton data-tour="workflow-save" color="primary" variant="solid" size="sm" icon="i-tabler-device-floppy" :label="editingWorkflow ? t('workflows.save') : t('workflows.createConfirm')" :loading="busy" :disabled="busy || !formValid" @click="submitForm" />
         </template>
       </ManagementDetailHeader>
-      <UAlert v-if="workflowMessage" role="alert" color="warning" variant="soft" :title="t('workflows.settings')" :description="workflowMessage" class="mb-3" />
+      <DismissibleAlert v-if="workflowMessage" role="alert" color="warning" variant="soft" :title="t('workflows.settings')" :description="workflowMessage" :dismiss-key="workflowMessage" class="mb-3" />
       <ManagementWorkspaceSurface variant="canvas">
       <UTabs v-model="activeEditorTab" @click="openEmptyTabPicker" @keydown.enter="openEmptyTabPicker" @keydown.space="openEmptyTabPicker" data-testid="workflow-editor-tabs" :items="editorTabs" color="neutral" variant="link" size="sm" orientation="vertical" activation-mode="manual" class="h-full min-h-0 w-full" :ui="{ root: '!grid h-full min-h-0 w-full grid-cols-[176px_minmax(0,1fr)] items-stretch gap-0', list: '!flex h-full min-h-0 flex-col justify-start gap-1 overflow-y-auto rounded-none border-r border-[var(--border)] bg-[var(--surface-subtle)] p-3 [scrollbar-gutter:stable]', indicator: 'hidden', trigger: 'type-label relative h-9 w-full flex-none justify-start gap-2 rounded-[5px] px-2.5 py-0 text-[var(--text-secondary)] after:absolute after:inset-y-2 after:left-0 after:hidden after:w-0.5 after:rounded-full after:bg-[var(--accent)] hover:bg-[var(--surface-hover)] data-[state=active]:bg-[var(--selection)] data-[state=active]:font-semibold data-[state=active]:!text-[var(--text)] data-[state=active]:after:block', leadingIcon: 'size-4 shrink-0', label: 'min-w-0 flex-1 truncate text-left', trailingBadge: 'type-caption ml-auto min-w-4 justify-center px-1', content: 'min-h-0 overflow-y-auto rounded-none bg-[var(--app-bg)] px-5 py-5 focus:outline-none [scrollbar-gutter:stable]' }">
         <template #basic>
@@ -572,7 +573,7 @@ usePageEscape(() => formOpen.value, requestCloseForm)
               <ShortcutRecorder v-model="globalShortcut" :disabled="busy" />
             </ManagementFormRow>
             <template #after>
-              <UAlert v-if="messages[editing?.id ?? 'workflows']" color="error" variant="soft" :title="messages[editing?.id ?? 'workflows']" />
+              <DismissibleAlert v-if="messages[editing?.id ?? 'workflows']" color="error" variant="soft" :title="messages[editing?.id ?? 'workflows']" :dismiss-key="messages[editing?.id ?? 'workflows']" />
               <UAlert v-if="basicProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(basicProblems)" />
             </template>
           </ManagementFormSection>

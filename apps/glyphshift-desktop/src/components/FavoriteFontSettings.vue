@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
 import { useWorkspace } from '../useWorkspace'
 import { recommendedFavoriteFonts } from '../settingsCatalogs'
+import DismissibleAlert from './DismissibleAlert.vue'
 const { t } = useI18n()
 const app = useAppSettings()
 const workspace = useWorkspace()
@@ -39,6 +40,6 @@ async function refresh() {
       <USelectMenu v-model="selected" :items="available" virtualize :aria-label="t('settingsManager.searchFont')" :placeholder="t('settingsManager.searchFont')" :disabled="app.settingsBusy.value" class="min-w-0 flex-1" />
       <UButton :label="t('settingsManager.addFavorite')" icon="i-tabler-star" :disabled="!selected || app.settingsBusy.value || app.settings.value.favoriteFonts.length >= 64" @click="selected && save([...app.settings.value.favoriteFonts, selected])" />
     </div>
-    <p v-if="error" role="alert" class="type-metadata mb-3 text-error">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="mb-3" @dismiss="error = ''" />
   </ManagementFormSection>
 </template>

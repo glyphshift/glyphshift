@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { TableColumn } from '@nuxt/ui/components/Table.vue'
@@ -161,12 +162,12 @@ onBeforeUnmount(() => {
     @update:open="$event || stop()"
   >
     <template #body>
-      <UAlert v-if="error" role="alert" color="error" variant="soft" :title="t('workflows.diagnostics.error')" :description="error">
+      <UAlert v-if="error" role="alert" color="error" variant="soft" :title="t('workflows.diagnostics.error')" :description="error" close @update:open="$event || (error = '')">
         <template #actions>
           <UButton color="error" variant="outline" size="xs" :label="t('workflows.diagnostics.retry')" @click="refresh" />
         </template>
       </UAlert>
-      <UAlert v-if="dropped" color="warning" variant="soft" icon="i-tabler-alert-triangle" :description="t('workflows.diagnostics.dropped', { count: dropped })" />
+      <DismissibleAlert v-if="dropped" color="warning" variant="soft" icon="i-tabler-alert-triangle" :description="t('workflows.diagnostics.dropped', { count: dropped })" :dismiss-key="dropped" @dismiss="dropped = 0" />
 
       <div class="flex items-center gap-2">
         <UInput v-model="query" icon="i-tabler-search" size="sm" class="min-w-0 flex-1" :placeholder="t('workflows.diagnostics.search')" :aria-label="t('workflows.diagnostics.search')" />

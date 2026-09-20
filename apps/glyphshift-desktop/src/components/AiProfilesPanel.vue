@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DismissibleAlert from './DismissibleAlert.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import defaultTranslationPrompt from '../../../../crates/product/ai-translation/src/default-translation-prompt.txt?raw'
@@ -622,7 +623,7 @@ onMounted(() => void ai.connect())
           <UButton v-if="supportsModelDiscovery" color="neutral" variant="soft" icon="i-tabler-refresh" :label="t('ai.fetchModels')" :loading="modelsLoading" class="shrink-0" @click="fetchModels" />
         </div>
         <p v-if="usesMicrosoftTranslator" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.microsoftDeploymentHint') }}</p>
-        <p v-if="modelsError" role="alert" class="type-caption m-0 mt-1 leading-4 text-[var(--danger)]">{{ modelsError }}</p>
+        <DismissibleAlert v-if="modelsError" role="alert" color="error" variant="soft" :description="modelsError" :dismiss-key="modelsError" class="mt-2" @dismiss="modelsError = ''" />
         <p v-else-if="modelsFetched" role="status" class="type-caption m-0 mt-1 leading-4 text-[var(--text-muted)]">{{ t('ai.modelsFetched', { count: modelItems.length }) }}</p>
       </UFormField>
       </div>

@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppSettings } from '../appSettings'
 import type { AiFilterPolicy } from '../textFilters'
+import DismissibleAlert from './DismissibleAlert.vue'
 const { t } = useI18n()
 const app = useAppSettings()
 const draft = ref<AiFilterPolicy>(JSON.parse(JSON.stringify(app.settings.value.textFilterPolicy)))
@@ -39,6 +40,6 @@ async function save() {
     <ManagementFormRow :label="t('ai.excludedPatterns')" :help="t('ai.excludedPatternsHint')" multiline>
       <UTextarea v-model="patterns" :aria-label="t('ai.excludedPatterns')" :rows="3" class="w-full" />
     </ManagementFormRow>
-    <p v-if="error" role="alert" class="text-error px-4">{{ error }}</p>
+    <DismissibleAlert v-if="error" role="alert" color="error" variant="soft" :description="error" :dismiss-key="error" class="mx-4" @dismiss="error = ''" />
   </ManagementFormSection>
 </template>

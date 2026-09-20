@@ -15,6 +15,7 @@ import {
 import { managementActionsColumnMeta, managementIdentityColumnMeta } from '../tableInteraction'
 import { useTableColumns } from '../useTableColumns'
 import { useWorkspace } from '../useWorkspace'
+import DismissibleAlert from './DismissibleAlert.vue'
 
 type TaskTab = 'current' | 'statistics' | 'list'
 
@@ -420,7 +421,7 @@ onMounted(() => void ai.connectTaskMonitor().catch(() => undefined))
               <strong v-if="current.usage" class="shrink-0 text-[16px] font-semibold tabular-nums text-[var(--text)]">{{ usagePrimary(current.usage) }}</strong>
             </div>
 
-            <UAlert v-if="current.writebackError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('ai.tasks.writebackFailed')" :description="t('ai.tasks.writebackFailedDescription')" class="m-3" />
+            <DismissibleAlert v-if="current.writebackError" color="error" variant="soft" icon="i-tabler-alert-circle" :title="t('ai.tasks.writebackFailed')" :description="t('ai.tasks.writebackFailedDescription')" :dismiss-key="current.jobId" class="m-3" />
 
             <UCollapsible v-model:open="batchDetailsOpen" class="border-t border-[var(--border)]">
               <UButton
