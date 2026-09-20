@@ -688,7 +688,7 @@ fn desktop_update_settings(
                     .map(|fallback| (fallback.language(), fallback.font_family())),
             );
             window_controls::update_labels(&app, &saved);
-            // The workflow loop republishes changed decision inputs on its next reconciliation.
+            application.reconcile_enabled_workflows()?;
             Ok(saved)
         }
         Err(error) => {

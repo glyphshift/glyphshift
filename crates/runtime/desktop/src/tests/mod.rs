@@ -20,6 +20,7 @@ use tempfile::tempdir;
 const TEST_ADAPTER_ID: &str = "test.inline";
 type AcquisitionCall = (usize, u64, Box<str>);
 type AcquisitionCalls = Arc<Mutex<Vec<AcquisitionCall>>>;
+type PublishedPublications = Arc<Mutex<Vec<glyphshift_runtime_contract::RuntimePublication>>>;
 
 fn open_test_backend(root: impl AsRef<Path>) -> DesktopBackend {
     DesktopBackend::open_with_environment(
@@ -46,6 +47,10 @@ struct InventoryController;
 
 struct InMemoryRuntimeFactory;
 
+struct PublicationCaptureFactory {
+    publications: PublishedPublications,
+}
+
 impl RuntimeFactory for InMemoryRuntimeFactory {
     fn discover(
         &mut self,
@@ -62,6 +67,28 @@ impl RuntimeFactory for InMemoryRuntimeFactory {
             acquisition_instance_id: 0,
             acquisition_calls: None,
             live_instance: None,
+            published_publications: None,
+        }))
+    }
+}
+
+impl RuntimeFactory for PublicationCaptureFactory {
+    fn discover(
+        &mut self,
+        application_id: Box<str>,
+        spec: &DesktopRuntimeSpec,
+    ) -> Result<Box<dyn ManagedRuntime>, DesktopRuntimeError> {
+        Ok(Box::new(InMemoryRuntime {
+            application_id,
+            active_features: BTreeSet::new(),
+            generation: spec.publication().generation(),
+            stop_fails: false,
+            target_ids: vec![1],
+            captured_target_ids: None,
+            acquisition_instance_id: 0,
+            acquisition_calls: None,
+            live_instance: None,
+            published_publications: Some(Arc::clone(&self.publications)),
         }))
     }
 }
@@ -88,6 +115,7 @@ impl RuntimeFactory for AcquisitionRuntimeFactory {
             acquisition_instance_id: instance_id,
             acquisition_calls: Some(Arc::clone(&self.calls)),
             live_instance: None,
+            published_publications: None,
         }))
     }
 }
@@ -102,6 +130,7 @@ struct InMemoryRuntime {
     acquisition_instance_id: usize,
     acquisition_calls: Option<AcquisitionCalls>,
     live_instance: Option<(Arc<AtomicUsize>, usize)>,
+    published_publications: Option<PublishedPublications>,
 }
 
 struct FamilyCaptureFactory {
@@ -124,6 +153,7 @@ impl RuntimeFactory for FamilyCaptureFactory {
             acquisition_instance_id: 0,
             acquisition_calls: None,
             live_instance: None,
+            published_publications: None,
         }))
     }
 }
@@ -153,6 +183,7 @@ impl RuntimeFactory for OfflineThenRunningRuntimeFactory {
             acquisition_instance_id: 0,
             acquisition_calls: None,
             live_instance: None,
+            published_publications: None,
         }))
     }
 }
@@ -175,6 +206,7 @@ impl RuntimeFactory for RetryRuntimeFactory {
                 acquisition_instance_id: 0,
                 acquisition_calls: None,
                 live_instance: None,
+                published_publications: None,
             },
             reject_capture,
         }))
@@ -382,6 +414,12 @@ impl ManagedRuntime for InMemoryRuntime {
         &mut self,
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError> {
+        if let Some(publications) = &self.published_publications {
+            publications
+                .lock()
+                .map_err(|_| DesktopRuntimeError::InvalidState)?
+                .push(publication.clone());
+        }
         self.generation = publication.generation();
         Ok(())
     }
@@ -499,6 +537,7 @@ impl RuntimeFactory for RestartingRuntimeFactory {
             acquisition_instance_id: 0,
             acquisition_calls: None,
             live_instance: Some((self.instance.clone(), instance)),
+            published_publications: None,
         }))
     }
 }

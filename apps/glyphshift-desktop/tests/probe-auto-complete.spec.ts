@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { model } from './fixtures/productModel'
 
+test.setTimeout(60_000)
+
 async function setup(page: Page, interval = 5) {
   await page.clock.install()
   await page.addInitScript(({ snapshot, interval }) => {
@@ -68,6 +70,46 @@ test('probe auto fill survives navigation, skips busy and empty cycles, and expo
   await expect(stoppedNotice).toBeVisible()
   await stoppedNotice.getByRole('button').click()
   await expect(stoppedNotice).toHaveCount(0)
+})
+
+test('retryable partial translation failure keeps auto fill enabled and retries later', async ({ page }) => {
+  await setup(page, 1)
+  await toggle(page)
+  await page.clock.runFor(1200)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(1)
+
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    const error = {
+      category: 'timeout',
+      retryable: true,
+      retryAfterMs: null,
+      providerCode: null,
+      requestId: null,
+      httpStatus: null,
+      safeMessage: 'temporary timeout',
+    }
+    state.task.status = 'completed_with_failures'
+    state.task.failedCount = 1
+    state.task.failedBatches = 1
+    state.task.errors = [error]
+    state.task.batches = [{
+      batchNumber: 1,
+      itemCount: 1,
+      status: 'failed',
+      attemptCount: 1,
+      startedAfterMs: 0,
+      elapsedMs: 1000,
+      lastError: error,
+      usage: null,
+    }]
+    state.task.dictionaryLocked = false
+  })
+
+  await page.clock.runFor(8000)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(2)
+  await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
 })
 
 test('unchecking auto fill while planning prevents a late request', async ({ page }) => {

@@ -1,15 +1,17 @@
 import { ref } from 'vue'
 import { applyWorkflowRuntime } from './workspace/state'
 import { invoke } from '@tauri-apps/api/core'
-import { useAiTranslation } from './useAiTranslation'
+import { useAiTranslation, type AiTranslationTask } from './useAiTranslation'
 import { useAppSettings } from './appSettings'
 import type { ProbeRunSummary } from './model'
 
-interface AutoRun { workflowId?: string; profileId: string; nextCheck: number; jobId?: string; checkedContent?: string; pendingContent?: string }
+interface AutoRun { workflowId?: string; profileId: string; nextCheck: number; jobId?: string; checkedContent?: string; pendingContent?: string; retryFailures?: number }
 const runs = ref<Record<string, AutoRun>>({})
 const stopped = ref<Record<string, boolean>>({})
 const queued = ref<string[]>([])
 const MIN_CHECK_MS = 250
+const MIN_RETRY_MS = 5_000
+const MAX_RETRY_BACKOFF_MS = 60_000
 let timer: ReturnType<typeof setTimeout> | undefined
 let checking = false
 let listening = false
@@ -20,6 +22,16 @@ export function useProbeAutoComplete() {
   const settings = useAppSettings()
   const intervalMs = () => Math.max(MIN_CHECK_MS, settings.settings.value.autoCompleteIntervalSeconds * 1000)
   function enqueue(runId: string) { if (!queued.value.includes(runId)) queued.value.push(runId) }
+  function retryDelay(task: AiTranslationTask, failures: number) {
+    const failedBatchErrors = task.batches
+      .filter(batch => batch.status === 'failed' && batch.lastError)
+      .map(batch => batch.lastError!)
+    const errors = failedBatchErrors.length ? failedBatchErrors : task.errors
+    if (!errors.length || errors.some(error => !error.retryable)) return null
+    const retryAfterMs = Math.max(0, ...errors.map(error => error.retryAfterMs ?? 0))
+    const backoffMs = Math.min(MAX_RETRY_BACKOFF_MS, MIN_RETRY_MS * 2 ** Math.min(failures, 4))
+    return Math.max(intervalMs(), retryAfterMs, backoffMs)
+  }
   function stop(runId: string) {
     delete runs.value[runId]
     queued.value = queued.value.filter(id => id !== runId)
@@ -63,14 +75,28 @@ export function useProbeAutoComplete() {
             continue
           }
           const job = ai.taskCenter.value.current
-          if (run.jobId && job?.jobId === run.jobId && ['interrupted', 'cancelled', 'completed_with_failures', 'cancelling'].includes(job.status)) {
-            stopped.value[runId] = true
-            stop(runId)
-            continue
+          if (run.jobId && job?.jobId === run.jobId) {
+            if (job.writebackError) { stopped.value[runId] = true; stop(runId); continue }
+            if (job.status === 'completed_with_failures') {
+              const failures = run.retryFailures ?? 0
+              const delay = retryDelay(job, failures)
+              if (delay === null) { stopped.value[runId] = true; stop(runId); continue }
+              run.jobId = undefined
+              run.retryFailures = failures + 1
+              run.nextCheck = Date.now() + delay
+              run.pendingContent = undefined
+              queued.value = queued.value.filter(id => id !== runId)
+              continue
+            }
+            if (['interrupted', 'cancelled', 'cancelling'].includes(job.status)) {
+              stopped.value[runId] = true
+              stop(runId)
+              continue
+            }
           }
           if (run.jobId) {
-            if (!job || job.jobId !== run.jobId || job.writebackError) { stopped.value[runId] = true; stop(runId); continue }
-            if (job.status === 'completed') run.jobId = undefined
+            if (!job || job.jobId !== run.jobId) { stopped.value[runId] = true; stop(runId); continue }
+            if (job.status === 'completed') { run.jobId = undefined; run.retryFailures = 0 }
           }
           if (Date.now() < run.nextCheck) continue
           run.nextCheck = Date.now() + intervalMs()

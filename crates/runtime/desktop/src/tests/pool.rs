@@ -615,6 +615,75 @@ fn single_workflows_publish_shared_dictionary_updates_to_each_software() {
 }
 
 #[test]
+fn same_generation_fallback_font_change_republishes_the_active_runtime() {
+    let root = tempdir().expect("fallback font Runtime data");
+    let executable = root.path().join("FallbackFontHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    backend.replace_font_families(["Fallback Sans A", "Fallback Sans B"]);
+    backend.replace_language_fallback_fonts([("zh-cn", "Fallback Sans A")]);
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.fallback", "Fallback", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "打开")]),
+        )
+        .expect("fallback dictionary");
+    create_single_workflow(
+        &mut backend,
+        "workflow.fallback",
+        &software_id,
+        "dictionary.fallback",
+    );
+
+    let first_intent = backend
+        .effective_workflow_intent("workflow.fallback")
+        .expect("initial intent");
+    let first_publication = first_intent.targets()[0]
+        .runtime_spec()
+        .publication()
+        .clone();
+    let publications = Arc::new(Mutex::new(Vec::new()));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(PublicationCaptureFactory {
+        publications: Arc::clone(&publications),
+    }));
+    pool.reconcile_workflow(&first_intent)
+        .expect("activate initial fallback font");
+    assert!(publications.lock().unwrap().is_empty());
+
+    backend.replace_language_fallback_fonts([("zh-cn", "Fallback Sans B")]);
+    let second_intent = backend
+        .effective_workflow_intent("workflow.fallback")
+        .expect("updated intent");
+    let second_publication = second_intent.targets()[0]
+        .runtime_spec()
+        .publication()
+        .clone();
+    assert_eq!(
+        first_publication.generation(),
+        second_publication.generation()
+    );
+    assert_ne!(
+        first_publication.identity().unwrap(),
+        second_publication.identity().unwrap()
+    );
+
+    pool.reconcile_workflow(&second_intent)
+        .expect("reconcile updated fallback font");
+    let published = publications.lock().unwrap();
+    assert_eq!(published.len(), 1);
+    assert_eq!(
+        published[0].identity().unwrap(),
+        second_publication.identity().unwrap()
+    );
+}
+
+#[test]
 fn explicit_workflow_replacement_removes_the_entire_old_intent() {
     let root = tempdir().expect("workflow Runtime data");
     let mut backend = open_test_backend(root.path().join("data"));

@@ -144,6 +144,7 @@ impl WorkflowReconcileReport {
 pub struct DesktopRuntimePool {
     factory: Box<dyn RuntimeFactory>,
     sessions: BTreeMap<Box<str>, Box<dyn ManagedRuntime>>,
+    session_publications: BTreeMap<Box<str>, glyphshift_runtime_contract::RuntimePublication>,
     requested_features: BTreeMap<Box<str>, BTreeSet<Feature>>,
     workflow_targets: BTreeMap<Box<str>, BTreeSet<Box<str>>>,
     capture_targets: BTreeSet<Box<str>>,
@@ -161,6 +162,7 @@ impl DesktopRuntimePool {
         Self {
             factory,
             sessions: BTreeMap::new(),
+            session_publications: BTreeMap::new(),
             requested_features: BTreeMap::new(),
             workflow_targets: BTreeMap::new(),
             capture_targets: BTreeSet::new(),
@@ -205,9 +207,25 @@ impl DesktopRuntimePool {
         spec: &DesktopRuntimeSpec,
     ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
         let application_id = application_id.into();
+        let stale_inactive_session = self
+            .sessions
+            .get(application_id.as_ref())
+            .is_some_and(|runtime| !runtime.is_active())
+            && self
+                .session_publications
+                .get(application_id.as_ref())
+                .is_none_or(|publication| publication != spec.publication());
+        if stale_inactive_session {
+            self.sessions.remove(application_id.as_ref());
+            self.session_publications.remove(application_id.as_ref());
+            self.requested_features.remove(application_id.as_ref());
+            self.active_collections.remove(application_id.as_ref());
+        }
         if !self.sessions.contains_key(application_id.as_ref()) {
             let runtime = self.factory.discover(application_id.clone(), spec)?;
             self.sessions.insert(application_id.clone(), runtime);
+            self.session_publications
+                .insert(application_id.clone(), spec.publication().clone());
         }
         self.status(&application_id)
             .ok_or(DesktopRuntimeError::InvalidState)
@@ -378,20 +396,26 @@ impl DesktopRuntimePool {
         }
 
         self.discover(application_id.clone(), spec)?;
+        let publication_changed = self
+            .session_publications
+            .get(application_id.as_ref())
+            .is_none_or(|publication| publication != spec.publication());
         let runtime = self
             .sessions
             .get_mut(application_id.as_ref())
             .ok_or(DesktopRuntimeError::InvalidState)?;
         if runtime.is_active() {
-            if runtime
-                .applied_generation()
-                .is_none_or(|generation| spec.publication().generation() > generation)
-            {
+            if publication_changed {
                 runtime.publish(spec.publication().clone())?;
             }
+            let status = runtime_status(runtime.as_ref(), requested_features.clone());
             self.requested_features
                 .insert(application_id.clone(), requested_features.clone());
-            return Ok(runtime_status(runtime.as_ref(), requested_features));
+            if publication_changed {
+                self.session_publications
+                    .insert(application_id, spec.publication().clone());
+            }
+            return Ok(status);
         }
         let Some(target_id) =
             target_id.or_else(|| runtime.targets().first().map(RuntimeTarget::id))
@@ -626,6 +650,7 @@ impl DesktopRuntimePool {
         let previous_collection = self.active_collections.remove(application_id.as_ref());
         let Some(mut runtime) = self.sessions.remove(application_id.as_ref()) else {
             self.requested_features.remove(application_id.as_ref());
+            self.session_publications.remove(application_id.as_ref());
             return Ok(DesktopRuntimeStatus::inactive(application_id));
         };
         if runtime.is_active() {
@@ -639,6 +664,7 @@ impl DesktopRuntimePool {
             }
         }
         self.requested_features.remove(application_id.as_ref());
+        self.session_publications.remove(application_id.as_ref());
         Ok(runtime_status(runtime.as_ref(), BTreeSet::new()))
     }
 
@@ -708,6 +734,7 @@ impl DesktopRuntimePool {
             runtime.abandon();
         }
         self.requested_features.remove(application_id);
+        self.session_publications.remove(application_id);
     }
 
     pub fn stop_capture(
@@ -785,6 +812,7 @@ impl DesktopRuntimePool {
                 runtime.abandon();
             }
         }
+        self.session_publications.remove(application_id.as_ref());
 
         let mut runtime = self.factory.discover(application_id.clone(), spec)?;
         if !requested_features.is_empty() {
@@ -794,7 +822,9 @@ impl DesktopRuntimePool {
             }
         }
         let status = runtime_status(runtime.as_ref(), requested_features);
-        self.sessions.insert(application_id, runtime);
+        self.sessions.insert(application_id.clone(), runtime);
+        self.session_publications
+            .insert(application_id, spec.publication().clone());
         Ok(status)
     }
 
@@ -823,16 +853,21 @@ impl DesktopRuntimePool {
         application_id: &str,
         publication: glyphshift_runtime_contract::RuntimePublication,
     ) -> Result<(), DesktopRuntimeError> {
+        let cached_publication = publication.clone();
         let runtime = self
             .sessions
             .get_mut(application_id)
             .ok_or(DesktopRuntimeError::InvalidState)?;
-        runtime.publish(publication)
+        runtime.publish(publication)?;
+        self.session_publications
+            .insert(application_id.into(), cached_publication);
+        Ok(())
     }
 
     pub fn remove(&mut self, application_id: &str) -> Result<(), DesktopRuntimeError> {
         let Some(mut runtime) = self.sessions.remove(application_id) else {
             self.requested_features.remove(application_id);
+            self.session_publications.remove(application_id);
             return Ok(());
         };
         if runtime.is_active() {
@@ -843,6 +878,7 @@ impl DesktopRuntimePool {
         }
         self.requested_features.remove(application_id);
         self.capture_targets.remove(application_id);
+        self.session_publications.remove(application_id);
         Ok(())
     }
 }
