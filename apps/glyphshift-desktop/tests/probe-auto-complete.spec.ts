@@ -6,7 +6,7 @@ test.setTimeout(60_000)
 async function setup(page: Page, interval = 5) {
   await page.clock.install()
   await page.addInitScript(({ snapshot, interval }) => {
-    const state = { observedCount: 1, starts: 0, plans: 0, startedScopes: [] as string[], plannedCounts: [] as number[], candidates: true, holdPlan: false, release: null as any, task: null as any, taskCenterFailures: 0, status: 'running', phase: 'running', enabled: true, cancelled: [] as string[] }
+    const state = { observedCount: 1, starts: 0, plans: 0, startedScopes: [] as string[], plannedCounts: [] as number[], candidates: true, holdPlan: false, release: null as any, task: null as any, taskCenterFailures: 0, planFailures: 0, status: 'running', phase: 'running', enabled: true, cancelled: [] as string[] }
     ;(window as any).__auto = state
     const profile = { id: 'profile.auto', name: '自动测试', protocol: 'ollama_chat', baseUrl: 'http://127.0.0.1:11434/api', modelId: 'synthetic', reasoningEffort: 'disabled', timeoutMs: 60000, maxItemsPerRequest: 50, maxConcurrency: 1, maxRetries: 0, filterPolicy: {}, hasCredential: false, credentialRequired: false }
     const run = { id: 'probe-auto', workflowId: 'workflow-proof', name: '自动探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'], status: 'running', livePreviewEnabled: false, observationRevision: 1, observedCount: 1, ignoredCount: 0, droppedObservations: 0, previewGeneration: 1, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: null, excludedDictionaryIds: [], exclusionRevisions: {} }
@@ -28,6 +28,10 @@ async function setup(page: Page, interval = 5) {
       if (command === 'desktop_plan_probe_ai_translation') {
         state.plans++
         state.plannedCounts.push(state.observedCount)
+        if (state.planFailures > 0) {
+          state.planFailures--
+          throw new Error('transient probe-plan failure')
+        }
         if (state.holdPlan) await new Promise(resolve => { state.release = resolve })
         return { token: args.request.runId, scopeId: `probe:${args.request.runId}`, snapshotRevision: 1, sourceLocale: 'en-US', targetLocale: 'zh-CN', candidates: state.candidates ? [{ itemId: 'one', source: 'Open', protectedTokens: [] }] : [], skipped: [] }
       }
@@ -158,6 +162,28 @@ test('replacement of the global current task does not disable auto fill', async 
 
   await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
+})
+
+test('transient probe planning failure after a successful job retries without disabling auto fill', async ({ page }) => {
+  await setup(page, 0)
+  await toggle(page)
+  await page.clock.runFor(1200)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(1)
+
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    state.task.status = 'completed'
+    state.task.dictionaryLocked = false
+    state.planFailures = 1
+  })
+  await page.clock.runFor(1200)
+
+  await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
+  await expect.poll(async () => {
+    await page.clock.runFor(600)
+    return page.evaluate(() => (window as any).__auto.starts)
+  }).toBe(2)
 })
 
 test('unchecking auto fill while planning prevents a late request', async ({ page }) => {

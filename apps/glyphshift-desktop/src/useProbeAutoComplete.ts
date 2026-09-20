@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { applyWorkflowRuntime } from './workspace/state'
 import { invoke } from '@tauri-apps/api/core'
 import { useAiTranslation, type AiTranslationTask } from './useAiTranslation'
+import { isCommandError } from './commandError'
 import { useAppSettings } from './appSettings'
 import type { ProbeRunSummary } from './model'
 
@@ -12,6 +13,15 @@ const queued = ref<string[]>([])
 const MIN_CHECK_MS = 250
 const MIN_RETRY_MS = 5_000
 const MAX_RETRY_BACKOFF_MS = 60_000
+const AUTO_FILL_FATAL_COMMAND_ERRORS = new Set([
+  'ai.profile_required',
+  'ai.profile_invalid',
+  'ai.profile_not_found',
+  'ai.credential_missing',
+  'ai.filter_pattern_invalid',
+  'ai.provider_unavailable',
+  'ai.task_scope_invalid',
+])
 let timer: ReturnType<typeof setTimeout> | undefined
 let checking = false
 let listening = false
@@ -135,8 +145,15 @@ export function useProbeAutoComplete() {
             if (task.scopeId === `probe:${runId}`) run.jobId = task.jobId
             else enqueue(runId)
           }
-        } catch {
-          if (current()) { stopped.value[runId] = true; stop(runId) }
+        } catch (reason) {
+          if (!current()) continue
+          if (isCommandError(reason) && AUTO_FILL_FATAL_COMMAND_ERRORS.has(reason.code)) {
+            stopped.value[runId] = true
+            stop(runId)
+            continue
+          }
+          run.pendingContent = undefined
+          run.nextCheck = Date.now() + intervalMs()
         }
       }
     } finally {
