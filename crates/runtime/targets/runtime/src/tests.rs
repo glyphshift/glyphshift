@@ -5,6 +5,57 @@ use glyphshift_translation::{FontPolicy, TranslationSnapshot};
 static TEST_RUNTIME: Mutex<()> = Mutex::new(());
 
 #[test]
+fn same_generation_publication_update_replaces_the_live_font_policy() {
+    let _serial = TEST_RUNTIME.lock().unwrap();
+    let snapshot = TranslationSnapshot::empty(Generation::new(1));
+    activate_deployment(TargetRuntimeDeployment::new(
+        RuntimePublication::new(
+            RouteProgram::direct("capture"),
+            snapshot.clone(),
+            FontPolicy::empty().with_location("capture", "Fallback Sans A"),
+        ),
+        std::iter::empty(),
+    ))
+    .expect("activate initial font policy");
+
+    let context = Box::into_raw(Box::new(NativeDecisionContext {
+        adapter_id: "synthetic.font".into(),
+        source_policy: SourceTextPolicy::Exact,
+        text_runs: Mutex::new(glyphshift_domain::TextRunResolver::default()),
+        text_host: OnceLock::new(),
+    }));
+    let decide_font = || {
+        let source = "Open".encode_utf16().collect::<Vec<_>>();
+        let mut font = [0_u16; 64];
+        let decision = decide_utf16(
+            context.cast(),
+            source.as_ptr(),
+            source.len() as u32,
+            std::ptr::null_mut(),
+            0,
+            font.as_mut_ptr(),
+            font.len() as u32,
+        );
+        assert_ne!(decision.decision_bits & DECISION_FONT_SUBSTITUTE, 0);
+        String::from_utf16(&font[..decision.font_len as usize]).unwrap()
+    };
+
+    assert_eq!(decide_font(), "Fallback Sans A");
+    update_publication(RuntimePublication::new(
+        RouteProgram::direct("capture"),
+        snapshot,
+        FontPolicy::empty().with_location("capture", "Fallback Sans B"),
+    ))
+    .expect("same-generation font-only publication should update the live Runtime");
+    assert_eq!(decide_font(), "Fallback Sans B");
+
+    deactivate_runtime().expect("deactivate font policy fixture");
+    unsafe {
+        drop(Box::from_raw(context));
+    }
+}
+
+#[test]
 fn target_runtime_drains_observations_only_in_batch_producer_mode() {
     let _serial = TEST_RUNTIME.lock().unwrap();
     let publication = RuntimePublication::new(

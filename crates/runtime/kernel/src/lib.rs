@@ -242,8 +242,11 @@ impl RuntimeKernel {
         let (route, snapshot, font_policy) = publication.into_parts();
         let current = self.snapshot.generation();
         let incoming = snapshot.generation();
-        if incoming <= current {
+        if incoming < current {
             return Err(RuntimeKernelError::StaleGeneration { current, incoming });
+        }
+        if incoming == current && publication_identity == self.publication_identity {
+            return Ok(incoming);
         }
         self.route = route;
         self.snapshot = snapshot;

@@ -242,6 +242,44 @@ fn rtk_005_rejects_a_stale_publication_without_partially_switching_its_route() {
 }
 
 #[test]
+fn rtk_006_applies_same_generation_publication_when_its_identity_changes() {
+    let observation = TextObservation::new("adapter-a", "Open", "surface-main");
+    let snapshot =
+        TranslationSnapshot::empty(Generation::new(2)).with_entry("menu", "Open", "打开");
+    let mut kernel = RuntimeKernel::from_publication(
+        std::iter::empty(),
+        RuntimePublication::new(
+            RouteProgram::direct("menu"),
+            snapshot.clone(),
+            FontPolicy::empty().with_location("menu", "Fallback Sans A"),
+        ),
+    )
+    .expect("initial publication should activate");
+    assert_eq!(
+        kernel.decide(&observation).font,
+        FontDecision::Substitute("Fallback Sans A".into())
+    );
+
+    let acknowledged = kernel
+        .apply_publication(RuntimePublication::new(
+            RouteProgram::direct("menu"),
+            snapshot,
+            FontPolicy::empty().with_location("menu", "Fallback Sans B"),
+        ))
+        .expect("same-generation publication identity change should apply atomically");
+
+    assert_eq!(acknowledged, Generation::new(2));
+    assert_eq!(
+        kernel.decide(&observation),
+        RenderDecision {
+            text: TextDecision::Replace("打开".into()),
+            font: FontDecision::Substitute("Fallback Sans B".into()),
+            generation: Generation::new(2),
+        }
+    );
+}
+
+#[test]
 fn regex_publications_apply_next_generation_and_restore_on_removal() {
     use glyphshift_translation::{RegexTranslationRule, RegexTranslationRules};
     let rules = RegexTranslationRules::compile(vec![RegexTranslationRule {
