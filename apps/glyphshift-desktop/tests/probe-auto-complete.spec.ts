@@ -6,7 +6,7 @@ test.setTimeout(60_000)
 async function setup(page: Page, interval = 5) {
   await page.clock.install()
   await page.addInitScript(({ snapshot, interval }) => {
-    const state = { observedCount: 1, starts: 0, plans: 0, startedScopes: [] as string[], plannedCounts: [] as number[], candidates: true, holdPlan: false, release: null as any, task: null as any, status: 'running', phase: 'running', enabled: true, cancelled: [] as string[] }
+    const state = { observedCount: 1, starts: 0, plans: 0, startedScopes: [] as string[], plannedCounts: [] as number[], candidates: true, holdPlan: false, release: null as any, task: null as any, taskCenterFailures: 0, status: 'running', phase: 'running', enabled: true, cancelled: [] as string[] }
     ;(window as any).__auto = state
     const profile = { id: 'profile.auto', name: '自动测试', protocol: 'ollama_chat', baseUrl: 'http://127.0.0.1:11434/api', modelId: 'synthetic', reasoningEffort: 'disabled', timeoutMs: 60000, maxItemsPerRequest: 50, maxConcurrency: 1, maxRetries: 0, filterPolicy: {}, hasCredential: false, credentialRequired: false }
     const run = { id: 'probe-auto', workflowId: 'workflow-proof', name: '自动探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'], status: 'running', livePreviewEnabled: false, observationRevision: 1, observedCount: 1, ignoredCount: 0, droppedObservations: 0, previewGeneration: 1, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: null, excludedDictionaryIds: [], exclusionRevisions: {} }
@@ -17,7 +17,13 @@ async function setup(page: Page, interval = 5) {
       if (command === 'desktop_probe_runs') return [{ ...run, status: state.status }]
       if (command === 'desktop_probe_run_summary' || command === 'desktop_workflow_collection') return { ...run, status: state.status, observedCount: state.observedCount, workflowRuntime: { workflowId: run.workflowId, targets: [], errors: {}, revision: state.observedCount, lifecycle: { phase: state.phase, enabled: state.enabled, collectNewSources: state.status !== 'paused', checkedAtMs: 1, revision: state.observedCount } } }
       if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
-      if (command === 'desktop_ai_translation_tasks') return { current: structuredClone(state.task), history: [] }
+      if (command === 'desktop_ai_translation_tasks') {
+        if (state.taskCenterFailures > 0) {
+          state.taskCenterFailures--
+          throw new Error('transient task-center failure')
+        }
+        return { current: structuredClone(state.task), history: [] }
+      }
       if (command === 'desktop_probe_run_entries') { (state as any).lastEntryRequest = args; return { observationRevision: 1, dictionaryRevision: 1, page: 1, pageSize: 50, total: 0, rows: [] } }
       if (command === 'desktop_plan_probe_ai_translation') {
         state.plans++
@@ -108,6 +114,48 @@ test('retryable partial translation failure keeps auto fill enabled and retries 
 
   await page.clock.runFor(8000)
   await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(2)
+  await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
+})
+
+test('transient task-center polling failure does not disable auto fill', async ({ page }) => {
+  await setup(page, 0)
+  await toggle(page)
+  await page.clock.runFor(1200)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(1)
+
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    state.task.status = 'completed'
+    state.task.dictionaryLocked = false
+    state.candidates = false
+    state.taskCenterFailures = 1
+  })
+  await page.clock.runFor(1500)
+
+  await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
+})
+
+test('replacement of the global current task does not disable auto fill', async ({ page }) => {
+  await setup(page, 0)
+  await toggle(page)
+  await page.clock.runFor(1200)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(1)
+
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    state.task = {
+      ...state.task,
+      jobId: 'job-other',
+      planToken: 'other-plan',
+      scopeId: 'dictionary:other',
+      origin: 'dictionary',
+      status: 'running',
+    }
+  })
+  await page.clock.runFor(1200)
+
   await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
 })

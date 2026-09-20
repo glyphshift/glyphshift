@@ -57,7 +57,8 @@ export function useProbeAutoComplete() {
     if (checking) return
     checking = true
     try {
-      await ai.connectTaskMonitor()
+      try { await ai.connectTaskMonitor() }
+      catch { return }
       // Coalesce changes while another task is running; never retain stale translation plans.
       for (const [runId, run] of Object.entries(runs.value)) {
         const current = () => runs.value[runId] === run
@@ -95,8 +96,12 @@ export function useProbeAutoComplete() {
             }
           }
           if (run.jobId) {
-            if (!job || job.jobId !== run.jobId) { stopped.value[runId] = true; stop(runId); continue }
-            if (job.status === 'completed') { run.jobId = undefined; run.retryFailures = 0 }
+            if (!job || job.jobId !== run.jobId) {
+              run.jobId = undefined
+              run.retryFailures = 0
+              run.pendingContent = undefined
+            }
+            else if (job.status === 'completed') { run.jobId = undefined; run.retryFailures = 0 }
           }
           if (Date.now() < run.nextCheck) continue
           run.nextCheck = Date.now() + intervalMs()
@@ -104,9 +109,7 @@ export function useProbeAutoComplete() {
           if (run.checkedContent === content) continue
           run.pendingContent = content
           enqueue(runId)
-        } catch {
-          if (current()) { stopped.value[runId] = true; stop(runId) }
-        }
+        } catch { continue }
       }
       // One global task owns writeback; its batches use the selected profile's concurrency.
       while (queued.value.length && !ai.taskRunning.value && !ai.busy.value) {
@@ -136,8 +139,6 @@ export function useProbeAutoComplete() {
           if (current()) { stopped.value[runId] = true; stop(runId) }
         }
       }
-    } catch {
-      for (const id of Object.keys(runs.value)) { stopped.value[id] = true; stop(id) }
     } finally {
       checking = false
       timer = undefined
