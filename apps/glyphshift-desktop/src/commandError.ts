@@ -245,7 +245,6 @@ export function translateCommandError(error: unknown): string {
     }
     else if (controllerElevated) key = 'errors.runtime.targetAccessFailedElevated'
   }
-  if (error.code === 'runtime.session_rejected' && error.args.action === 'refreshText') key = 'errors.runtime.refreshRejected'
   const localizedArgs = Object.fromEntries(Object.entries(error.args).map(([name, value]) => [
     name,
     Array.isArray(value)

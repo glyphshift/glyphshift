@@ -570,7 +570,12 @@ pub fn resolve(
         if target.collect_text {
             requested_features.push(Feature::TextObserve);
         }
-        if has_text_replacement {
+        let live_collection_can_replace = target.collect_text
+            && !target.dictionary_ids.is_empty()
+            && selected_adapters
+                .iter()
+                .any(|adapter| adapter.features.contains(&Feature::TextReplace));
+        if has_text_replacement || live_collection_can_replace {
             requested_features.push(Feature::TextReplace);
         }
         if has_font_scaling {

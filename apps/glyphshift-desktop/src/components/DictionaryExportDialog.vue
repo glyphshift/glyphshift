@@ -11,11 +11,13 @@ const visible = ref(false)
 const format = ref('json')
 const dictionaryId = ref('')
 const batchIds = ref<string[]>([])
+const untranslatedOnly = ref(false)
 const result = ref('')
 const busy = ref(false)
 const error = ref('')
 function open(id: string) {
   batchIds.value = []
+  untranslatedOnly.value = false
   result.value = ''
   dictionaryId.value = id
   format.value = 'json'
@@ -27,11 +29,12 @@ function openBatch(ids: string[]) {
   open(ids[0]!)
   batchIds.value = [...ids]
 }
-async function exportOne(id: string, selectedFormat: 'json' | 'csv') {
+async function exportOne(id: string, selectedFormat: 'json' | 'csv', onlyUntranslated = false) {
   if (busy.value) return
   open(id)
   visible.value = false
   format.value = selectedFormat
+  untranslatedOnly.value = onlyUntranslated
   await confirm()
 }
 async function confirm() {
@@ -55,10 +58,11 @@ async function confirm() {
       if (completed !== batchIds.value.length) error.value = t('dictionaryExport.partialFailure')
       return
     }
-    const path = await save({ title: t('dictionaryExport.title'), defaultPath: `${dictionaryId.value}.${format.value}`, filters: [{ name: format.value.toUpperCase(), extensions: [format.value] }] })
+    const suffix = untranslatedOnly.value ? '-untranslated' : ''
+    const path = await save({ title: t(untranslatedOnly.value ? 'dictionaryExport.partialTitle' : 'dictionaryExport.title'), defaultPath: `${dictionaryId.value}${suffix}.${format.value}`, filters: [{ name: format.value.toUpperCase(), extensions: [format.value] }] })
     if (!path) return
     const outputPath = path.toLowerCase().endsWith(`.${format.value}`) ? path : `${path.replace(/\.(json|csv)$/i, '')}.${format.value}`
-    await exportDictionaryFile(dictionaryId.value, outputPath)
+    await exportDictionaryFile(dictionaryId.value, outputPath, untranslatedOnly.value)
     visible.value = false
   } catch (cause) { error.value = translateCommandError(cause); visible.value = true }
   finally { busy.value = false }

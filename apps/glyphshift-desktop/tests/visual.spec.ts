@@ -31,6 +31,11 @@ async function waitForVisualStability(page: import('@playwright/test').Page) {
   await page.waitForTimeout(150)
 }
 
+async function openDictionarySettings(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: '字典操作' }).click()
+  await page.getByRole('menuitem', { name: '字典设置' }).click()
+}
+
 test('capture composable workflow and asset surfaces', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -43,7 +48,7 @@ test('capture composable workflow and asset surfaces', async ({ page }) => {
   await expect(dialog).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-basic-configuration.png' })
-  await dialog.getByRole('tab', { name: '软件与适配器' }).click()
+  await dialog.getByRole('tab', { name: '设置软件' }).click()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-software-interception.png' })
   await dialog.getByRole('tab', { name: '翻译字典' }).click()
@@ -51,7 +56,7 @@ test('capture composable workflow and asset surfaces', async ({ page }) => {
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-dictionaries.png' })
   await dialog.getByRole('tab', { name: '字体策略' }).click()
   await dialog.getByRole('combobox', { name: '应用范围' }).click()
-  await page.getByRole('option', { name: '探针找到的全部文字' }).click()
+  await page.getByRole('option', { name: '工作流找到的全部文字' }).click()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-font-policy-all-observations.png' })
   await page.getByRole('button', { name: '返回工作流列表' }).click()
@@ -59,35 +64,6 @@ test('capture composable workflow and asset surfaces', async ({ page }) => {
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.waitForTimeout(200)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/dictionaries-metadata.png' })
-})
-
-test('capture probe run creation and joined table state', async ({ page }) => {
-  await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/')
-  await page.getByRole('button', { name: '探针', exact: true }).click()
-  await waitForVisualStability(page)
-  await page.getByRole('button', { name: '新建探针任务' }).click()
-  await expect(page.getByRole('dialog', { name: '新建探针任务' })).toBeVisible()
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-create.png' })
-  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '使用临时词典' }).click()
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-create-new-dictionary.png' })
-  await page.setViewportSize({ width: 960, height: 640 })
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-create-new-dictionary-compact.png' })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const createDialog = page.getByRole('dialog', { name: '新建探针任务' })
-  await createDialog.getByRole('textbox', { name: '任务名称' }).fill('Vector Studio 探针')
-  await page.getByRole('dialog', { name: '新建探针任务' }).getByRole('button', { name: '创建并连接' }).click()
-  await expect(page.getByPlaceholder('搜索原文、译文或适配器')).toBeVisible()
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-table.png' })
-  await page.setViewportSize({ width: 960, height: 640 })
-  await waitForVisualStability(page)
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/probe-run-table-compact.png' })
 })
 
 test('capture distilled dictionary editor, metadata, and guarded inline draft', async ({ page }) => {
@@ -106,7 +82,7 @@ test('capture distilled dictionary editor, metadata, and guarded inline draft', 
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/dictionary-editor-distilled.png' })
 
-  await page.getByRole('button', { name: '字典设置' }).click()
+  await openDictionarySettings(page)
   await expect(page.getByRole('dialog', { name: '字典设置' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/dictionary-settings-modal.png' })
@@ -115,7 +91,7 @@ test('capture distilled dictionary editor, metadata, and guarded inline draft', 
   await page.setViewportSize({ width: 1160, height: 527 })
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/dictionary-editor-distilled-short.png' })
-  await page.getByRole('button', { name: '字典设置' }).click()
+  await openDictionarySettings(page)
   await expect(page.getByRole('dialog', { name: '字典设置' })).toBeVisible()
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/dictionary-settings-modal-short.png' })
@@ -193,23 +169,6 @@ test('capture compact workflow composition', async ({ page }) => {
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-target-composition-compact.png' })
 })
 
-test('capture independent software editor at wide and compact widths', async ({ page }) => {
-  await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/')
-  await page.evaluate(() => document.fonts.ready)
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/software-management.png' })
-  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
-  await expect(page.getByTestId('software-editor')).toBeVisible()
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/software-editor-independent.png' })
-  await page.setViewportSize({ width: 960, height: 640 })
-  await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/software-editor-independent-compact.png' })
-})
-
 test('capture compact help surface', async ({ page }) => {
   await page.addInitScript(value => localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(value)), model)
   await page.setViewportSize({ width: 960, height: 640 })
@@ -256,7 +215,7 @@ test('capture English light settings at wide and compact widths', async ({ page 
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/settings-english-light-compact.png' })
 })
 
-test('capture light workflow and software editor surfaces', async ({ page }) => {
+test('capture light workflow editor and software settings surfaces', async ({ page }) => {
   await page.addInitScript(({ productModel, appSettings }) => {
     localStorage.setItem('glyphshift.composable-product-model.v3', JSON.stringify(productModel))
     localStorage.setItem('glyphshift.app-settings.v1', JSON.stringify(appSettings))
@@ -281,14 +240,11 @@ test('capture light workflow and software editor surfaces', async ({ page }) => 
   await waitForVisualStability(page)
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-editor-light-compact.png' })
 
-  await page.getByRole('button', { name: '返回工作流列表' }).click()
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
-  await expect(page.getByTestId('software-editor')).toBeVisible()
+  await page.getByTestId('workflow-editor').getByRole('tab', { name: '设置软件' }).click()
   await page.setViewportSize({ width: 1440, height: 900 })
   await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/software-editor-light.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-software-settings-light.png' })
   await page.setViewportSize({ width: 960, height: 640 })
   await waitForVisualStability(page)
-  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/software-editor-light-compact.png' })
+  await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-software-settings-light-compact.png' })
 })

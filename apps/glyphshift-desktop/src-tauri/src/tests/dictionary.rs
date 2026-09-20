@@ -142,7 +142,7 @@ fn dictionary_file_exchange_uses_one_portable_json_without_a_publish_service() {
             .any(|dictionary| dictionary.id() == "dictionary.exchange")
     );
     application
-        .export_dictionary_file("dictionary.exchange", output.clone())
+        .export_dictionary_file("dictionary.exchange", output.clone(), false)
         .expect("export dictionary file");
     let exported = fs::read_to_string(output).expect("read export");
     let reopened = glyphshift_dictionary_package::DictionaryPackage::decode_json(

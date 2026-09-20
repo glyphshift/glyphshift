@@ -247,7 +247,8 @@ export default {
     actions: '字典操作', batchTitle: '批量导出', chooseFolder: '选择导出目录',
     batchHint: '导出选中的 {count} 份字典，每份一个文件，保存到新建子目录。',
     batchResult: '已导出 {completed}/{total} 份字典：{path}', partialFailure: '部分字典导出失败，已成功的文件保留。',
-    title: '导出字典', confirm: '导出', format: '文件格式', failed: '导出失败',
+    import: '导入', export: '导出', partialExport: '导出（仅未翻译）', partialExportHint: '仅导出未翻译词条。',
+    title: '导出字典', partialTitle: '导出未翻译词条', confirm: '导出', format: '文件格式', failed: '导出失败',
     jsonHint: '包含原文、译文、语言和字典信息。', csvHint: '仅包含原文和译文，适合表格编辑。',
     importHint: '支持多选 JSON、CSV、SRT', saveFirst: '请先保存修改，再导出字典。',
   },
@@ -571,11 +572,11 @@ export default {
   },
   help: {
     updates: {
-      dictionary: { title: '字典导入、导出与分页', description: '在“字典操作”中导入或导出 JSON、CSV。JSON 带语言等信息；CSV 校验通过后再补充设置。导入可选追加（保留同原文）、覆盖（更新同原文）或替换（清空后导入），确认后保存。列表多选可批量导出。每页可选 50、100、200 条。' },
+      dictionary: { title: '字典导入、导出与分页', description: '在“字典操作”中通过二级菜单导入 JSON、CSV、SRT，或导出 JSON、CSV；“导出（仅未翻译）”只包含未翻译词条。导入可选追加（保留同原文）、覆盖（更新同原文）或替换（清空后导入），确认后保存。列表多选可批量导出。每页可选 50、100、200 条。' },
       probe: { title: '工作流与附加字典', description: '工作流可选择多本字典，并指定一本写入新原文；也可以创建新字典。其他所选字典只要包含该原文，就不再追加，不论译文是否为空。工作流列表可直接停止运行；停止不会删除字典。' },
       automatic: { title: '边玩边自动补全', description: '先在设置中调整自动补全间隔（默认 10 秒，可设 0～60 秒，0 表示每 250 毫秒检查新内容），再到工作流的自动翻译旁勾选“自动补全”。有待翻译内容才发起请求，已有翻译任务时合并排队；当前任务结束后处理等待项，每批条数和并发请求数按所选翻译配置。离开页面仍会继续；停止工作流、翻译失败或重启 App 后需要重新勾选。取消勾选只停止后续补全，已开始的任务可到任务中心停止。' },
       profiles: { title: '服务预设与高级选项', description: '添加翻译配置时可选择 DeepSeek、LibreTranslate、百度翻译、Google Translate、通义千问、硅基流动等预设。LibreTranslate 本机自建默认不需要 Key；传统翻译服务会按各自接口自动批量拆分。' },
-      refresh: { title: '已有译文，界面却没变', description: '先保存译文，再从工作流的“任务操作”里点“强制刷新文字”。还没变化的话，试试重新打开界面或进入下一句对话。有些软件不能马上刷新。' },
+      refresh: { title: '已有译文，界面却没变', description: '译文保存后会自动发布到正在运行的工作流。已经显示出来的旧控件或当前句不一定会重绘，可以重新打开界面或进入下一句对话；如果之后新出现的文字仍不替换，请检查所用适配器是否支持文字替换。' },
       experimental: { title: '实验适配器怎么理解', description: 'VGUI 和 CatSystem2 目前保留实验标识。已验证的游戏可以使用，但同引擎的其他游戏仍需测试；能提取文字也不代表每个区域都能替换。请以目标界面的实际效果为准。' },
       license: 'Glyphshift 使用 GPL-3.0-only 协议开源，第三方组件保留各自许可证。',
     },
@@ -1203,7 +1204,6 @@ export default {
       unknownSoftware: '已移除的软件',
       status: {
         softwareStopped: '软件未启动',
-        refreshRejected: '强制刷新未完成：当前翻译会话未接受更新。请先停止并重新运行工作流；若此前使用过旧版或其他注入方式，请保存工作，完全退出目标软件后重新打开，再运行工作流。',
       sessionRejected: '当前翻译会话未接受操作。如果此前使用过旧版 Glyphshift 或其他注入方式，请先保存工作，完全退出目标软件，再重新打开并开始运行工作流。若仍失败，请更换适配器后再试。',
         bundleUnavailable: '运行组件尚未就绪',
         accessFailed: '连接失败',
@@ -1331,8 +1331,6 @@ export default {
     resume: '连接并继续',
     launchSoftware: '运行软件',
     disconnect: '停止运行',
-    refreshText: '强制刷新文字',
-    refreshTextHint: '让软件重新显示译文。如果没变化，试试重新打开界面，或进入下一句对话。',
     taskActions: '任务操作',
     backToRuns: '返回工作流管理',
     settings: '工作流设置',
@@ -1560,7 +1558,6 @@ export default {
     },
     runtime: {
       targetNotFound: '没有找到与该程序路径匹配的运行实例；请先启动这个版本的软件。',
-      refreshRejected: '强制刷新未完成：当前翻译会话未接受更新。请先停止并重新运行工作流；若此前使用过旧版或其他注入方式，请保存工作，完全退出目标软件后重新打开，再运行工作流。',
       sessionRejected: '当前翻译会话未接受操作。如果此前使用过旧版 Glyphshift 或其他注入方式，请先保存工作，完全退出目标软件，再重新打开并开始运行工作流。若仍失败，请更换适配器后再试。',
       bundleUnavailable: 'Glyphshift 的运行组件尚未就绪。请修复或重新安装后重启。',
       bundleIncompatible: 'Glyphshift 的运行组件版本不一致。请修复或重新安装后重启 Glyphshift；只重启目标软件无法解决。',

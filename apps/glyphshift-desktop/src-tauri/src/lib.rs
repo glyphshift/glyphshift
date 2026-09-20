@@ -874,7 +874,6 @@ pub fn run() {
             probe::commands::desktop_resume_probe_run,
             probe::commands::desktop_set_probe_run_paused,
             probe::commands::desktop_disconnect_probe_run,
-            probe::commands::desktop_refresh_probe_text,
             probe::commands::desktop_probe_run_summary,
             probe::commands::desktop_probe_run_entries,
             probe::commands::desktop_edit_probe_translation,

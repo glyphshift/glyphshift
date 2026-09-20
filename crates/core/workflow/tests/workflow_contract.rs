@@ -320,6 +320,36 @@ fn wf_008_dictionary_match_font_policy_without_entries_has_no_effective_rules() 
 }
 
 #[test]
+fn collecting_into_an_empty_dictionary_prearms_text_replacement() {
+    let compiled = resolve(
+        &Workflow::new(
+            "workflow-live-collection",
+            [WorkflowTarget::new(
+                "software-editor",
+                AdapterPlan::parallel(["adapter-text"]),
+                ["dictionary-empty"],
+            )
+            .with_collection(true)],
+        ),
+        &[software(15)],
+        &[Dictionary::new("dictionary-empty", "zh-CN", [])],
+        &CompositionEnvironment::new(
+            [AdapterInput::new(
+                "adapter-text",
+                [Feature::TextObserve, Feature::TextReplace],
+            )],
+            [] as [&str; 0],
+        ),
+    )
+    .expect("live collection should be ready for the first translation");
+
+    assert_eq!(
+        compiled.targets()[0].requested_features(),
+        &[Feature::TextObserve, Feature::TextReplace]
+    );
+}
+
+#[test]
 fn wf_009_rejects_a_plan_without_font_substitution_capability() {
     let result = resolve(
         &Workflow::new(

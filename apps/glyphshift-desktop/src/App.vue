@@ -257,7 +257,7 @@ watch(firstRunGuideOpen, value => {
     settingsSection.value = 'general'
     if (view.value !== 'settings') requestNavigation('settings')
   }
-})
+}, { immediate: true })
 
 function navigateOnboarding(section: string) {
   if (section === 'workflows') requestNavigation('workflows')

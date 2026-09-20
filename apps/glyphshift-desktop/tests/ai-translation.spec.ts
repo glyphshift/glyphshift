@@ -751,7 +751,7 @@ test('background translation task reports partial batches, writeback, usage, and
   }
 })
 
-test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ page }) => {
+test('workflow text AI fill uses the backend full-run plan and CAS writeback', async ({ page }) => {
   const profile = {
     id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
     baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b',
@@ -759,9 +759,10 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
     filterPolicy, hasCredential: false, credentialRequired: false,
   }
   await page.addInitScript(({ snapshot, aiProfile }) => {
+    Object.assign(snapshot.workflows[0].targets[0], { writeDictionaryId: 'dictionary-proof' })
     let applied = false
     let summary = {
-      id: 'probe-ai', name: 'AI 探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      id: 'probe-ai', workflowId: 'workflow-proof', name: '默认创作工作流', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
       adapterIds: ['synthetic.text-out'], status: 'ready', livePreviewEnabled: false,
       observationRevision: 4, observedCount: 3, ignoredCount: 0, droppedObservations: 0,
       previewGeneration: 1, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 3,
@@ -773,7 +774,7 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
         if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
-        if (command === 'desktop_probe_run_summary') return summary
+        if (command === 'desktop_probe_run_summary' || command === 'desktop_workflow_collection') return summary
         if (command === 'desktop_ai_profiles') return { defaultProfileId: aiProfile.id, profiles: [aiProfile] }
         if (command === 'desktop_probe_run_entries') return {
           observationRevision: 4, dictionaryRevision: summary.dictionaryRevision, page: 1, pageSize: 50, total: 3,
@@ -833,23 +834,21 @@ test('probe AI fill uses the backend full-run plan and CAS writeback', async ({ 
       },
     }
     ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
-    localStorage.setItem('glyphshift.probe.selectedRun', summary.id)
   }, { snapshot: model, aiProfile: profile })
   await page.goto('/')
-  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '查看文字', exact: true }).click()
 
   await page.getByRole('button', { name: '自动翻译', exact: true }).click()
   await startFromAiPreflight(page)
 
-  await expect(page.getByRole('heading', { name: '翻译任务' })).toBeVisible()
-  await expect(page.getByText('探针', { exact: true }).first()).toBeVisible()
-  await expect(page.getByText('已写入').locator('..')).toContainText('1')
+  await expect(page.getByRole('heading', { name: '默认创作工作流' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '“Close”的译文' })).toHaveValue('关闭')
   await expect.poll(() => page.evaluate(() => (
     window as unknown as { __probeAiPlan?: { runId?: string } }
   ).__probeAiPlan)).toEqual(expect.objectContaining({ runId: 'probe-ai' }))
 })
 
-test('probe shows only compact AI task status and links to full task details', async ({ page }) => {
+test('workflow text shows only compact AI task status and links to full task details', async ({ page }) => {
   const profile = {
     id: 'profile.local', name: '本地 Ollama', protocol: 'ollama_chat',
     baseUrl: 'http://127.0.0.1:11434/api', modelId: 'qwen3:8b', reasoningEffort: 'disabled',
@@ -857,9 +856,10 @@ test('probe shows only compact AI task status and links to full task details', a
     filterPolicy, hasCredential: false, credentialRequired: false,
   }
   await page.addInitScript(({ snapshot, profile }) => {
+    Object.assign(snapshot.workflows[0].targets[0], { writeDictionaryId: 'dictionary-proof' })
     let showTask = false
     const run = {
-      id: 'probe-ai-status', name: 'AI 状态探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
+      id: 'probe-ai-status', workflowId: 'workflow-proof', name: '默认创作工作流', softwareId: 'software-proof', dictionaryId: 'dictionary-proof',
       adapterIds: ['synthetic.text-out'], status: 'ready', livePreviewEnabled: false,
       observationRevision: 1, observedCount: 10, ignoredCount: 0, droppedObservations: 0,
       previewGeneration: 0, createdAtMs: 1, updatedAtMs: 2, dictionaryRevision: 3,
@@ -885,7 +885,7 @@ test('probe shows only compact AI task status and links to full task details', a
         if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [run]
-        if (command === 'desktop_probe_run_summary') return run
+        if (command === 'desktop_probe_run_summary' || command === 'desktop_workflow_collection') return run
         if (command === 'desktop_probe_run_entries') return { observationRevision: 1, dictionaryRevision: 3, page: 1, pageSize: 50, total: 0, rows: [] }
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails['dictionary-proof']
         if (command === 'desktop_ai_profiles') return { defaultProfileId: profile.id, profiles: [profile] }
@@ -895,14 +895,14 @@ test('probe shows only compact AI task status and links to full task details', a
     }
     ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
     ;(window as unknown as { __showProbeAiTask: () => void }).__showProbeAiTask = () => { showTask = true }
-    localStorage.setItem('glyphshift.probe.selectedRun', run.id)
   }, { snapshot: model, profile })
   await page.goto('/')
-  await page.getByRole('button', { name: '探针', exact: true }).click()
+  await page.getByRole('button', { name: '查看文字', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: 'AI 状态探针' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '默认创作工作流' })).toBeVisible()
   await page.evaluate(() => (window as unknown as { __showProbeAiTask: () => void }).__showProbeAiTask())
-  const status = page.getByRole('status').filter({ hasText: 'AI 正在翻译' })
+  const status = page.getByTestId('probe-ai-task-status')
+  await expect(status).toContainText('正在自动翻译')
   await expect(status).toContainText('已完成 2/10 条')
   await expect(status.getByRole('button', { name: '查看任务' })).toBeVisible()
   await expect(page.getByRole('region', { name: '自动翻译实时进度' })).toHaveCount(0)

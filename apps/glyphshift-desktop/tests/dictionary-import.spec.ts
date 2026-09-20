@@ -2,11 +2,15 @@ import { selectLanguage } from './fixtures/languageSelect'
 import { expect, test } from '@playwright/test'
 import { model, storageKey } from './fixtures/productModel'
 
-async function setup(page: import('@playwright/test').Page) {
-  await page.addInitScript(({ snapshot, key }) => {
+async function setup(page: import('@playwright/test').Page, pending = false) {
+  await page.addInitScript(({ snapshot, key, pending }) => {
     localStorage.setItem(key, JSON.stringify(snapshot))
     const detail = structuredClone(snapshot.dictionaryDetails['dictionary-proof'])
-    detail.entries = [{ source: 'Same', translation: 'Original' }, { source: 'Keep', translation: 'Keep translation' }]
+    detail.entries = [
+      { source: 'Same', translation: 'Original' },
+      { source: 'Keep', translation: 'Keep translation' },
+      ...(pending ? [{ source: 'Pending', translation: '' }] : []),
+    ]
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
       if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
@@ -24,7 +28,7 @@ async function setup(page: import('@playwright/test').Page) {
       if (command === 'desktop_update_dictionary') { (window as any).__savedDictionary = args.edit; Object.assign(detail, { entries: args.edit.entries, revision: detail.revision + 1 }); return snapshot }
       return null
     } }
-  }, { snapshot: model, key: storageKey })
+  }, { snapshot: model, key: storageKey, pending })
   await page.goto('/')
   await page.getByRole('button', { name: '字典', exact: true }).click()
 }
@@ -50,7 +54,8 @@ for (const [mode, same, keep] of [['追加', 'Original', true], ['覆盖', 'Impo
     await setup(page)
     await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
     await page.getByRole('button', { name: '字典操作' }).click()
-    await page.getByRole('menuitem', { name: '导入 CSV', exact: true }).click()
+    await page.getByRole('menuitem', { name: '导入', exact: true }).hover()
+    await page.getByRole('menuitem', { name: 'CSV', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '导入词条' })
     await dialog.getByRole('combobox', { name: '导入方式' }).click()
     await page.getByRole('option', { name: mode, exact: true }).click()
@@ -84,12 +89,25 @@ test('icons render with external icon APIs blocked and actions expose hover labe
 })
 
 
-test('dictionary detail offers grouped JSON and CSV import and export actions', async ({ page }) => {
-  await setup(page)
+test('dictionary detail groups formats under import, export, and untranslated-only export', async ({ page }) => {
+  await setup(page, true)
   await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
   await page.getByRole('button', { name: '字典操作' }).click()
-  for (const name of ['导入 JSON', '导入 CSV', '导出 JSON', '导出 CSV']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
+  for (const name of ['导入', '导出', '导出（仅未翻译）']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
+
+  await page.getByRole('menuitem', { name: '导入', exact: true }).hover()
+  for (const name of ['JSON', 'CSV', 'SRT']) await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '字典操作' }).click()
+  await page.getByRole('menuitem', { name: '导出', exact: true }).hover()
+  await page.getByRole('menuitem', { name: 'CSV', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__exportedDictionary)).toEqual({ dictionaryId: 'dictionary-proof', outputPath: 'X:/SyntheticFixtures/export.csv', untranslatedOnly: false })
+
+  await page.getByRole('button', { name: '字典操作' }).click()
+  await page.getByRole('menuitem', { name: '导出（仅未翻译）', exact: true }).hover()
+  await expect(page.getByRole('menuitem', { name: 'JSON', exact: true })).toBeVisible()
   if (process.env.GLYPHSHIFT_EXPORT_SCREENSHOT) await page.screenshot({ path: process.env.GLYPHSHIFT_EXPORT_SCREENSHOT })
-  await page.getByRole('menuitem', { name: '导出 CSV', exact: true }).click()
-  await expect.poll(() => page.evaluate(() => (window as any).__exportedDictionary)).toEqual({ dictionaryId: 'dictionary-proof', outputPath: 'X:/SyntheticFixtures/export.csv' })
+  await page.getByRole('menuitem', { name: 'JSON', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__exportedDictionary)).toEqual({ dictionaryId: 'dictionary-proof', outputPath: 'X:/SyntheticFixtures/export.json', untranslatedOnly: true })
 })

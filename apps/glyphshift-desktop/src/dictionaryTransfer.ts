@@ -26,6 +26,6 @@ export async function previewImportFiles(paths: string[]): Promise<ImportFile[]>
   if (errors.length) throw new Error(errors.join('\n'))
   return files
 }
-export async function exportDictionaryFile(dictionaryId: string, outputPath: string) {
-  await invoke('desktop_export_dictionary', { dictionaryId, outputPath })
+export async function exportDictionaryFile(dictionaryId: string, outputPath: string, untranslatedOnly = false) {
+  await invoke('desktop_export_dictionary', { dictionaryId, outputPath, untranslatedOnly })
 }

@@ -572,6 +572,15 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
             ]),
         )
         .unwrap();
+    let intent = app
+        .backend
+        .effective_workflow_intent("workflow.collect")
+        .unwrap();
+    assert_eq!(
+        intent.targets()[0].requested_features(),
+        &[Feature::TextObserve, Feature::TextReplace],
+        "a writable empty dictionary must prearm replacement before the first translation",
+    );
     let ready = app.workflow_collection_view("workflow.collect").unwrap();
     assert_eq!(ready.summary.status(), ProbeRunStatus::Ready);
     app.resume_probe_run(ready.summary.id()).unwrap();
@@ -613,8 +622,6 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
             .status(),
         ProbeRunStatus::Running
     );
-    app.refresh_probe_text(run.id()).unwrap();
-    assert_eq!(calls.lock().unwrap().capture_publications.len(), 1);
     let writer = app.backend.dictionary("dictionary.writer").unwrap();
     assert_eq!(writer.entries().len(), 1);
     assert_eq!(writer.entries()[0].source(), "New source");
@@ -659,7 +666,6 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
         app.probe_runs.summary(run.id()).unwrap().status(),
         ProbeRunStatus::Ready
     );
-    assert!(app.refresh_probe_text(run.id()).is_err());
     assert_eq!(
         app.backend
             .dictionary("dictionary.writer")

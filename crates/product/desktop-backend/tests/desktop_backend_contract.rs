@@ -259,6 +259,58 @@ fn desktop_imports_and_exports_one_portable_dictionary_v3_file() {
         fs::read_to_string(csv_path).expect("CSV text"),
         "\u{feff}source,translation\r\n\"Open\",\"打开\"\r\n\"Quoted, \"\"text\"\"\",\"第一行\n第二行\"\r\n"
     );
+
+    backend
+        .create_dictionary(
+            DictionaryCreate::new(
+                "dictionary.exchange-pending",
+                "Exchange pending",
+                "en-US",
+                "zh-CN",
+            )
+            .with_entries([
+                DictionaryEntryCreate::new("Done", "完成"),
+                DictionaryEntryCreate::new("Pending", ""),
+            ]),
+        )
+        .expect("create dictionary with pending entry");
+
+    let full_json = exchange.path().join("full-with-pending.json");
+    backend
+        .export_dictionary_file("dictionary.exchange-pending", &full_json)
+        .expect("full JSON export with pending entry");
+    let full_json_text = fs::read_to_string(full_json).expect("full JSON text");
+    assert!(full_json_text.contains("\"translation\": \"\""));
+    let full =
+        glyphshift_desktop_backend::dictionary_transfer::decode_document(&full_json_text, "json")
+            .expect("full JSON remains importable dictionary data");
+    assert!(full.metadata.is_some());
+    assert_eq!(full.entries.len(), 2);
+
+    let partial_json = exchange.path().join("untranslated.json");
+    backend
+        .export_dictionary_file_filtered("dictionary.exchange-pending", &partial_json, true)
+        .expect("partial JSON export");
+    let partial_json_text = fs::read_to_string(partial_json).expect("partial JSON text");
+    assert!(partial_json_text.contains("\"translation\": \"\""));
+    let partial = glyphshift_desktop_backend::dictionary_transfer::decode_document(
+        &partial_json_text,
+        "json",
+    )
+    .expect("partial JSON remains importable dictionary data");
+    assert!(partial.metadata.is_some());
+    assert_eq!(partial.entries.len(), 1);
+    assert_eq!(partial.entries[0].source, "Pending");
+    assert!(partial.entries[0].translation.is_empty());
+
+    let partial_csv = exchange.path().join("untranslated.csv");
+    backend
+        .export_dictionary_file_filtered("dictionary.exchange-pending", &partial_csv, true)
+        .expect("partial CSV export");
+    assert_eq!(
+        fs::read_to_string(partial_csv).expect("partial CSV text"),
+        "\u{feff}source,translation\r\n\"Pending\",\"\"\r\n"
+    );
 }
 
 #[test]

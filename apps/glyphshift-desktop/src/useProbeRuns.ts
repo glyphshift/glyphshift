@@ -284,10 +284,6 @@ export function useProbeRuns() {
     return runSummaryCommand('desktop_import_probe_entries', { request: { runId, inputPath, format, mode } })
   }
 
-  async function refreshText(runId: string) {
-    return runSummaryCommand('desktop_refresh_probe_text', { runId })
-  }
-
   async function runSummaryCommand(command: string, args: Record<string, unknown>) {
     if (busy.value || !hasDesktopRuntime()) return null
     busy.value = true
@@ -298,9 +294,7 @@ export function useProbeRuns() {
       return summary
     }
     catch (error) {
-      const contextualError = command === 'desktop_refresh_probe_text' && isCommandError(error)
-        ? { ...error, args: { ...error.args, action: 'refreshText' } } : error
-      reportError(contextualError, typeof args.runId === 'string' ? args.runId : undefined)
+      reportError(error, typeof args.runId === 'string' ? args.runId : undefined)
       return null
     }
     finally {
@@ -447,7 +441,6 @@ export function useProbeRuns() {
     resume,
     setPaused,
     disconnect,
-    refreshText,
     refreshSummary,
     queryEntries,
     editTranslation,

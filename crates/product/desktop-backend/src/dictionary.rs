@@ -494,6 +494,15 @@ impl DesktopBackend {
         dictionary_id: &str,
         output_path: impl AsRef<Path>,
     ) -> Result<(), BackendError> {
+        self.export_dictionary_file_filtered(dictionary_id, output_path, false)
+    }
+
+    pub fn export_dictionary_file_filtered(
+        &self,
+        dictionary_id: &str,
+        output_path: impl AsRef<Path>,
+        untranslated_only: bool,
+    ) -> Result<(), BackendError> {
         let output_path = output_path.as_ref();
         if !output_path.is_absolute() {
             return Err(BackendError::InvalidInput("dictionary-export-path"));
@@ -506,6 +515,7 @@ impl DesktopBackend {
             .dictionary(dictionary_id)?
             .entries()
             .iter()
+            .filter(|entry| !untranslated_only || entry.translation().trim().is_empty())
             .map(|entry| crate::dictionary_transfer::Entry {
                 source: entry.source().into(),
                 translation: entry.translation().into(),

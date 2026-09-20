@@ -153,70 +153,14 @@ test('management table body stays continuous for empty and populated states', as
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/management-table-populated-continuous.png' })
 })
 
-test('software creation uses one entry and supports preflight plus foreground capture', async ({ page }) => {
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await expect(page.getByRole('button', { name: '快速捕获' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '新建软件' }).first()).toBeVisible()
-
-  await page.getByRole('button', { name: '新建软件' }).first().click()
-  const dialog = page.getByRole('dialog', { name: '新建软件' })
-  await dialog.getByRole('textbox', { name: '软件名称' }).fill('Synthetic Editor')
-  await dialog.getByRole('textbox', { name: '程序路径' }).fill('X:\\SyntheticFixtures\\SyntheticEditor.exe')
-  await expect(dialog.getByRole('button', { name: '添加软件' })).toBeDisabled()
-  await expect(dialog.getByText('通过接入检查后才能添加。')).toBeVisible()
-  await dialog.getByRole('button', { name: '检查' }).click()
-  await expect(dialog.getByText('基础接入条件已通过')).toBeVisible()
-  await expect(dialog.getByRole('button', { name: '添加软件' })).toBeEnabled()
-  await dialog.getByRole('button', { name: '取消' }).click()
-
-  await page.getByRole('button', { name: '新建软件' }).first().click()
-  await dialog.getByRole('button', { name: '按键捕获' }).click()
-  await expect(dialog.getByText('等待选择软件', { exact: true })).toBeVisible()
-  await expect(dialog.getByText(/切换到目标软件，再按 Ctrl\+Shift\+F8/).first()).toBeVisible()
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('glyphshift:software-quick-capture', {
-    detail: {
-      state: 'captured',
-      shortcut: 'Ctrl+Shift+F8',
-      preflight: {
-        executablePath: 'X:\\SyntheticFixtures\\CapturedEditor.exe',
-        executableName: 'CapturedEditor.exe',
-        suggestedName: 'CapturedEditor',
-        architecture: 'x86_64',
-        running: true,
-        canAdd: true,
-        state: 'ready',
-        existingName: null,
-      },
-    },
-  })))
-  await expect(dialog.getByRole('textbox', { name: '软件名称' })).toHaveValue('CapturedEditor')
-  await expect(dialog.getByRole('textbox', { name: '程序路径' })).toHaveValue('X:\\SyntheticFixtures\\CapturedEditor.exe')
-  await expect(dialog.getByText('基础接入条件已通过')).toBeVisible()
-  await dialog.getByRole('button', { name: '取消' }).click()
-  await page.getByRole('button', { name: '工作流', exact: true }).click()
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await expect(dialog).toBeHidden()
-})
-
-test('software rows expose a direct delete action', async ({ page }) => {
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  const row = page.getByRole('row').filter({ hasText: 'Vector Studio' })
-
-  await expect(row.getByRole('button', { name: '删除 Vector Studio' })).toBeVisible()
-})
-
 test('management tables share independent persisted column controls', async ({ page }) => {
   const columnsButton = page.getByRole('button', { name: '显示列', exact: true })
 
   await expect(columnsButton).toBeVisible()
   await columnsButton.click()
-  await page.getByRole('menuitemcheckbox', { name: '适配器', exact: true }).click()
+  await page.getByRole('menuitemcheckbox', { name: '软件', exact: true }).click()
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('columnheader', { name: '适配器', exact: true })).toHaveCount(0)
-
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await expect(columnsButton).toBeVisible()
-  await expect(page.getByRole('columnheader', { name: '描述', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '软件', exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await columnsButton.click()
@@ -224,51 +168,19 @@ test('management tables share independent persisted column controls', async ({ p
   await page.keyboard.press('Escape')
   await expect(page.getByRole('columnheader', { name: '发布', exact: true })).toHaveCount(0)
 
-  await page.getByRole('button', { name: '探针', exact: true }).click()
-  await columnsButton.click()
-  await page.getByRole('menuitemcheckbox', { name: '更新时间', exact: true }).click()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('columnheader', { name: '更新时间', exact: true })).toHaveCount(0)
-
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
+  await expect(page.getByRole('columnheader', { name: '软件', exact: true })).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole('columnheader', { name: '适配器', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: '软件', exact: true })).toHaveCount(0)
 })
 
-test('software direct and batch delete remove unreferenced records', async ({ page }) => {
-  const snapshot = JSON.parse(JSON.stringify(model))
-  snapshot.software.push({
-    ...snapshot.software[0],
-    id: 'software-disposable-one',
-    name: 'Disposable One',
-    executableName: 'DisposableOne.exe',
-    executablePath: 'X:\\SyntheticFixtures\\DisposableOne.exe',
-  }, {
-    ...snapshot.software[0],
-    id: 'software-disposable-two',
-    name: 'Disposable Two',
-    executableName: 'DisposableTwo.exe',
-    executablePath: 'X:\\SyntheticFixtures\\DisposableTwo.exe',
-  })
-  await replaceModel(page, snapshot)
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-
-  await page.getByRole('button', { name: '删除 Disposable One' }).click()
-  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '删除软件' }).click()
-  await expect(page.getByText('Disposable One', { exact: true })).toBeHidden()
-
-  await page.getByRole('checkbox', { name: '选择 Disposable Two' }).click()
-  await page.getByRole('button', { name: '批量删除' }).click()
-  await page.getByRole('dialog', { name: '删除软件' }).getByRole('button', { name: '删除软件' }).click()
-  await expect(page.getByText('Disposable Two', { exact: true })).toBeHidden()
-})
-
-test('dictionary delete names every workflow and probe that blocks it', async ({ page }) => {
+test('dictionary delete names every workflow record that blocks it', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   await page.addInitScript(({ current }) => {
     const internals = {
       invoke: async (command: string) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_delete_dictionaries') {
           throw {
@@ -296,38 +208,6 @@ test('dictionary delete names every workflow and probe that blocks it', async ({
   await expect(alert).toContainText('界面巡检探针')
 })
 
-test('software batch delete keeps a rejected record and explains why', async ({ page }) => {
-  const snapshot = JSON.parse(JSON.stringify(model))
-  await page.addInitScript(({ current }) => {
-    const internals = {
-      invoke: async (command: string) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
-        if (command === 'desktop_snapshot') return current
-        if (command === 'desktop_remove_software') {
-          throw {
-            schemaVersion: 1,
-            code: 'software.referenced',
-            args: { workflowCount: 1, probeCount: 0 },
-          }
-        }
-        return null
-      },
-    }
-    ;(window as unknown as { __TAURI_INTERNALS__: typeof internals }).__TAURI_INTERNALS__ = internals
-  }, { current: snapshot })
-  await replaceModel(page, snapshot)
-
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await page.getByRole('checkbox', { name: '选择 Vector Studio' }).click()
-  await page.getByRole('button', { name: '批量删除' }).click()
-  const confirmation = page.getByRole('dialog', { name: '删除软件' })
-  await confirmation.getByRole('button', { name: '删除软件' }).click()
-
-  await expect(page.getByText('Vector Studio', { exact: true })).toBeVisible()
-  await expect(page.getByRole('alert')).toContainText('仍被 1 个工作流使用')
-})
-
 test('workflow names a stopped software and exposes its actionable Runtime error', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
@@ -351,7 +231,7 @@ test('workflow names a stopped software and exposes its actionable Runtime error
   await replaceModel(page, snapshot)
 
   await expect(page.getByText('需要处理', { exact: true })).toHaveCount(0)
-  const stoppedStatus = page.getByRole('button', { name: '软件未启动', exact: true })
+  const stoppedStatus = page.getByRole('button', { name: '等待软件启动', exact: true })
   await expect(stoppedStatus).toBeVisible()
   await stoppedStatus.click()
   const details = page.getByTestId('workflow-runtime-issues')
@@ -411,7 +291,7 @@ test('workflow identifies unavailable target processes without claiming a permis
   }
   await replaceModel(page, snapshot)
 
-  const failedStatus = page.getByRole('button', { name: '软件未启动', exact: true })
+  const failedStatus = page.getByRole('button', { name: '连接失败', exact: true })
   await expect(failedStatus).toBeVisible()
   await failedStatus.click()
   await expect(page.getByTestId('workflow-runtime-issues')).not.toContainText('管理员权限不能')
@@ -419,7 +299,7 @@ test('workflow identifies unavailable target processes without claiming a permis
 
 test('navigation keeps fonts inside workflow targets instead of a separate asset page', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '工作流' })).toBeVisible()
-  await expect(page.getByText('传统 Windows 文字（高级）', { exact: true })).toBeVisible()
+  await expect(page.getByText('1 种适配器', { exact: true })).toBeVisible()
   await expect(page.getByText('桌面服务已连接')).toHaveCount(0)
   await expect(page.getByText('本地预览')).toHaveCount(0)
 

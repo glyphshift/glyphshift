@@ -244,62 +244,6 @@ impl DesktopApplication {
             .collect()
     }
 
-    pub(crate) fn refresh_probe_text(
-        &mut self,
-        run_id: &str,
-    ) -> Result<ProbeRunView, CommandError> {
-        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        if let Some(owner) = summary.workflow_id() {
-            if !self
-                .workflow_runtime_status
-                .get(owner)
-                .is_some_and(|runtime| {
-                    runtime.targets.iter().any(|target| {
-                        target.software_id.as_ref() == summary.software_id()
-                            && target.active
-                            && target.translation_active
-                    })
-                })
-            {
-                return Err(CommandError::new("capture.not_active"));
-            }
-            let intent = self
-                .backend
-                .effective_workflow_intent(owner)
-                .map_err(|_| CommandError::new("workflow.invalid"))?;
-            let target = intent
-                .targets()
-                .iter()
-                .find(|target| target.software_id() == summary.software_id())
-                .ok_or_else(|| CommandError::new("workflow.invalid"))?;
-            self.runtimes
-                .as_mut()
-                .ok_or_else(runtime_unavailable)?
-                .publish_capture(
-                    summary.software_id(),
-                    target.runtime_spec().publication().clone(),
-                )
-                .map_err(|error| runtime_command_error(error, true))?;
-            return self.probe_run_summary(run_id);
-        }
-        if self.active_probe_run_id.as_deref() != Some(run_id)
-            || !matches!(
-                summary.status(),
-                ProbeRunStatus::Running | ProbeRunStatus::Paused
-            )
-        {
-            return Err(CommandError::new("capture.not_active"));
-        }
-        if !summary.live_preview_enabled() {
-            return Err(CommandError::new("capture.preview_unavailable"));
-        }
-        // Republish the current dictionary to dispatch native refresh callbacks
-        // and asynchronous redraw. Acceptance does not prove visual completion.
-        self.publish_probe_preview_if_active(run_id)?;
-        let summary = self.probe_runs.summary(run_id).map_err(probe_run_error)?;
-        self.probe_run_view(summary)
-    }
-
     pub(crate) fn publish_probe_preview_if_active(
         &mut self,
         run_id: &str,

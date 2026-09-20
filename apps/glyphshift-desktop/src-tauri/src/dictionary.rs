@@ -275,9 +275,10 @@ impl DesktopApplication {
         &self,
         dictionary_id: &str,
         output_path: PathBuf,
+        untranslated_only: bool,
     ) -> Result<(), CommandError> {
         self.backend
-            .export_dictionary_file(dictionary_id, output_path)
+            .export_dictionary_file_filtered(dictionary_id, output_path, untranslated_only)
             .map_err(dictionary_export_error)
     }
 
@@ -464,12 +465,17 @@ pub(super) fn desktop_import_dictionary(
 pub(super) fn desktop_export_dictionary(
     dictionary_id: String,
     output_path: PathBuf,
+    untranslated_only: Option<bool>,
     application: State<'_, Mutex<DesktopApplication>>,
 ) -> Result<(), CommandError> {
     application
         .lock()
         .map_err(|_| workspace_unavailable())?
-        .export_dictionary_file(&dictionary_id, output_path)
+        .export_dictionary_file(
+            &dictionary_id,
+            output_path,
+            untranslated_only.unwrap_or(false),
+        )
 }
 
 #[tauri::command]

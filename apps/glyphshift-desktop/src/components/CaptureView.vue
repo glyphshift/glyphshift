@@ -141,7 +141,6 @@ const settingsCompatibilityLoading = ref(false)
 const clearAllOpen = ref(false)
 const mergeRules = ref(true)
 const dictionaryNotice = ref('')
-const refreshingText = ref(false)
 const launchingSoftware = ref(false)
 const disconnectingRunId = ref('')
 const translationValues = ref<Record<string, string>>({})
@@ -352,8 +351,6 @@ const exportItems = computed<DropdownMenuItem[][]>(() => [[
 const taskActionLabel = computed(() => t('capture.taskActions'))
 const taskActionItems = computed<DropdownMenuItem[][]>(() => selectedRun.value ? [[{
   label: t('capture.launchSoftware'), icon: 'i-tabler-app-window', disabled: launchingSoftware.value || !selectedSoftware.value?.executablePath, onSelect: () => void launchSelectedSoftware(),
-}, {
-  label: t('capture.refreshText'), icon: 'i-tabler-refresh', disabled: refreshingText.value || probe.busy.value || !selectedRun.value.livePreviewEnabled || !['running', 'paused'].includes(selectedRun.value.status), onSelect: () => void refreshTargetText(),
 }], [{ type: 'checkbox' as const, label: t('capture.mergeRules'), checked: mergeRules.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setMergeRules(checked) }], ...(props.workflowId ? [[{ type: 'checkbox' as const, label: t('workflowLifecycle.collect'), description: t('workflowLifecycle.collectHint'), checked: collectionEnabled.value, disabled: !hasWriter.value, onSelect: (event: Event) => event.preventDefault(), onUpdateChecked: (checked: boolean) => void setCollection(checked) }]] : []), ...(!props.workflowId ? [[{ label: t('capture.settings'), icon: 'i-tabler-settings', onSelect: () => void openSettings() }]] : []), ...exportItems.value] : [])
 const adapterFilterItems = computed<DropdownMenuItem[][]>(() => [
   selectedRunAdapters.value.map(adapter => ({
@@ -881,21 +878,6 @@ async function disconnectRun(run: ProbeRunSummary | null) {
   }
   finally {
     if (disconnectingRunId.value === run.id) disconnectingRunId.value = ''
-  }
-}
-
-async function refreshTargetText() {
-  const run = selectedRun.value
-  if (!run || refreshingText.value || probe.busy.value) return
-  refreshingText.value = true
-  try {
-    for (const source of [...dirtyTranslations]) await saveTranslation(source)
-    await translationSaveQueue
-    if (dirtyTranslations.size || selectedRun.value?.id !== run.id) return
-    await probe.refreshText(run.id)
-  }
-  finally {
-    refreshingText.value = false
   }
 }
 

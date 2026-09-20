@@ -180,4 +180,18 @@ mod tests {
         assert!(decoded.entries[0].translation.is_empty());
         assert!(encode_entries("xml", &entries, None).is_err());
     }
+
+    #[test]
+    fn json_export_keeps_an_empty_translation_field() {
+        let entries = vec![Entry {
+            source: "Pending".into(),
+            translation: String::new(),
+        }];
+        let encoded = encode_entries("json", &entries, None).unwrap();
+        assert!(encoded.contains("\"source\": \"Pending\""));
+        assert!(encoded.contains("\"translation\": \"\""));
+        let decoded = decode_document(&encoded, "json").unwrap();
+        assert_eq!(decoded.entries[0].source, "Pending");
+        assert!(decoded.entries[0].translation.is_empty());
+    }
 }

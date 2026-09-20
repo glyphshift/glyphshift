@@ -2,7 +2,7 @@ import { selectLanguage } from './fixtures/languageSelect'
 import { expect, test } from '@playwright/test'
 import { model, replaceModel, storageKey } from './fixtures/productModel'
 
-test('large dictionary renders bounded pages and preserves edits across pages', async ({ page }, testInfo) => {
+test('large dictionary renders bounded pages and preserves edits across pages', async ({ page }) => {
   const snapshot = structuredClone(model)
   snapshot.dictionaryDetails['dictionary-proof'].entries = Array.from({ length: 550 }, (_, index) => ({ source: `Entry ${index}`, translation: `Translation ${index}` }))
   snapshot.dictionaries[0].entryCount = 550
@@ -29,7 +29,6 @@ test('large dictionary renders bounded pages and preserves edits across pages', 
   await page.getByRole('combobox', { name: '每页数量' }).click()
   await page.getByRole('option', { name: '100', exact: true }).click()
   await expect(page.getByRole('textbox', { name: /^编辑原文：/ })).toHaveCount(100)
-  await page.screenshot({ path: testInfo.outputPath('dictionary-pagination.png') })
 
 })
 
@@ -58,7 +57,7 @@ test('dictionary library reports skipped artifacts while keeping valid dictionar
 test('dictionary library separates local provenance from the offline catalog mode', async ({ page }) => {
   await page.getByRole('button', { name: '字典', exact: true }).click()
 
-  const localMode = page.getByRole('button', { name: /本地词典/ })
+  const localMode = page.getByRole('button', { name: /本地字典/ })
   const catalogMode = page.getByRole('button', { name: '在线目录', exact: true })
   await expect(localMode).toHaveAttribute('aria-pressed', 'true')
   await expect(localMode).toHaveClass(/text-primary/)
@@ -100,8 +99,8 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
   await page.addInitScript(({ current, imported }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_dictionary') return { ...current.dictionaryDetails['dictionary-proof'], metadata: imported.dictionaries[1].metadata }
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
@@ -135,7 +134,8 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
 
   await page.getByRole('row').filter({ hasText: '导入字典' }).dblclick()
   await page.getByRole('button', { name: '字典操作' }).click()
-  await page.getByRole('menuitem', { name: '导出 JSON', exact: true }).click()
+  await page.getByRole('menuitem', { name: '导出', exact: true }).hover()
+  await page.getByRole('menuitem', { name: 'JSON', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __dictionaryExport?: { dictionaryId?: string, outputPath?: string } }).__dictionaryExport
   ))).toEqual(expect.objectContaining({
@@ -153,8 +153,8 @@ test('dictionary export reports when the native save dialog cannot open', async 
   await page.addInitScript(({ snapshot }) => {
     const internals = {
       invoke: async (command: string) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails['dictionary-proof']
         if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
@@ -168,24 +168,19 @@ test('dictionary export reports when the native save dialog cannot open', async 
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
   await page.getByRole('button', { name: '字典操作' }).click()
-  await page.getByRole('menuitem', { name: '导出 JSON', exact: true }).click()
+  await page.getByRole('menuitem', { name: '导出', exact: true }).hover()
+  await page.getByRole('menuitem', { name: 'JSON', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('导出失败')
 })
 
-test('local management items support double-click editing while keeping explicit actions', async ({ page }) => {
+test('workflow and dictionary items support double-click editing while keeping explicit actions', async ({ page }) => {
   await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
   await expect(page.getByRole('heading', { name: '默认创作工作流' })).toBeVisible()
   await expect(page.getByRole('button', { name: '返回工作流列表' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: '编辑工作流' })).toHaveCount(0)
   await page.getByRole('button', { name: '返回工作流列表' }).click()
 
-  await page.getByRole('button', { name: '软件', exact: true }).click()
-  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
-  await expect(page.getByRole('heading', { name: 'Vector Studio' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '返回软件列表' })).toBeVisible()
-  await expect(page.getByRole('dialog', { name: '编辑软件' })).toHaveCount(0)
-  await page.getByRole('button', { name: '返回软件列表' }).click()
-
+  await expect(page.getByRole('button', { name: '软件', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
   await expect(page.getByRole('heading', { name: '界面基础词典' })).toBeVisible()
@@ -203,6 +198,7 @@ test('escape returns from each independent item page and protects dirty forms', 
   await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
 
   await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await page.getByRole('tab', { name: '基础配置' }).click()
   await page.getByRole('textbox', { name: '工作流名称' }).fill('尚未保存的工作流')
   await page.keyboard.press('Escape')
   const workflowDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
@@ -211,22 +207,14 @@ test('escape returns from each independent item page and protects dirty forms', 
   await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
 
   await page.getByRole('row').filter({ hasText: '默认创作工作流' }).dblclick()
+  await page.getByRole('tab', { name: '基础配置' }).click()
   await page.getByRole('textbox', { name: '工作流名称' }).fill('切换菜单前尚未保存')
-  await page.getByRole('button', { name: '软件', exact: true }).click()
+  await page.getByRole('button', { name: '字典', exact: true }).click()
   const navigationDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
   await expect(navigationDiscard).toBeVisible()
   await navigationDiscard.getByRole('button', { name: '放弃更改' }).click()
-  await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '字典', exact: true })).toBeVisible()
 
-  await page.getByRole('row').filter({ hasText: 'Vector Studio' }).dblclick()
-  await page.getByRole('textbox', { name: '显示名称' }).fill('尚未保存的软件')
-  await page.keyboard.press('Escape')
-  const softwareDiscard = page.getByRole('dialog', { name: '放弃未保存更改？' })
-  await expect(softwareDiscard).toBeVisible()
-  await softwareDiscard.getByRole('button', { name: '放弃更改' }).click()
-  await expect(page.getByRole('heading', { name: '软件', exact: true })).toBeVisible()
-
-  await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('heading', { name: '字典', exact: true })).toBeVisible()
@@ -257,8 +245,8 @@ test('configured dictionary catalog queries and installs through the desktop sea
   await page.addInitScript(({ current, installed }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') {
@@ -314,8 +302,8 @@ test('catalog requires explicit confirmation before replacing local dictionary c
   await page.addInitScript(({ current }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') return {
@@ -359,8 +347,8 @@ test('catalog presentation follows the English interface locale', async ({ page 
   await page.addInitScript(({ current }) => {
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 35 }
+        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') {
@@ -520,8 +508,8 @@ test('dictionary list batch exports only selected dictionaries into one new fold
     (window as any).__batchExports = []
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
       if (command === 'desktop_snapshot') return snapshot
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'plugin:dialog|open') return (window as any).__cancelBatch ? null : 'X:/SyntheticFixtures/exports'
       if (command === 'desktop_export_dictionary') { if ((window as any).__failBatch && args.dictionaryId === 'dictionary-second') throw new Error('synthetic export failure'); (window as any).__batchExports.push(args); return null }
       return null
@@ -597,8 +585,8 @@ test('dictionary import displays the native CSV line and reason without writing'
     const w = window as any
     w.__importWrites = 0
     w.__TAURI_INTERNALS__ = { invoke: async (command: string) => {
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', checkUpdatesOnStartup: false }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
+      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', checkUpdatesOnStartup: false }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\malformed.csv'
       if (command === 'desktop_preview_dictionary_import') throw { schemaVersion: 1, code: 'import.csv_quote', args: { line: 478 } }

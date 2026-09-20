@@ -94,6 +94,38 @@ test('first run leads with normal compatibility and advances the tour through re
   })).toBe(true)
 })
 
+test('desktop startup opens pending onboarding that was loaded before the app mounts', async ({ page }) => {
+  await page.addInitScript(snapshot => {
+    ;(window as any).__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } },
+      invoke: async (command: string, args: any) => {
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_settings') return {
+          settingsSchemaVersion: 1,
+          safetyNoticeVersion: 1,
+          onboardingVersion: 0,
+          localePreference: 'zh-CN',
+          themePreference: 'light',
+        }
+        if (command === 'desktop_update_settings') return { settingsSchemaVersion: 1, ...args.update }
+        if (['desktop_snapshot', 'desktop_refresh_workflows'].includes(command)) return snapshot
+        if (command === 'desktop_probe_runs') return []
+        if (command === 'desktop_ai_profiles') return { defaultProfileId: null, profiles: [] }
+        if (command === 'desktop_ai_translation_tasks') return { current: null, history: [] }
+        return null
+      },
+    }
+  }, structuredClone(model))
+
+  await page.goto('/')
+
+  const guide = page.getByTestId('first-run-guide')
+  await expect(guide).toBeVisible()
+  await expect(page.getByRole('button', { name: '设置', exact: true })).toHaveAttribute('aria-current', 'page')
+  await guide.getByRole('button', { name: '下一步' }).click()
+  await expect(guide.getByRole('heading', { name: '部分软件需要管理员权限', exact: true })).toBeVisible()
+})
+
 test('the interactive guide can be dismissed permanently and restarted from settings', async ({ page }) => {
   await resetFirstRun(page)
   await page.getByRole('dialog', { name: '开始前了解一下兼容性' })

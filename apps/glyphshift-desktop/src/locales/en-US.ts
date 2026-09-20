@@ -253,9 +253,10 @@ export default {
     actions: 'Dictionary actions', batchTitle: 'Batch export', chooseFolder: 'Choose export folder',
     batchHint: 'Export {count} selected dictionaries as separate files in a new subfolder.',
     batchResult: 'Exported {completed}/{total} dictionaries: {path}', partialFailure: 'Some dictionaries failed to export. Successful files were kept.',
-    title: 'Export dictionary', confirm: 'Export', format: 'File format', failed: 'Export failed',
+    import: 'Import', export: 'Export', partialExport: 'Export (untranslated only)', partialExportHint: 'Export untranslated entries only.',
+    title: 'Export dictionary', partialTitle: 'Export untranslated entries', confirm: 'Export', format: 'File format', failed: 'Export failed',
     jsonHint: 'Includes entries, languages, and dictionary metadata.', csvHint: 'Source and translation columns for spreadsheet editing.',
-    importHint: 'Import JSON or CSV', saveFirst: 'Save your changes before exporting.',
+    importHint: 'Import JSON, CSV, or SRT', saveFirst: 'Save your changes before exporting.',
   },
   ai: {
     saveDraftFirst: "Save the dictionary before starting automatic translation. Previewing does not save your changes.",
@@ -577,11 +578,11 @@ export default {
   },
   help: {
     updates: {
-      dictionary: { title: 'Dictionary files and pagination', description: 'Use Dictionary actions to import or export JSON and CSV. JSON includes language metadata; CSV is validated before configuration. Append keeps existing sources, overwrite updates matching sources, and replace clears entries before import. Save after reviewing. Select dictionaries in the library to export in bulk. Pages contain 50, 100, or 200 entries.' },
+      dictionary: { title: 'Dictionary files and pagination', description: 'Use the nested Dictionary actions to import JSON, CSV, or SRT and export JSON or CSV. Partial export contains untranslated entries only. Append keeps existing sources, overwrite updates matching sources, and replace clears entries before import. Save after reviewing. Select dictionaries in the library to export in bulk. Pages contain 50, 100, or 200 entries.' },
       probe: { title: 'Workflows and excluded dictionaries', description: 'A new workflow creates a dictionary by default, or you can choose an existing one. Excluded dictionaries skip existing sources, even when their translations are blank, so you can work with several dictionaries separately. Stop a workflow directly from the list; its dictionary is kept.' },
       automatic: { title: 'Automatically fill while playing', description: 'Set the interval in Settings (10 seconds by default, from 0 to 60; 0 starts when new untranslated text is detected), then enable Auto fill beside automatic translation in the workflow. Requests start only when candidates exist and wait while another translation task runs. It continues across pages. Enable it again after stopping the workflow, a translation failure, or restarting the app. Unchecking prevents future fills; stop an active task in the task center.' },
       profiles: { title: 'Service presets and advanced options', description: 'Choose DeepSeek, LibreTranslate, Baidu Translate, Google Translate, Qwen, SiliconFlow, or another preset. Self-hosted LibreTranslate does not need a key by default; dedicated translation services are automatically split into provider-sized batches.' },
-      refresh: { title: 'Saved translations are not visible', description: 'Save your translations, then select Refresh target text in the workflow. Cached controls may need the interface reopened or dialogue advanced. Refresh support depends on the adapter and target; some controls cannot update immediately.' },
+      refresh: { title: 'Saved translations are not visible', description: 'Saved translations are published automatically to a running workflow. Controls or the current dialogue line that are already visible may not redraw, so reopen the interface or advance dialogue. If newly displayed text still is not replaced, check whether the selected adapter supports text replacement.' },
       experimental: { title: 'Experimental adapters', description: 'VGUI and CatSystem2 remain experimental. Verified games can be used, but other games on the same engine still need testing. Capturing text does not guarantee replacement in every area; check the target interface.' },
       license: 'Glyphshift is open source under GPL-3.0-only. Third-party components retain their own licenses.',
     },
@@ -1185,7 +1186,6 @@ export default {
       unknownSoftware: 'Removed software',
       status: {
         softwareStopped: 'Software not running',
-        refreshRejected: 'Force refresh did not complete: the current translation session did not accept the update. Stop and start the workflow. If an older version or another injector was used, save your work, fully exit and reopen the target, then run the workflow.',
       sessionRejected: 'The current translation session did not accept the operation. If an older Glyphshift or another injector was used, save your work, fully exit the target, reopen it and start the workflow. If it still fails, try another adapter.',
         bundleUnavailable: 'App components not ready',
         accessFailed: 'Connection failed',
@@ -1313,8 +1313,6 @@ export default {
     resume: 'Connect and continue',
     launchSoftware: 'Run software',
     disconnect: 'Stop running',
-    refreshText: 'Force text refresh',
-    refreshTextHint: 'Reapply the current dictionary. Controls without immediate refresh support may require reopening the screen or advancing dialogue.',
     taskActions: 'Task actions',
     backToRuns: 'Back to workflow management',
     settings: 'Workflow settings',
@@ -1542,7 +1540,6 @@ export default {
     },
     runtime: {
       targetNotFound: 'No running instance matches this executable path. Start this version of the software first.',
-      refreshRejected: 'Force refresh did not complete: the current translation session did not accept the update. Stop and start the workflow. If an older version or another injector was used, save your work, fully exit and reopen the target, then run the workflow.',
       sessionRejected: 'The current translation session did not accept the operation. If an older Glyphshift or another injector was used, save your work, fully exit the target, reopen it and start the workflow. If it still fails, try another adapter.',
       bundleUnavailable: 'Glyphshift app components are not ready. Repair or reinstall Glyphshift, then restart it.',
       bundleIncompatible: 'Glyphshift app components are from different versions. Repair or reinstall Glyphshift, then restart it. Restarting only the target application will not fix this.',

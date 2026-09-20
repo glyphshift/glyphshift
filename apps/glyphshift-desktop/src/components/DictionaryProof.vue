@@ -3,6 +3,7 @@
 import DictionaryExportDialog from './DictionaryExportDialog.vue'
 import DictionaryImportDialog from './DictionaryImportDialog.vue'
 import { mergeDictionaryEntries, type DictionaryImportData } from '../dictionaryImport'
+import { dictionaryFormats } from '../dictionaryTransfer'
 import { mergeDictionaryDraft } from '../dictionaryDraft'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { TableColumn, TableRow } from '@nuxt/ui/components/Table.vue'
@@ -44,9 +45,33 @@ async function applyImport(data: DictionaryImportData) {
 const dictionaryActions = computed<DropdownMenuItem[][]>(() => [[
   { label: t('dictionaryEditor.settings'), icon: 'i-tabler-settings', disabled: dictionaryLocked.value, onSelect: openMetadata },
 ], [
-  ...(['json', 'csv', 'srt'] as const).map(format => ({ label: t(format === 'json' ? 'capture.importJson' : format === 'csv' ? 'capture.importCsv' : 'capture.importSrt'), icon: 'i-tabler-file-import', disabled: dictionaryLocked.value || props.busy, onSelect: () => void importDialog.value?.choose(format) })),
-], [
-  ...(['json', 'csv'] as const).map(format => ({ label: t(format === 'json' ? 'capture.exportJson' : 'capture.exportCsv'), icon: 'i-tabler-file-export', disabled: props.busy || hasUnsavedChanges.value, onSelect: () => void exportDialog.value?.exportOne(props.detail.metadata.id, format) })),
+  {
+    label: t('dictionaryExport.import'),
+    icon: 'i-tabler-file-import',
+    disabled: dictionaryLocked.value || props.busy,
+    children: dictionaryFormats.filter(format => format.importable).map(format => ({
+      label: format.label,
+      onSelect: () => void importDialog.value?.choose(format.extension),
+    })),
+  },
+  {
+    label: t('dictionaryExport.export'),
+    icon: 'i-tabler-file-export',
+    disabled: props.busy || hasUnsavedChanges.value,
+    children: (['json', 'csv'] as const).map(format => ({
+      label: format.toUpperCase(),
+      onSelect: () => void exportDialog.value?.exportOne(props.detail.metadata.id, format),
+    })),
+  },
+  {
+    label: t('dictionaryExport.partialExport'),
+    icon: 'i-tabler-filter-down',
+    disabled: props.busy || hasUnsavedChanges.value || !draft.value.entries.some(entry => !entry.translation.trim()),
+    children: (['json', 'csv'] as const).map(format => ({
+      label: format.toUpperCase(),
+      onSelect: () => void exportDialog.value?.exportOne(props.detail.metadata.id, format, true),
+    })),
+  },
 ], [
   { label: t('dictionaryEditor.clearDictionary'), icon: 'i-tabler-trash', color: 'error', disabled: dictionaryLocked.value || props.busy, onSelect: () => { clearOpen.value = true } },
 ]])

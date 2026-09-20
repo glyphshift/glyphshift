@@ -82,17 +82,6 @@ pub(crate) fn desktop_set_probe_run_paused(
 }
 
 #[tauri::command]
-pub(crate) fn desktop_refresh_probe_text(
-    run_id: String,
-    application: State<'_, Mutex<DesktopApplication>>,
-) -> Result<ProbeRunView, CommandError> {
-    application
-        .lock()
-        .map_err(|_| runtime_unavailable())?
-        .refresh_probe_text(&run_id)
-}
-
-#[tauri::command]
 pub(crate) fn desktop_disconnect_probe_run(
     run_id: String,
     application: State<'_, Mutex<DesktopApplication>>,
