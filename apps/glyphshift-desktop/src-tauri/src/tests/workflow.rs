@@ -876,6 +876,52 @@ fn collection_summaries_are_read_only_and_locked_final_batches_retry() {
 }
 
 #[test]
+fn collection_appends_to_5000_entry_dictionary() {
+    let (mut app, _calls, software_id, _root) = workflow_application();
+    app.backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.large", "Large", "en-US", "zh-CN").with_entries(
+                (0..5_000).map(|index| {
+                    DictionaryEntryCreate::new(
+                        format!("Existing source {index}"),
+                        format!("Existing translation {index}"),
+                    )
+                }),
+            ),
+        )
+        .unwrap();
+    app.backend
+        .create_workflow(
+            WorkflowCreate::new("workflow.large", "Large").with_targets([
+                WorkflowTargetCreate::new(software_id, [TEST_ADAPTER_ID], ["dictionary.large"])
+                    .with_write_dictionary("dictionary.large"),
+            ]),
+        )
+        .unwrap();
+    app.enable_workflow("workflow.large", false).unwrap();
+    let ready = app.workflow_collection_view("workflow.large").unwrap();
+    let id = ready.summary.id();
+    let sink = glyphshift_capture::FileCaptureSink::start(
+        app.probe_runs
+            .capture_configuration(id, DEFAULT_MAX_ENTRIES)
+            .unwrap(),
+    )
+    .unwrap();
+    sink.observe(TEST_ADAPTER_ID, "Fresh source");
+    sink.finish().unwrap();
+
+    app.collect_workflow_sources(id).unwrap();
+    assert_eq!(
+        app.backend
+            .dictionary("dictionary.large")
+            .unwrap()
+            .entries()
+            .len(),
+        5_001
+    );
+}
+
+#[test]
 fn workflow_lifecycle_preserves_collection_choice_and_reports_stop_failure() {
     let (mut app, calls, software_id, _root) = workflow_application();
     app.backend

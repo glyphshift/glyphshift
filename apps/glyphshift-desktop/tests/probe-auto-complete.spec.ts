@@ -70,7 +70,32 @@ test('probe auto fill survives navigation, skips busy and empty cycles, and expo
   await page.evaluate(() => { const s = (window as any).__auto; s.candidates = true; s.observedCount++ })
   await page.clock.runFor(6000)
   await expect.poll(async () => { await page.clock.runFor(1000); return page.evaluate(() => (window as any).__auto.starts) }).toBe(2)
-  await page.evaluate(() => { (window as any).__auto.task.status = 'completed_with_failures' })
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    const error = {
+      category: 'invalid_request',
+      retryable: false,
+      retryAfterMs: null,
+      providerCode: null,
+      requestId: null,
+      httpStatus: 400,
+      safeMessage: 'invalid request',
+    }
+    state.task.status = 'completed_with_failures'
+    state.task.failedCount = 1
+    state.task.failedBatches = 1
+    state.task.errors = [error]
+    state.task.batches = [{
+      batchNumber: 1,
+      itemCount: 1,
+      status: 'failed',
+      attemptCount: 1,
+      startedAfterMs: 0,
+      elapsedMs: 1000,
+      lastError: error,
+      usage: null,
+    }]
+  })
   await page.clock.runFor(12000)
   expect(await page.evaluate(() => (window as any).__auto.starts)).toBe(2)
   await page.getByRole('button', { name: '工作流', exact: true }).click()
@@ -113,6 +138,28 @@ test('retryable partial translation failure keeps auto fill enabled and retries 
       lastError: error,
       usage: null,
     }]
+    state.task.dictionaryLocked = false
+  })
+
+  await page.clock.runFor(8000)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(2)
+  await expect(page.getByRole('checkbox', { name: '自动补全', exact: true })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('probe-auto-complete-stopped')).toHaveCount(0)
+})
+
+test('completed translation failure without error details keeps auto fill enabled and retries later', async ({ page }) => {
+  await setup(page, 1)
+  await toggle(page)
+  await page.clock.runFor(1200)
+  await expect.poll(() => page.evaluate(() => (window as any).__auto.starts)).toBe(1)
+
+  await page.evaluate(() => {
+    const state = (window as any).__auto
+    state.task.status = 'completed_with_failures'
+    state.task.failedCount = 1
+    state.task.failedBatches = 1
+    state.task.errors = []
+    state.task.batches = []
     state.task.dictionaryLocked = false
   })
 

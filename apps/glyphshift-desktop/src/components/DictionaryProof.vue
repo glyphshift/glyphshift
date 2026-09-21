@@ -36,6 +36,7 @@ const importDialog = ref<InstanceType<typeof DictionaryImportDialog>>()
 async function applyImport(data: DictionaryImportData) {
   if (dictionaryLocked.value || props.busy || !commitNewEntry()) return false
   draft.value.entries = mergeDictionaryEntries(draft.value.entries, data.entries, data.mode)
+  draftDirty.value = true
   selected.value = new Set()
   query.value = ''
   translationFilter.value = 'all'
@@ -86,6 +87,7 @@ function emptyEntry(): DictionaryEntry {
 
 const saved = ref<DictionaryDetail>(clone(props.detail))
 const draft = ref<DictionaryDetail>(clone(props.detail))
+const draftDirty = ref(false)
 const externalConflicts = ref<string[]>([])
 const aiSaveRequired = ref(false)
 const selected = ref(new Set<number>())
@@ -107,6 +109,7 @@ function clearDictionary() {
   if (dictionaryLocked.value || props.busy) return
   clearCaptured.value = true
   draft.value.entries = []
+  draftDirty.value = true
   newEntry.value = emptyEntry()
   selected.value = new Set()
   clearOpen.value = false
@@ -147,9 +150,11 @@ watch(() => props.detail, (value) => {
   if (sameDictionary && hasUnsavedChanges.value) {
     const merged = mergeDictionaryDraft(saved.value, draft.value, value)
     draft.value = clone(merged.detail)
+    draftDirty.value = JSON.stringify(merged.detail) !== JSON.stringify(value)
     externalConflicts.value = [...new Set([...externalConflicts.value, ...merged.conflicts])]
   } else {
     draft.value = clone(value)
+    draftDirty.value = false
     externalConflicts.value = []
     newEntry.value = emptyEntry()
   }
@@ -234,7 +239,7 @@ const entriesValid = computed(() => draft.value.entries.every((_, index) => (
   !entrySourceError(index)
 )))
 const hasUnsavedChanges = computed(() => (
-  clearCaptured.value || JSON.stringify(draft.value) !== JSON.stringify(saved.value) || newEntryTouched.value
+  clearCaptured.value || draftDirty.value || newEntryTouched.value
 ))
 const canSave = computed(() => (
   hasUnsavedChanges.value
@@ -287,6 +292,7 @@ function applyMetadata() {
   next.homepage = next.homepage?.trim() || null
   next.tags = [...new Set(next.tags.map(value => value.trim()).filter(Boolean))]
   if (!next.name || !next.releaseVersion || !next.sourceLocale || !next.targetLocale) return
+  if (JSON.stringify(next) !== JSON.stringify(draft.value.metadata)) draftDirty.value = true
   draft.value.metadata = next
   metadataOpen.value = false
 }
@@ -295,6 +301,7 @@ function commitNewEntry() {
   if (!newEntryTouched.value) return true
   if (!newEntryValid.value) return false
   draft.value.entries.push(normalizedEntry(newEntry.value))
+  draftDirty.value = true
   newEntry.value = emptyEntry()
   return true
 }
@@ -302,6 +309,7 @@ function commitNewEntry() {
 function confirmRemoval() {
   const removed = new Set(pendingRemoval.value)
   draft.value.entries = draft.value.entries.filter((_, index) => !removed.has(index))
+  if (removed.size) draftDirty.value = true
   selected.value = new Set()
   pendingRemoval.value = []
 }
@@ -380,6 +388,7 @@ async function executeAiTranslation() {
         entry.translation = result.translation
         applied += 1
       }
+      if (applied) draftDirty.value = true
       if (job.status === 'completed') {
         aiNoticeCancelled.value = false
         aiNoticeTone.value = 'success'
@@ -469,7 +478,7 @@ usePageEscape(() => true, () => emit('back'))
     <UAlert v-if="externalConflicts.length" role="alert" color="warning" :title="t('dictionaryEditor.externalConflictTitle')" :description="t('dictionaryEditor.externalConflictDescription', { items: externalConflicts.join('、') })" class="mb-3">
       <template #actions>
         <UButton :label="t('dictionaryEditor.keepDraftChanges')" @click="externalConflicts = []" />
-        <UButton color="neutral" :label="t('dictionaryEditor.useSavedVersion')" @click="draft = clone(saved); metadataDraft = clone(saved.metadata); newEntry = emptyEntry(); externalConflicts = []" />
+        <UButton color="neutral" :label="t('dictionaryEditor.useSavedVersion')" @click="draft = clone(saved); draftDirty = false; metadataDraft = clone(saved.metadata); newEntry = emptyEntry(); externalConflicts = []" />
       </template>
     </UAlert>
     <UAlert v-if="!dictionaryLocked && ai.error.value" role="alert" color="error" variant="soft" :title="t('ai.translationFailed')" :description="ai.error.value" class="mb-3">
@@ -553,6 +562,7 @@ usePageEscape(() => true, () => emit('back'))
               :ui="{ base: 'px-0' }"
               class="w-full"
               :disabled="dictionaryLocked"
+              @update:model-value="draftDirty = true"
             />
             <p v-if="row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index)" class="type-metadata m-0 leading-4 text-[var(--danger)]">
               {{ row.original.kind === 'new' ? newSourceError : entrySourceError(row.original.index) }}
@@ -584,6 +594,7 @@ usePageEscape(() => true, () => emit('back'))
               :ui="{ base: 'px-0' }"
               class="w-full"
               :disabled="dictionaryLocked"
+              @update:model-value="draftDirty = true"
             />
           </div>
         </template>

@@ -171,6 +171,33 @@ impl TranslationSnapshot {
     }
 
     #[must_use]
+    pub fn with_entries_at_location<S, T>(
+        mut self,
+        location: impl Into<Box<str>>,
+        entries: impl IntoIterator<Item = (S, T)>,
+    ) -> Self
+    where
+        S: Into<Box<str>>,
+        T: Into<Box<str>>,
+    {
+        let location = location.into();
+        let mut changed = false;
+        for (source, translation) in entries {
+            let source = source.into();
+            self.entries
+                .entry(location.clone())
+                .or_default()
+                .insert(source.clone(), Arc::from(translation.into()));
+            self.adapter_scopes.remove(&(location.clone(), source));
+            changed = true;
+        }
+        if changed {
+            self.refresh_digest();
+        }
+        self
+    }
+
+    #[must_use]
     pub fn with_entry_for_adapters(
         mut self,
         location: impl Into<Box<str>>,

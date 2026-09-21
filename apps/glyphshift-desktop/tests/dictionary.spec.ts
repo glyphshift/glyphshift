@@ -32,6 +32,36 @@ test('large dictionary renders bounded pages and preserves edits across pages', 
 
 })
 
+test('editing a 5000-entry dictionary does not serialize the whole draft on each keystroke', async ({ page }) => {
+  const snapshot = structuredClone(model)
+  snapshot.dictionaryDetails['dictionary-proof'].entries = Array.from({ length: 5_000 }, (_, index) => ({
+    source: `Entry ${index}`,
+    translation: `Translation ${index}`,
+  }))
+  snapshot.dictionaries[0].entryCount = 5_000
+  await replaceModel(page, snapshot)
+  await page.getByRole('button', { name: '字典', exact: true }).click()
+  await page.getByRole('row').filter({ hasText: '界面基础词典' }).dblclick()
+  await expect(page.getByRole('textbox', { name: '编辑译文：Entry 0', exact: true })).toBeVisible()
+
+  await page.evaluate(() => {
+    const json = JSON as any
+    const original = json.stringify.bind(JSON)
+    ;(window as any).__largeDictionaryStringifies = 0
+    json.stringify = (...args: any[]) => {
+      const value = args[0]
+      if (value?.metadata?.id === 'dictionary-proof' && Array.isArray(value.entries) && value.entries.length === 5_000) {
+        ;(window as any).__largeDictionaryStringifies++
+      }
+      return original(...args)
+    }
+  })
+
+  await page.getByRole('textbox', { name: '编辑译文：Entry 0', exact: true }).fill('Edited once')
+  await expect.poll(() => page.evaluate(() => (window as any).__largeDictionaryStringifies)).toBe(0)
+  await expect(page.getByRole('button', { name: '保存字典', exact: true })).toBeEnabled()
+})
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')

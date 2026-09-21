@@ -426,14 +426,15 @@ pub fn resolve(
                 snapshot = snapshot
                     .with_dictionary_rules(rule_location.clone(), dictionary.text_rules.clone());
                 has_text_replacement = true;
-                for entry in &dictionary.entries {
-                    snapshot = snapshot.with_entry(
-                        rule_location.clone(),
-                        entry.source.clone(),
-                        entry.translation.clone(),
-                    );
-                }
+                snapshot = snapshot.with_entries_at_location(
+                    rule_location,
+                    dictionary
+                        .entries
+                        .iter()
+                        .map(|entry| (entry.source.clone(), entry.translation.clone())),
+                );
             }
+            let mut winning_entries = Vec::with_capacity(dictionary.entries.len());
             for entry in &dictionary.entries {
                 if let Some(winner) = winning_dictionaries.get(&entry.source) {
                     diagnostics.push(CompositionDiagnostic::EntryConflict {
@@ -445,13 +446,17 @@ pub fn resolve(
                     continue;
                 }
                 winning_dictionaries.insert(entry.source.clone(), dictionary.id.clone());
-                for location in &software.locations {
-                    snapshot = snapshot.with_entry(
-                        location.clone(),
-                        entry.source.clone(),
-                        entry.translation.clone(),
-                    );
-                }
+                winning_entries.push(entry);
+            }
+            for location in &software.locations {
+                snapshot = snapshot.with_entries_at_location(
+                    location.clone(),
+                    winning_entries
+                        .iter()
+                        .map(|entry| (entry.source.clone(), entry.translation.clone())),
+                );
+            }
+            if !winning_entries.is_empty() {
                 has_text_replacement = true;
             }
         }

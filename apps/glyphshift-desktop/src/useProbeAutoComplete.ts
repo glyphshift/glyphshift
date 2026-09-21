@@ -37,7 +37,7 @@ export function useProbeAutoComplete() {
       .filter(batch => batch.status === 'failed' && batch.lastError)
       .map(batch => batch.lastError!)
     const errors = failedBatchErrors.length ? failedBatchErrors : task.errors
-    if (!errors.length || errors.some(error => !error.retryable)) return null
+    if (errors.some(error => !error.retryable)) return null
     const retryAfterMs = Math.max(0, ...errors.map(error => error.retryAfterMs ?? 0))
     const backoffMs = Math.min(MAX_RETRY_BACKOFF_MS, MIN_RETRY_MS * 2 ** Math.min(failures, 4))
     return Math.max(intervalMs(), retryAfterMs, backoffMs)
