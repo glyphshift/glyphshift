@@ -25,9 +25,9 @@
   },
   {
     "id": "windows.renpy.message",
-    "name": "Ren'Py 对话文字（实验）",
-    "summary": "适合已验证的 Windows x64 Ren'Py 8.5.2 / 8.5.3 官方运行时，通过 CPython 3.12 在完整对白进入实际显示时采集和替换，并把工作流字体替换应用到当前对白。带 Ren'Py text tag 的原文会以完整文本作为查找键；译文可省略标签，若保留标签则必须与原文标签序列完全一致。词典或字体发布更新后会在主线程刷新当前对白，无需推进剧情。未知 build 拒绝激活；停用后新对白恢复原路径，组件保留到游戏退出。Katawa Shoujo: Re-Engineered 2.0.4 已确认使用 Ren'Py 8.5.2，但该真实游戏的生产 Runtime 像素闭环仍待补齐。",
-    "technology": "Ren'Py 8.5.2 / 8.5.3 / CPython 3.12（x64）",
+    "name": "Ren'Py 对话文字",
+    "summary": "适合 Windows x64 Ren'Py 8.5.x / CPython 3.12；8.5.2 / 8.5.3 是已验证参考 build，其他 8.5.x 仅在对白、菜单、重绘与字体等结构能力探测通过时激活。通过 CPython 3.12 在完整对白进入实际显示时采集和替换，并把工作流字体替换应用到当前对白。带 Ren'Py text tag 的原文会以完整文本作为查找键；译文可省略标签，若保留标签则必须与原文标签序列完全一致。词典或字体发布更新后会在主线程刷新当前对白，无需推进剧情。结构不兼容的目标拒绝激活；停用会恢复当前可见对白与字体并撤销 Glyphshift 自己安装的 Hook。Katawa Shoujo: Re-Engineered 2.0.4 已在 Ren'Py 8.5.2.26010301 的 ADV 对话路径完成生产 Runtime 源文捕获、两代当前对白可见更新和停用恢复闭环。",
+    "technology": "Ren'Py 8.5.x / CPython 3.12（Windows x64；8.5.2 / 8.5.3 已验证）",
     "technicalTarget": "renpy.character.ADVCharacter.do_display",
     "documentationUrl": "https://www.renpy.org/doc/html/dialogue.html"
   },
@@ -40,9 +40,17 @@
     "documentationUrl": "https://github.com/rpgtkoolmv/corescript/blob/master/js/rpg_windows/Window_Message.js"
   },
   {
+    "id": "windows.electron.dom-text",
+    "name": "Electron / Chromium DOM 文字（实验）",
+    "summary": "面向 Windows x64 Electron/Chromium renderer 的通用 DOM 文字适配器。运行时按能力选择兼容 V8 路径，或沿已加载原生模块的 N-API import 发现实际 provider，并通过 Node linked binding 主动取得 renderer N-API 环境；不绑定应用名、provider 模块名或单一 Electron 版本。覆盖普通文本节点、title、aria-label、placeholder、开放 Shadow DOM 和可访问的同源 iframe。DOM 变化会增量处理，词典更新会主动重扫，停用仅恢复仍由 Glyphshift 持有的译文。脚本、样式、模板、代码块、可编辑区域、用户输入值、Canvas/WebGL/图片内文字不处理。目标仍需具备受支持的 renderer/Node/libuv 能力。",
+    "technology": "Electron / Chromium DOM（Windows x64，V8 / N-API + Node + libuv 能力探测）",
+    "technicalTarget": "renderer DOM Text + MutationObserver",
+    "documentationUrl": "https://www.electronjs.org/docs/latest/tutorial/process-model"
+  },
+  {
     "id": "windows.tyranoscript.message",
-    "name": "TyranoScript 对话文字（实验）",
-    "summary": "适合已验证的 Windows x64 TyranoScript V6.03 导出运行时（引擎版本 520 / Electron 24.1.2）。在完整主消息进入 backlog、语音、HTML 构造和打字机渲染前采集；纯文本可替换，HTML 敏感文本或控制文本只采集不替换。未知运行时拒绝激活；停用后恢复自身包装，组件保留到游戏退出。",
+    "name": "TyranoScript 对话文字",
+    "summary": "适合已验证的 Windows x64 TyranoScript V6.03 导出运行时（引擎版本 520 / Electron 24.1.2）。已在 V6.03 引擎导出模型下通过生产 Runtime 注入完成 Electron 主进程到 renderer 的自动目标回退、源文捕获、词典替换与停用恢复闭环。在完整主消息进入 backlog、语音、HTML 构造和打字机渲染前采集；纯文本可替换，HTML 敏感文本或控制文本只采集不替换。未知运行时拒绝激活；组件停用后恢复自身包装，并保留到游戏退出。",
     "technology": "TyranoScript V6.03 / Electron 24.1.2 / V8 11.2.214.9-electron.0（x64）",
     "technicalTarget": "TYRANO.kag.ftag.master_tag.text.showMessage",
     "documentationUrl": "https://tyrano.jp/"

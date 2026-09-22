@@ -52,13 +52,12 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
     let mut runtime = bundle
         .discover(application_id.clone(), &spec)
         .expect("authorized host discovery");
-    let target_id = runtime
+    let target_ids = runtime
         .targets()
-        .next()
-        .expect("authorized host must already be running")
-        .id();
+        .map(|target| target.id())
+        .collect::<Vec<_>>();
     runtime
-        .start(target_id, [requested_feature])
+        .start_first_available(target_ids, [requested_feature])
         .expect("authorized host Runtime activation");
     assert!(runtime.is_feature_active(requested_feature));
     if let Some(hold_ms) = std::env::var_os("GLYPHSHIFT_REAL_HOST_HOLD_MS")

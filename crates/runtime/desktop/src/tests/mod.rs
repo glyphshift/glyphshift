@@ -12,8 +12,8 @@ use glyphshift_protocol::{
     ControllerHello, ControllerInventory, ControllerTarget, ControllerTargetToken, TransportFailure,
 };
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 use tempfile::tempdir;
 
@@ -251,6 +251,15 @@ impl ManagedRuntime for RetryRuntime {
         self.inner.start(target_id, requested_features)
     }
 
+    fn start_first_available(
+        &mut self,
+        target_ids: &[u64],
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        self.inner
+            .start_first_available(target_ids, requested_features)
+    }
+
     fn start_capture(
         &mut self,
         target_ids: &[u64],
@@ -352,11 +361,27 @@ impl ManagedRuntime for InMemoryRuntime {
 
     fn start(
         &mut self,
-        _target_id: u64,
+        target_id: u64,
         requested_features: &BTreeSet<Feature>,
     ) -> Result<(), DesktopRuntimeError> {
+        if !self.target_ids.contains(&target_id) {
+            return Err(DesktopRuntimeError::UnknownTarget);
+        }
         self.active_features = requested_features.clone();
         Ok(())
+    }
+
+    fn start_first_available(
+        &mut self,
+        target_ids: &[u64],
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        let target_id = target_ids
+            .iter()
+            .copied()
+            .find(|target_id| self.target_ids.contains(target_id))
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        self.start(target_id, requested_features)
     }
 
     fn start_capture(

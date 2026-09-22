@@ -108,6 +108,7 @@ $profileDirectory = $Profile.ToLowerInvariant()
 $x86ProfileRoot = Join-Path $CargoTargetDir "i686-pc-windows-msvc\$profileDirectory"
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 & (Join-Path $PSScriptRoot 'build-renpy-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
+& (Join-Path $PSScriptRoot 'build-electron-dom-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 & (Join-Path $PSScriptRoot 'build-tyranoscript-native.ps1') -OutputRoot (Join-Path $CargoTargetDir $profileDirectory)
 & (Join-Path $PSScriptRoot 'build-monogame-native.ps1') -Architecture x86 -OutputRoot $x86ProfileRoot
 & (Join-Path $PSScriptRoot 'build-rpgmaker-mv-native.ps1') -OutputRoot $x86ProfileRoot
@@ -170,6 +171,8 @@ $monoGameBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_monogame_native.dll' 'adapter-monogame' 'dll'
 $renPyBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_renpy_native.dll' 'adapter-renpy' 'dll'
+$electronDomBundle = Copy-VersionedBundleArtifact `
+    'glyphshift_adapter_electron_dom_native.dll' 'adapter-electron-dom' 'dll'
 $tyranoScriptBundle = Copy-VersionedBundleArtifact `
     'glyphshift_adapter_tyranoscript_native.dll' 'adapter-tyranoscript' 'dll'
 
@@ -236,6 +239,7 @@ $unityMonoStandardUiPresentation = Get-AdapterPresentation 'windows.unity.mono.s
 $unityIl2CppStandardUiPresentation = Get-AdapterPresentation 'windows.unity.il2cpp.standard-ui'
 $monoGamePresentation = Get-AdapterPresentation 'windows.monogame.sprite-batch-draw-string'
 $renPyPresentation = Get-AdapterPresentation 'windows.renpy.message'
+$electronDomPresentation = Get-AdapterPresentation 'windows.electron.dom-text'
 $rpgMakerMvPresentation = Get-AdapterPresentation 'windows.rpgmaker-mv.message'
 $tyranoScriptPresentation = Get-AdapterPresentation 'windows.tyranoscript.message'
 $vguiLocalizePresentation = Get-AdapterPresentation 'windows.vgui.localize-query'
@@ -274,6 +278,16 @@ $runtimeManifest = [ordered]@{
             technology = $renPyPresentation.technology
             technicalTarget = $renPyPresentation.technicalTarget
             documentationUrl = $renPyPresentation.documentationUrl
+            process_resident_after_deactivate = $true
+        },
+        [ordered]@{
+            file = $electronDomBundle.file
+            sha256 = $electronDomBundle.sha256
+            name = $electronDomPresentation.name
+            summary = $electronDomPresentation.summary
+            technology = $electronDomPresentation.technology
+            technicalTarget = $electronDomPresentation.technicalTarget
+            documentationUrl = $electronDomPresentation.documentationUrl
             process_resident_after_deactivate = $true
         },
         [ordered]@{

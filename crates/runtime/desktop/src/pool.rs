@@ -417,11 +417,6 @@ impl DesktopRuntimePool {
             }
             return Ok(status);
         }
-        let Some(target_id) =
-            target_id.or_else(|| runtime.targets().first().map(RuntimeTarget::id))
-        else {
-            return Err(DesktopRuntimeError::UnknownTarget);
-        };
         if let Some(configuration) = collection {
             let target_ids = runtime
                 .targets()
@@ -442,7 +437,17 @@ impl DesktopRuntimePool {
             self.active_collections
                 .insert(application_id.clone(), configuration);
         } else {
-            if let Err(error) = runtime.start(target_id, &requested_features) {
+            let result = if let Some(target_id) = target_id {
+                runtime.start(target_id, &requested_features)
+            } else {
+                let target_ids = runtime
+                    .targets()
+                    .into_iter()
+                    .map(|target| target.id())
+                    .collect::<Vec<_>>();
+                runtime.start_first_available(&target_ids, &requested_features)
+            };
+            if let Err(error) = result {
                 if !runtime.is_active() {
                     self.sessions.remove(application_id.as_ref());
                     self.active_collections.remove(application_id.as_ref());
@@ -816,10 +821,12 @@ impl DesktopRuntimePool {
 
         let mut runtime = self.factory.discover(application_id.clone(), spec)?;
         if !requested_features.is_empty() {
-            let target_id = runtime.targets().first().map(RuntimeTarget::id);
-            if let Some(target_id) = target_id {
-                runtime.start(target_id, &requested_features)?;
-            }
+            let target_ids = runtime
+                .targets()
+                .into_iter()
+                .map(|target| target.id())
+                .collect::<Vec<_>>();
+            runtime.start_first_available(&target_ids, &requested_features)?;
         }
         let status = runtime_status(runtime.as_ref(), requested_features);
         self.sessions.insert(application_id.clone(), runtime);

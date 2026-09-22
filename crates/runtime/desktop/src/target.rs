@@ -1,5 +1,5 @@
 use super::*;
-use crate::acquisition::{AcquisitionExecutor, map_acquisition_protocol_error};
+use crate::acquisition::{map_acquisition_protocol_error, AcquisitionExecutor};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeTarget {
@@ -48,6 +48,11 @@ pub(super) trait ManagedRuntime: Send {
     fn start(
         &mut self,
         target_id: u64,
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError>;
+    fn start_first_available(
+        &mut self,
+        target_ids: &[u64],
         requested_features: &BTreeSet<Feature>,
     ) -> Result<(), DesktopRuntimeError>;
     fn start_capture(
@@ -135,6 +140,18 @@ impl ManagedRuntime for WindowsDesktopRuntime {
         requested_features: &BTreeSet<Feature>,
     ) -> Result<(), DesktopRuntimeError> {
         DesktopRuntime::start(self, target_id, requested_features.iter().copied())
+    }
+
+    fn start_first_available(
+        &mut self,
+        target_ids: &[u64],
+        requested_features: &BTreeSet<Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntime::start_first_available(
+            self,
+            target_ids.iter().copied(),
+            requested_features.iter().copied(),
+        )
     }
 
     fn start_capture(
@@ -411,7 +428,15 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         target_id: u64,
         requested_features: impl IntoIterator<Item = Feature>,
     ) -> Result<(), DesktopRuntimeError> {
-        self.start_inner([target_id], requested_features, None)
+        self.start_inner([target_id], requested_features, None, true)
+    }
+
+    pub fn start_first_available(
+        &mut self,
+        target_ids: impl IntoIterator<Item = u64>,
+        requested_features: impl IntoIterator<Item = Feature>,
+    ) -> Result<(), DesktopRuntimeError> {
+        self.start_inner(target_ids, requested_features, None, true)
     }
 
     pub fn start_capture(
@@ -420,7 +445,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         requested_features: impl IntoIterator<Item = Feature>,
         capture: CaptureConfiguration,
     ) -> Result<(), DesktopRuntimeError> {
-        self.start_inner(target_ids, requested_features, Some(capture))
+        self.start_inner(target_ids, requested_features, Some(capture), false)
     }
 
     fn start_inner(
@@ -428,6 +453,7 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         target_ids: impl IntoIterator<Item = u64>,
         requested_features: impl IntoIterator<Item = Feature>,
         capture: Option<CaptureConfiguration>,
+        stop_after_first_success: bool,
     ) -> Result<(), DesktopRuntimeError> {
         let requested_features = requested_features.into_iter().collect::<Vec<_>>();
         let capture_requested = capture.is_some();
@@ -438,7 +464,11 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
         {
             return Err(DesktopRuntimeError::SessionRejected);
         }
-        let target_ids = target_ids.into_iter().collect::<BTreeSet<_>>();
+        let mut seen_target_ids = BTreeSet::new();
+        let target_ids = target_ids
+            .into_iter()
+            .filter(|target_id| seen_target_ids.insert(*target_id))
+            .collect::<Vec<_>>();
         if target_ids.is_empty() {
             return Err(DesktopRuntimeError::UnknownTarget);
         }
@@ -569,6 +599,9 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             };
             active_features.extend(status.active_features());
             sessions.insert(target_id, status.session_id());
+            if stop_after_first_success {
+                break;
+            }
         }
         if sessions.is_empty() {
             if let Some(owner) = capture_owner {
