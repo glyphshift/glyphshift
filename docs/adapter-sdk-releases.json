@@ -1,0 +1,15 @@
+{
+  "schema": "glyphshift.adapter-sdk-releases/1",
+  "releases": [
+    {
+      "version": "0.1.0",
+      "tag": "adapter-sdk-v0.1.0",
+      "source_commit": "fa755652c2ecc30dd70f329613403cfc128ab14b",
+      "asset": "glyphshift-adapter-sdk-0.1.0.zip",
+      "sha256": "cb0ab2bbbb5dc08e5b841f275db39b88f7f4ccab2170fd45cb0241c7716237a0",
+      "bytes": 88347,
+      "native_abi": [1, 0],
+      "gsp_schema": "glyphshift.plugin/1"
+    }
+  ]
+}

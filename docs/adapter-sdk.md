@@ -18,7 +18,10 @@ python scripts/export-adapter-sdk.py --ref <committed-revision> --output <sdk-so
 输出应位于本机 `local-test/`。导出使用已提交源码和依赖锁，以离线 Cargo metadata 收敛 SDK 图；
 本机需要已取得对应的第三方 crate 索引/缓存。`sdk-release.json` 记录版本、源 commit、Native ABI、GSP schema
 与每个文件的 SHA-256。ZIP 文件顺序、时间戳和权限固定；相同 commit、锁文件和工具环境的重复导出字节一致。
-输出文件已存在时拒绝覆盖。SDK 来源是具体 commit，版本目前沿用工作区版本；正式发布前须审阅版本唯一性。
+输出文件已存在时拒绝覆盖。SDK 来源是具体 commit，导出版本目前沿用工作区版本。
+发行身份由 [SDK 版本登记](adapter-sdk-releases.json) 固定：0.1.0 只对应其中登记的源 commit、制品名和摘要，
+不得从新 commit 导出同版本后覆盖。修改 SDK 时先分配新版本，并更新消费者锁；相同版本的重复构建只能核对已有字节。
+SDK 标签使用 `adapter-sdk-vMAJOR.MINOR.PATCH`，与桌面发布的 `v*` 标签分离。
 
 SDK 内的 `glyphshift-adapter-tool` 提供：
 
@@ -35,7 +38,7 @@ DLL 加载初始化；`pack`/`verify` 不执行插件代码。具体包合同见
 
 `adapter-raylib` 拥有描述符与 Native DLL 实现、跨架构合同、构建/打包入口和 CI 定义。
 它通过 `sdk.lock.json` 固定 SDK 来源，展开的 `.sdk/` 是生成依赖缓存，不引用相邻主仓。
-当前源码 SDK 随独立仓库固定在 vendor 中；没有虚构的远端 Release 下载地址。第三方 Rust 依赖正常通过
+源码 SDK 随独立仓库固定在 vendor 中；SDK Release 草稿不作为可匿名下载的依赖地址。第三方 Rust 依赖正常通过
 Cargo 锁文件取得，SDK 与构建工具都不进入最终 `.gsp`。
 
 主产品暂保留原路径下的 Raylib **内置兼容快照**，维持现有构建、默认能力与集成测试。
@@ -50,4 +53,6 @@ python scripts/sync-raylib-snapshot.py --archive <reviewed-git-archive.zip> --sh
 导入先验证完整来源摘要和 git archive commit，只复制固定映射的两个源码文件，拒绝覆盖尚未处理的本地快照修改。
 导入之后按现有活动包验证入口检查；不更改主产品的共同 SDK/ABI 依赖边界。
 
-这一步完成独立构建与本地包消费。远端仓库、正式 SDK/插件 Release、Registry 发布者验证、在线安装界面仍需后续落地。
+独立源码已托管于 [glyphshift/adapter-raylib](https://github.com/glyphshift/adapter-raylib)。
+CI 执行双架构构建、合同与打包，成功后保留带源 commit、SDK 锁和 SHA256SUMS 的候选制品。
+SDK/插件先使用预发布草稿审核，不自动更新桌面最新版；正式 Release、Registry 发布者验证、在线安装界面仍需后续落地。

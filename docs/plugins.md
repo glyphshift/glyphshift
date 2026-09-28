@@ -2,7 +2,7 @@
 
 第一阶段已提供 `.gsp` 包合同、开发者 CLI、本地不可变安装与桌面启动加载。尚未提供在线 Registry、
 发布者签名验证、插件管理界面、双击关联、自动下载、热切换或物理卸载。
-独立 SDK 源码包和本地 Raylib 仓库已建立，构建与快照边界见 [adapter-sdk.md](adapter-sdk.md)；尚未发布远端 Release。
+独立 SDK 源码包和 Raylib 组织仓库已建立，构建与快照边界见 [adapter-sdk.md](adapter-sdk.md)；Release 处于草稿准备阶段。
 术语以 [CONTEXT.md](../CONTEXT.md#适配器插件) 为准。当前包不是面向普通用户的线上发行流程。
 
 ## 包合同
