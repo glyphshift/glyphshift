@@ -59,11 +59,30 @@ _Avoid_: 页面位置、主界面区域
 
 **Runtime Bundle**：
 Glyphshift 在本机用于连接目标和执行界面能力的受信发布集合。它提供可验证的能力目录，不包含用户工作流。
+当前发布将公共 Controller、Target Runtime 与适配器一起打包；它不等同于单个适配器插件包。
 _Avoid_: 工作流包、词典包
 
-**Capability Adapter**：
+**适配器（Capability Adapter，简称 Adapter）**：
 在明确界面技术路径上提供文字观察、文字替换或字体替换能力的执行模块。
-_Avoid_: Technology、Hook Type、GDI 作为单一 Adapter 身份
+按引擎、框架或稳定 API 能力定义，软件和游戏是验证样本。Adapter 是选择和激活能力的单位，
+不与源码仓库、安装包或 DLL 强制一一对应。
+_Avoid_: Technology、Hook Type、GDI 作为单一 Adapter 身份、插件包
+
+**原生适配器制品（Native Adapter Artifact）**：
+适配器可供加载的原生二进制文件，当前 Windows 实现主要为 DLL。一个插件包可以携带多个 DLL；
+支持 DLL、辅助程序、脚本或资源不因此自动成为独立 Adapter。DLL 是运行制品，不是插件包格式。
+_Avoid_: 一个 DLL 必定对应一个插件包、把所有 DLL 都列为可选适配器
+
+**Controller / Target Runtime**：
+Controller 负责目标连接与控制；Target Runtime 在目标进程内协调适配器与运行能力。
+它们是公共运行组件，按需要的目标架构提供，不应在每个适配器插件包内重复携带。
+_Avoid_: 插件 SDK、某个技术族专属适配器
+
+**Adapter SDK / Native ABI**：
+SDK 是开发适配器使用的合同与辅助接口；Native ABI 是原生制品与宿主之间的二进制调用合同。
+SDK 版本、ABI 版本、适配器版本和插件包版本分别表达不同的兼容边界，不能互相替代。
+编译时依赖 SDK 不表示用户安装插件时需要安装一份完整开发工具链。
+_Avoid_: 公共 Runtime、插件包版本等于 ABI 版本
 
 **Platform**：
 目标和 Adapter 的操作系统兼容事实，例如 Windows。它不进入词典，也不作为 Adapter 名称前缀。
@@ -140,6 +159,52 @@ _Avoid_: Workflow、持续 Runtime 翻译
 _Avoid_: 词典历史、请求日志、聊天记录
 
 ## 目录与发布
+
+### 适配器插件
+
+以下为已确定的领域与命名约定；`.gsp` 打包、独立安装更新和线上发布尚未实现。
+具体清单 schema、字段编码和签名封装由包合同另行定义，术语约定不表示这些接口已经可用。
+
+**适配器插件包（Adapter Plugin Package，简称插件包）**：
+适配器能力的发布、下载、安装和升级单位。一个包可提供一个或多个 Adapter，携带对应的 DLL、
+必要支持文件、清单和许可声明。共同维护、共同升级的技术族能力可归为一包，不按软件品牌拆包。
+用户侧称“适配器插件”；技术文档中用“插件包”强调交付边界，用“适配器”强调执行能力。
+_Avoid_: 单个 DLL、源码仓库、词典、Translation Provider
+
+**GSP（Glyphshift Plugin，`.gsp`）**：
+适配器插件包的文件格式与扩展名约定。内部采用标准 ZIP 容器和版本化清单，不自创压缩算法。
+扩展名用于识别和安装入口，不是信任依据；安装必须校验清单、制品和发布来源。
+词典保持独立的资产与交付格式，不因同属在线资源而成为可执行插件。
+_Avoid_: DLL 的另一种扩展名、通用资源压缩包、改后缀即可加载
+
+**包身份（Package ID）与适配器身份（Adapter ID）**：
+Package ID 唯一标识持续发布的插件包，例如 `glyphshift-adapter-qt`；Adapter ID 标识包提供的
+具体运行能力。包名、展示名、文件名、仓库名与 Adapter ID 不混用。既有 Adapter ID 不因拆仓或改包名而改变。
+_Avoid_: 用 DLL 文件名推导永久身份、用展示名称匹配工作流
+
+**插件发布（Plugin Release）与平台变体（Package Variant）**：
+插件发布是一个 Package ID 与发布版本对应的不可变交付；平台变体是同一发布面向操作系统和目标架构的制品组合。
+一个离线包可包含多个变体，在线分发可按需交付；x64 桌面 App 仍可能需要 x86 目标适配器。
+包版本管理整体交付，包内 Adapter 版本描述具体能力，二者不要求数值一致。
+_Avoid_: 源码提交号、本地工作流 revision、只按桌面壳架构选包
+
+**插件清单（Plugin Manifest）**：
+描述包身份、版本、提供的 Adapter、平台变体、ABI/Runtime 兼容要求、依赖、文件摘要与许可入口的机器可读合同。
+摘要确认内容完整性，发布者验证确认来源；包内自报作者或摘要不能单独建立信任。
+_Avoid_: 展示文案、文件名约定、自报可信
+
+**插件安装（Plugin Installation）**：
+本机对已验证插件发布及所需变体的安装记录。安装不等于工作流已选择或激活其中的 Adapter。
+内置与外置来源必须解析为明确版本，不能因来源不同而重复激活同一 Adapter ID；停止适配器不保证 DLL
+立即卸载，升级或卸载可能需要目标软件退出。
+_Avoid_: 下载完成、工作流开关、停用即热卸载
+
+**在线 Registry 与本地 Adapter Registry**：
+在线 Registry 拥有可发现的插件/词典发布与制品分发合同；本地 Adapter Registry 是运行时能力注册与解析组件。
+Hub 负责社区展示，源码仓库负责开发协作；它们都不等同于本地插件安装状态。
+_Avoid_: 同名 registry crate 已代表线上发布服务、建仓即完成插件化
+
+### 词典与共享发布术语
 
 **词典发布（Dictionary Release）**：
 以词典身份和发布版本唯一标识的一次不可变内容发布。
