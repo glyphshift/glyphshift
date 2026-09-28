@@ -7,6 +7,9 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 
+& python (Join-Path $PSScriptRoot 'sync-raylib-snapshot.py') --check
+if ($LASTEXITCODE -ne 0) { throw 'Raylib compatibility snapshot differs from its pinned source.' }
+
 & (Join-Path $PSScriptRoot 'test-runtime-bundle-kirikiri-packaging.ps1')
 
 # Native integration tests load real DLL and executable artifacts by filename.
