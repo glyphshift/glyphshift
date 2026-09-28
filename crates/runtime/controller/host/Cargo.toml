@@ -18,8 +18,17 @@ glyphshift-protocol = { path = "../../protocol" }
 serde_json = "1"
 sha2 = "0.10"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_IO",
+] }
+
 [dev-dependencies]
 glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
 
-[lints]
-workspace = true
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security", "Win32_System_Pipes"] }
+
+[lints.rust]
+unsafe_code = "allow"

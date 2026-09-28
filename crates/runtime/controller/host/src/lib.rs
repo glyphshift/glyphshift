@@ -5,10 +5,10 @@ use glyphshift_capture::{
     CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId, CaptureTranslationContext,
 };
 use glyphshift_controller_sdk::{
-    Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
+    PROTOCOL_SCHEMA, Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
     WireCaptureObservationBatch, WireControllerConfiguration, WireControllerLossPolicy,
     WireFeature, WireOperation, WireRuntimeDeployment, WireRuntimeFontOutcome,
-    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant, PROTOCOL_SCHEMA,
+    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant,
 };
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{CodeHash, ControllerCodeIdentity, ExtensionId, ProtocolVersion};
@@ -26,6 +26,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -165,6 +166,7 @@ pub struct ProcessControllerTransport {
     input: Option<ChildStdin>,
     responses: Receiver<String>,
     reader: Option<JoinHandle<()>>,
+    reader_output: Arc<std::fs::File>,
     timeout: Duration,
     next_request_id: u64,
     terminated: bool,
@@ -198,9 +200,15 @@ impl ProcessControllerTransport {
             .stdout
             .take()
             .ok_or(ControllerLoadError::SpawnFailed)?;
+        #[cfg(windows)]
+        let output = std::fs::File::from(std::os::windows::io::OwnedHandle::from(output));
+        #[cfg(unix)]
+        let output = std::fs::File::from(std::os::fd::OwnedFd::from(output));
+        let reader_output = Arc::new(output);
+        let output = Arc::clone(&reader_output);
         let (sender, responses) = mpsc::channel();
         let reader = thread::spawn(move || {
-            for line in BufReader::new(output).lines() {
+            for line in BufReader::new(output.as_ref()).lines() {
                 let Ok(line) = line else {
                     break;
                 };
@@ -214,6 +222,7 @@ impl ProcessControllerTransport {
             input: Some(input),
             responses,
             reader: Some(reader),
+            reader_output,
             timeout,
             next_request_id: 0,
             terminated: false,
@@ -262,6 +271,10 @@ impl ProcessControllerTransport {
 
 fn classify_rejection(code: &str) -> glyphshift_protocol::ControllerRejection {
     use glyphshift_protocol::ControllerRejection;
+
+    if std::env::var_os("GLYPHSHIFT_TRACE_CONTROLLER_REJECTION").is_some() {
+        eprintln!("controller rejection: {code}");
+    }
 
     let reason = code.split_once(':').map_or(code, |(_, reason)| reason);
     match reason {
@@ -603,6 +616,7 @@ impl ControllerTransport for ProcessControllerTransport {
         if self.terminated {
             return;
         }
+        trace_controller_transport("terminate_begin");
         self.terminated = true;
         if let Some(mut input) = self.input.take() {
             self.next_request_id = self.next_request_id.saturating_add(1);
@@ -617,14 +631,62 @@ impl ControllerTransport for ProcessControllerTransport {
             let _ = input.write_all(b"\n");
             let _ = input.flush();
         }
+        trace_controller_transport("terminate_input_closed");
+        // Let the plugin drop pending launches before resorting to termination.
+        let deadline = std::time::Instant::now() + self.timeout.min(Duration::from_secs(1));
+        while self.child.try_wait().ok().flatten().is_none() && std::time::Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
         }
+        trace_controller_transport("terminate_before_child_wait");
         let _ = self.child.wait();
+        trace_controller_transport("terminate_after_child_wait");
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            trace_controller_transport("terminate_before_reader_finish");
+            finish_reader(reader, self.reader_output.as_ref());
+            trace_controller_transport("terminate_after_reader_finish");
         }
     }
+}
+
+fn trace_controller_transport(stage: &str) {
+    if std::env::var_os("GLYPHSHIFT_TRACE_CONTROLLER_REJECTION").is_some() {
+        eprintln!("controller transport: {stage}");
+    }
+}
+
+#[cfg(windows)]
+fn finish_reader(reader: JoinHandle<()>, output: &impl std::os::windows::io::AsRawHandle) {
+    use std::os::windows::io::AsRawHandle;
+    use std::ptr::null;
+    use std::thread;
+    use std::time::Duration;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::IO::{CancelIoEx, CancelSynchronousIo};
+
+    for _ in 0..50 {
+        if reader.is_finished() {
+            break;
+        }
+        // Keep the pipe and thread handles owned while cancelling. The reader may
+        // finish between this check and cancellation; neither handle can be reused.
+        unsafe {
+            CancelIoEx(output.as_raw_handle() as HANDLE, null());
+            CancelSynchronousIo(reader.as_raw_handle() as HANDLE);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    if reader.is_finished() {
+        let _ = reader.join();
+    }
+}
+
+#[cfg(not(windows))]
+fn finish_reader(reader: JoinHandle<()>, _output: &std::fs::File) {
+    let _ = reader.join();
 }
 
 fn decode_observation_batch(
@@ -703,3 +765,42 @@ fn hide_window(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn hide_window(_command: &mut Command) {}
+
+#[cfg(all(test, windows))]
+mod reader_shutdown_tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Read;
+    use std::os::windows::io::FromRawHandle;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+
+    #[test]
+    fn shutdown_cancels_a_reader_while_another_process_could_still_hold_the_writer() {
+        let mut read_handle = null_mut();
+        let mut write_handle = null_mut();
+        assert_ne!(
+            unsafe { CreatePipe(&mut read_handle, &mut write_handle, std::ptr::null(), 0) },
+            0
+        );
+        let output = Arc::new(unsafe { File::from_raw_handle(read_handle) });
+        let writer = unsafe { File::from_raw_handle(write_handle) };
+        let thread_output = Arc::clone(&output);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let result = thread_output.as_ref().read(&mut [0_u8; 1]);
+            let _ = done_tx.send(result.is_err());
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        finish_reader(reader, output.as_ref());
+        let cancelled = done_rx.recv_timeout(Duration::from_secs(2));
+        drop(writer);
+        assert_eq!(
+            cancelled,
+            Ok(true),
+            "reader must finish without waiting for pipe EOF"
+        );
+    }
+}
