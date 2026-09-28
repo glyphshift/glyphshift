@@ -1,15 +1,17 @@
+use crate::controlled_launch::{ProcessLauncher, SuspendedProcess, SystemProcessLauncher};
 use crate::platform::{
     enumerate_processes, file_sha256, has_authorized_ancestor, validate_executable_name,
-    validate_executable_path,
+    validate_executable_path, windows_executable,
 };
 #[cfg(windows)]
 use crate::remote;
 use glyphshift_controller_sdk::{
     ControllerPlugin, PluginError, WireAdapterRequirement, WireCaptureObservationBatch,
     WireCaptureObservationRecord, WireCaptureTranslationContext, WireControllerConfiguration,
-    WireControllerLossPolicy, WireFeature, WireInventory, WireRecipe, WireRuntimeAck,
-    WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome, WireRuntimeTraceBatch,
-    WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget, WireWorkerTargetGrant,
+    WireControllerLossPolicy, WireFeature, WireInstallation, WireInventory, WireRecipe,
+    WireRuntimeAck, WireRuntimeDeployment, WireRuntimeFontOutcome, WireRuntimeTextOutcome,
+    WireRuntimeTraceBatch, WireRuntimeTraceRecord, WireRuntimeTraceStatus, WireTarget,
+    WireWorkerTargetGrant,
 };
 use glyphshift_runtime_contract::RuntimePublication;
 use glyphshift_target_runtime_contract::TargetRuntimeDeployment;
@@ -62,13 +64,22 @@ pub(super) struct AuthorizedProcess {
 pub struct WindowsController {
     executable_names: BTreeSet<String>,
     executable_paths: BTreeSet<String>,
+    installations: BTreeMap<String, InstallationRecord>,
     descendant_executable_names: BTreeSet<String>,
     adapter_requirements: Vec<WireAdapterRequirement>,
     process_inventory: Box<dyn ProcessInventory>,
+    process_launcher: Box<dyn ProcessLauncher>,
+    pending_launches: BTreeMap<u32, Box<dyn SuspendedProcess>>,
     admitted_instances: BTreeSet<ProcessInstanceId>,
     pub(super) targets: BTreeMap<String, ProcessRecord>,
     pub(super) runtime_libraries: BTreeMap<String, std::path::PathBuf>,
     next_target_token: u64,
+}
+
+#[derive(Clone, Debug)]
+struct InstallationRecord {
+    path: std::path::PathBuf,
+    display_name: String,
 }
 
 impl Default for WindowsController {
@@ -80,16 +91,30 @@ impl Default for WindowsController {
 impl WindowsController {
     #[must_use]
     pub fn new() -> Self {
-        Self::with_process_inventory(Box::new(SystemProcessInventory))
+        Self::with_process_services(
+            Box::new(SystemProcessInventory),
+            Box::new(SystemProcessLauncher),
+        )
     }
 
+    #[cfg(test)]
     pub(super) fn with_process_inventory(process_inventory: Box<dyn ProcessInventory>) -> Self {
+        Self::with_process_services(process_inventory, Box::new(SystemProcessLauncher))
+    }
+
+    pub(super) fn with_process_services(
+        process_inventory: Box<dyn ProcessInventory>,
+        process_launcher: Box<dyn ProcessLauncher>,
+    ) -> Self {
         Self {
             executable_names: BTreeSet::new(),
             executable_paths: BTreeSet::new(),
+            installations: BTreeMap::new(),
             descendant_executable_names: BTreeSet::new(),
             adapter_requirements: Vec::new(),
             process_inventory,
+            process_launcher,
+            pending_launches: BTreeMap::new(),
             admitted_instances: BTreeSet::new(),
             targets: BTreeMap::new(),
             runtime_libraries: BTreeMap::new(),
@@ -234,6 +259,16 @@ impl WindowsController {
             .retain(|token, _| self.targets.contains_key(token));
         wire_targets
     }
+
+    pub(super) fn resume_controlled_launch(
+        &mut self,
+        target: &ProcessRecord,
+    ) -> Result<(), PluginError> {
+        let Some(process) = self.pending_launches.remove(&target.process_id) else {
+            return Ok(());
+        };
+        process.resume()
+    }
 }
 
 impl ControllerPlugin for WindowsController {
@@ -247,11 +282,14 @@ impl ControllerPlugin for WindowsController {
             .iter()
             .map(|name| validate_executable_name(name))
             .collect::<Result<BTreeSet<_>, _>>()?;
-        let executable_paths = configuration
-            .executable_paths
-            .iter()
-            .map(|path| validate_executable_path(path))
-            .collect::<Result<BTreeSet<_>, _>>()?;
+        let mut executable_paths = BTreeSet::new();
+        let mut installation_candidates = BTreeMap::new();
+        for path in &configuration.executable_paths {
+            let normalized = validate_executable_path(path)?;
+            let executable = windows_executable(Path::new(path), Some(false))?;
+            executable_paths.insert(normalized.clone());
+            installation_candidates.insert(normalized, executable);
+        }
         let descendant_executable_names = configuration
             .descendant_executable_names
             .iter()
@@ -262,8 +300,29 @@ impl ControllerPlugin for WindowsController {
         }
         self.executable_names = executable_names;
         self.executable_paths = executable_paths;
+        self.installations = installation_candidates
+            .into_iter()
+            .filter(|(_, executable)| executable.architecture() == std::env::consts::ARCH)
+            .enumerate()
+            .map(|(index, (_, executable))| {
+                let display_name = executable
+                    .path()
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(executable.name())
+                    .to_string();
+                (
+                    format!("installation:{}", index + 1),
+                    InstallationRecord {
+                        path: executable.path().to_path_buf(),
+                        display_name,
+                    },
+                )
+            })
+            .collect();
         self.descendant_executable_names = descendant_executable_names;
         self.adapter_requirements = configuration.adapter_requirements.clone();
+        self.pending_launches.clear();
         self.admitted_instances.clear();
         self.targets.clear();
         self.runtime_libraries.clear();
@@ -273,16 +332,39 @@ impl ControllerPlugin for WindowsController {
 
     fn inventory(&mut self) -> Result<WireInventory, PluginError> {
         let processes = self.process_inventory.snapshot()?;
+        let live_process_ids = processes
+            .iter()
+            .map(|process| process.process_id)
+            .collect::<BTreeSet<_>>();
+        self.pending_launches
+            .retain(|process_id, _| live_process_ids.contains(process_id));
         let authorized = self.authorized_processes(processes);
         let targets = self.rebuild_targets(authorized);
         Ok(WireInventory {
-            installations: Vec::new(),
+            installations: self
+                .installations
+                .iter()
+                .map(|(token, installation)| WireInstallation {
+                    token: token.clone(),
+                    display_name: installation.display_name.clone(),
+                })
+                .collect(),
             targets,
         })
     }
 
-    fn launch(&mut self, _installation_token: &str) -> Result<(), PluginError> {
-        Err(PluginError::new("launch_not_configured"))
+    fn launch(&mut self, installation_token: &str) -> Result<(), PluginError> {
+        let installation = self
+            .installations
+            .get(installation_token)
+            .ok_or_else(|| PluginError::new("installation_not_found"))?;
+        let process = self.process_launcher.launch_suspended(&installation.path)?;
+        let process_id = process.process_id();
+        if process_id == 0 || self.pending_launches.contains_key(&process_id) {
+            return Err(PluginError::new("controlled_launch_invalid_process"));
+        }
+        self.pending_launches.insert(process_id, process);
+        Ok(())
     }
 
     fn prepare(
@@ -317,6 +399,7 @@ impl ControllerPlugin for WindowsController {
         let target = self
             .targets
             .get(target_token)
+            .cloned()
             .ok_or_else(|| PluginError::new("target_not_found"))?;
         let started_at = target
             .started_at
@@ -335,6 +418,7 @@ impl ControllerPlugin for WindowsController {
         let target = self
             .targets
             .get(target_token)
+            .cloned()
             .ok_or_else(|| PluginError::new("target_not_found"))?;
         let runtime_library = std::path::PathBuf::from(&deployment.runtime_library);
         let decoded = TargetRuntimeDeployment::decode_json(&deployment.deployment_json)
@@ -374,20 +458,20 @@ impl ControllerPlugin for WindowsController {
             .as_bytes();
         let mut controller_preloads = Vec::new();
         for adapter in decoded.adapters() {
-            match remote::prepare_adapter(target, adapter.library()) {
+            match remote::prepare_adapter(&target, adapter.library()) {
                 Ok(true) => controller_preloads.push(adapter.library().to_path_buf()),
                 Ok(false) => {}
                 Err(remote::RemoteError::AdapterPreparation(
                     glyphshift_adapter_native_host::PREPARE_STATUS_UNSUPPORTED,
                 )) => {
                     for library in controller_preloads.drain(..) {
-                        let _ = remote::release_prepared_adapter(target, &library);
+                        let _ = remote::release_prepared_adapter(&target, &library);
                     }
                     return Err(PluginError::new("adapter_unsupported"));
                 }
                 Err(error) => {
                     for library in controller_preloads.drain(..) {
-                        let _ = remote::release_prepared_adapter(target, &library);
+                        let _ = remote::release_prepared_adapter(&target, &library);
                     }
                     return Err(PluginError::new(format!(
                         "adapter_prepare_failed:{}",
@@ -397,11 +481,11 @@ impl ControllerPlugin for WindowsController {
             }
         }
         let activation =
-            match remote::activate(target, &runtime_library, &deployment.deployment_json) {
+            match remote::activate(&target, &runtime_library, &deployment.deployment_json) {
                 Ok(activation) => activation,
                 Err(error) => {
                     for library in controller_preloads.drain(..) {
-                        let _ = remote::release_prepared_adapter(target, &library);
+                        let _ = remote::release_prepared_adapter(&target, &library);
                     }
                     return Err(PluginError::new(format!(
                         "runtime_activation_failed:{}",
@@ -410,10 +494,15 @@ impl ControllerPlugin for WindowsController {
                 }
             };
         for library in controller_preloads {
-            let _ = remote::release_prepared_adapter(target, &library);
+            let _ = remote::release_prepared_adapter(&target, &library);
         }
         self.runtime_libraries
-            .insert(target_token.into(), runtime_library);
+            .insert(target_token.into(), runtime_library.clone());
+        if let Err(error) = self.resume_controlled_launch(&target) {
+            let _ = remote::deactivate(&target, &runtime_library);
+            self.runtime_libraries.remove(target_token);
+            return Err(error);
+        }
         Ok(WireRuntimeAck {
             generation: deployment.generation,
             publication_identity,

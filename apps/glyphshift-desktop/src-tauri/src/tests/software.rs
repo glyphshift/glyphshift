@@ -141,6 +141,25 @@ fn software_launch_resolves_only_an_existing_bound_executable() {
 }
 
 #[test]
+fn software_launch_uses_controlled_runtime_for_an_enabled_workflow_target() {
+    let (mut application, calls, software_id, _data_root) = workflow_application();
+    application
+        .enable_workflow("workflow.product", false)
+        .expect("enable workflow before launch");
+
+    application
+        .launch_software(&software_id)
+        .expect("controlled workflow launch");
+
+    let calls = calls.lock().expect("runtime call log");
+    assert_eq!(
+        calls.launched,
+        vec![(Box::<str>::from("workflow.product"), software_id)]
+    );
+    assert_eq!(calls.refreshed, vec![Box::<str>::from("workflow.product")]);
+}
+
+#[test]
 fn software_delete_reports_references_before_touching_the_runtime() {
     let (mut application, calls, software_id, _data_root) = workflow_application();
     application

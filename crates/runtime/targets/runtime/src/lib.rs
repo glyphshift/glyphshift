@@ -58,11 +58,17 @@ struct RuntimeState {
     bindings: Vec<AdapterBinding>,
     adapter_libraries: Vec<PathBuf>,
     adapters: Vec<Arc<LoadedNativeAdapter>>,
+    resident_adapters: Vec<ResidentNativeAdapter>,
     native_hosts: Vec<usize>,
     active_adapters: Vec<bool>,
     capture: Option<RuntimeCapture>,
     active: bool,
     source_aliases: BTreeMap<SourceTextPolicy, BTreeMap<String, String>>,
+}
+
+struct ResidentNativeAdapter {
+    binding: AdapterBinding,
+    adapter: Arc<LoadedNativeAdapter>,
 }
 
 fn runtime_state() -> &'static Mutex<Option<RuntimeState>> {
@@ -159,21 +165,55 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 request_current_process_redraw();
                 return Ok(());
             }
-            if !same_adapter_set(&runtime.bindings, &bindings)
-                || runtime.adapter_libraries != adapter_libraries
-            {
-                return Err(TargetRuntimeError::InvalidDeployment);
-            }
-            runtime.kernel = kernel;
-            runtime.publication = publication;
-            runtime.source_aliases = source_aliases(&runtime.publication, &runtime.adapters);
-            text_host::reset_runs(runtime);
-            runtime.bindings = bindings;
-            runtime.capture = capture_configuration
+            let capture = capture_configuration
                 .clone()
                 .map(RuntimeCapture::start)
                 .transpose()?;
-            (runtime.adapters.clone(), runtime.native_hosts.clone())
+            let deployment_changed = !same_adapter_set(&runtime.bindings, &bindings)
+                || runtime.adapter_libraries != adapter_libraries;
+            let (adapters, native_hosts) = if deployment_changed {
+                let adapters = deployment
+                    .adapters()
+                    .iter()
+                    .map(|deployment| {
+                        if let Some(resident) = runtime.resident_adapters.iter().find(|resident| {
+                            same_adapter_identity(&resident.binding, deployment.binding())
+                        }) {
+                            return Ok(Arc::clone(&resident.adapter));
+                        }
+                        let adapter = unsafe {
+                            LoadedNativeAdapter::load(
+                                deployment.library(),
+                                &deployment.binding().descriptor,
+                            )
+                            .map(Arc::new)
+                            .map_err(|_| TargetRuntimeError::AdapterLoad)?
+                        };
+                        Ok(adapter)
+                    })
+                    .collect::<Result<Vec<_>, TargetRuntimeError>>()?;
+                let native_hosts = bindings
+                    .iter()
+                    .zip(&adapters)
+                    .map(|(binding, adapter)| {
+                        native_host(binding.adapter_id.as_str(), adapter.source_policy())
+                    })
+                    .collect::<Vec<_>>();
+                (adapters, native_hosts)
+            } else {
+                (runtime.adapters.clone(), runtime.native_hosts.clone())
+            };
+            runtime.kernel = kernel;
+            runtime.publication = publication;
+            runtime.source_aliases = source_aliases(&runtime.publication, &adapters);
+            text_host::reset_runs(runtime);
+            runtime.bindings = bindings;
+            runtime.adapter_libraries = adapter_libraries;
+            runtime.adapters = adapters.clone();
+            runtime.native_hosts = native_hosts.clone();
+            runtime.active_adapters = vec![false; adapters.len()];
+            runtime.capture = capture;
+            (adapters, native_hosts)
         } else {
             let capture = capture_configuration
                 .clone()
@@ -188,6 +228,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                         .map_err(|_| TargetRuntimeError::AdapterLoad)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            let resident_adapters = Vec::new();
             let native_hosts = bindings
                 .iter()
                 .zip(&adapters)
@@ -202,6 +243,7 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
                 bindings,
                 adapter_libraries,
                 adapters: adapters.clone(),
+                resident_adapters,
                 native_hosts: native_hosts.clone(),
                 active_adapters: vec![false; adapters.len()],
                 capture,
@@ -263,14 +305,23 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         let capture_finished = capture.is_none_or(|capture| capture.finish().is_ok());
         if adapters_deactivated && capture_finished {
             let rolled_back = runtime_state().lock().is_ok_and(|mut state| {
-                if state.as_ref().is_some_and(|runtime| {
-                    !runtime.active && same_loaded_adapters(runtime, &adapters)
-                }) {
-                    *state = None;
-                    true
-                } else {
-                    false
-                }
+                let Some(runtime) = state
+                    .as_mut()
+                    .filter(|runtime| !runtime.active && same_loaded_adapters(runtime, &adapters))
+                else {
+                    return false;
+                };
+                runtime.active_adapters.fill(false);
+                text_host::reset_runs(runtime);
+                text_host::invalidate_scopes();
+                // Failed first activations must release their library references.
+                // Only adapters that previously activated successfully stay resident.
+                runtime.adapters.clear();
+                runtime.bindings.clear();
+                runtime.adapter_libraries.clear();
+                runtime.native_hosts.clear();
+                runtime.active_adapters.clear();
+                true
             });
             if rolled_back {
                 request_current_process_redraw();
@@ -291,6 +342,21 @@ pub fn activate_deployment(deployment: TargetRuntimeDeployment) -> Result<(), Ta
         let runtime = state
             .as_mut()
             .ok_or(TargetRuntimeError::RuntimeUnavailable)?;
+        for ((binding, adapter), active) in
+            runtime.bindings.iter().zip(&adapters).zip(&active_adapters)
+        {
+            if *active
+                && !runtime
+                    .resident_adapters
+                    .iter()
+                    .any(|resident| Arc::ptr_eq(&resident.adapter, adapter))
+            {
+                runtime.resident_adapters.push(ResidentNativeAdapter {
+                    binding: binding.clone(),
+                    adapter: Arc::clone(adapter),
+                });
+            }
+        }
         runtime.active_adapters = active_adapters;
         runtime.active = true;
     }
@@ -331,14 +397,19 @@ fn same_active_deployment(
 
 fn same_adapter_set(previous: &[AdapterBinding], next: &[AdapterBinding]) -> bool {
     previous.len() == next.len()
-        && previous.iter().zip(next).all(|(previous, next)| {
-            previous.descriptor == next.descriptor
-                && previous.adapter_id == next.adapter_id
-                && previous.version == next.version
-                && previous.apply_model == next.apply_model
-                && previous.artifact_hash == next.artifact_hash
-                && previous.host == next.host
-        })
+        && previous
+            .iter()
+            .zip(next)
+            .all(|(previous, next)| same_adapter_identity(previous, next))
+}
+
+fn same_adapter_identity(previous: &AdapterBinding, next: &AdapterBinding) -> bool {
+    previous.descriptor == next.descriptor
+        && previous.adapter_id == next.adapter_id
+        && previous.version == next.version
+        && previous.apply_model == next.apply_model
+        && previous.artifact_hash == next.artifact_hash
+        && previous.host == next.host
 }
 
 fn file_sha256(path: &Path) -> Result<[u8; 32], std::io::Error> {
@@ -458,6 +529,7 @@ pub fn query_activation() -> Result<RuntimeActivationReport, TargetRuntimeError>
 }
 
 pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
+    trace_deactivation("begin");
     let (capture, refresh_adapters, deactivated) = {
         let mut state = runtime_state()
             .lock()
@@ -473,15 +545,18 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         // An adapter may drain callbacks which need this same Runtime mutex.
         // Never hold the decision lock while asking an adapter to deactivate.
         drop(state);
+        trace_deactivation("before_adapter_deactivate");
         // Attempt every stop: one package failure must not keep later packages translating.
         let stopped = refresh_adapters
             .iter()
             .map(|adapter| adapter.deactivate().is_ok())
             .collect::<Vec<_>>();
+        trace_deactivation("after_adapter_deactivate");
         let deactivated = stopped.iter().all(|stopped| *stopped);
         let mut state = runtime_state()
             .lock()
             .map_err(|_| TargetRuntimeError::RuntimeUnavailable)?;
+        trace_deactivation("after_runtime_relock");
         let runtime = state
             .as_mut()
             .filter(|runtime| same_loaded_adapters(runtime, &loaded))
@@ -508,14 +583,35 @@ pub fn deactivate_runtime() -> Result<(), TargetRuntimeError> {
         )
     };
     if let Some(capture) = capture {
+        trace_deactivation("before_capture_finish");
         capture.finish()?;
+        trace_deactivation("after_capture_finish");
     }
+    trace_deactivation("before_adapter_refresh");
     request_adapter_refreshes(&refresh_adapters);
+    trace_deactivation("after_adapter_refresh");
+    trace_deactivation("before_redraw");
     request_current_process_redraw();
+    trace_deactivation("after_redraw");
     if deactivated {
+        trace_deactivation("done");
         Ok(())
     } else {
         Err(TargetRuntimeError::AdapterActivation)
+    }
+}
+
+fn trace_deactivation(stage: &str) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("GLYPHSHIFT_RUNTIME_DEACTIVATE_TRACE") else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{stage}");
     }
 }
 

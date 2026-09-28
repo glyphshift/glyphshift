@@ -346,6 +346,7 @@ impl DesktopRuntimePool {
             target_id,
             requested_features.into_iter().collect(),
             None,
+            false,
         )
     }
 
@@ -356,6 +357,7 @@ impl DesktopRuntimePool {
         target_id: Option<u64>,
         mut requested_features: BTreeSet<Feature>,
         collection: Option<CaptureConfiguration>,
+        launch_if_missing: bool,
     ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
         if collection.is_some() {
             requested_features.insert(Feature::TextObserve);
@@ -417,6 +419,19 @@ impl DesktopRuntimePool {
             }
             return Ok(status);
         }
+        let launched_target_id = if launch_if_missing && runtime.targets().is_empty() {
+            match runtime.launch() {
+                Ok(target_id) => Some(target_id),
+                Err(error) => {
+                    self.sessions.remove(application_id.as_ref());
+                    self.active_collections.remove(application_id.as_ref());
+                    self.requested_features.remove(application_id.as_ref());
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         if let Some(configuration) = collection {
             let target_ids = runtime
                 .targets()
@@ -437,7 +452,7 @@ impl DesktopRuntimePool {
             self.active_collections
                 .insert(application_id.clone(), configuration);
         } else {
-            let result = if let Some(target_id) = target_id {
+            let result = if let Some(target_id) = target_id.or(launched_target_id) {
                 runtime.start(target_id, &requested_features)
             } else {
                 let target_ids = runtime
@@ -496,6 +511,54 @@ impl DesktopRuntimePool {
     ) {
         self.workflow_collections
             .insert(workflow_id.into(), collections);
+    }
+
+    /// Explicitly starts one workflow target through the Controller and activates its Runtime
+    /// before the target's primary thread is resumed.
+    pub fn launch_workflow_target(
+        &mut self,
+        intent: &EffectiveWorkflowIntent,
+        software_id: &str,
+    ) -> Result<DesktopRuntimeStatus, DesktopRuntimeError> {
+        if self.capture_targets.contains(software_id) {
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Capture,
+            ));
+        }
+        if self.workflow_targets.iter().any(|(workflow_id, owned)| {
+            workflow_id.as_ref() != intent.workflow_id() && owned.contains(software_id)
+        }) {
+            return Err(DesktopRuntimeError::TargetInUse(
+                TargetExecutionOwner::Workflow,
+            ));
+        }
+        let target = intent
+            .targets()
+            .iter()
+            .find(|target| target.software_id() == software_id)
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        self.workflow_targets
+            .entry(intent.workflow_id().into())
+            .or_default()
+            .insert(software_id.into());
+        let requested_features = target
+            .requested_features()
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let collection = self
+            .workflow_collections
+            .get(intent.workflow_id())
+            .and_then(|collections| collections.get(software_id))
+            .cloned();
+        self.set_features_with_collection(
+            software_id.into(),
+            target.runtime_spec(),
+            None,
+            requested_features,
+            collection,
+            true,
+        )
     }
 
     pub fn reconcile_workflow(
@@ -560,6 +623,7 @@ impl DesktopRuntimePool {
                 None,
                 requested_features,
                 collection,
+                false,
             ) {
                 Ok(status) => statuses.push(status),
                 Err(error) => {

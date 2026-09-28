@@ -312,8 +312,43 @@ impl DesktopApplication {
         Ok(executable_path)
     }
 
-    pub(super) fn launch_software(&self, extension_id: &str) -> Result<(), CommandError> {
+    pub(super) fn launch_software(&mut self, extension_id: &str) -> Result<(), CommandError> {
         let executable_path = self.software_launch_path(extension_id)?;
+        let workflow_id = self
+            .backend
+            .enabled_workflow_ids()
+            .iter()
+            .find(|workflow_id| {
+                self.backend.workflow(workflow_id).is_ok_and(|workflow| {
+                    workflow
+                        .targets()
+                        .iter()
+                        .any(|target| target.software_id() == extension_id)
+                })
+            })
+            .cloned();
+        if let Some(workflow_id) = workflow_id {
+            self.prepare_workflow_collection(&workflow_id)?;
+            let intent = self
+                .backend
+                .effective_workflow_intent(&workflow_id)
+                .map_err(|_| CommandError::new("software.launch_failed"))?;
+            let runtimes = self.runtimes.as_mut().ok_or_else(|| {
+                runtime_command_error(
+                    self.runtime_bundle_error
+                        .unwrap_or(DesktopRuntimeError::BundleUnavailable),
+                    true,
+                )
+            })?;
+            runtimes
+                .launch_workflow_target(&intent, extension_id)
+                .map_err(|error| runtime_command_error(error, true))?;
+            let runtime = runtimes.refresh_workflow(&intent);
+            self.workflow_runtime_status
+                .insert(workflow_id.clone(), runtime);
+            self.update_workflow_collection_status(&workflow_id, true)?;
+            return Ok(());
+        }
         let mut command = std::process::Command::new(&executable_path);
         if let Some(parent) = executable_path.parent() {
             command.current_dir(parent);

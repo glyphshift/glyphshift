@@ -632,6 +632,27 @@ fn trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop()
     activate_deployment(changed_features)
         .expect("an inactive Runtime must accept a new Feature set for the same adapter");
     deactivate_runtime().expect("changed Feature set pass-through");
+
+    let reduced_package = crate::native_package();
+    let reduced_hash = artifact_hash(&reduced_package);
+    let reduced_deployment = TargetRuntimeDeployment::new(
+        publication(6, "Reduced adapter set"),
+        [NativeAdapterDeployment::new(
+            reduced_package,
+            binding(reduced_hash, [Feature::TextReplace]),
+        )
+        .expect("reduced GDI deployment")],
+    );
+    activate_deployment(reduced_deployment)
+        .expect("an inactive Runtime must accept a different Adapter set without restart");
+    assert_eq!(
+        query_activation()
+            .expect("reduced activation report")
+            .active_adapter_ids()
+            .collect::<Vec<_>>(),
+        vec![glyphshift_adapter_gdi::ADAPTER_ID]
+    );
+    deactivate_runtime().expect("reduced Adapter set pass-through");
 }
 
 #[test]

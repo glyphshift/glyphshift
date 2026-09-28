@@ -1,8 +1,15 @@
+use crate::controlled_launch::{ProcessLauncher, SuspendedProcess};
 use crate::controller::{ProcessInventory, ProcessRecord, WindowsController};
+use crate::platform::validate_executable_path;
 use glyphshift_controller_sdk::{
     ControllerPlugin, PluginError, WireAdapterRequirement, WireControllerConfiguration, WireFeature,
 };
 use std::collections::VecDeque;
+use std::path::Path;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 struct SyntheticProcessInventory {
     snapshots: VecDeque<Vec<ProcessRecord>>,
@@ -19,6 +26,39 @@ impl SyntheticProcessInventory {
 impl ProcessInventory for SyntheticProcessInventory {
     fn snapshot(&mut self) -> Result<Vec<ProcessRecord>, PluginError> {
         Ok(self.snapshots.pop_front().unwrap_or_default())
+    }
+}
+
+struct SyntheticSuspendedProcess {
+    process_id: u32,
+    resumed: Arc<AtomicBool>,
+}
+
+impl SuspendedProcess for SyntheticSuspendedProcess {
+    fn process_id(&self) -> u32 {
+        self.process_id
+    }
+
+    fn resume(self: Box<Self>) -> Result<(), PluginError> {
+        self.resumed.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct SyntheticProcessLauncher {
+    process_id: u32,
+    resumed: Arc<AtomicBool>,
+}
+
+impl ProcessLauncher for SyntheticProcessLauncher {
+    fn launch_suspended(
+        &mut self,
+        _executable: &Path,
+    ) -> Result<Box<dyn SuspendedProcess>, PluginError> {
+        Ok(Box::new(SyntheticSuspendedProcess {
+            process_id: self.process_id,
+            resumed: self.resumed.clone(),
+        }))
     }
 }
 

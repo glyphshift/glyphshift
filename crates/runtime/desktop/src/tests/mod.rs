@@ -12,8 +12,8 @@ use glyphshift_protocol::{
     ControllerHello, ControllerInventory, ControllerTarget, ControllerTargetToken, TransportFailure,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
 };
 use tempfile::tempdir;
 
@@ -319,6 +319,14 @@ impl ManagedRuntime for InMemoryRuntime {
             self.active_features.clear();
         }
         Ok(alive)
+    }
+
+    fn launch(&mut self) -> Result<u64, DesktopRuntimeError> {
+        if !self.target_ids.is_empty() {
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        self.target_ids.push(1);
+        Ok(1)
     }
 
     fn application_id(&self) -> &str {

@@ -134,3 +134,65 @@ fn independent_same_executable_instances_remain_top_level_roots() {
     assert_eq!(authorized.len(), 2);
     assert!(authorized.iter().all(|process| process.is_root));
 }
+
+#[test]
+fn controlled_launch_publishes_installation_and_holds_process_until_resume() {
+    let executable = std::env::current_exe().expect("test executable path");
+    let normalized = validate_executable_path(&executable.to_string_lossy())
+        .expect("test executable should be a valid launch path");
+    let resumed = Arc::new(AtomicBool::new(false));
+    let launched_process = ProcessRecord {
+        process_id: 500,
+        parent_process_id: 1,
+        started_at: Some(5_000),
+        executable_name: executable
+            .file_name()
+            .expect("test executable name")
+            .to_string_lossy()
+            .into_owned(),
+        executable_path: Some(normalized),
+        architecture: std::env::consts::ARCH.into(),
+    };
+    let mut controller = WindowsController::with_process_services(
+        Box::new(SyntheticProcessInventory::new([
+            Vec::new(),
+            vec![launched_process.clone()],
+        ])),
+        Box::new(SyntheticProcessLauncher {
+            process_id: launched_process.process_id,
+            resumed: resumed.clone(),
+        }),
+    );
+    controller
+        .configure(
+            "org.example.controlled-launch",
+            &WireControllerConfiguration {
+                executable_names: vec![launched_process.executable_name.clone()],
+                executable_paths: vec![executable.to_string_lossy().into_owned()],
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: Vec::new(),
+            },
+        )
+        .expect("controlled launch configuration");
+
+    let before = controller.inventory().expect("installation inventory");
+    assert_eq!(before.installations.len(), 1);
+    assert!(before.targets.is_empty());
+    controller
+        .launch(&before.installations[0].token)
+        .expect("suspended launch should be accepted");
+    assert!(!resumed.load(Ordering::SeqCst));
+
+    let after = controller.inventory().expect("launched process inventory");
+    assert_eq!(after.targets.len(), 1);
+    assert_eq!(
+        controller.targets[&after.targets[0].token].process_id,
+        launched_process.process_id
+    );
+    assert!(!resumed.load(Ordering::SeqCst));
+
+    controller
+        .resume_controlled_launch(&launched_process)
+        .expect("activation boundary should resume the controlled process");
+    assert!(resumed.load(Ordering::SeqCst));
+}

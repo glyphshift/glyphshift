@@ -246,6 +246,14 @@ trait WorkflowRuntimeService: Send {
 
     fn refresh_workflow(&mut self, intent: &EffectiveWorkflowIntent) -> WorkflowRuntimeView;
 
+    fn launch_workflow_target(
+        &mut self,
+        _intent: &EffectiveWorkflowIntent,
+        _software_id: &str,
+    ) -> Result<(), DesktopRuntimeError> {
+        Err(DesktopRuntimeError::UnknownTarget)
+    }
+
     fn remove_software(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError>;
 
     fn start_capture(
@@ -322,6 +330,14 @@ impl WorkflowRuntimeService for DesktopRuntimePool {
     fn refresh_workflow(&mut self, intent: &EffectiveWorkflowIntent) -> WorkflowRuntimeView {
         let report = DesktopRuntimePool::refresh_workflow(self, intent);
         workflow_runtime_view(self, intent, report, true)
+    }
+
+    fn launch_workflow_target(
+        &mut self,
+        intent: &EffectiveWorkflowIntent,
+        software_id: &str,
+    ) -> Result<(), DesktopRuntimeError> {
+        DesktopRuntimePool::launch_workflow_target(self, intent, software_id).map(|_| ())
     }
 
     fn remove_software(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {

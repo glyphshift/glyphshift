@@ -1,5 +1,5 @@
 use super::*;
-use crate::acquisition::{map_acquisition_protocol_error, AcquisitionExecutor};
+use crate::acquisition::{AcquisitionExecutor, map_acquisition_protocol_error};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeTarget {
@@ -44,6 +44,9 @@ pub(super) trait ManagedRuntime: Send {
     fn applied_generation(&self) -> Option<Generation>;
     fn refresh_liveness(&mut self) -> Result<bool, DesktopRuntimeError> {
         Ok(!self.targets().is_empty())
+    }
+    fn launch(&mut self) -> Result<u64, DesktopRuntimeError> {
+        Err(DesktopRuntimeError::UnknownTarget)
     }
     fn start(
         &mut self,
@@ -91,6 +94,10 @@ impl ManagedRuntime for WindowsDesktopRuntime {
             self.refresh_discovery()?;
             Ok(true)
         }
+    }
+
+    fn launch(&mut self) -> Result<u64, DesktopRuntimeError> {
+        self.launch_first_installation()
     }
 
     fn application_id(&self) -> &str {
@@ -319,6 +326,59 @@ impl<T: ControllerTransport + Send + 'static> DesktopRuntime<T> {
             })
             .collect();
         Ok(())
+    }
+
+    /// Starts the configured executable through the Controller while keeping its primary thread
+    /// suspended. The normal Runtime activation path resumes it only after deployment succeeds.
+    pub fn launch_first_installation(&mut self) -> Result<u64, DesktopRuntimeError> {
+        let Some(RuntimePhase::Discovered(connection)) = self.phase.as_mut() else {
+            return Err(DesktopRuntimeError::InvalidState);
+        };
+        let inventory = connection
+            .inventory()
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        if !inventory.targets().is_empty() {
+            self.targets = inventory
+                .targets()
+                .iter()
+                .map(|target| TargetRecord {
+                    view: RuntimeTarget {
+                        id: target.id().as_u64(),
+                        display_name: target.display_name().into(),
+                    },
+                    controller_id: target.id(),
+                    facts: target.facts().clone(),
+                })
+                .collect();
+            return Err(DesktopRuntimeError::InvalidState);
+        }
+        let installation = inventory
+            .installations()
+            .first()
+            .map(|installation| installation.id())
+            .ok_or(DesktopRuntimeError::UnknownTarget)?;
+        connection
+            .launch(installation)
+            .map_err(map_protocol_error)?;
+        let inventory = connection
+            .inventory()
+            .map_err(|_| DesktopRuntimeError::ControllerUnavailable)?;
+        self.targets = inventory
+            .targets()
+            .iter()
+            .map(|target| TargetRecord {
+                view: RuntimeTarget {
+                    id: target.id().as_u64(),
+                    display_name: target.display_name().into(),
+                },
+                controller_id: target.id(),
+                facts: target.facts().clone(),
+            })
+            .collect();
+        self.targets
+            .first()
+            .map(|target| target.view.id)
+            .ok_or(DesktopRuntimeError::UnknownTarget)
     }
 
     pub fn acquire_point(

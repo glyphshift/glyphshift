@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-#[ignore = "requires an explicitly authorized, already-running Windows host"]
+#[ignore = "requires an explicitly authorized Windows host"]
 fn desktop_runtime_activates_in_an_authorized_real_host() {
     let runtime_root = std::env::var_os("GLYPHSHIFT_RUNTIME_ROOT")
         .map(std::path::PathBuf::from)
@@ -20,6 +20,8 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
         std::env::var("GLYPHSHIFT_REAL_HOST_TRANSLATION").unwrap_or_else(|_| "文件".into());
     let updated_translation = std::env::var("GLYPHSHIFT_REAL_HOST_TRANSLATION_UPDATE").ok();
     let require_replacement_hits = std::env::var("GLYPHSHIFT_REAL_HOST_REQUIRE_HITS")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
+    let controlled_launch = std::env::var("GLYPHSHIFT_REAL_HOST_CONTROLLED_LAUNCH")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"));
 
     let data = tempdir().expect("isolated desktop data");
@@ -52,10 +54,41 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
     let mut runtime = bundle
         .discover(application_id.clone(), &spec)
         .expect("authorized host discovery");
-    let target_ids = runtime
-        .targets()
-        .map(|target| target.id())
-        .collect::<Vec<_>>();
+    if controlled_launch {
+        assert_eq!(
+            runtime.targets().count(),
+            0,
+            "controlled launch requires the authorized executable to be offline"
+        );
+        let target_id = runtime
+            .launch_first_installation()
+            .expect("controlled launch authorized host");
+        println!("authorized host controlled launch target id={target_id}");
+    }
+    let targets = runtime.targets().cloned().collect::<Vec<_>>();
+    for (index, target) in targets.iter().enumerate() {
+        println!(
+            "authorized host target[{index}]: id={} display_name={}",
+            target.id(),
+            target.display_name()
+        );
+    }
+    let target_ids = if let Some(index) = std::env::var("GLYPHSHIFT_REAL_HOST_TARGET_INDEX")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .expect("authorized host target index")
+        }) {
+        vec![
+            targets
+                .get(index)
+                .unwrap_or_else(|| panic!("authorized host target index {index} is out of range"))
+                .id(),
+        ]
+    } else {
+        targets.iter().map(|target| target.id()).collect::<Vec<_>>()
+    };
     runtime
         .start_first_available(target_ids, [requested_feature])
         .expect("authorized host Runtime activation");
@@ -87,6 +120,15 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
                 .filter(|record| record.adapter_id() == adapter_id)
             {
                 hit_count += 1;
+                if record.source_text() == source {
+                    println!(
+                        "authorized host diagnostic phase=initial source={:?} generation={} status={:?} text={:?}",
+                        record.source_text(),
+                        record.generation(),
+                        record.status(),
+                        record.text()
+                    );
+                }
                 if record.source_text() == source
                     && record.generation() == initial_generation
                     && record.status() == RuntimeTraceStatus::Matched
@@ -140,6 +182,15 @@ fn desktop_runtime_activates_in_an_authorized_real_host() {
                     .filter(|record| record.adapter_id() == adapter_id)
                 {
                     hit_count += 1;
+                    if record.source_text() == source {
+                        println!(
+                            "authorized host diagnostic phase=updated source={:?} generation={} status={:?} text={:?}",
+                            record.source_text(),
+                            record.generation(),
+                            record.status(),
+                            record.text()
+                        );
+                    }
                     if record.source_text() == source
                         && record.generation() == updated_generation
                         && record.status() == RuntimeTraceStatus::Matched
@@ -206,7 +257,7 @@ fn desktop_runtime_captures_an_authorized_real_host() {
         .add_software(ExecutableSelection::new(&host_executable))
         .expect("register authorized host executable");
     let application_id = snapshot.software()[0].id().to_owned();
-    let spec = backend
+    let mut spec = backend
         .capture_runtime_spec(
             &application_id,
             &adapter_ids
@@ -216,6 +267,15 @@ fn desktop_runtime_captures_an_authorized_real_host() {
                 .collect::<Vec<_>>(),
         )
         .expect("compiled authorized capture Runtime spec");
+    if let Ok(descendants) = std::env::var("GLYPHSHIFT_REAL_HOST_DESCENDANTS") {
+        spec = spec.with_descendant_executable_names(
+            descendants
+                .split(';')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned),
+        );
+    }
     let capture = CaptureConfiguration::new(
         CaptureSessionId::new("authorized-real-host").expect("capture session id"),
         &output,
@@ -224,8 +284,32 @@ fn desktop_runtime_captures_an_authorized_real_host() {
     .expect("capture configuration");
     let bundle = RuntimeBundle::open(&runtime_root).expect("verified Runtime bundle");
     let mut pool = DesktopRuntimePool::new(bundle);
+    let status = pool
+        .discover(application_id.clone(), &spec)
+        .expect("authorized host capture discovery");
+    let targets = status.targets().cloned().collect::<Vec<_>>();
+    for (index, target) in targets.iter().enumerate() {
+        println!(
+            "authorized host target[{index}]: id={} display_name={}",
+            target.id(),
+            target.display_name()
+        );
+    }
+    let target_id = std::env::var("GLYPHSHIFT_REAL_HOST_TARGET_INDEX")
+        .ok()
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .expect("authorized host target index")
+        })
+        .map(|index| {
+            targets
+                .get(index)
+                .unwrap_or_else(|| panic!("authorized host target index {index} is out of range"))
+                .id()
+        });
 
-    pool.start_capture(application_id.clone(), &spec, None, capture)
+    pool.start_capture(application_id.clone(), &spec, target_id, capture)
         .expect("start authorized host capture");
     println!("authorized host capture is active");
     std::thread::sleep(Duration::from_millis(hold_ms));

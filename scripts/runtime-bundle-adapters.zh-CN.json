@@ -49,9 +49,9 @@
   },
   {
     "id": "windows.electron.dom-text",
-    "name": "Electron / Chromium DOM 文字（实验）",
-    "summary": "面向 Windows x64 Electron/Chromium renderer 的通用 DOM 文字适配器。运行时按能力选择兼容 V8 路径，或沿已加载原生模块的 N-API import 发现实际 provider，并通过 Node linked binding 主动取得 renderer N-API 环境；不绑定应用名、provider 模块名或单一 Electron 版本。覆盖普通文本节点、title、aria-label、placeholder、开放 Shadow DOM 和可访问的同源 iframe。DOM 变化会增量处理，词典更新会主动重扫，停用仅恢复仍由 Glyphshift 持有的译文。脚本、样式、模板、代码块、可编辑区域、用户输入值、Canvas/WebGL/图片内文字不处理。目标仍需具备受支持的 renderer/Node/libuv 能力。",
-    "technology": "Electron / Chromium DOM（Windows x64，V8 / N-API + Node + libuv 能力探测）",
+    "name": "Web / Chromium DOM 文字（实验）",
+    "summary": "面向 Windows x64 Web/Chromium DOM 的通用文字适配器。Electron 运行时按能力选择 V8、N-API / Node linked binding 或 browser webContents broker；CEF renderer 通过导出的 CEF V8 C API 进入实际页面上下文；WebView2 宿主在 Runtime 先于 WebView 创建接入时，通过公开 ICoreWebView2 ExecuteScript 通道复用同一 DOM 引擎。现有 WebView2 已创建而没有宿主通道时会拒绝激活，避免无效启用。不绑定应用名或单一框架版本。覆盖普通文本节点、title、aria-label、placeholder、开放 Shadow DOM 和可访问的同源 iframe。DOM 变化会增量处理，词典更新会主动重扫，停用仅恢复仍由 Glyphshift 持有的译文。脚本、样式、模板、代码块、可编辑区域、用户输入值、Canvas/WebGL/图片内文字不处理。",
+    "technology": "Web / Chromium DOM（Windows x64，Electron V8/N-API、CEF V8 C API、WebView2 Host API 能力探测）",
     "technicalTarget": "renderer DOM Text + MutationObserver",
     "documentationUrl": "https://www.electronjs.org/docs/latest/tutorial/process-model"
   },

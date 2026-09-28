@@ -317,6 +317,16 @@ impl DesktopRuntimeSpec {
         self.executable_paths = paths.into_iter().map(Into::into).collect();
         self
     }
+
+    #[must_use]
+    pub fn with_descendant_executable_names(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<Box<str>>>,
+    ) -> Self {
+        self.descendant_executable_names = names.into_iter().map(Into::into).collect();
+        self
+    }
+
     #[must_use]
     pub fn executable_names(&self) -> &[Box<str>] {
         &self.executable_names

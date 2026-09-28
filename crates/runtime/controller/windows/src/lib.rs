@@ -1,5 +1,6 @@
 //! Generic Windows target discovery behind the isolated Controller protocol.
 
+mod controlled_launch;
 mod controller;
 mod executable;
 mod platform;

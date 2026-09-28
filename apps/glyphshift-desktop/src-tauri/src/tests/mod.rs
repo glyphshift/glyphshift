@@ -91,6 +91,7 @@ fn fixture_dictionary_distribution(data_root: &std::path::Path) -> DictionaryDis
 #[derive(Default)]
 struct WorkflowRuntimeCalls {
     enabled: Vec<(Box<str>, bool, Vec<Box<str>>)>,
+    launched: Vec<(Box<str>, Box<str>)>,
     disabled: Vec<Box<str>>,
     stop_failure_ids: BTreeSet<Box<str>>,
     refreshed: Vec<Box<str>>,
@@ -215,6 +216,19 @@ impl WorkflowRuntimeService for RecordingWorkflowRuntime {
             .refreshed
             .push(intent.workflow_id().into());
         self.activate_workflow(intent, false)
+    }
+
+    fn launch_workflow_target(
+        &mut self,
+        intent: &glyphshift_desktop_backend::EffectiveWorkflowIntent,
+        software_id: &str,
+    ) -> Result<(), DesktopRuntimeError> {
+        self.calls
+            .lock()
+            .expect("runtime call log")
+            .launched
+            .push((intent.workflow_id().into(), software_id.into()));
+        Ok(())
     }
 
     fn remove_software(&mut self, software_id: &str) -> Result<(), DesktopRuntimeError> {

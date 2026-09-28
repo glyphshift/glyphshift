@@ -1026,6 +1026,58 @@ fn failed_workflow_collection_start_is_discarded_before_retry() {
 }
 
 #[test]
+fn offline_workflow_target_stays_offline_until_explicit_controlled_launch() {
+    let root = tempdir().expect("controlled launch pool data");
+    let executable = root.path().join("OfflineControlledHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("selected executable");
+    let mut backend = open_test_backend(root.path().join("data"));
+    let software_id = backend
+        .add_software(ExecutableSelection::new(executable))
+        .expect("registered executable")
+        .selected_software_id()
+        .expect("selected software")
+        .to_owned();
+    backend
+        .create_dictionary(
+            DictionaryCreate::new("dictionary.controlled", "Controlled", "en-US", "zh-CN")
+                .with_entries([DictionaryEntryCreate::new("Open", "Translated")]),
+        )
+        .expect("controlled launch dictionary");
+    create_single_workflow(
+        &mut backend,
+        "workflow.controlled",
+        &software_id,
+        "dictionary.controlled",
+    );
+    let intent = backend
+        .effective_workflow_intent("workflow.controlled")
+        .expect("controlled launch intent");
+    let instance = Arc::new(AtomicUsize::new(0));
+    let discoveries = Arc::new(AtomicUsize::new(0));
+    let mut pool = DesktopRuntimePool::with_factory(Box::new(RestartingRuntimeFactory {
+        instance,
+        discoveries: Arc::clone(&discoveries),
+    }));
+
+    let initial = pool
+        .reconcile_workflow(&intent)
+        .expect("offline workflow reconciliation");
+    assert_eq!(
+        initial.errors().get(software_id.as_str()),
+        Some(&DesktopRuntimeError::UnknownTarget)
+    );
+    assert!(pool.status(&software_id).is_none());
+
+    let status = pool
+        .launch_workflow_target(&intent, &software_id)
+        .expect("explicit controlled launch");
+    assert!(status.is_active());
+    assert!(status.is_feature_active(Feature::TextReplace));
+    assert_eq!(status.active_target_id(), Some(1));
+    assert_eq!(discoveries.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn workflow_status_poll_keeps_the_active_connection() {
     let root = tempdir().expect("workflow Runtime data");
     let executable = root.path().join("Restarted.exe");
