@@ -2,12 +2,14 @@
 /target
 **/target
 /local-test
+/flightdeck/
 
 # Node / Vite
 node_modules
 apps/glyphshift-desktop/dist
 apps/glyphshift-desktop/playwright-report
 apps/glyphshift-desktop/test-results
+/test-results/
 apps/glyphshift-desktop/src-tauri/gen
 
 # Local design material

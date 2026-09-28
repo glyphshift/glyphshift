@@ -7,6 +7,8 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 
+& (Join-Path $PSScriptRoot 'test-runtime-bundle-kirikiri-packaging.ps1')
+
 # Native integration tests load real DLL and executable artifacts by filename.
 # `cargo test --workspace` does not guarantee that those artifacts are emitted first.
 & cargo build `
@@ -26,6 +28,7 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
     -p glyphshift-adapter-sidefx-cv-paint-buffer-native `
     -p glyphshift-adapter-unity-mono-standard-ui-native `
     -p glyphshift-target-runtime `
+    -p glyphshift-test-native-adapter `
     -p glyphshift-test-controller-plugin `
     -p glyphshift-test-isolated-worker `
     -p glyphshift-test-acquisition-worker `

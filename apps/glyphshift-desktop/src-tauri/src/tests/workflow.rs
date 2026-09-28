@@ -103,6 +103,28 @@ fn runtime_module_rejection_reaches_an_actionable_command_error() {
 }
 
 #[test]
+fn adapter_prepare_unsupported_reaches_a_distinct_product_error() {
+    let error = serde_json::to_value(runtime_command_error(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::AdapterUnsupported),
+        true,
+    ))
+    .expect("serialize unsupported Adapter rejection");
+
+    assert_eq!(error["code"], "runtime.component_unsupported");
+}
+
+#[test]
+fn adapter_prepare_failure_remains_a_generic_activation_error() {
+    let error = serde_json::to_value(runtime_command_error(
+        DesktopRuntimeError::ActivationRejected(HostOperationFailure::ControllerRejected),
+        true,
+    ))
+    .expect("serialize failed Adapter preparation");
+
+    assert_eq!(error["code"], "runtime.activation_failed");
+}
+
+#[test]
 fn changed_resident_adapter_set_requires_a_target_restart() {
     let error = serde_json::to_value(runtime_command_error(
         DesktopRuntimeError::ActivationRejected(HostOperationFailure::TargetRuntimeRestartRequired),
@@ -452,9 +474,8 @@ fn editing_an_enabled_workflow_dictionary_reconciles_its_new_generation() {
 
     let snapshot = application
         .update_dictionary(
-            DictionaryEdit::from_dictionary(&dictionary).with_entries([
-                DictionaryEntryCreate::new("Open", "立即打开"),
-            ]),
+            DictionaryEdit::from_dictionary(&dictionary)
+                .with_entries([DictionaryEntryCreate::new("Open", "立即打开")]),
         )
         .expect("edit enabled workflow dictionary");
 
@@ -651,12 +672,11 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     app.probe_run_summary(run.id()).unwrap();
     let paused = app.set_probe_run_paused(run.id(), true).unwrap();
     assert_eq!(paused.summary.status(), ProbeRunStatus::Paused);
-    assert!(
-        app.backend
-            .enabled_workflow_ids()
-            .iter()
-            .any(|id| id.as_ref() == "workflow.collect")
-    );
+    assert!(app
+        .backend
+        .enabled_workflow_ids()
+        .iter()
+        .any(|id| id.as_ref() == "workflow.collect"));
     assert_eq!(
         app.set_probe_run_paused(run.id(), false)
             .unwrap()
@@ -685,20 +705,19 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
     );
     assert!(!calls.lock().unwrap().refreshed.is_empty());
     let current = app.backend.workflow("workflow.collect").unwrap();
-    assert!(
-        app.backend
-            .update_workflow(
-                WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
-                    WorkflowTargetCreate::new(
-                        run.software_id(),
-                        [TEST_ADAPTER_ID],
-                        ["dictionary.writer", "dictionary.pending"]
-                    )
-                    .with_write_dictionary("dictionary.pending"),
-                ])
-            )
-            .is_err()
-    );
+    assert!(app
+        .backend
+        .update_workflow(
+            WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+                WorkflowTargetCreate::new(
+                    run.software_id(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.writer", "dictionary.pending"]
+                )
+                .with_write_dictionary("dictionary.pending"),
+            ])
+        )
+        .is_err());
     assert_eq!(
         app.backend.workflow("workflow.collect").unwrap().targets()[0].write_dictionary_id(),
         Some("dictionary.writer")
@@ -744,13 +763,12 @@ fn workflow_collection_uses_the_writer_and_other_dictionary_sources() {
         "dictionary.writer"
     );
     app.delete_workflows(&["workflow.collect".into()]).unwrap();
-    assert!(
-        !app.probe_runs
-            .list()
-            .unwrap()
-            .iter()
-            .any(|record| record.workflow_id() == Some("workflow.collect"))
-    );
+    assert!(!app
+        .probe_runs
+        .list()
+        .unwrap()
+        .iter()
+        .any(|record| record.workflow_id() == Some("workflow.collect")));
     assert_eq!(
         app.backend
             .dictionary("dictionary.writer")
@@ -832,23 +850,21 @@ fn collection_summaries_are_read_only_and_locked_final_batches_retry() {
     for _ in 0..5 {
         app.probe_run_summary(id).unwrap();
     }
-    assert!(
-        app.backend
-            .dictionary("dictionary.writer")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.writer")
+        .unwrap()
+        .entries()
+        .is_empty());
     app.ai_locked_dictionary_id = Some("dictionary.writer".into());
     app.disable_workflow("workflow.batch").unwrap();
     assert!(app.pending_collection_runs.contains(id));
-    assert!(
-        app.backend
-            .dictionary("dictionary.writer")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.writer")
+        .unwrap()
+        .entries()
+        .is_empty());
     app.ai_locked_dictionary_id = None;
     app.collect_workflow_sources(id).unwrap();
     assert!(!app.pending_collection_runs.contains(id));
@@ -1102,11 +1118,9 @@ fn workflow_reports_no_compatibility_signal_after_five_seconds_and_clears_it_aft
     app.update_workflow_collection_status("workflow.compatibility", true)
         .unwrap();
 
-    assert!(
-        app.workflow_runtime_status["workflow.compatibility"]
-            .warnings
-            .is_empty()
-    );
+    assert!(app.workflow_runtime_status["workflow.compatibility"]
+        .warnings
+        .is_empty());
     assert!(app.workflow_compatibility_checks[run.summary.id()].matched);
 }
 
@@ -1283,14 +1297,13 @@ fn collection_filters_before_dictionary_write_and_rechecks_changed_policy() {
     assert!(!sources.contains(&"100 px"));
     app.set_collection_filter_policy(glyphshift_ai_translation::FilterPolicy::default());
     app.collect_workflow_sources(run.summary.id()).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.filtered")
-            .unwrap()
-            .entries()
-            .iter()
-            .any(|entry| entry.source() == "1234")
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.filtered")
+        .unwrap()
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "1234"));
 }
 
 #[test]
@@ -1300,14 +1313,12 @@ fn exit_stops_runtime_without_erasing_saved_intent_or_restarting_on_poll() {
     let desired = app.backend.enabled_workflow_ids().to_vec();
     let activations = calls.lock().unwrap().enabled.len();
     app.prepare_exit().unwrap();
-    assert!(
-        calls
-            .lock()
-            .unwrap()
-            .disabled
-            .iter()
-            .any(|id| id.as_ref() == "workflow.product")
-    );
+    assert!(calls
+        .lock()
+        .unwrap()
+        .disabled
+        .iter()
+        .any(|id| id.as_ref() == "workflow.product"));
     assert_eq!(app.backend.enabled_workflow_ids(), desired);
     app.refresh_workflows().unwrap();
     app.reconcile_enabled_workflows().unwrap();
@@ -1343,14 +1354,12 @@ fn exit_failure_still_stops_other_workflows_and_allows_retry() {
         serde_json::to_value(app.prepare_exit().unwrap_err()).unwrap()["code"],
         "runtime.exit_stop_failed"
     );
-    assert!(
-        calls
-            .lock()
-            .unwrap()
-            .disabled
-            .iter()
-            .any(|id| id.as_ref() == "workflow.second")
-    );
+    assert!(calls
+        .lock()
+        .unwrap()
+        .disabled
+        .iter()
+        .any(|id| id.as_ref() == "workflow.second"));
     assert!(app.exiting);
     calls.lock().unwrap().stop_failure_ids.clear();
     app.prepare_exit().unwrap();
@@ -1399,12 +1408,10 @@ fn dictionary_rules_collect_one_label_and_ai_ignores_dynamic_counts() {
         .unwrap()
         .clone();
     assert_eq!(dictionary.entries().len(), 2);
-    assert!(
-        dictionary
-            .entries()
-            .iter()
-            .any(|entry| entry.source() == "Total" && entry.translation().is_empty())
-    );
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Total" && entry.translation().is_empty()));
     let request = app.probe_ai_plan_request(id).unwrap();
     let plan = glyphshift_ai_translation::AiTranslation::new()
         .plan_translation(request)
@@ -1514,13 +1521,12 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
         translation_context: None,
     })
     .unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.counter")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .entries()
+        .is_empty());
     assert_eq!(
         rows(&mut app)["rows"][0]["resolution"]["kind"],
         "rule_pending"
@@ -1538,13 +1544,12 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
         action: "clear_translations".into(),
     })
     .unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.counter")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .entries()
+        .is_empty());
     app.edit_probe_translation(super::super::probe::ProbeTranslationEditRequest {
         run_id: id.into(),
         source: "Total:18".into(),
@@ -1563,13 +1568,12 @@ fn dictionary_rule_manual_edits_write_fixed_key_and_refresh_all_counts() {
     )
     .unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.counter")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.counter")
+        .unwrap()
+        .entries()
+        .is_empty());
     assert_eq!(rows(&mut app)["total"], 0);
 }
 
@@ -1601,31 +1605,26 @@ fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
         .dictionary("dictionary.product")
         .unwrap()
         .clone();
-    assert!(
-        dictionary
-            .entries()
-            .iter()
-            .any(|entry| entry.source() == "Captured entry")
-    );
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Captured entry"));
     app.update_dictionary_with_capture_clear(
         DictionaryEdit::from_dictionary(&dictionary).with_entries([]),
         true,
     )
     .unwrap();
-    assert!(
-        calls
-            .lock()
-            .unwrap()
-            .disabled
-            .iter()
-            .any(|id| id.as_ref() == "workflow.clear")
-    );
-    assert!(
-        app.backend
-            .enabled_workflow_ids()
-            .iter()
-            .any(|id| id.as_ref() == "workflow.clear")
-    );
+    assert!(calls
+        .lock()
+        .unwrap()
+        .disabled
+        .iter()
+        .any(|id| id.as_ref() == "workflow.clear"));
+    assert!(app
+        .backend
+        .enabled_workflow_ids()
+        .iter()
+        .any(|id| id.as_ref() == "workflow.clear"));
     assert!(
         calls
             .lock()
@@ -1638,13 +1637,12 @@ fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
     );
     app.workflow_collection_view("workflow.clear").unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.product")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .entries()
+        .is_empty());
     let request = serde_json::from_value(
         serde_json::json!({"runId":id,"search":"Captured entry","page":1,"pageSize":50}),
     )
@@ -1653,13 +1651,12 @@ fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
     app.probe_runs = ProbeRunStore::open(root.path().join("probe-runs")).unwrap();
     app.collection_versions.clear();
     app.collect_workflow_sources(id).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.product")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.product")
+        .unwrap()
+        .entries()
+        .is_empty());
     let sink = glyphshift_capture::FileCaptureSink::start(
         app.probe_runs
             .capture_configuration(id, DEFAULT_MAX_ENTRIES)
@@ -1672,18 +1669,14 @@ fn clearing_dictionary_discards_old_capture_and_allows_recapture() {
     app.collect_workflow_sources(id).unwrap();
     let dictionary = app.backend.dictionary("dictionary.product").unwrap();
     assert_eq!(dictionary.entries().len(), 2);
-    assert!(
-        dictionary
-            .entries()
-            .iter()
-            .any(|entry| entry.source() == "Captured entry")
-    );
-    assert!(
-        dictionary
-            .entries()
-            .iter()
-            .any(|entry| entry.source() == "Fresh entry")
-    );
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Captured entry"));
+    assert!(dictionary
+        .entries()
+        .iter()
+        .any(|entry| entry.source() == "Fresh entry"));
 }
 
 #[test]
@@ -1730,13 +1723,12 @@ fn clearing_dynamic_source_resets_capture_without_blocking_rule_key() {
     )
     .unwrap();
     app.collect_workflow_sources(id).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.dynamic")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.dynamic")
+        .unwrap()
+        .entries()
+        .is_empty());
 }
 
 #[test]
@@ -1784,13 +1776,12 @@ fn clearing_empty_dictionary_hides_uncollected_workflow_rows() {
         0
     );
     app.collect_workflow_sources(id).unwrap();
-    assert!(
-        app.backend
-            .dictionary("dictionary.empty")
-            .unwrap()
-            .entries()
-            .is_empty()
-    );
+    assert!(app
+        .backend
+        .dictionary("dictionary.empty")
+        .unwrap()
+        .entries()
+        .is_empty());
 }
 
 #[test]

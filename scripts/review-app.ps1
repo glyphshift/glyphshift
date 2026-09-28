@@ -9,6 +9,10 @@ param(
 
     [switch]$ResearchQt5,
 
+    [string]$KirikiriKagBridgeX86,
+
+    [string]$KirikiriSdkLicensePath,
+
     [switch]$BuildOnly
 )
 
@@ -82,11 +86,18 @@ New-Item -ItemType Directory -Path $webViewProfileRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $cargoTargetDir -Force | Out-Null
 
-& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') `
-    -Profile $Profile `
-    -OutputRoot $runtimeRoot `
-    -CargoTargetDir $cargoTargetDir `
-    -ResearchQt5:$ResearchQt5
+$runtimeBundleArguments = @{
+    Profile = $Profile
+    OutputRoot = $runtimeRoot
+    CargoTargetDir = $cargoTargetDir
+    ResearchQt5 = $ResearchQt5
+}
+if (-not [string]::IsNullOrWhiteSpace($KirikiriKagBridgeX86) -or
+    -not [string]::IsNullOrWhiteSpace($KirikiriSdkLicensePath)) {
+    $runtimeBundleArguments.KirikiriKagBridgeX86 = $KirikiriKagBridgeX86
+    $runtimeBundleArguments.KirikiriSdkLicensePath = $KirikiriSdkLicensePath
+}
+& (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments
 
 Push-Location $desktopRoot
 try {

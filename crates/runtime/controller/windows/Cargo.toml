@@ -49,6 +49,7 @@ features = [
 glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
 glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
 glyphshift-domain = { path = "../../../core/domain" }
+glyphshift-test-native-adapter = { path = "../../../../test-support/native-adapter" }
 glyphshift-translation = { path = "../../../core/translation" }
 
 [lints.rust]

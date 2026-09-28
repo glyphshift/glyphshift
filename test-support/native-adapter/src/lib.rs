@@ -1,17 +1,27 @@
 //! Synthetic native Adapter used to verify the target Runtime lifecycle seam.
 
 use glyphshift_adapter_native_abi::{
-    ARCH_X86_64, FEATURE_TEXT_REPLACE, NativeAdapterApiV1, NativeAdapterDescriptorV1,
-    NativeNegotiationV1, NativeRuntimeHostV1, PLATFORM_WINDOWS, STATUS_INVALID_HOST, STATUS_OK,
+    NativeAdapterApiV1, NativeAdapterDescriptorV1, NativeAdapterPrepareCommandV1,
+    NativeNegotiationV1, NativeRuntimeHostV1, ARCH_X86_64, FEATURE_TEXT_REPLACE, PLATFORM_WINDOWS,
+    PREPARE_ACTION_CANCEL, PREPARE_ACTION_POLL, PREPARE_ACTION_REQUEST, PREPARE_STATUS_CANCELLED,
+    PREPARE_STATUS_FAILED, PREPARE_STATUS_PENDING, PREPARE_STATUS_READY, PREPARE_STATUS_UNKNOWN,
+    PREPARE_STATUS_UNSUPPORTED, STATUS_ACTIVATION_FAILED, STATUS_INVALID_HOST, STATUS_OK,
     STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE,
 };
 use glyphshift_adapter_sdk::AdapterDescriptor;
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
 pub const ADAPTER_ID: &str = "example.synthetic.native-refresh";
 const SUPPORTED_FEATURES: u64 = FEATURE_TEXT_REPLACE;
+const PREPARE_REQUEST_ID: u32 = 1;
+const PREPARE_FAIL_ENV: &str = "GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_FAIL";
+const PREPARE_PENDING_ENV: &str = "GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_PENDING";
+const PREPARE_UNSUPPORTED_ENV: &str = "GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_UNSUPPORTED";
+const REQUIRE_PREPARE_ENV: &str = "GLYPHSHIFT_TEST_NATIVE_ADAPTER_REQUIRE_PREPARE";
+const ACTIVATE_FAIL_ENV: &str = "GLYPHSHIFT_TEST_NATIVE_ADAPTER_ACTIVATE_FAIL";
 
 static DEACTIVATE_STATUS: AtomicI32 = AtomicI32::new(STATUS_OK);
+static PREPARED: AtomicBool = AtomicBool::new(false);
 
 static REFRESH_COUNT: AtomicU32 = AtomicU32::new(0);
 
@@ -47,6 +57,14 @@ extern "C" fn activate(
     requested: u64,
     granted: u64,
 ) -> NativeNegotiationV1 {
+    if std::env::var_os(ACTIVATE_FAIL_ENV).is_some()
+        || (std::env::var_os(REQUIRE_PREPARE_ENV).is_some() && !PREPARED.load(Ordering::Acquire))
+    {
+        return NativeNegotiationV1 {
+            status: STATUS_ACTIVATION_FAILED,
+            active_feature_bits: 0,
+        };
+    }
     if host.is_null()
         || unsafe { (*host).struct_size } != std::mem::size_of::<NativeRuntimeHostV1>() as u32
     {
@@ -74,6 +92,54 @@ extern "C" fn request_refresh() {
 #[no_mangle]
 pub extern "C" fn glyphshift_test_refresh_count_v1() -> u32 {
     REFRESH_COUNT.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn glyphshift_adapter_prepare_v1(
+    command: *mut NativeAdapterPrepareCommandV1,
+) -> u32 {
+    let Some(command) = command.as_mut() else {
+        return 87;
+    };
+    if command.struct_size != std::mem::size_of::<NativeAdapterPrepareCommandV1>() as u32 {
+        return 87;
+    }
+    match command.action {
+        PREPARE_ACTION_REQUEST => {
+            command.request_id = PREPARE_REQUEST_ID;
+            command.status = if std::env::var_os(PREPARE_UNSUPPORTED_ENV).is_some() {
+                PREPARED.store(false, Ordering::Release);
+                PREPARE_STATUS_UNSUPPORTED
+            } else if std::env::var_os(PREPARE_FAIL_ENV).is_some() {
+                PREPARED.store(false, Ordering::Release);
+                PREPARE_STATUS_FAILED
+            } else if std::env::var_os(PREPARE_PENDING_ENV).is_some() {
+                PREPARED.store(false, Ordering::Release);
+                PREPARE_STATUS_PENDING
+            } else {
+                PREPARED.store(true, Ordering::Release);
+                PREPARE_STATUS_READY
+            };
+        }
+        PREPARE_ACTION_POLL => {
+            if command.request_id != PREPARE_REQUEST_ID {
+                command.status = PREPARE_STATUS_UNKNOWN;
+            } else if std::env::var_os(PREPARE_PENDING_ENV).is_some() {
+                PREPARED.store(true, Ordering::Release);
+                command.status = PREPARE_STATUS_READY;
+            }
+        }
+        PREPARE_ACTION_CANCEL => {
+            if command.request_id != PREPARE_REQUEST_ID {
+                command.status = PREPARE_STATUS_UNKNOWN;
+            } else {
+                PREPARED.store(false, Ordering::Release);
+                command.status = PREPARE_STATUS_CANCELLED;
+            }
+        }
+        _ => return 87,
+    }
+    0
 }
 
 #[no_mangle]

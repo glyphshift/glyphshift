@@ -1,5 +1,13 @@
 [
   {
+    "id": "experimental.kirikiri.kag-scenario",
+    "name": "KiriKiri 2 / KAG 场景文字（实验）",
+    "summary": "适用于已验证的 Windows x86 KiriKiri 2 公共 TJS/KAG 插件接口。Controller 会在 Runtime 激活前把首次插件初始化切到目标 UI 线程，再通过公开 TVPGetFunctionExporter 完成链接；场景重新加载时应用字典，已缓存当前页不会强制刷新。KiriKiri Z 1.4.0 x86/x64 的发行主程序没有该公开 PE 导出，当前会明确拒绝自动接入。组件保留到目标退出。",
+    "technology": "KiriKiri 2 / KAG（Windows x86）",
+    "technicalTarget": "V2Link + TVPGetFunctionExporter + KAG scenario loader",
+    "documentationUrl": "https://github.com/krkrz/krkrz"
+  },
+  {
     "id": "windows.catsystem2.utf8-text",
     "name": "CatSystem2 对话文字（实验）",
     "summary": "适用于已验证的 CatSystem2 x86 UTF-8 和经典 ANSI 对话对象，支持即时刷新及停用恢复；历史记录仅验证 UTF-8 分支。经典分支使用目标的系统代码页，不支持的控制标记或无法编码的译文保持原文。其他引擎版本及字体回退尚未覆盖。组件保留到游戏退出。",

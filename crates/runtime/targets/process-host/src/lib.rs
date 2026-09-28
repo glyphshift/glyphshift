@@ -17,11 +17,11 @@ use glyphshift_session::{
     RuntimeTraceStatus, SessionId, TargetInstance, TargetInstanceId,
 };
 use glyphshift_target_runtime_contract::{
-    NativeAdapterDeployment, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT, TargetRuntimeDeployment,
+    NativeAdapterDeployment, TargetRuntimeDeployment, STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -368,6 +368,7 @@ fn host_protocol_failure(error: ControllerProtocolError) -> HostFailure {
             HostOperationFailure::RemoteThreadUnavailable
         }
         ControllerRejection::RemoteThreadTimeout => HostOperationFailure::RemoteThreadTimeout,
+        ControllerRejection::AdapterUnsupported => HostOperationFailure::AdapterUnsupported,
         ControllerRejection::TargetRuntimeRejected(STATUS_TARGET_RUNTIME_INVALID_DEPLOYMENT) => {
             HostOperationFailure::TargetRuntimeRestartRequired
         }

@@ -7,7 +7,20 @@ use glyphshift_adapter_sdk::{AdapterDescriptor, AdapterVersion};
 use glyphshift_domain::{AbiVersion, AdapterId, ApplyModel, Feature, Placement};
 
 pub const ENTRY_SYMBOL_V1: &[u8] = b"glyphshift_adapter_entry_v1\0";
+pub const PREPARE_SYMBOL_V1: &[u8] = b"glyphshift_adapter_prepare_v1\0";
 pub const NATIVE_ABI_V1: AbiVersion = AbiVersion::new(1, 0);
+
+pub const PREPARE_ACTION_REQUEST: u32 = 1;
+pub const PREPARE_ACTION_POLL: u32 = 2;
+pub const PREPARE_ACTION_CANCEL: u32 = 3;
+pub const PREPARE_STATUS_UNKNOWN: i32 = -1;
+pub const PREPARE_STATUS_FAILED: i32 = -4;
+pub const PREPARE_STATUS_UNSUPPORTED: i32 = -7;
+pub const PREPARE_STATUS_UNAVAILABLE: i32 = -8;
+pub const PREPARE_STATUS_PENDING: i32 = 0;
+pub const PREPARE_STATUS_READY: i32 = 1;
+pub const PREPARE_STATUS_CANCELLED: i32 = 3;
+pub const PREPARE_STATUS_RUNNING: i32 = 4;
 
 pub const FEATURE_TEXT_OBSERVE: u64 = 1 << 0;
 pub const FEATURE_TEXT_REPLACE: u64 = 1 << 1;
@@ -265,6 +278,19 @@ pub struct NativeAdapterApiV1 {
 }
 
 pub type NativeAdapterEntryV1 = extern "C" fn() -> NativeAdapterApiV1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeAdapterPrepareCommandV1 {
+    pub struct_size: u32,
+    pub action: u32,
+    pub request_id: u32,
+    pub status: i32,
+    pub thread_id: u32,
+}
+
+pub type NativeAdapterPrepareV1 =
+    unsafe extern "system" fn(*mut NativeAdapterPrepareCommandV1) -> u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativeAbiError {

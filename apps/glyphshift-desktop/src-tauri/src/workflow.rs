@@ -593,6 +593,9 @@ pub(super) fn runtime_command_error_with_privilege(
             HostOperationFailure::RuntimeModuleUnavailable => {
                 CommandError::new("runtime.component_load_failed")
             }
+            HostOperationFailure::AdapterUnsupported => {
+                CommandError::new("runtime.component_unsupported")
+            }
             HostOperationFailure::TargetRuntimeRestartRequired => {
                 CommandError::new("runtime.target_restart_required")
             }

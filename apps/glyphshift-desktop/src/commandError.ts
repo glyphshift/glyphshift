@@ -127,6 +127,7 @@ const messageKeys: Record<string, string> = {
   'runtime.bundle_incompatible': 'errors.runtime.bundleIncompatible',
   'runtime.target_access_failed': 'errors.runtime.targetAccessFailed',
   'runtime.component_load_failed': 'errors.runtime.componentLoadFailed',
+  'runtime.component_unsupported': 'errors.runtime.componentUnsupported',
   'runtime.component_incompatible': 'errors.runtime.componentIncompatible',
   'runtime.no_compatibility_signal': 'errors.runtime.noCompatibilitySignal',
   'runtime.target_restart_required': 'errors.runtime.targetRestartRequired',

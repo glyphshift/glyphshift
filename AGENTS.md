@@ -7,6 +7,12 @@
   with the production loader before launch. Never launch a shell produced by a standalone
   `cargo build`/`tauri build` or pair a newly built shell with a pre-existing Runtime directory.
 
+## Engine-level adaptation scope
+
+- Build reusable engine/framework adapters across applications and games. Individual games are validation samples, not implementation targets.
+- Do not hardcode game titles, scenario names, dialogue, installation paths, or game-specific addresses into production adapters. Detect and declare engine API, architecture, and version capabilities instead.
+- Validate shared contracts with synthetic fixtures and multiple independent engine projects. A successful single-game experiment does not establish general engine support.
+
 ## Archive-only UIA boundary
 
 - UIA source is repository archive only. Do not build, test, run, launch, package, validate, or

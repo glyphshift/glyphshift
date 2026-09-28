@@ -878,6 +878,7 @@ fn map_controller_rejection(
             HostOperationFailure::RemoteThreadUnavailable
         }
         ControllerRejection::RemoteThreadTimeout => HostOperationFailure::RemoteThreadTimeout,
+        ControllerRejection::AdapterUnsupported => HostOperationFailure::AdapterUnsupported,
         ControllerRejection::TargetRuntimeRejected(status) => {
             HostOperationFailure::TargetRuntimeRejected(status)
         }

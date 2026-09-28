@@ -1,9 +1,14 @@
 use crate::controller::ProcessRecord;
+use glyphshift_adapter_native_host::{
+    NativeAdapterPrepareCommandV1, PREPARE_ACTION_CANCEL, PREPARE_ACTION_POLL,
+    PREPARE_ACTION_REQUEST, PREPARE_STATUS_CANCELLED, PREPARE_STATUS_PENDING, PREPARE_STATUS_READY,
+    PREPARE_STATUS_RUNNING,
+};
 use glyphshift_capture::CaptureObservationBatch;
 use glyphshift_target_runtime_contract::{
-    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     RuntimeActivationQueryV1, RuntimeActivationReport, RuntimeCommandV1, RuntimeDiagnosticsControl,
     RuntimeDiagnosticsQueryV1, RuntimeObservationQueryV1, RuntimeTraceBatch,
+    MAX_RUNTIME_ACTIVATION_REPORT_BYTES, MAX_RUNTIME_OBSERVATION_BYTES, MAX_RUNTIME_TRACE_BYTES,
     STATUS_TARGET_RUNTIME_OK,
 };
 use std::ffi::c_void;
@@ -11,28 +16,32 @@ use std::mem::size_of;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr::null_mut;
+use std::time::{Duration, Instant};
+use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, FreeLibrary, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::System::Diagnostics::Debug::{ReadProcessMemory, WriteProcessMemory};
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, TH32CS_SNAPMODULE,
+    CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W, TH32CS_SNAPMODULE,
     TH32CS_SNAPMODULE32,
 };
 use windows::Win32::System::LibraryLoader::{
+    GetModuleFileNameW, GetModuleHandleExW, GetModuleHandleW, GetProcAddress, LoadLibraryExW,
     DONT_RESOLVE_DLL_REFERENCES, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, GetModuleFileNameW, GetModuleHandleExW,
-    GetModuleHandleW, GetProcAddress, LoadLibraryExW,
+    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 };
 use windows::Win32::System::Memory::{
-    MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx, VirtualFreeEx,
+    VirtualAllocEx, VirtualFreeEx, MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READWRITE,
 };
 use windows::Win32::System::Threading::{
-    CreateRemoteThread, GetExitCodeThread, LPTHREAD_START_ROUTINE, OpenProcess,
-    PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
-    PROCESS_VM_WRITE, WaitForSingleObject,
+    CreateRemoteThread, GetExitCodeThread, OpenProcess, WaitForSingleObject,
+    LPTHREAD_START_ROUTINE, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
+    PROCESS_VM_READ, PROCESS_VM_WRITE,
 };
-use windows::core::{PCWSTR, s, w};
 
 const REMOTE_TIMEOUT_MS: u32 = 15_000;
+const ADAPTER_PREPARE_TIMEOUT: Duration = Duration::from_secs(5);
+const ADAPTER_PREPARE_POLL: Duration = Duration::from_millis(10);
+const ADAPTER_PREPARE_EXPORT: &str = "glyphshift_adapter_prepare_v1";
 
 #[derive(Clone, Copy, Debug)]
 pub enum RemoteError {
@@ -44,6 +53,7 @@ pub enum RemoteError {
     ExportUnavailable,
     ThreadFailed,
     Timeout,
+    AdapterPreparation(i32),
     RemoteRejected(u32),
 }
 
@@ -58,6 +68,7 @@ impl RemoteError {
             Self::ExportUnavailable => "runtime_export_unavailable".into(),
             Self::ThreadFailed => "remote_thread_failed".into(),
             Self::Timeout => "remote_thread_timeout".into(),
+            Self::AdapterPreparation(status) => format!("adapter_prepare_failed_{status}"),
             Self::RemoteRejected(status) => format!("target_runtime_rejected_{status}"),
         }
     }
@@ -84,7 +95,7 @@ impl ProcessHandle {
         let mut user = created;
         let mut machine = 0u16;
         let mut native = 0u16;
-        let handle = process.0.0;
+        let handle = process.0 .0;
         let valid = unsafe {
             windows_sys::Win32::System::Threading::GetProcessTimes(
                 handle,
@@ -193,7 +204,7 @@ pub fn activate(
 ) -> Result<RuntimeActivationReport, RemoteError> {
     let process_id = target.process_id;
     let process = ProcessHandle::open(target)?;
-    inject_library(process_id, process.0, runtime_library)?;
+    let _ = inject_library(process_id, process.0, runtime_library)?;
     invoke_json_export(
         process_id,
         process.0,
@@ -215,6 +226,67 @@ pub fn activate(
         let _ = deactivate(target, runtime_library);
     }
     report
+}
+
+pub fn prepare_adapter(target: &ProcessRecord, library: &Path) -> Result<bool, RemoteError> {
+    let Some(offset) = local_export_offset(library, ADAPTER_PREPARE_EXPORT)? else {
+        return Ok(false);
+    };
+    let process_id = target.process_id;
+    let process = ProcessHandle::open(target)?;
+    let injected = inject_library(process_id, process.0, library)?;
+    let function = remote_module_base(process_id, library)?
+        .checked_add(offset)
+        .ok_or(RemoteError::ExportUnavailable)?;
+    let mut command = NativeAdapterPrepareCommandV1 {
+        struct_size: size_of::<NativeAdapterPrepareCommandV1>() as u32,
+        action: PREPARE_ACTION_REQUEST,
+        request_id: 0,
+        status: PREPARE_STATUS_PENDING,
+        thread_id: 0,
+    };
+    invoke_prepare(process.0, function, &mut command)?;
+    if command.request_id == 0 {
+        if injected {
+            let _ = release_library(process_id, process.0, library);
+        }
+        return Err(RemoteError::AdapterPreparation(command.status));
+    }
+
+    let deadline = Instant::now() + ADAPTER_PREPARE_TIMEOUT;
+    loop {
+        match command.status {
+            PREPARE_STATUS_READY => return Ok(injected),
+            PREPARE_STATUS_PENDING | PREPARE_STATUS_RUNNING => {}
+            status => {
+                if injected {
+                    let _ = release_library(process_id, process.0, library);
+                }
+                return Err(RemoteError::AdapterPreparation(status));
+            }
+        }
+        if Instant::now() >= deadline {
+            if command.status == PREPARE_STATUS_PENDING {
+                command.action = PREPARE_ACTION_CANCEL;
+                if invoke_prepare(process.0, function, &mut command).is_ok()
+                    && command.status == PREPARE_STATUS_CANCELLED
+                    && injected
+                {
+                    let _ = release_library(process_id, process.0, library);
+                }
+            }
+            return Err(RemoteError::Timeout);
+        }
+        std::thread::sleep(ADAPTER_PREPARE_POLL);
+        command.action = PREPARE_ACTION_POLL;
+        invoke_prepare(process.0, function, &mut command)?;
+    }
+}
+
+pub fn release_prepared_adapter(target: &ProcessRecord, library: &Path) -> Result<(), RemoteError> {
+    let process_id = target.process_id;
+    let process = ProcessHandle::open(target)?;
+    release_library(process_id, process.0, library)
 }
 
 pub fn update(
@@ -366,9 +438,9 @@ pub fn deactivate(target: &ProcessRecord, runtime_library: &Path) -> Result<(), 
         .ok_or(RemoteError::RemoteRejected(status))
 }
 
-fn inject_library(process_id: u32, process: HANDLE, library: &Path) -> Result<(), RemoteError> {
+fn inject_library(process_id: u32, process: HANDLE, library: &Path) -> Result<bool, RemoteError> {
     if remote_module_base(process_id, library).is_ok() {
-        return Ok(());
+        return Ok(false);
     }
     let wide = library
         .as_os_str()
@@ -388,7 +460,40 @@ fn inject_library(process_id: u32, process: HANDLE, library: &Path) -> Result<()
     if result == 0 || remote_module_base(process_id, library).is_err() {
         return Err(RemoteError::ModuleUnavailable);
     }
+    Ok(true)
+}
+
+fn invoke_prepare(
+    process: HANDLE,
+    function: usize,
+    command: &mut NativeAdapterPrepareCommandV1,
+) -> Result<(), RemoteError> {
+    let bytes = unsafe {
+        std::slice::from_raw_parts(
+            (command as *const NativeAdapterPrepareCommandV1).cast::<u8>(),
+            size_of::<NativeAdapterPrepareCommandV1>(),
+        )
+    };
+    let remote = RemoteAllocation::write(process, bytes)?;
+    let status = run_remote_thread(process, function, Some(remote.address.cast_const()))?;
+    if status != 0 {
+        return Err(RemoteError::RemoteRejected(status));
+    }
+    let mut returned = vec![0_u8; size_of::<NativeAdapterPrepareCommandV1>()];
+    remote.read(&mut returned)?;
+    *command = unsafe {
+        std::ptr::read_unaligned(returned.as_ptr().cast::<NativeAdapterPrepareCommandV1>())
+    };
     Ok(())
+}
+
+fn release_library(process_id: u32, process: HANDLE, library: &Path) -> Result<(), RemoteError> {
+    let module = remote_module_base(process_id, library)?;
+    let free_library = remote_system_export(process_id, "kernel32.dll", "FreeLibrary")?;
+    let result = run_remote_thread(process, free_library, Some(module as *const c_void))?;
+    (result != 0)
+        .then_some(())
+        .ok_or(RemoteError::ModuleUnavailable)
 }
 
 fn invoke_json_export(
@@ -447,7 +552,7 @@ fn run_remote_thread(
     result
 }
 
-fn remote_export(process_id: u32, library: &Path, export: &str) -> Result<usize, RemoteError> {
+fn local_export_offset(library: &Path, export: &str) -> Result<Option<usize>, RemoteError> {
     let wide = library
         .as_os_str()
         .encode_wide()
@@ -462,15 +567,20 @@ fn remote_export(process_id: u32, library: &Path, export: &str) -> Result<usize,
         .map_err(|_| RemoteError::ModuleUnavailable)?
     };
     let name = std::ffi::CString::new(export).map_err(|_| RemoteError::ExportUnavailable)?;
-    let address = unsafe { GetProcAddress(local, windows::core::PCSTR(name.as_ptr().cast())) }
-        .ok_or(RemoteError::ExportUnavailable)? as usize;
-    let offset = address
-        .checked_sub(local.0 as usize)
-        .ok_or(RemoteError::ExportUnavailable)?;
+    let offset = unsafe { GetProcAddress(local, windows::core::PCSTR(name.as_ptr().cast())) }
+        .map(|address| address as usize)
+        .and_then(|address| address.checked_sub(local.0 as usize));
     unsafe {
         let _ = FreeLibrary(local);
     }
-    Ok(remote_module_base(process_id, library)? + offset)
+    Ok(offset)
+}
+
+fn remote_export(process_id: u32, library: &Path, export: &str) -> Result<usize, RemoteError> {
+    let offset = local_export_offset(library, export)?.ok_or(RemoteError::ExportUnavailable)?;
+    remote_module_base(process_id, library)?
+        .checked_add(offset)
+        .ok_or(RemoteError::ExportUnavailable)
 }
 
 fn remote_system_export(
@@ -483,6 +593,7 @@ fn remote_system_export(
     let address = unsafe {
         match export {
             "LoadLibraryW" => GetProcAddress(local, s!("LoadLibraryW")),
+            "FreeLibrary" => GetProcAddress(local, s!("FreeLibrary")),
             _ => None,
         }
     }

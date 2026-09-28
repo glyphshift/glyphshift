@@ -349,6 +349,7 @@ function runtimeIssueKind(item: WorkflowSummary) {
     'runtime.bundle_unavailable': 'bundleUnavailable',
     'runtime.target_access_failed': 'accessFailed',
     'runtime.component_load_failed': 'componentLoadFailed',
+    'runtime.component_unsupported': 'componentUnsupported',
     'runtime.component_incompatible': 'componentIncompatible',
     'runtime.target_restart_required': 'targetRestartRequired',
     'runtime.activation_timed_out': 'activationTimedOut',

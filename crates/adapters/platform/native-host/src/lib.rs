@@ -1,14 +1,21 @@
 //! Dynamic loader for trusted target-process Adapter packages.
 
 mod metadata;
-pub use metadata::{NativeAdapterMetadata, inspect_pe_architecture};
-
-use glyphshift_adapter_native_abi::{BindTextHostV1, NativeTextHostV1, TEXT_HOST_BIND_SYMBOL_V1};
-use glyphshift_adapter_native_abi::{
-    ENTRY_SYMBOL_V1, NativeAbiError, NativeAdapterApiV1, NativeAdapterEntryV1, NativeRuntimeHostV1,
-    STATUS_OK, STATUS_UNAUTHORIZED_FEATURE, STATUS_UNSUPPORTED_FEATURE, descriptor_matches,
-    feature_bits,
+pub use glyphshift_adapter_native_abi::{
+    NativeAdapterPrepareCommandV1, PREPARE_ACTION_CANCEL, PREPARE_ACTION_POLL,
+    PREPARE_ACTION_REQUEST, PREPARE_STATUS_CANCELLED, PREPARE_STATUS_FAILED,
+    PREPARE_STATUS_PENDING, PREPARE_STATUS_READY, PREPARE_STATUS_RUNNING,
+    PREPARE_STATUS_UNAVAILABLE, PREPARE_STATUS_UNKNOWN, PREPARE_STATUS_UNSUPPORTED,
+    PREPARE_SYMBOL_V1,
 };
+pub use metadata::{inspect_pe_architecture, NativeAdapterMetadata};
+
+use glyphshift_adapter_native_abi::{
+    descriptor_matches, feature_bits, NativeAbiError, NativeAdapterApiV1, NativeAdapterEntryV1,
+    NativeRuntimeHostV1, ENTRY_SYMBOL_V1, STATUS_OK, STATUS_UNAUTHORIZED_FEATURE,
+    STATUS_UNSUPPORTED_FEATURE,
+};
+use glyphshift_adapter_native_abi::{BindTextHostV1, NativeTextHostV1, TEXT_HOST_BIND_SYMBOL_V1};
 use glyphshift_adapter_sdk::AdapterDescriptor;
 use glyphshift_domain::{Feature, SourceTextPolicy};
 use libloading::Library;

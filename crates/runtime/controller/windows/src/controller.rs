@@ -372,10 +372,46 @@ impl ControllerPlugin for WindowsController {
             .identity()
             .map_err(|_| PluginError::new("invalid_runtime_deployment"))?
             .as_bytes();
-        let activation = remote::activate(target, &runtime_library, &deployment.deployment_json)
-            .map_err(|error| {
-                PluginError::new(format!("runtime_activation_failed:{}", error.code()))
-            })?;
+        let mut controller_preloads = Vec::new();
+        for adapter in decoded.adapters() {
+            match remote::prepare_adapter(target, adapter.library()) {
+                Ok(true) => controller_preloads.push(adapter.library().to_path_buf()),
+                Ok(false) => {}
+                Err(remote::RemoteError::AdapterPreparation(
+                    glyphshift_adapter_native_host::PREPARE_STATUS_UNSUPPORTED,
+                )) => {
+                    for library in controller_preloads.drain(..) {
+                        let _ = remote::release_prepared_adapter(target, &library);
+                    }
+                    return Err(PluginError::new("adapter_unsupported"));
+                }
+                Err(error) => {
+                    for library in controller_preloads.drain(..) {
+                        let _ = remote::release_prepared_adapter(target, &library);
+                    }
+                    return Err(PluginError::new(format!(
+                        "adapter_prepare_failed:{}",
+                        error.code()
+                    )));
+                }
+            }
+        }
+        let activation =
+            match remote::activate(target, &runtime_library, &deployment.deployment_json) {
+                Ok(activation) => activation,
+                Err(error) => {
+                    for library in controller_preloads.drain(..) {
+                        let _ = remote::release_prepared_adapter(target, &library);
+                    }
+                    return Err(PluginError::new(format!(
+                        "runtime_activation_failed:{}",
+                        error.code()
+                    )));
+                }
+            };
+        for library in controller_preloads {
+            let _ = remote::release_prepared_adapter(target, &library);
+        }
         self.runtime_libraries
             .insert(target_token.into(), runtime_library);
         Ok(WireRuntimeAck {

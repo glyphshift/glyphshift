@@ -241,6 +241,66 @@ test('workflow names a stopped software and exposes its actionable Runtime error
   await page.screenshot({ path: '../../local-test/evidence/desktop-screens/workflow-runtime-stopped.png' })
 })
 
+test('workflow shows an explicit unsupported-adapter Runtime error', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+  snapshot.workflowRuntimeStatus = {
+    'workflow-proof': {
+      workflowId: 'workflow-proof',
+      targets: [{
+        softwareId: 'software-proof', discovered: true, active: false,
+        translationRequested: true, fontRequested: true,
+        translationActive: false, fontActive: false, appliedGeneration: null,
+      }],
+      errors: {
+        'software-proof': {
+          schemaVersion: 1,
+          code: 'runtime.component_unsupported',
+          args: {},
+        },
+      },
+    },
+  }
+  await replaceModel(page, snapshot)
+
+  const failedStatus = page.getByRole('button', { name: '连接失败', exact: true })
+  await expect(failedStatus).toBeVisible()
+  await failedStatus.click()
+  const details = page.getByTestId('workflow-runtime-issues')
+  await expect(details).toContainText('当前适配器不支持这个目标或引擎版本')
+  await expect(details).not.toContainText('软件正在运行，但 Glyphshift 没能开始翻译')
+})
+
+test('workflow keeps a generic activation failure distinct from unsupported adapters', async ({ page }) => {
+  const snapshot = JSON.parse(JSON.stringify(model))
+  snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+  snapshot.workflowRuntimeStatus = {
+    'workflow-proof': {
+      workflowId: 'workflow-proof',
+      targets: [{
+        softwareId: 'software-proof', discovered: true, active: false,
+        translationRequested: true, fontRequested: true,
+        translationActive: false, fontActive: false, appliedGeneration: null,
+      }],
+      errors: {
+        'software-proof': {
+          schemaVersion: 1,
+          code: 'runtime.activation_failed',
+          args: {},
+        },
+      },
+    },
+  }
+  await replaceModel(page, snapshot)
+
+  const failedStatus = page.getByRole('button', { name: '连接失败', exact: true })
+  await expect(failedStatus).toBeVisible()
+  await failedStatus.click()
+  const details = page.getByTestId('workflow-runtime-issues')
+  await expect(details).toContainText('软件正在运行，但 Glyphshift 没能开始翻译')
+  await expect(details).not.toContainText('当前适配器不支持这个目标或引擎版本')
+})
+
 test('workflow does not label generic access failures as permission mismatches', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]

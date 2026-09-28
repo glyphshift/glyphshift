@@ -5,8 +5,8 @@ use glyphshift_adapter_registry::{
 };
 use glyphshift_capture::{CaptureProducerConfiguration, CaptureProducerId};
 use glyphshift_controller_sdk::{
-    ControllerPlugin, WireAdapterRequirement, WireControllerConfiguration, WireFeature,
-    WireRuntimeDeployment, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
+    ControllerPlugin, PluginError, WireAdapterRequirement, WireControllerConfiguration,
+    WireFeature, WireRuntimeDeployment, WireRuntimeTextOutcome, WireRuntimeTraceStatus,
 };
 use glyphshift_controller_windows::WindowsController;
 use glyphshift_domain::{Feature, Generation, RouteProgram};
@@ -19,8 +19,14 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Mutex;
+use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W, TH32CS_SNAPMODULE,
+    TH32CS_SNAPMODULE32,
+};
 
 const TARGET_BINARY: &str = "glyphshift-windows-runtime-target.exe";
+const PREPARE_ADAPTER_BINARY: &str = "glyphshift_test_native_adapter.dll";
 static TARGET_PROCESS_LOCK: Mutex<()> = Mutex::new(());
 
 struct TargetProcess {
@@ -31,15 +37,22 @@ struct TargetProcess {
 
 impl TargetProcess {
     fn spawn(profile: &Path) -> Self {
+        Self::spawn_with_env(profile, &[])
+    }
+
+    fn spawn_with_env(profile: &Path, environment: &[(&str, &str)]) -> Self {
         use std::os::windows::process::CommandExt;
 
-        let mut child = Command::new(profile.join(TARGET_BINARY))
+        let mut command = Command::new(profile.join(TARGET_BINARY));
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .creation_flags(0x0800_0000)
-            .spawn()
-            .expect("synthetic target should start");
+            .creation_flags(0x0800_0000);
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        let mut child = command.spawn().expect("synthetic target should start");
         let stdin = child.stdin.take().expect("target stdin");
         let stdout = BufReader::new(child.stdout.take().expect("target stdout"));
         Self {
@@ -47,6 +60,10 @@ impl TargetProcess {
             stdin,
             stdout,
         }
+    }
+
+    fn process_id(&self) -> u32 {
+        self.child.id()
     }
 
     fn render(&mut self) -> String {
@@ -89,6 +106,39 @@ fn profile_directory() -> PathBuf {
         .to_path_buf()
 }
 
+fn module_is_loaded(process_id: u32, module_name: &str) -> bool {
+    let snapshot = unsafe {
+        CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id)
+            .expect("target module snapshot")
+    };
+    let mut entry = MODULEENTRY32W {
+        dwSize: std::mem::size_of::<MODULEENTRY32W>() as u32,
+        ..Default::default()
+    };
+    let mut found = false;
+    if unsafe { Module32FirstW(snapshot, &mut entry) }.is_ok() {
+        loop {
+            let length = entry
+                .szModule
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(entry.szModule.len());
+            let module = String::from_utf16_lossy(&entry.szModule[..length]);
+            if module.eq_ignore_ascii_case(module_name) {
+                found = true;
+                break;
+            }
+            if unsafe { Module32NextW(snapshot, &mut entry) }.is_err() {
+                break;
+            }
+        }
+    }
+    unsafe {
+        let _ = CloseHandle(snapshot);
+    }
+    found
+}
+
 fn publication(generation: u64, translation: &str) -> RuntimePublication {
     RuntimePublication::new(
         RouteProgram::direct("menu"),
@@ -126,6 +176,30 @@ fn deployment(profile: &Path, publication: RuntimePublication) -> TargetRuntimeD
         publication,
         [NativeAdapterDeployment::new(adapter_library, binding)
             .expect("target-process adapter deployment")],
+    )
+}
+
+fn prepare_adapter_deployment(
+    profile: &Path,
+    publication: RuntimePublication,
+) -> TargetRuntimeDeployment {
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let adapter_library = profile.join(PREPARE_ADAPTER_BINARY);
+    let binding = AdapterBinding {
+        descriptor: descriptor.clone(),
+        adapter_id: descriptor.adapter_id().clone(),
+        version: descriptor.version(),
+        apply_model: descriptor.apply_model(),
+        artifact_hash: ArtifactHash::sha256(sha256(&adapter_library)),
+        host: AdapterHostBinding::TargetProcess {
+            library: PackageArtifactId::new("adapters/synthetic-prepare"),
+        },
+        features: vec![Feature::TextReplace],
+    };
+    TargetRuntimeDeployment::new(
+        publication,
+        [NativeAdapterDeployment::new(adapter_library, binding)
+            .expect("synthetic prepare adapter deployment")],
     )
 }
 
@@ -344,6 +418,322 @@ fn ctl_windows_007_drains_bounded_observation_batches_through_the_controller() {
 }
 
 #[test]
+fn ctl_windows_008_prepares_optional_adapter_before_runtime_activation() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn_with_env(
+        &profile,
+        &[("GLYPHSHIFT_TEST_NATIVE_ADAPTER_REQUIRE_PREPARE", "1")],
+    );
+
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-prepare",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextReplace],
+                }],
+            },
+        )
+        .expect("prepare target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("prepare target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = prepare_adapter_deployment(&profile, publication(1, "Prepared"))
+        .encode_json()
+        .expect("prepare deployment json");
+
+    let acknowledgement = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect("prepared Runtime activation");
+    assert_eq!(
+        acknowledgement.active_adapter_ids,
+        Some(vec![glyphshift_test_native_adapter::ADAPTER_ID.into()])
+    );
+    assert!(module_is_loaded(
+        target.process_id(),
+        PREPARE_ADAPTER_BINARY
+    ));
+    controller
+        .deactivate_runtime(&target_token)
+        .expect("prepared Runtime deactivation");
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_012_waits_for_pending_optional_prepare_before_runtime_activation() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn_with_env(
+        &profile,
+        &[
+            ("GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_PENDING", "1"),
+            ("GLYPHSHIFT_TEST_NATIVE_ADAPTER_REQUIRE_PREPARE", "1"),
+        ],
+    );
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-prepare-pending",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextReplace],
+                }],
+            },
+        )
+        .expect("pending prepare target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("pending prepare target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = prepare_adapter_deployment(&profile, publication(1, "Pending then ready"))
+        .encode_json()
+        .expect("pending prepare deployment json");
+
+    let acknowledgement = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect("pending prepare should poll until ready before Runtime activation");
+    assert_eq!(
+        acknowledgement.active_adapter_ids,
+        Some(vec![glyphshift_test_native_adapter::ADAPTER_ID.into()])
+    );
+    controller
+        .deactivate_runtime(&target_token)
+        .expect("pending prepare Runtime deactivation");
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_009_releases_adapter_when_optional_prepare_is_rejected() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn_with_env(
+        &profile,
+        &[("GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_FAIL", "1")],
+    );
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-prepare-rejection",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextReplace],
+                }],
+            },
+        )
+        .expect("prepare rejection target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("prepare rejection target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = prepare_adapter_deployment(&profile, publication(1, "Rejected"))
+        .encode_json()
+        .expect("prepare rejection deployment json");
+
+    let error = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect_err("prepare rejection should fail activation");
+    assert_eq!(
+        error,
+        PluginError::new("adapter_prepare_failed:adapter_prepare_failed_-4")
+    );
+    assert!(!module_is_loaded(
+        target.process_id(),
+        PREPARE_ADAPTER_BINARY
+    ));
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_010_reports_optional_prepare_unsupported_without_leaving_adapter_loaded() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn_with_env(
+        &profile,
+        &[("GLYPHSHIFT_TEST_NATIVE_ADAPTER_PREPARE_UNSUPPORTED", "1")],
+    );
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-prepare-unsupported",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextReplace],
+                }],
+            },
+        )
+        .expect("prepare unsupported target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("prepare unsupported target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = prepare_adapter_deployment(&profile, publication(1, "Unsupported"))
+        .encode_json()
+        .expect("prepare unsupported deployment json");
+
+    let error = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect_err("unsupported prepare should fail activation distinctly");
+    assert_eq!(error, PluginError::new("adapter_unsupported"));
+    assert!(!module_is_loaded(
+        target.process_id(),
+        PREPARE_ADAPTER_BINARY
+    ));
+    target.stop();
+}
+
+#[test]
+fn ctl_windows_011_releases_preload_when_runtime_activation_fails() {
+    let _target_process_guard = TARGET_PROCESS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let profile = profile_directory();
+    let mut target = TargetProcess::spawn_with_env(
+        &profile,
+        &[
+            ("GLYPHSHIFT_TEST_NATIVE_ADAPTER_REQUIRE_PREPARE", "1"),
+            ("GLYPHSHIFT_TEST_NATIVE_ADAPTER_ACTIVATE_FAIL", "1"),
+        ],
+    );
+    let descriptor = glyphshift_test_native_adapter::descriptor();
+    let mut controller = WindowsController::new();
+    controller
+        .configure(
+            "org.example.synthetic-activation-failure",
+            &WireControllerConfiguration {
+                executable_names: vec![TARGET_BINARY.into()],
+                executable_paths: Vec::new(),
+                descendant_executable_names: Vec::new(),
+                adapter_requirements: vec![WireAdapterRequirement {
+                    adapter_id: descriptor.adapter_id().as_str().into(),
+                    version_major: descriptor.version().major(),
+                    version_minor: descriptor.version().minor(),
+                    version_patch: descriptor.version().patch(),
+                    features: vec![WireFeature::TextReplace],
+                }],
+            },
+        )
+        .expect("activation failure target configuration");
+    let target_token = controller
+        .inventory()
+        .expect("activation failure target inventory")
+        .targets[0]
+        .token
+        .clone();
+    let runtime_library = profile.join("glyphshift_target_runtime.dll");
+    let deployment = prepare_adapter_deployment(&profile, publication(1, "Failure"))
+        .encode_json()
+        .expect("activation failure deployment json");
+
+    let error = controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: runtime_library.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&runtime_library),
+                deployment_json: deployment,
+                generation: 1,
+            },
+        )
+        .expect_err("synthetic adapter activation should fail");
+    assert_eq!(
+        error,
+        PluginError::new("runtime_activation_failed:target_runtime_rejected_14")
+    );
+    assert!(!module_is_loaded(
+        target.process_id(),
+        PREPARE_ADAPTER_BINARY
+    ));
+    target.stop();
+}
+
+#[test]
 fn ctl_windows_005_rejects_a_changed_runtime_before_target_injection() {
     let profile = profile_directory();
     let original_runtime = profile.join("glyphshift_target_runtime.dll");
@@ -386,17 +776,15 @@ fn ctl_windows_005_rejects_a_changed_runtime_before_target_injection() {
         .encode_json()
         .expect("runtime deployment json");
 
-    assert!(
-        controller
-            .activate_runtime(
-                &target_token,
-                &WireRuntimeDeployment {
-                    runtime_library: changed_runtime.to_string_lossy().into_owned(),
-                    runtime_library_sha256: sha256(&original_runtime),
-                    deployment_json: encoded_deployment,
-                    generation: 1,
-                },
-            )
-            .is_err()
-    );
+    assert!(controller
+        .activate_runtime(
+            &target_token,
+            &WireRuntimeDeployment {
+                runtime_library: changed_runtime.to_string_lossy().into_owned(),
+                runtime_library_sha256: sha256(&original_runtime),
+                deployment_json: encoded_deployment,
+                generation: 1,
+            },
+        )
+        .is_err());
 }

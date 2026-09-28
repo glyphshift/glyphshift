@@ -208,6 +208,7 @@ pub enum HostOperationFailure {
     RuntimeExportUnavailable,
     RemoteThreadUnavailable,
     RemoteThreadTimeout,
+    AdapterUnsupported,
     IsolatedWorkerPermissionDenied,
     IsolatedWorkerTimeout,
     TargetRuntimeRestartRequired,

@@ -95,6 +95,28 @@ struct TextHost {
     LeaveTextScope leave;
 };
 
+struct PrepareCommand {
+    uint32_t size;
+    uint32_t action;
+    uint32_t request;
+    int32_t status;
+    uint32_t thread;
+};
+
+using PrepareAdapter = uint32_t(__stdcall*)(PrepareCommand*);
+
+constexpr uint32_t GS_PREPARE_REQUEST = 1;
+constexpr uint32_t GS_PREPARE_POLL = 2;
+constexpr uint32_t GS_PREPARE_CANCEL = 3;
+constexpr int32_t GS_PREPARE_UNKNOWN = -1;
+constexpr int32_t GS_PREPARE_FAILED = -4;
+constexpr int32_t GS_PREPARE_UNSUPPORTED = -7;
+constexpr int32_t GS_PREPARE_UNAVAILABLE = -8;
+constexpr int32_t GS_PREPARE_PENDING = 0;
+constexpr int32_t GS_PREPARE_READY = 1;
+constexpr int32_t GS_PREPARE_CANCELLED = 3;
+constexpr int32_t GS_PREPARE_RUNNING = 4;
+
 constexpr uint64_t GS_FEATURE_TEXT_OBSERVE = 1ull << 0;
 constexpr uint64_t GS_FEATURE_TEXT_REPLACE = 1ull << 1;
 constexpr uint64_t GS_FEATURE_FONT_SUBSTITUTE = 1ull << 2;
@@ -117,3 +139,4 @@ static_assert(sizeof(Host) == (sizeof(void*) == 8 ? 32 : 16));
 static_assert(sizeof(Api) == (sizeof(void*) == 8 ? 176 : 160));
 static_assert(sizeof(TextEvent) == (sizeof(void*) == 8 ? 56 : 48));
 static_assert(sizeof(TextHost) == (sizeof(void*) == 8 ? 40 : 24));
+static_assert(sizeof(PrepareCommand) == 20);

@@ -11,6 +11,10 @@ param(
 
     [switch]$ResearchQt5,
 
+    [string]$KirikiriKagBridgeX86,
+
+    [string]$KirikiriSdkLicensePath,
+
     [switch]$KeepExistingOutput
 )
 
@@ -37,6 +41,25 @@ function Assert-LocalTestPath([string]$Candidate, [string]$Purpose) {
 }
 
 Assert-LocalTestPath $OutputRoot 'Runtime Bundle output'
+
+$includeKirikiriKag = -not [string]::IsNullOrWhiteSpace($KirikiriKagBridgeX86) -or
+    -not [string]::IsNullOrWhiteSpace($KirikiriSdkLicensePath)
+if ($includeKirikiriKag) {
+    if ([string]::IsNullOrWhiteSpace($KirikiriKagBridgeX86) -or
+        [string]::IsNullOrWhiteSpace($KirikiriSdkLicensePath)) {
+        throw 'KiriKiri KAG packaging requires both -KirikiriKagBridgeX86 and -KirikiriSdkLicensePath.'
+    }
+    $KirikiriKagBridgeX86 = (Resolve-Path -LiteralPath $KirikiriKagBridgeX86).Path
+    $KirikiriSdkLicensePath = (Resolve-Path -LiteralPath $KirikiriSdkLicensePath).Path
+    if ([System.IO.Path]::GetExtension($KirikiriKagBridgeX86) -ne '.dll') {
+        throw 'The KiriKiri KAG bridge input must be a DLL.'
+    }
+    $expectedKirikiriSdkLicenseHash = 'C1A879ABA7176AFC99773A33487F9D906EC1256AC4472126F3D8B67A0EF22FD7'
+    $actualKirikiriSdkLicenseHash = (Get-FileHash -LiteralPath $KirikiriSdkLicensePath -Algorithm SHA256).Hash
+    if ($actualKirikiriSdkLicenseHash -ne $expectedKirikiriSdkLicenseHash) {
+        throw 'KiriKiri SDK license does not match the reviewed KiriKiri 2 SDK 2.32r2 license.'
+    }
+}
 
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
@@ -135,6 +158,20 @@ function Copy-VersionedBundleArtifact(
     return [ordered]@{ file = $targetName; sha256 = $hash }
 }
 
+function Copy-ExternalBundleArtifact(
+    [string]$SourcePath,
+    [string]$TargetStem,
+    [string]$Extension
+) {
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "Missing external Runtime Bundle artifact: $SourcePath"
+    }
+    $hash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $targetName = "$TargetStem-$($hash.Substring(0, 12)).$Extension"
+    Copy-Item -LiteralPath $SourcePath -Destination (Join-Path $stagingRoot $targetName)
+    return [ordered]@{ file = $targetName; sha256 = $hash }
+}
+
 $controllerBundle = Copy-VersionedBundleArtifact `
     'glyphshift-controller-windows.exe' 'controller' 'exe'
 $runtimeBundle = Copy-VersionedBundleArtifact `
@@ -192,6 +229,14 @@ $x86RpgMakerMv = Copy-VersionedBundleArtifact 'glyphshift_adapter_rpgmaker_mv_na
 $x86VguiLocalize = Copy-VersionedBundleArtifact 'glyphshift_adapter_vgui_localize_native.dll' 'adapter-vgui-localize-x86' 'dll' $x86ProfileRoot
 $x86CatSystem2 = Copy-VersionedBundleArtifact 'glyphshift_adapter_catsystem2_native.dll' 'adapter-catsystem2-x86' 'dll' $x86ProfileRoot
 
+$x86KirikiriKag = $null
+$kirikiriSdkNoticeName = $null
+if ($includeKirikiriKag) {
+    $x86KirikiriKag = Copy-ExternalBundleArtifact $KirikiriKagBridgeX86 'adapter-kirikiri-kag-x86' 'dll'
+    $kirikiriSdkNoticeName = 'NOTICE-kirikiri2-sdk-license.txt'
+    Copy-Item -LiteralPath $KirikiriSdkLicensePath -Destination (Join-Path $stagingRoot $kirikiriSdkNoticeName)
+}
+
 if ($IncludeTestTarget) {
     $testTarget = Join-Path $CargoTargetDir "$profileDirectory\glyphshift-windows-runtime-target.exe"
     Copy-Item -LiteralPath $testTarget -Destination (Join-Path $stagingRoot 'test-target.exe')
@@ -244,6 +289,9 @@ $rpgMakerMvPresentation = Get-AdapterPresentation 'windows.rpgmaker-mv.message'
 $tyranoScriptPresentation = Get-AdapterPresentation 'windows.tyranoscript.message'
 $vguiLocalizePresentation = Get-AdapterPresentation 'windows.vgui.localize-query'
 $catSystem2Presentation = Get-AdapterPresentation 'windows.catsystem2.utf8-text'
+$kirikiriKagPresentation = if ($includeKirikiriKag) {
+    Get-AdapterPresentation 'experimental.kirikiri.kag-scenario'
+} else { $null }
 
 $runtimeManifest = [ordered]@{
     schema = 'glyphshift.runtime-bundle/4'
@@ -448,6 +496,18 @@ foreach ($pair in @(@($x86Gdi, $extTextOutPresentation), @($x86TextOut, $textOut
     if ($artifact.file -eq $x86VguiLocalize.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
     if ($artifact.file -eq $x86CatSystem2.file) { $x86Adapters[-1].process_resident_after_deactivate = $true }
 }
+if ($includeKirikiriKag) {
+    $x86Adapters += [ordered]@{
+        file = $x86KirikiriKag.file
+        sha256 = $x86KirikiriKag.sha256
+        name = $kirikiriKagPresentation.name
+        summary = $kirikiriKagPresentation.summary
+        technology = $kirikiriKagPresentation.technology
+        technicalTarget = $kirikiriKagPresentation.technicalTarget
+        documentationUrl = $kirikiriKagPresentation.documentationUrl
+        process_resident_after_deactivate = $true
+    }
+}
 $runtimeManifest.additional_architectures = @([ordered]@{
     architecture = 'x86'
     controller = [ordered]@{artifact='windows-generic-controller-x86';file=$x86Controller.file;sha256=$x86Controller.sha256;protocol=@(1,0)}
@@ -477,6 +537,9 @@ $declaredArtifacts = @(
     $runtimeManifest.runtime
 ) + @($runtimeManifest.adapters) + @($runtimeManifest.isolated_workers) + @($x86Controller, $x86Runtime) + @($x86Adapters)
 $expectedFiles = @('runtime-bundle.json') + @($declaredArtifacts | ForEach-Object { $_.file })
+if ($includeKirikiriKag) {
+    $expectedFiles += $kirikiriSdkNoticeName
+}
 if ($IncludeTestTarget) {
     $expectedFiles += @('test-target.exe', 'test-target-x86.exe')
 }

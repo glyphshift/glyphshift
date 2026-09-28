@@ -5,10 +5,10 @@ use glyphshift_capture::{
     CaptureObservationBatch, CaptureObservationRecord, CaptureProducerId, CaptureTranslationContext,
 };
 use glyphshift_controller_sdk::{
-    PROTOCOL_SCHEMA, Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
+    Request, RequestEnvelope, Response, ResponseEnvelope, WireAdapterRequirement,
     WireCaptureObservationBatch, WireControllerConfiguration, WireControllerLossPolicy,
     WireFeature, WireOperation, WireRuntimeDeployment, WireRuntimeFontOutcome,
-    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant,
+    WireRuntimeTextOutcome, WireRuntimeTraceStatus, WireWorkerTargetGrant, PROTOCOL_SCHEMA,
 };
 use glyphshift_domain::{AdapterId, Feature, TargetFacts};
 use glyphshift_extension::{CodeHash, ControllerCodeIdentity, ExtensionId, ProtocolVersion};
@@ -273,6 +273,7 @@ fn classify_rejection(code: &str) -> glyphshift_protocol::ControllerRejection {
         "runtime_export_unavailable" => ControllerRejection::RuntimeExportUnavailable,
         "remote_thread_failed" => ControllerRejection::RemoteThreadUnavailable,
         "remote_thread_timeout" => ControllerRejection::RemoteThreadTimeout,
+        "adapter_unsupported" => ControllerRejection::AdapterUnsupported,
         _ => reason
             .strip_prefix("target_runtime_rejected_")
             .and_then(|status| status.parse().ok())
@@ -280,6 +281,24 @@ fn classify_rejection(code: &str) -> glyphshift_protocol::ControllerRejection {
                 ControllerRejection::Unknown,
                 ControllerRejection::TargetRuntimeRejected,
             ),
+    }
+}
+
+#[cfg(test)]
+mod rejection_tests {
+    use super::*;
+    use glyphshift_protocol::ControllerRejection;
+
+    #[test]
+    fn controller_host_preserves_adapter_unsupported_as_a_stable_rejection() {
+        assert_eq!(
+            classify_rejection("adapter_unsupported"),
+            ControllerRejection::AdapterUnsupported
+        );
+        assert_eq!(
+            classify_rejection("runtime_activation_failed:adapter_unsupported"),
+            ControllerRejection::AdapterUnsupported
+        );
     }
 }
 

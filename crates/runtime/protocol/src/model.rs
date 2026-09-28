@@ -49,6 +49,7 @@ pub enum ControllerRejection {
     RuntimeExportUnavailable,
     RemoteThreadUnavailable,
     RemoteThreadTimeout,
+    AdapterUnsupported,
     TargetRuntimeRejected(u32),
     Unknown,
 }
