@@ -2,7 +2,7 @@
 
 **Translate Windows applications and games with your own dictionaries, with optional AI help.**
 
-[Download](https://www.yuelili.com/apps/glyphshift) · [Online guide (Chinese)](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/Yuelioi/glyphshift/releases) · [简体中文](README.md)
+[Download](https://www.yuelili.com/apps/glyphshift) · [Online guide (Chinese)](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [简体中文](README.md)
 
 Glyphshift reads text while an application is running, looks up translations in a dictionary, and passes them back to the application for display. Collect text, edit translations, and configure fonts in one workflow, without changing the application's installed files.
 

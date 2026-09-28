@@ -2,7 +2,7 @@
 
 **给 Windows 软件和游戏翻译界面，用自己的字典，也可以让 AI 帮忙。**
 
-[下载软件](https://www.yuelili.com/apps/glyphshift) · [在线文档](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/Yuelioi/glyphshift/releases) · [English](README.en.md)
+[下载软件](https://www.yuelili.com/apps/glyphshift) · [在线文档](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [English](README.en.md)
 
 Glyphshift 在目标软件运行时读取文字，查找字典，再把译文交给目标软件显示。收集原文、填写译文、调整字体都在同一个工作流里完成，不需要修改目标软件的安装文件。
 
