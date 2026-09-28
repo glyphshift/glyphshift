@@ -1,0 +1,21 @@
+[package]
+name = "glyphshift-plugin-package"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+
+[dependencies]
+glyphshift-adapter-native-host = { path = "../native-host" }
+glyphshift-domain = { path = "../../../core/domain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+# Reuse the existing Rust DEFLATE backend; do not link a second codec or Zopfli.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
+
+[lints]
+workspace = true

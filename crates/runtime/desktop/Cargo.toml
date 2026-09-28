@@ -12,7 +12,12 @@ path = "src/lib.rs"
 name = "glyphshift-runtime-bundle-verify"
 path = "src/bin/verify_runtime_bundle.rs"
 
+[[bin]]
+name = "glyphshift-plugin"
+path = "src/bin/plugin.rs"
+
 [dependencies]
+glyphshift-plugin-package = { path = "../../adapters/platform/package" }
 glyphshift-acquisition = { path = "../acquisition" }
 glyphshift-acquisition-worker-host = { path = "../worker/acquisition-host" }
 glyphshift-adapter-native-host = { path = "../../adapters/platform/native-host" }
@@ -31,8 +36,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 url = "2.5"
-
-[dev-dependencies]
 tempfile = "3"
 
 [lints.rust]

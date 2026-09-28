@@ -74,6 +74,10 @@ pub fn inspect_pe_architecture(path: &Path) -> std::io::Result<&'static str> {
     let mut file = std::fs::File::open(path)?;
     pe_architecture(&mut file)
 }
+/// Checks an in-memory PE header without loading the library or writing temporary files.
+pub fn inspect_pe_architecture_bytes(bytes: &[u8]) -> std::io::Result<&'static str> {
+    pe_architecture(&mut std::io::Cursor::new(bytes))
+}
 fn pe_architecture(file: &mut (impl Read + Seek)) -> std::io::Result<&'static str> {
     let invalid = || {
         std::io::Error::new(

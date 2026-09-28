@@ -442,7 +442,8 @@ impl DesktopApplication {
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
         let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
-        let runtime_bundle = RuntimeBundle::open(runtime_root);
+        let runtime_bundle =
+            RuntimeBundle::open_with_plugin_store(runtime_root, data_root.join("plugins"));
         let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
         let runtime_bundle = runtime_bundle.ok();
         if let Some(bundle) = &runtime_bundle {

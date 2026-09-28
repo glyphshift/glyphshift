@@ -37,7 +37,7 @@ struct ControllerManifest {
     protocol: [u16; 2],
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ArtifactManifest {
     file: Box<str>,
     sha256: Box<str>,
@@ -267,6 +267,25 @@ pub struct RuntimeBundle {
 
 impl RuntimeBundle {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, DesktopRuntimeError> {
+        Self::open_with_packages(root, &[])
+    }
+
+    pub fn open_with_plugin_store(
+        root: impl AsRef<Path>,
+        store: impl Into<PathBuf>,
+    ) -> Result<Self, DesktopRuntimeError> {
+        let packages = glyphshift_plugin_package::PluginStore::new(store)
+            .selected()
+            .map_err(|_| DesktopRuntimeError::AdapterRegistryRejected)?;
+        Self::open_with_packages(root, &packages)
+    }
+
+    /// Uses explicitly selected, locally approved immutable packages. Selection
+    /// overrides a built-in Adapter ID as a whole; there is no implicit latest-version search.
+    pub fn open_with_packages(
+        root: impl AsRef<Path>,
+        plugins: &[glyphshift_plugin_package::InstalledPackage],
+    ) -> Result<Self, DesktopRuntimeError> {
         let root = root
             .as_ref()
             .canonicalize()
@@ -281,7 +300,7 @@ impl RuntimeBundle {
             BUNDLE_SCHEMA | "glyphshift.runtime-bundle/4"
         ) || manifest.authority.as_ref() != FIRST_PARTY_BUNDLE_AUTHORITY
             || manifest.controller.artifact.trim().is_empty()
-            || manifest.adapters.is_empty()
+            || (manifest.adapters.is_empty() && plugins.is_empty())
         {
             return Err(DesktopRuntimeError::InvalidManifest);
         }
@@ -305,6 +324,7 @@ impl RuntimeBundle {
             return Err(DesktopRuntimeError::InvalidManifest);
         }
         let signer = SignerId::new(manifest.authority.clone());
+        let mut trusted_signers = vec![signer.clone()];
         let controller_signer = ControllerSignerId::new(manifest.authority.clone());
         let controller_hash = parse_hash(&manifest.controller.sha256)?;
         let controller_path = artifact_path(&root, &manifest.controller.file)?;
@@ -338,12 +358,19 @@ impl RuntimeBundle {
         let mut native_artifacts = manifest
             .adapters
             .iter()
-            .map(|adapter| (primary_architecture.clone(), adapter))
+            .map(|adapter| {
+                (
+                    primary_architecture.clone(),
+                    adapter.clone(),
+                    root.clone(),
+                    signer.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         for variant in &manifest.additional_architectures {
             if !matches!(variant.architecture.as_ref(), "x86" | "x86_64")
                 || controllers.contains_key(&variant.architecture)
-                || variant.adapters.is_empty()
+                || (variant.adapters.is_empty() && plugins.is_empty())
                 || variant.controller.protocol != manifest.controller.protocol
             {
                 return Err(DesktopRuntimeError::InvalidManifest);
@@ -371,12 +398,91 @@ impl RuntimeBundle {
                 variant.architecture.clone(),
                 RuntimeArtifact::new(path, hash),
             );
-            native_artifacts.extend(
-                variant
-                    .adapters
-                    .iter()
-                    .map(|adapter| (variant.architecture.clone(), adapter)),
-            );
+            native_artifacts.extend(variant.adapters.iter().map(|adapter| {
+                (
+                    variant.architecture.clone(),
+                    adapter.clone(),
+                    root.clone(),
+                    signer.clone(),
+                )
+            }));
+        }
+        let mut plugin_owners = BTreeSet::new();
+        for plugin in plugins {
+            plugin
+                .verify()
+                .map_err(|_| DesktopRuntimeError::ArtifactHashMismatch)?;
+            let package = plugin.manifest();
+            if package.runtime_bundle_schema != manifest.schema.as_ref() {
+                return Err(DesktopRuntimeError::AdapterAbiMismatch);
+            }
+            let ids = package
+                .variants
+                .iter()
+                .flat_map(|v| &v.adapters)
+                .map(|a| a.native_metadata.adapter_id.as_str())
+                .collect::<BTreeSet<_>>();
+            for id in &ids {
+                if !plugin_owners.insert((*id).to_owned())
+                    || manifest
+                        .isolated_workers
+                        .iter()
+                        .any(|w| w.adapter_id.as_ref() == *id)
+                {
+                    return Err(DesktopRuntimeError::AdapterRegistryRejected);
+                }
+            }
+            // Bundle v4 build metadata names built-ins without executing their DLLs.
+            if native_artifacts
+                .iter()
+                .any(|(_, a, _, _)| a.native_metadata.is_none())
+            {
+                return Err(DesktopRuntimeError::InvalidManifest);
+            }
+            native_artifacts.retain(|(_, a, _, _)| {
+                !ids.contains(a.native_metadata.as_ref().unwrap().adapter_id.as_str())
+            });
+            let approval = SignerId::new(format!("local-approved-sha256:{}", plugin.sha256()));
+            trusted_signers.push(approval.clone());
+            for variant in &package.variants {
+                if !controllers.contains_key(variant.architecture.as_str()) {
+                    return Err(DesktopRuntimeError::AdapterAbiMismatch);
+                }
+                for adapter in &variant.adapters {
+                    let path = plugin
+                        .file(&adapter.file)
+                        .map_err(|_| DesktopRuntimeError::InvalidArtifactPath)?;
+                    let file = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or(DesktopRuntimeError::InvalidArtifactPath)?;
+                    let parent = path
+                        .parent()
+                        .ok_or(DesktopRuntimeError::InvalidArtifactPath)?;
+                    let hash = package
+                        .files
+                        .iter()
+                        .find(|f| f.path == adapter.file)
+                        .ok_or(DesktopRuntimeError::InvalidManifest)?;
+                    native_artifacts.push((
+                        variant.architecture.clone().into(),
+                        ArtifactManifest {
+                            file: file.into(),
+                            sha256: hash.sha256.clone().into(),
+                            name: Some(adapter.name.clone().into()),
+                            summary: Some(adapter.summary.clone().into()),
+                            technology: Some(adapter.technology.clone().into()),
+                            technical_target: None,
+                            documentation_url: None,
+                            process_resident_after_deactivate: adapter
+                                .process_resident_after_deactivate,
+                            native_metadata: Some(adapter.native_metadata.clone()),
+                        },
+                        parent.to_path_buf(),
+                        approval.clone(),
+                    ));
+                }
+            }
         }
         let mut architecture_requirements: BTreeMap<Box<str>, Vec<AdapterRequirement>> =
             BTreeMap::new();
@@ -386,9 +492,11 @@ impl RuntimeBundle {
         let mut authorized_adapters = Vec::new();
         let mut discovered_requirements = Vec::new();
         let mut adapter_options = Vec::new();
-        for (index, (architecture, adapter)) in native_artifacts.into_iter().enumerate() {
+        for (index, (architecture, adapter, artifact_root, artifact_signer)) in
+            native_artifacts.into_iter().enumerate()
+        {
             let hash = parse_hash(&adapter.sha256)?;
-            let path = verified_artifact(&root, &adapter.file, hash)?;
+            let path = verified_artifact(&artifact_root, &adapter.file, hash)?;
             if multi {
                 verify_architecture(&path, &architecture)?;
             }
@@ -481,7 +589,7 @@ impl RuntimeBundle {
                 AdapterPackage::new(
                     descriptor,
                     artifact_id.clone(),
-                    signer.clone(),
+                    artifact_signer,
                     ArtifactHash::sha256(hash),
                     ArtifactHash::sha256(hash),
                 )
@@ -583,8 +691,10 @@ impl RuntimeBundle {
 
         let adapter_options = merge_adapter_options(adapter_options)?;
         let discovered_requirements = merge_requirements(discovered_requirements)?;
-        let mut registry =
-            AdapterRegistry::new(AdapterTrustPolicy::new([signer], authorized_adapters));
+        let mut registry = AdapterRegistry::new(AdapterTrustPolicy::new(
+            trusted_signers,
+            authorized_adapters,
+        ));
         registry
             .reload(AdapterPackageSet::new(packages))
             .map_err(|_| DesktopRuntimeError::AdapterRegistryRejected)?;

@@ -9,6 +9,7 @@ crate types, and runtime discovery remain stable across the folder split.
 
 - `sdk/` — package `glyphshift-adapter-sdk`
 - `registry/` — package `glyphshift-adapter-registry`
+- `package/` — package `glyphshift-plugin-package`, GSP archives and immutable local installations
 - `native-abi/` — package `glyphshift-adapter-native-abi`
 - `native-host/` — package `glyphshift-adapter-native-host`
 
@@ -28,3 +29,6 @@ are not created before a concrete Adapter exists.
 
 Adapters are organized by text technology, not by software brand. Product orchestration discovers concrete
 implementations at runtime and must not add static dependencies on them.
+
+See [the local GSP pilot](../../docs/plugins.md) for package manifests, developer commands,
+explicit local trust, and version selection. Native plugin packages do not duplicate the shared Runtime.
