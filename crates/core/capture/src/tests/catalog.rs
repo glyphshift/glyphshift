@@ -1,5 +1,5 @@
 use crate::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 #[test]
@@ -171,7 +171,6 @@ fn preferred_sources_displace_fallback_evidence_when_capacity_is_full() {
 fn capture_sink_checkpoints_during_continuous_observations() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Instant;
 
     let root = tempdir().expect("capture root");
     let output = root.path().join("capture.json");
@@ -235,8 +234,19 @@ fn capture_sink_checkpoints_while_running_and_pause_does_not_end_the_session() {
     )
     .expect("capture sink");
     sink.observe("windows.gdi.text-out", "Before pause");
-    std::thread::sleep(Duration::from_millis(1_100));
-    let live = CaptureCatalog::read_current(&output).expect("live checkpoint");
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let live = loop {
+        if let Ok(catalog) = CaptureCatalog::read_current(&output) {
+            if !catalog.entries().is_empty() {
+                break catalog;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "live checkpoint was not published"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
     assert_eq!(live.entries().len(), 1);
 
     let ingress = sink.ingress();

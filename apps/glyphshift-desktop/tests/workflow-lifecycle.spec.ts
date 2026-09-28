@@ -5,6 +5,7 @@ async function setup(page: Page) {
   await page.addInitScript(snapshot => {
     const state = { failRefresh: false, phase: 'running', warning: false, revision: 1, refreshes: 0, commands: [] as string[], hold: false, release: null as any, collect: true }
     ;(window as any).__lifecycle = state
+    ;(window as any).__lifecycleSnapshot = snapshot
     Object.assign(snapshot.workflows[0].targets[0], { writeDictionaryId: 'dictionary-proof' })
     const runtime = () => ({ workflowId: 'workflow-proof', revision: state.revision,
       lifecycle: { phase: state.phase, enabled: !['stopped', 'stop_failed'].includes(state.phase), collectNewSources: state.collect, revision: state.revision, checkedAtMs: 1 },
@@ -123,7 +124,9 @@ test('start arriving during stop is serialized and multiple workflows count inde
   await expect(page.locator('#probe-activity-status')).toHaveText('等待软件启动 1')
   await page.evaluate(async () => {
     const path = '/src/workspace/state.ts'; const state = await import(path)
-    state.model.value.workflows.push({ ...state.model.value.workflows[0], id: 'workflow-second' })
+    const second = { ...state.model.value.workflows[0], id: 'workflow-second' }
+    state.model.value.workflows.push(second)
+    ;(window as any).__lifecycleSnapshot.workflows.push(JSON.parse(JSON.stringify(second)))
     state.applyWorkflowRuntime({ workflowId: 'workflow-second', targets: [], errors: {}, revision: 100, lifecycle: { phase: 'running', enabled: true, collectNewSources: true, checkedAtMs: 1, revision: 100 } })
   })
   await expect(page.locator('#probe-activity-status')).toContainText('等待软件启动 1')

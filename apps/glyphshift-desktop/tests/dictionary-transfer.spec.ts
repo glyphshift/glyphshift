@@ -15,8 +15,8 @@ for (const merge of [false, true]) test(`batch import ${merge ? 'merged' : 'sepa
     const w = window as any
     w.__created = []
     w.__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
+      if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'plugin:dialog|open') { w.__openOptions = args; return ['X:/SyntheticFixtures/one.csv', 'X:/SyntheticFixtures/two.srt'] }
       if (command === 'desktop_preview_dictionary_import') return { metadata: null, entries: [{ source: 'Hello', translation: args.inputPath.endsWith('.csv') ? '你好' : '' }] }
@@ -53,8 +53,8 @@ test('batch import retries only unfinished dictionaries and reports preview file
     const w = window as any
     w.__created = []; w.__failOnce = true; w.__badPreview = true
     w.__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN' }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
+      if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'plugin:dialog|open') return ['X:/SyntheticFixtures/one.json', 'X:/SyntheticFixtures/two.srt']
       if (command === 'desktop_preview_dictionary_import') {

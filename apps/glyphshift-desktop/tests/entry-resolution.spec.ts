@@ -14,8 +14,8 @@ test('collection displays translation provenance and keeps automatic dictionary 
     Object.assign(rows[2]!.resolution, { editSource: 'Hidden', editTranslation: '' })
     ;(window as any).__resolution = { rows, run, merges: [] as boolean[], filters: [] as string[], saves: [] as any[] }
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args?: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot
       if (command === 'desktop_probe_runs') return []
       if (command === 'desktop_dictionary') return structuredClone(snapshot.dictionaryDetails['dictionary-proof'])

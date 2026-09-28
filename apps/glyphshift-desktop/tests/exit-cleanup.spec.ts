@@ -8,8 +8,8 @@ test(`${behavior} respects runtime cleanup and the window close preference`, asy
     ;(window as any).__exitTest = state
     ;(window as any).__TAURI_INTERNALS__ = { metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } }, invoke: async (command: string) => {
       state.calls.push(command)
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 35 }
-      if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', closeBehavior: behavior }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', closeBehavior: behavior }
       if (['desktop_snapshot', 'desktop_refresh_workflows'].includes(command)) return snapshot
       if (command === 'desktop_probe_runs') return []
       if (command === 'desktop_ai_profiles') return { defaultProfileId: null, profiles: [] }
@@ -48,8 +48,8 @@ test('tray exit bypasses hide preference and still prepares runtime cleanup', as
       invoke: async (command: string, args: any) => {
         state.calls.push(command)
         if (command === 'plugin:event|listen') { listeners.set(args.event, args.handler); return args.handler }
-        if (command === 'desktop_status') return { shellReady: true, apiVersion: 35 }
-        if (command === 'desktop_settings') return { settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', closeBehavior: 'tray' }
+        if (command === 'desktop_status') return { shellReady: true, apiVersion: 36 }
+        if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', closeBehavior: 'tray' }
         if (['desktop_snapshot', 'desktop_refresh_workflows'].includes(command)) return snapshot
         if (command === 'desktop_probe_runs') return []
         if (command === 'desktop_ai_profiles') return { defaultProfileId: null, profiles: [] }
