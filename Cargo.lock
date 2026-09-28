@@ -1433,6 +1433,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "glyphshift-adapter-devkit"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-adapter-native-host",
+ "glyphshift-plugin-package",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "glyphshift-adapter-direct2d"
 version = "0.1.0"
 dependencies = [

@@ -6,6 +6,7 @@ members = [
     "crates/adapters/implementations/native/console-native",
     "crates/adapters/platform/registry",
     "crates/adapters/platform/package",
+    "crates/adapters/tools/devkit",
     "crates/adapters/implementations/native/draw-text-native",
     "crates/adapters/implementations/native/direct2d",
     "crates/adapters/implementations/native/direct2d-native",

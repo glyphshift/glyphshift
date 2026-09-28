@@ -1,0 +1,19 @@
+[package]
+name = "glyphshift-adapter-devkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "glyphshift-adapter-tool"
+path = "src/main.rs"
+
+[dependencies]
+glyphshift-adapter-native-host = { path = "../../platform/native-host" }
+glyphshift-plugin-package = { path = "../../platform/package" }
+serde_json = "1"
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "allow"
