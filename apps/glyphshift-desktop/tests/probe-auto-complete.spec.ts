@@ -11,7 +11,7 @@ async function setup(page: Page, interval = 5) {
     const profile = { id: 'profile.auto', name: '自动测试', protocol: 'ollama_chat', baseUrl: 'http://127.0.0.1:11434/api', modelId: 'synthetic', reasoningEffort: 'disabled', timeoutMs: 60000, maxItemsPerRequest: 50, maxConcurrency: 1, maxRetries: 0, filterPolicy: {}, hasCredential: false, credentialRequired: false }
     const run = { id: 'probe-auto', workflowId: 'workflow-proof', name: '自动探针', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'], status: 'running', livePreviewEnabled: false, observationRevision: 1, observedCount: 1, ignoredCount: 0, droppedObservations: 0, previewGeneration: 1, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: null, excludedDictionaryIds: [], exclusionRevisions: {} }
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args?: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark', autoCompleteIntervalSeconds: interval }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot
       if (command === 'desktop_probe_runs') return [{ ...run, status: state.status }]

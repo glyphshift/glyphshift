@@ -99,7 +99,7 @@ test('desktop startup opens pending onboarding that was loaded before the app mo
     ;(window as any).__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main', windowLabel: 'main' } },
       invoke: async (command: string, args: any) => {
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_settings') return {
           settingsSchemaVersion: 1,
           safetyNoticeVersion: 1,

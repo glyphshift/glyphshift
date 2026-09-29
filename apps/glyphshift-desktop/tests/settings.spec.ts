@@ -86,8 +86,8 @@ test('settings shares the full-width primary page axis across wide and compact w
 test('settings navigation separates AI and management surfaces in the intended order', async ({ page }) => {
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const tabs = page.getByTestId('settings-tabs').getByRole('tab')
-  await expect(tabs).toHaveCount(6)
-  expect(await tabs.allTextContents()).toEqual(['通用', '翻译配置', '文字处理', '软件管理', '字体管理', '语言管理'])
+  await expect(tabs).toHaveCount(7)
+  expect(await tabs.allTextContents()).toEqual(['通用', '翻译配置', '文字处理', '软件管理', '字体管理', '语言管理', '插件管理'])
   await expect(page.getByTestId('settings-section-ai')).toBeHidden()
   await tabs.filter({ hasText: '翻译配置' }).click()
   await expect(page.getByTestId('settings-section-ai')).toBeVisible()
@@ -373,7 +373,7 @@ test('administrator launch preference persists before elevation and disables wit
           launchElevated: false,
           closeBehavior: 'quit',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.2.0', apiVersion: 38 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_privilege_status') return { elevated: false }
         if (command === 'desktop_update_settings') {
@@ -497,7 +497,7 @@ test('data settings open the native dictionary directory and allow retry', async
   await page.addInitScript(({ snapshot }) => {
     let attempts = 0
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_probe_runs') return []

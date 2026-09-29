@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::Path;
 use tempfile::TempDir;
-use zip::{ZipWriter, write::SimpleFileOptions};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 fn root() -> TempDir {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -89,6 +89,48 @@ fn package(version: u16) -> Package {
     let source = root();
     let manifest = fixture(source.path(), version);
     Package::from_bytes(&build_package(&manifest, source.path()).unwrap()).unwrap()
+}
+
+#[test]
+fn unselected_releases_can_be_inspected_but_tampering_is_rejected() {
+    let target = root();
+    let store = PluginStore::new(target.path());
+    let package = package(0);
+    store.install(&package, package.sha256()).unwrap();
+    let installed = store.get(package.sha256()).unwrap();
+    assert_eq!(installed.manifest().version, [1, 0, 0]);
+    assert!(store.selected().unwrap().is_empty());
+    fs::write(
+        installed.file("windows-x86/adapter.dll").unwrap(),
+        b"corrupt",
+    )
+    .unwrap();
+    assert!(store.get(package.sha256()).is_err());
+}
+
+#[test]
+fn stale_deselection_and_failed_preflight_preserve_the_new_selection() {
+    let target = root();
+    let store = PluginStore::new(target.path());
+    let old = package(0);
+    let new = package(1);
+    store.install(&old, old.sha256()).unwrap();
+    store.install(&new, new.sha256()).unwrap();
+    store.select(old.sha256(), |_| Ok(())).unwrap();
+    store.select(new.sha256(), |_| Ok(())).unwrap();
+    assert_eq!(
+        store.deselect_release(old.sha256(), |_| panic!(
+            "stale selection must not preflight"
+        )),
+        Err(PackageError::Conflict)
+    );
+    assert_eq!(
+        store.deselect_release(new.sha256(), |_| Err(PackageError::Incompatible)),
+        Err(PackageError::Incompatible)
+    );
+    assert_eq!(store.selected().unwrap()[0].sha256(), new.sha256());
+    store.deselect_release(new.sha256(), |_| Ok(())).unwrap();
+    assert!(store.selected().unwrap().is_empty());
 }
 
 fn raw_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {

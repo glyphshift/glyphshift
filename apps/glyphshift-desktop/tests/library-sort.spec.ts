@@ -49,7 +49,7 @@ test('empty dictionary can explicitly clear captured rows on save', async ({ pag
     const w = window as any
     w.__saveCalls = []
     w.__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 38 }
       if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', checkUpdatesOnStartup: false }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot
       if (command === 'desktop_dictionary') return structuredClone(snapshot.dictionaryDetails['dictionary-proof'])

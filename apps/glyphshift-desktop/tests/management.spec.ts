@@ -180,7 +180,7 @@ test('dictionary delete names every workflow record that blocks it', async ({ pa
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_delete_dictionaries') {
           throw {

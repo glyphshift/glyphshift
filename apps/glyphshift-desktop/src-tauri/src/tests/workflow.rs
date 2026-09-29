@@ -563,6 +563,7 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
         capture_capability: ProbeRuntimeCapability::DirectReplace,
     });
     let mut reopened = DesktopApplication {
+        loaded_plugin_digests: BTreeSet::new(),
         backend,
         dictionary_distribution: offline_dictionary_distribution(data_root.path())
             .expect("offline dictionary distribution"),

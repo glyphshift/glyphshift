@@ -131,7 +131,7 @@ test('dictionary library imports and exports one portable JSON file', async ({ p
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return current
         if (command === 'desktop_dictionary') return { ...current.dictionaryDetails['dictionary-proof'], metadata: imported.dictionaries[1].metadata }
         if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\dictionary-imported.json'
@@ -185,7 +185,7 @@ test('dictionary export reports when the native save dialog cannot open', async 
     const internals = {
       invoke: async (command: string) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_dictionary') return snapshot.dictionaryDetails['dictionary-proof']
         if (command === 'plugin:dialog|save') throw new Error('synthetic save dialog failure')
@@ -277,7 +277,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') {
@@ -341,7 +341,7 @@ test('catalog protects local dictionary changes without sending an overwrite', a
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') return {
@@ -382,7 +382,7 @@ test('catalog presentation follows the English interface locale', async ({ page 
     const internals = {
       invoke: async (command: string, args?: Record<string, any>) => {
         if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'en-US', themePreference: 'dark' }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return current
 
         if (command === 'desktop_query_dictionary_catalog') {
@@ -548,7 +548,7 @@ test('dictionary list batch exports only selected dictionaries into one new fold
     (window as any).__batchExports = []
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
       if (command === 'desktop_snapshot') return snapshot
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'plugin:dialog|open') return (window as any).__cancelBatch ? null : 'X:/SyntheticFixtures/exports'
       if (command === 'desktop_export_dictionary') { if ((window as any).__failBatch && args.dictionaryId === 'dictionary-second') throw new Error('synthetic export failure'); (window as any).__batchExports.push(args); return null }
@@ -626,7 +626,7 @@ test('dictionary import displays the native CSV line and reason without writing'
     w.__importWrites = 0
     w.__TAURI_INTERNALS__ = { invoke: async (command: string) => {
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', checkUpdatesOnStartup: false }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'plugin:dialog|open') return 'X:\\SyntheticFixtures\\malformed.csv'
       if (command === 'desktop_preview_dictionary_import') throw { schemaVersion: 1, code: 'import.csv_quote', args: { line: 478 } }

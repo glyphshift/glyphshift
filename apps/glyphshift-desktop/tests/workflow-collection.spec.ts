@@ -26,7 +26,7 @@ test('workflow collection opens its owned record and uses common text controls',
     ;(window as any).__collectionCalls = calls
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args?: any) => {
       calls.push(command)
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_update_settings') return { settingsSchemaVersion: 1, ...args.update }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot
@@ -151,7 +151,7 @@ test('creating a workflow goes straight to collection and open failures are visi
     ;(window as any).__entry = state
     const run = { id: 'new-record', workflowId: '', name: '新收集工作流', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'], status: 'ready', livePreviewEnabled: true, observationRevision: 0, observedCount: 0, ignoredCount: 0, droppedObservations: 0, previewGeneration: 0, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 0, runtimeCapability: null, excludedDictionaryIds: [], exclusionRevisions: [] }
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_update_settings') return { settingsSchemaVersion: 1, ...args.update }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot

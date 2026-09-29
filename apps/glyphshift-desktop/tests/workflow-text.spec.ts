@@ -31,7 +31,7 @@ test('workflow text view can launch its bound software', async ({ page }) => {
         settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
         localePreference: 'zh-CN', themePreference: 'dark',
       }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_probe_runs') return [run]
       if (command === 'desktop_workflow_collection' || command === 'desktop_probe_run_summary') return run
@@ -76,7 +76,7 @@ test('workflow text view keeps backend paging while adapter filters and view sta
         settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
         localePreference: 'zh-CN', themePreference: 'dark',
       }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_probe_runs') return [summary]
       if (command === 'desktop_workflow_collection' || command === 'desktop_probe_run_summary') return summary
@@ -211,7 +211,7 @@ test('workflow text contextual rows keep observation identity while sharing one 
         settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
         localePreference: 'zh-CN', themePreference: 'dark',
       }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_probe_runs') return [summary]
       if (command === 'desktop_workflow_collection' || command === 'desktop_probe_run_summary') return summary
@@ -299,7 +299,7 @@ for (const scenario of [
           settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
           localePreference: 'zh-CN', themePreference: 'dark',
         }
-        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+        if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
         if (command === 'desktop_snapshot') return snapshot
         if (command === 'desktop_probe_runs') return [summary]
         if (command === 'desktop_workflow_collection' || command === 'desktop_probe_run_summary') return summary
@@ -333,7 +333,7 @@ test('workflow text import confirms overwrite by default and sends the selected 
         settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1,
         localePreference: 'zh-CN', themePreference: 'dark',
       }
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_probe_runs') return [run]
       if (command === 'desktop_workflow_collection' || command === 'desktop_probe_run_summary') return run

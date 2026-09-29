@@ -17,6 +17,7 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
+glyphshift-plugin-package = { path = "../../../crates/adapters/platform/package" }
 glyphshift-registry-client = { path = "../../../crates/product/registry-client" }
 reqwest = { version = "0.13.4", default-features = false, features = ["native-tls", "system-proxy"] }
 semver = "1"
@@ -44,6 +45,7 @@ tempfile = "3.23.0"
 winreg = "0.55.0"
 
 [dev-dependencies]
+glyphshift-adapter-native-host = { path = "../../../crates/adapters/platform/native-host" }
 glyphshift-adapter-registry = { path = "../../../crates/adapters/platform/registry" }
 glyphshift-dictionary-package = { path = "../../../crates/dictionary/package" }
 

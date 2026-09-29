@@ -42,6 +42,7 @@ declare module 'vue' {
     ManagementPageHeader: typeof import('./src/components/ManagementPageHeader.vue')['default']
     ManagementTableFrame: typeof import('./src/components/ManagementTableFrame.vue')['default']
     ManagementWorkspaceSurface: typeof import('./src/components/ManagementWorkspaceSurface.vue')['default']
+    PluginSettings: typeof import('./src/components/PluginSettings.vue')['default']
     ProbeAdapterPicker: typeof import('./src/components/ProbeAdapterPicker.vue')['default']
     QuickProbeLauncher: typeof import('./src/components/QuickProbeLauncher.vue')['default']
     RecentSoftwareSettings: typeof import('./src/components/RecentSoftwareSettings.vue')['default']

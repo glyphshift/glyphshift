@@ -4,6 +4,7 @@ mod command_error;
 mod data;
 mod dictionary;
 mod registry;
+mod plugins;
 mod entry_resolution;
 mod exit;
 mod font_catalog;
@@ -90,7 +91,7 @@ use workflow::{
     workflow_activation_command_error,
 };
 
-const DESKTOP_API_VERSION: u16 = 37;
+const DESKTOP_API_VERSION: u16 = 38;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -403,6 +404,7 @@ struct WorkflowCompatibilityCheck {
 }
 
 struct DesktopApplication {
+    loaded_plugin_digests: BTreeSet<String>,
     backend: DesktopBackend,
     dictionary_distribution: DictionaryDistribution,
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
@@ -443,8 +445,8 @@ impl DesktopApplication {
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
         let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
-        let runtime_bundle =
-            RuntimeBundle::open_with_plugin_store(runtime_root, data_root.join("plugins"));
+        let (runtime_bundle, loaded_plugin_digests) =
+            plugins::open_runtime(&runtime_root, data_root.join("plugins"));
         let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
         let runtime_bundle = runtime_bundle.ok();
         if let Some(bundle) = &runtime_bundle {
@@ -521,6 +523,7 @@ impl DesktopApplication {
         let mut backend = DesktopBackend::open_with_environment(&data_root, environment)
             .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
+            loaded_plugin_digests,
             backend,
             dictionary_distribution,
             runtimes: runtime_bundle.map(|bundle| {
@@ -836,8 +839,11 @@ pub fn run() {
             let saved_settings = settings
                 .current()
                 .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
-            let application = DesktopApplication::open(data_root.clone(), runtime_root, &saved_settings)
+            let application = DesktopApplication::open(data_root.clone(), runtime_root.clone(), &saved_settings)
                 .map_err(std::io::Error::other)?;
+            app.manage(Mutex::new(plugins::DesktopPlugins::new(
+                &data_root, runtime_root, application.loaded_plugin_digests.clone(), application.runtime_bundle_error.is_none(),
+            )));
             settings
                 .initialize_favorite_fonts(&application.font_families)
                 .map_err(|error| {
@@ -854,6 +860,11 @@ pub fn run() {
         })
         .on_window_event(window_controls::window_event)
         .invoke_handler(tauri::generate_handler![
+            plugins::desktop_plugins,
+            plugins::desktop_prepare_plugin,
+            plugins::desktop_install_plugin,
+            plugins::desktop_select_plugin,
+            plugins::desktop_cancel_plugin_install,
             window_controls::desktop_hide_to_tray,
             window_controls::desktop_minimize_window,
             workflow_shortcut::desktop_set_shortcut_recording,

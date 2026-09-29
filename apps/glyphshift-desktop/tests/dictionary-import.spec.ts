@@ -12,7 +12,7 @@ async function setup(page: import('@playwright/test').Page, pending = false) {
       ...(pending ? [{ source: 'Pending', translation: '' }] : []),
     ]
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.5.2', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_privilege_status') return { elevated: false }
       if (command === 'desktop_snapshot') return snapshot

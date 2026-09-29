@@ -13,6 +13,7 @@ import FontFallbackSettings from './FontFallbackSettings.vue'
 import FavoriteFontSettings from './FavoriteFontSettings.vue'
 import RecentSoftwareSettings from './RecentSoftwareSettings.vue'
 import LanguageSettings from './LanguageSettings.vue'
+import PluginSettings from './PluginSettings.vue'
 import AiProfilesPanel from './AiProfilesPanel.vue'
 import FirstRunSafetyNotice from './FirstRunSafetyNotice.vue'
 import DismissibleAlert from './DismissibleAlert.vue'
@@ -28,6 +29,7 @@ const sections = [
   { value: 'software', icon: 'i-tabler-app-window' },
   { value: 'fonts', icon: 'i-tabler-typography' },
   { value: 'languages', icon: 'i-tabler-language' },
+  { value: 'plugins', icon: 'i-tabler-puzzle' },
 ] as const
 const aiProfilesPanel = ref<InstanceType<typeof AiProfilesPanel>>()
 const { t } = useI18n()
@@ -273,6 +275,7 @@ onBeforeUnmount(() => {
         <TextFilterSettings />
       </div>
       <LanguageSettings v-if="section === 'languages'" />
+      <PluginSettings v-if="section === 'plugins'" />
       <div v-show="section === 'ai'" class="space-y-4">
         <ManagementFormSection
           data-testid="settings-section-ai"

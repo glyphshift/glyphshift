@@ -2030,6 +2030,7 @@ dependencies = [
 name = "glyphshift-desktop-shell"
 version = "0.5.2"
 dependencies = [
+ "glyphshift-adapter-native-host",
  "glyphshift-adapter-registry",
  "glyphshift-ai-translation",
  "glyphshift-capture",
@@ -2039,6 +2040,7 @@ dependencies = [
  "glyphshift-dictionary-distribution",
  "glyphshift-dictionary-package",
  "glyphshift-domain",
+ "glyphshift-plugin-package",
  "glyphshift-registry-client",
  "glyphshift-runtime-contract",
  "glyphshift-translation",

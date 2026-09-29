@@ -14,6 +14,15 @@ interface PresentationError {
 }
 
 const messageKeys: Record<string, string> = {
+  'plugin.storage': 'plugins.errors.storage',
+  'plugin.busy': 'plugins.errors.busy',
+  'plugin.conflict': 'plugins.errors.conflict',
+  'plugin.not_installed': 'plugins.errors.notInstalled',
+  'plugin.approval': 'plugins.errors.approval',
+  'plugin.integrity': 'plugins.errors.integrity',
+  'plugin.incompatible': 'plugins.errors.incompatible',
+  'plugin.too_large': 'plugins.errors.tooLarge',
+  'plugin.invalid': 'plugins.errors.invalid',
   'runtime.exit_stop_failed': 'errors.runtime.exitStopFailed',
   'workflow.shortcut_conflict': 'errors.workflow.shortcutConflict',
   'settings.window_failed': 'errors.settings.windowFailed',

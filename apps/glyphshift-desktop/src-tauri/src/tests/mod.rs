@@ -425,6 +425,7 @@ fn test_desktop_application(
     runtimes: Box<dyn WorkflowRuntimeService>,
 ) -> DesktopApplication {
     DesktopApplication {
+        loaded_plugin_digests: BTreeSet::new(),
         backend,
         dictionary_distribution: offline_dictionary_distribution(data_root)
             .expect("offline dictionary distribution"),

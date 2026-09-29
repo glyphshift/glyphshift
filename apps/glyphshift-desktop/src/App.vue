@@ -27,7 +27,7 @@ import { useWorkspace } from './useWorkspace'
 
 type View = 'workflows' | 'software' | 'dictionaries' | 'dictionary-editor' | 'capture' | 'translation-tasks' | 'help' | 'settings'
 type NavigableView = Exclude<View, 'dictionary-editor'>
-const desktopApiVersion = 36
+const desktopApiVersion = 38
 const safetyNoticeVersion = 1
 const onboardingVersion = 1
 const workflowMonitorIntervalMs = 250

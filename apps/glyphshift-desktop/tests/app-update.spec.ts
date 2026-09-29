@@ -19,7 +19,7 @@ async function setup(page: import('@playwright/test').Page, enabled = true, dela
         return { settingsSchemaVersion: 1, ...args.update }
       }
       if (command === 'desktop_privilege_status') return { elevated: false }
-      if (command === 'desktop_status') return { shellReady: true, apiVersion: 36, productVersion: '0.5.2' }
+      if (command === 'desktop_status') return { shellReady: true, apiVersion: 38, productVersion: '0.5.2' }
       if (command === 'desktop_snapshot') return snapshot
       if (command === 'desktop_check_update') {
         w.__checks++

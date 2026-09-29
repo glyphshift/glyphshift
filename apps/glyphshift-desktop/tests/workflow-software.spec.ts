@@ -92,7 +92,7 @@ test('running application and shortcut capture reuse the same binding without le
     ;(window as any).__softwareCalls = calls
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args?: any) => {
       calls.push(command)
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 38 }
       if (command === 'desktop_settings') return { safetyNoticeVersion: 1, onboardingVersion: 1, settingsSchemaVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_update_settings') return { settingsSchemaVersion: 1, ...args.update }
       if (command === 'desktop_snapshot' || command === 'desktop_refresh_workflows') return snapshot

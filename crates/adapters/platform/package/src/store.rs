@@ -264,6 +264,17 @@ impl PluginStore {
             .collect())
     }
 
+    /// Reads and verifies an installed release, including unselected versions.
+    /// This performs static file checks only; it never loads native code.
+    pub fn get(&self, digest: &str) -> Result<InstalledPackage, PackageError> {
+        let state = self.state()?;
+        let receipt = state
+            .releases
+            .get(digest)
+            .ok_or(PackageError::NotInstalled)?;
+        self.installed(digest, receipt)
+    }
+
     /// Preflight runs before the atomic selection change. Existing RuntimeBundle
     /// instances retain their old immutable paths; this never hot-reloads a target.
     pub fn select<F>(&self, digest: &str, preflight: F) -> Result<(), PackageError>
@@ -286,6 +297,26 @@ impl PluginStore {
 
     /// Removes the selection only. Immutable files are retained for loaded targets
     /// and rollback; physical garbage collection needs target lifetime accounting.
+    pub fn deselect_release<F>(&self, digest: &str, preflight: F) -> Result<(), PackageError>
+    where
+        F: FnOnce(&[InstalledPackage]) -> Result<(), PackageError>,
+    {
+        let _lock = self.lock()?;
+        let mut state = self.state()?;
+        let receipt = state
+            .releases
+            .get(digest)
+            .ok_or(PackageError::NotInstalled)?;
+        let id = receipt.package_id.clone();
+        if state.selected.get(&id).map(String::as_str) != Some(digest) {
+            return Err(PackageError::Conflict);
+        }
+        state.selected.remove(&id);
+        let packages = self.resolve(&state)?;
+        preflight(&packages)?;
+        self.save(&state)
+    }
+
     pub fn deselect<F>(&self, package_id: &str, preflight: F) -> Result<(), PackageError>
     where
         F: FnOnce(&[InstalledPackage]) -> Result<(), PackageError>,

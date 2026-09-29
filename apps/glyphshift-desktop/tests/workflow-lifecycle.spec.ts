@@ -16,7 +16,7 @@ async function setup(page: Page) {
     const run = () => ({ id: 'record-one', workflowId: 'workflow-proof', workflowRuntime: runtime(), name: 'Synthetic collection', softwareId: 'software-proof', dictionaryId: 'dictionary-proof', adapterIds: ['synthetic.text-out'], status: 'running', livePreviewEnabled: true, observationRevision: 1, observedCount: 3, ignoredCount: 0, droppedObservations: 0, previewGeneration: 1, createdAtMs: 1, updatedAtMs: 1, dictionaryRevision: 1, dictionaryEntryCount: 3, excludedDictionaryIds: [], exclusionRevisions: [] })
     const current = () => structuredClone({ ...snapshot, activations: runtime().lifecycle.enabled ? [{ workflowId: 'workflow-proof', revision: 1 }] : [], workflowRuntimeStatus: { 'workflow-proof': runtime() } })
     ;(window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
-      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 36 }
+      if (command === 'desktop_status') return { shellReady: true, productVersion: '0.3.0', apiVersion: 38 }
       if (command === 'desktop_settings') return { settingsSchemaVersion: 1, safetyNoticeVersion: 1, onboardingVersion: 1, localePreference: 'zh-CN', themePreference: 'dark' }
       if (command === 'desktop_snapshot') return current()
       if (command === 'desktop_refresh_workflows') { if (state.failRefresh) throw new Error('Synthetic status failure'); state.refreshes++; state.revision++; return current() }
