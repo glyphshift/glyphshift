@@ -48,12 +48,13 @@ jobs:
         run: |
           go build -trimpath -o registry-local.exe ./cmd/registry-local
           if ($LASTEXITCODE -ne 0) { throw 'Registry fixture build failed.' }
-      - name: Install stable Rust
+      - name: Install repository Rust components
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt
-          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
-          rustup default stable
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { throw 'Repository Rust installation failed.' }
+          rustup component add clippy rustfmt
+          if ($LASTEXITCODE -ne 0) { throw 'Repository Rust components failed.' }
       - name: Validate Rust contracts and Go HTTPS installation
         shell: pwsh
         run: ./scripts/test-registry-client.ps1 -RegistryExecutable (Resolve-Path local-test/providers/registry/registry-local.exe).Path
