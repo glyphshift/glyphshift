@@ -1485,34 +1485,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glyphshift-adapter-catsystem2-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "iced-x86",
- "retour",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "glyphshift-adapter-console"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-console-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-console",
- "glyphshift-adapter-native-abi",
- "retour",
- "windows 0.58.0",
-]
-
-[[package]]
 name = "glyphshift-adapter-devkit"
 version = "0.1.0"
 dependencies = [
@@ -1520,24 +1492,6 @@ dependencies = [
  "glyphshift-plugin-package",
  "serde_json",
  "tempfile",
-]
-
-[[package]]
-name = "glyphshift-adapter-direct2d"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-direct2d-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-direct2d",
- "glyphshift-adapter-native-abi",
- "retour",
- "windows 0.58.0",
 ]
 
 [[package]]
@@ -1626,40 +1580,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glyphshift-adapter-gtk3-pango"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-gtk3-pango-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-gtk3-pango",
- "glyphshift-adapter-native-abi",
- "retour",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "glyphshift-adapter-kirikiri"
-version = "0.1.0"
-dependencies = [
- "glyphshift-domain",
- "glyphshift-translation",
-]
-
-[[package]]
-name = "glyphshift-adapter-monogame"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
 name = "glyphshift-adapter-native-abi"
 version = "0.1.0"
 dependencies = [
@@ -1671,121 +1591,15 @@ dependencies = [
 name = "glyphshift-adapter-native-host"
 version = "0.1.0"
 dependencies = [
- "glyphshift-adapter-direct2d",
  "glyphshift-adapter-directwrite",
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
- "glyphshift-adapter-gtk3-pango",
  "glyphshift-adapter-native-abi",
- "glyphshift-adapter-qt-painter",
- "glyphshift-adapter-qt-translation",
- "glyphshift-adapter-raylib",
  "glyphshift-adapter-sdk",
- "glyphshift-adapter-sidefx-cv-paint-buffer",
- "glyphshift-adapter-unity-mono-standard-ui",
  "glyphshift-domain",
  "glyphshift-windows-host",
  "libloading 0.8.9",
  "serde",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "glyphshift-adapter-ocr"
-version = "0.1.0"
-dependencies = [
- "glyphshift-acquisition",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-painter"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-painter-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-qt-painter",
- "retour",
- "windows 0.58.0",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-quick"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-quick-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-qt-quick",
- "libloading 0.8.9",
- "retour",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-text-document"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-text-document-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-qt-text-document",
- "retour",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-translation"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-qt-translation-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-qt-translation",
- "retour",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "glyphshift-adapter-raylib"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-raylib-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-raylib",
- "retour",
  "windows 0.58.0",
 ]
 
@@ -1798,116 +1612,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "glyphshift-adapter-renpy"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-rpgmaker-mv"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
 name = "glyphshift-adapter-sdk"
 version = "0.1.0"
 dependencies = [
  "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-sidefx-cv-paint-buffer"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-sidefx-cv-paint-buffer-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-sidefx-cv-paint-buffer",
- "retour",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "glyphshift-adapter-tyranoscript"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-unity-il2cpp-standard-ui"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-unity-il2cpp-standard-ui-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-unity-il2cpp-standard-ui",
- "glyphshift-adapter-unity-standard-ui",
- "windows 0.58.0",
- "windows-sys 0.61.2",
- "winreg",
-]
-
-[[package]]
-name = "glyphshift-adapter-unity-mono-standard-ui"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-sdk",
- "glyphshift-adapter-unity-standard-ui",
- "glyphshift-domain",
-]
-
-[[package]]
-name = "glyphshift-adapter-unity-mono-standard-ui-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-adapter-unity-mono-standard-ui",
- "glyphshift-adapter-unity-standard-ui",
- "retour",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "glyphshift-adapter-unity-standard-ui"
-version = "0.1.0"
-
-[[package]]
-name = "glyphshift-adapter-vgui-localize-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "iced-x86",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "glyphshift-adapter-vgui-runs-native"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-abi",
- "glyphshift-domain",
- "iced-x86",
- "retour",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2253,10 +1961,8 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-gdi",
  "glyphshift-adapter-gdiplus",
- "glyphshift-adapter-monogame",
  "glyphshift-adapter-native-abi",
  "glyphshift-adapter-native-host",
- "glyphshift-adapter-qt-painter",
  "glyphshift-adapter-registry",
  "glyphshift-adapter-sdk",
  "glyphshift-capture",
@@ -2308,21 +2014,6 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-capture",
  "glyphshift-isolated-worker-sdk",
-]
-
-[[package]]
-name = "glyphshift-test-kag-runtime-host"
-version = "0.1.0"
-dependencies = [
- "glyphshift-adapter-native-host",
- "glyphshift-adapter-registry",
- "glyphshift-capture",
- "glyphshift-domain",
- "glyphshift-runtime-contract",
- "glyphshift-target-runtime",
- "glyphshift-target-runtime-contract",
- "glyphshift-translation",
- "sha2",
 ]
 
 [[package]]
@@ -2607,15 +2298,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "iced-x86"
-version = "1.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
-dependencies = [
- "lazy_static",
 ]
 
 [[package]]
@@ -2910,12 +2592,6 @@ dependencies = [
  "serde",
  "unicode-segmentation",
 ]
-
-[[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libappindicator"

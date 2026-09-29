@@ -8,8 +8,7 @@ use std::mem::size_of;
 use std::ptr::{null, null_mut};
 use windows::Win32::Foundation::RECT as WindowsRect;
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_POINT_2F, D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
-    D2D1_PIXEL_FORMAT,
+    D2D_POINT_2F, D2D_RECT_F, D2D1_ALPHA_MODE_IGNORE, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
@@ -20,19 +19,12 @@ use windows::Win32::Graphics::Direct2D::{
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FEATURE, DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES,
     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_BOLD,
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
     DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_RANGE, DWriteCreateFactory, IDWriteFactory,
     IDWriteTextLayout1,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::HDC as WindowsHdc;
-use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICImagingFactory,
-    WICBitmapCacheOnLoad,
-};
-use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
-};
 use windows::core::{Interface, w};
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::Graphics::Gdi::{
@@ -47,33 +39,12 @@ use windows_sys::Win32::Graphics::GdiPlus::{
     GdipGraphicsClear, GdiplusShutdown, GdiplusStartup, GdiplusStartupInput, GpBrush, GpFont,
     GpFontFamily, GpGraphics, GpSolidFill, RectF,
 };
-use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE, WriteConsoleW};
 
 const WIDTH: i32 = 360;
 const HEIGHT: i32 = 96;
 const PIXEL_COUNT: usize = WIDTH as usize * HEIGHT as usize;
 const WHITE: u32 = 0xffff_ffff;
 const BLACK: u32 = 0xff00_0000;
-
-/// Attempts one Unicode Console write without falling back to a byte-oriented API.
-///
-/// The synthetic process-family contract intentionally permits a redirected output handle:
-/// the return value records whether Windows accepted the write, while a target-process
-/// observer can still prove which process entered `WriteConsoleW`.
-#[must_use]
-pub fn write_raw_console(text: &str) -> bool {
-    let units = text.encode_utf16().collect::<Vec<_>>();
-    let mut written = 0_u32;
-    unsafe {
-        WriteConsoleW(
-            GetStdHandle(STD_OUTPUT_HANDLE),
-            units.as_ptr().cast(),
-            units.len() as u32,
-            &mut written,
-            null(),
-        ) != 0
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PixelEvidence {
@@ -92,39 +63,6 @@ impl PixelEvidence {
         self.signature
     }
 
-    fn from_bgra_bytes(bytes: &[u8]) -> Self {
-        let mut signature = 0xcbf2_9ce4_8422_2325_u64;
-        let mut ink_pixels = 0;
-        for pixel in bytes.chunks_exact(4) {
-            let pixel = u32::from_le_bytes([pixel[0], pixel[1], pixel[2], pixel[3]]);
-            if pixel & 0x00ff_ffff != 0x00ff_ffff {
-                ink_pixels += 1;
-            }
-            signature ^= u64::from(pixel);
-            signature = signature.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        Self {
-            ink_pixels,
-            signature,
-        }
-    }
-}
-
-struct ComApartment;
-
-impl ComApartment {
-    fn enter() -> Result<Self, String> {
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
-            .ok()
-            .map_err(|error| format!("CoInitializeEx failed: {error}"))?;
-        Ok(Self)
-    }
-}
-
-impl Drop for ComApartment {
-    fn drop(&mut self) {
-        unsafe { CoUninitialize() };
-    }
 }
 
 struct DibCanvas {
@@ -696,84 +634,6 @@ fn direct2d_target_properties() -> D2D1_RENDER_TARGET_PROPERTIES {
     }
 }
 
-fn direct2d_wic_target_properties() -> D2D1_RENDER_TARGET_PROPERTIES {
-    let mut properties = direct2d_target_properties();
-    properties.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-    properties
-}
-
-pub fn render_raw_direct2d_text(text: &str) -> Result<PixelEvidence, String> {
-    let canvas = DibCanvas::new()?;
-    let direct2d: ID2D1Factory =
-        unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
-            .map_err(|error| format!("D2D1CreateFactory failed: {error}"))?;
-    let target = unsafe { direct2d.CreateDCRenderTarget(&direct2d_target_properties()) }
-        .map_err(|error| format!("CreateDCRenderTarget failed: {error}"))?;
-    let bounds = WindowsRect {
-        left: 0,
-        top: 0,
-        right: WIDTH,
-        bottom: HEIGHT,
-    };
-    unsafe { target.BindDC(WindowsHdc(canvas.hdc), &bounds) }
-        .map_err(|error| format!("ID2D1DCRenderTarget::BindDC failed: {error}"))?;
-
-    let directwrite: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
-        .map_err(|error| format!("DWriteCreateFactory failed: {error}"))?;
-    let format = unsafe {
-        directwrite.CreateTextFormat(
-            w!("Segoe UI"),
-            None,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            30.0,
-            w!("en-US"),
-        )
-    }
-    .map_err(|error| format!("CreateTextFormat failed: {error}"))?;
-    let brush = unsafe {
-        target.CreateSolidColorBrush(
-            &D2D1_COLOR_F {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            None,
-        )
-    }
-    .map_err(|error| format!("CreateSolidColorBrush failed: {error}"))?;
-    let units = text.encode_utf16().collect::<Vec<_>>();
-    let layout = D2D_RECT_F {
-        left: 12.0,
-        top: 12.0,
-        right: (WIDTH - 12) as f32,
-        bottom: (HEIGHT - 12) as f32,
-    };
-    let white = D2D1_COLOR_F {
-        r: 1.0,
-        g: 1.0,
-        b: 1.0,
-        a: 1.0,
-    };
-    unsafe {
-        target.BeginDraw();
-        target.Clear(Some(&white));
-        target.DrawText(
-            &units,
-            &format,
-            &layout,
-            &brush,
-            D2D1_DRAW_TEXT_OPTIONS_NONE,
-            DWRITE_MEASURING_MODE_NATURAL,
-        );
-        target.EndDraw(None, None)
-    }
-    .map_err(|error| format!("ID2D1RenderTarget::EndDraw failed: {error}"))?;
-    Ok(canvas.evidence())
-}
-
 pub fn render_raw_directwrite_layout(text: &str) -> Result<PixelEvidence, String> {
     render_raw_directwrite_formatted_layout(text, false, DirectWriteLayoutStyle::Uniform)
 }
@@ -1035,84 +895,4 @@ pub fn render_raw_directwrite_layout_sequence(
         evidence.push(canvas.evidence());
     }
     Ok(evidence)
-}
-
-pub fn render_raw_direct2d_wic_text(text: &str) -> Result<PixelEvidence, String> {
-    let _apartment = ComApartment::enter()?;
-    let imaging: IWICImagingFactory =
-        unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }
-            .map_err(|error| format!("CoCreateInstance(WIC) failed: {error}"))?;
-    let bitmap = unsafe {
-        imaging.CreateBitmap(
-            WIDTH as u32,
-            HEIGHT as u32,
-            &GUID_WICPixelFormat32bppPBGRA,
-            WICBitmapCacheOnLoad,
-        )
-    }
-    .map_err(|error| format!("IWICImagingFactory::CreateBitmap failed: {error}"))?;
-    let direct2d: ID2D1Factory =
-        unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None) }
-            .map_err(|error| format!("D2D1CreateFactory failed: {error}"))?;
-    let target =
-        unsafe { direct2d.CreateWicBitmapRenderTarget(&bitmap, &direct2d_wic_target_properties()) }
-            .map_err(|error| format!("CreateWicBitmapRenderTarget failed: {error}"))?;
-    let directwrite: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
-        .map_err(|error| format!("DWriteCreateFactory failed: {error}"))?;
-    let format = unsafe {
-        directwrite.CreateTextFormat(
-            w!("Segoe UI"),
-            None,
-            DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            30.0,
-            w!("en-US"),
-        )
-    }
-    .map_err(|error| format!("CreateTextFormat failed: {error}"))?;
-    let brush = unsafe {
-        target.CreateSolidColorBrush(
-            &D2D1_COLOR_F {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            None,
-        )
-    }
-    .map_err(|error| format!("CreateSolidColorBrush failed: {error}"))?;
-    let units = text.encode_utf16().collect::<Vec<_>>();
-    let layout = D2D_RECT_F {
-        left: 12.0,
-        top: 12.0,
-        right: (WIDTH - 12) as f32,
-        bottom: (HEIGHT - 12) as f32,
-    };
-    let white = D2D1_COLOR_F {
-        r: 1.0,
-        g: 1.0,
-        b: 1.0,
-        a: 1.0,
-    };
-    unsafe {
-        target.BeginDraw();
-        target.Clear(Some(&white));
-        target.DrawText(
-            &units,
-            &format,
-            &layout,
-            &brush,
-            D2D1_DRAW_TEXT_OPTIONS_NONE,
-            DWRITE_MEASURING_MODE_NATURAL,
-        );
-        target.EndDraw(None, None)
-    }
-    .map_err(|error| format!("ID2D1RenderTarget::EndDraw failed: {error}"))?;
-
-    let mut pixels = vec![0_u8; PIXEL_COUNT * 4];
-    unsafe { bitmap.CopyPixels(std::ptr::null(), (WIDTH * 4) as u32, &mut pixels) }
-        .map_err(|error| format!("IWICBitmap::CopyPixels failed: {error}"))?;
-    Ok(PixelEvidence::from_bgra_bytes(&pixels))
 }

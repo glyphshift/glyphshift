@@ -67,206 +67,39 @@ function Assert-Dependencies {
 }
 
 Assert-Dependencies -PackageName 'glyphshift-domain' -Expected @()
-Assert-Dependencies -PackageName 'glyphshift-adapter-kirikiri' -Expected @()
-Assert-Dependencies -PackageName 'glyphshift-test-kag-runtime-host' -Expected @(
-    'glyphshift-adapter-native-host', 'glyphshift-adapter-registry', 'glyphshift-capture',
-    'glyphshift-domain', 'glyphshift-runtime-contract', 'glyphshift-target-runtime',
-    'glyphshift-target-runtime-contract', 'glyphshift-translation', 'sha2'
-)
 Assert-Dependencies -PackageName 'glyphshift-acquisition' -Expected @()
-Assert-Dependencies `
-    -PackageName 'glyphshift-ai-translation' `
-    -Expected @('regex', 'reqwest', 'serde', 'serde_json', 'tempfile', 'tokio')
-Assert-Dependencies `
-    -PackageName 'glyphshift-acquisition-worker-sdk' `
-    -Expected @('glyphshift-acquisition', 'serde', 'serde_json')
-Assert-Dependencies `
-    -PackageName 'glyphshift-acquisition-worker-host' `
-    -Expected @('glyphshift-acquisition', 'glyphshift-acquisition-worker-sdk')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-registry' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-sdk' `
-    -Expected @('glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-native-abi' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-native-host' `
-    -Expected @(
-        'glyphshift-adapter-native-abi',
-        'glyphshift-adapter-sdk',
-        'glyphshift-domain',
-        'libloading',
-        'serde'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-catsystem2-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'iced-x86', 'retour', 'windows-sys')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-console' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-console-native' `
-    -Expected @(
-        'glyphshift-adapter-console',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-direct2d' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-direct2d-native' `
-    -Expected @(
-        'glyphshift-adapter-direct2d',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-directwrite' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-directwrite-native' `
-    -Expected @(
-        'glyphshift-adapter-directwrite',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdi' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdi-native' `
-    -Expected @(
-        'glyphshift-adapter-gdi',
-        'glyphshift-adapter-gdi-native-support',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdi-native-support' `
-    -Expected @('glyphshift-adapter-native-abi', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdi-text-out-native' `
-    -Expected @(
-        'glyphshift-adapter-gdi',
-        'glyphshift-adapter-gdi-native-support',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-draw-text-native' `
-    -Expected @(
-        'glyphshift-adapter-gdi',
-        'glyphshift-adapter-gdi-native-support',
-        'glyphshift-adapter-native-abi',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdiplus' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gdiplus-native' `
-    -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gtk3-pango' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-gtk3-pango-native' `
-    -Expected @('glyphshift-adapter-gtk3-pango', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-ocr' `
-    -Expected @('glyphshift-acquisition')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-monogame' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-painter' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-painter-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-painter', 'retour', 'windows', 'windows-sys')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-quick' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-quick-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-quick', 'retour', 'windows-sys')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-text-document' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-text-document-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-text-document', 'retour', 'windows-sys')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-translation' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-qt-translation-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-qt-translation', 'retour', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-raylib' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-raylib-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-raylib', 'retour', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-renpy' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-rpgmaker-mv' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-sidefx-cv-paint-buffer' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-sidefx-cv-paint-buffer-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-sidefx-cv-paint-buffer', 'retour', 'windows')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-tyranoscript' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-unity-standard-ui' `
-    -Expected @()
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-unity-mono-standard-ui' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-adapter-unity-standard-ui', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-unity-mono-standard-ui-native' `
-    -Expected @(
-        'glyphshift-adapter-native-abi',
-        'glyphshift-adapter-unity-mono-standard-ui',
-        'glyphshift-adapter-unity-standard-ui',
-        'retour',
-        'windows'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-unity-il2cpp-standard-ui' `
-    -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-unity-il2cpp-standard-ui-native' `
-    -Expected @(
-        'glyphshift-adapter-native-abi',
-        'glyphshift-adapter-unity-il2cpp-standard-ui',
-        'glyphshift-adapter-unity-standard-ui',
-        'windows',
-        'windows-sys',
-        'winreg'
-    )
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-vgui-localize-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'iced-x86', 'windows-sys')
-Assert-Dependencies `
-    -PackageName 'glyphshift-adapter-vgui-runs-native' `
-    -Expected @('glyphshift-adapter-native-abi', 'glyphshift-domain', 'iced-x86', 'retour', 'windows-sys')
+Assert-Dependencies -PackageName 'glyphshift-ai-translation' -Expected @('regex', 'reqwest', 'serde', 'serde_json', 'tempfile', 'tokio')
+Assert-Dependencies -PackageName 'glyphshift-acquisition-worker-sdk' -Expected @('glyphshift-acquisition', 'serde', 'serde_json')
+Assert-Dependencies -PackageName 'glyphshift-acquisition-worker-host' -Expected @('glyphshift-acquisition', 'glyphshift-acquisition-worker-sdk')
+Assert-Dependencies -PackageName 'glyphshift-adapter-registry' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-sdk' -Expected @('glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-native-abi' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-native-host' -Expected @('glyphshift-adapter-native-abi', 'glyphshift-adapter-sdk', 'glyphshift-domain', 'libloading', 'serde')
+Assert-Dependencies -PackageName 'glyphshift-plugin-package' -Expected @(
+    'flate2',
+    'glyphshift-adapter-native-host',
+    'glyphshift-domain',
+    'serde',
+    'serde_json',
+    'sha2',
+    'tempfile',
+    'zip'
+)
+Assert-Dependencies -PackageName 'glyphshift-adapter-devkit' -Expected @(
+    'glyphshift-adapter-native-host',
+    'glyphshift-plugin-package',
+    'serde_json',
+    'tempfile'
+)
+Assert-Dependencies -PackageName 'glyphshift-adapter-directwrite' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-directwrite-native' -Expected @('glyphshift-adapter-directwrite', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdi' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-native-support' -Expected @('glyphshift-adapter-native-abi', 'windows')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-text-out-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+Assert-Dependencies -PackageName 'glyphshift-adapter-draw-text-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdiplus' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
+Assert-Dependencies -PackageName 'glyphshift-adapter-gdiplus-native' -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
     -PackageName 'glyphshift-worker-process-grant' `
     -Expected @('windows-sys')
@@ -283,7 +116,8 @@ Assert-Dependencies `
         'glyphshift-extension',
         'glyphshift-protocol',
         'serde_json',
-        'sha2'
+        'sha2',
+        'windows-sys'
     )
 Assert-Dependencies `
     -PackageName 'glyphshift-controller-windows' `
@@ -429,7 +263,10 @@ Assert-Dependencies `
     -Expected @('glyphshift-windows-host')
 Assert-Dependencies `
     -PackageName 'glyphshift-dictionary-package' `
-    -Expected @('glyphshift-translation', 'serde', 'serde_json')
+    -Expected @('glyphshift-translation', 'semver', 'serde', 'serde_json')
+Assert-Dependencies `
+    -PackageName 'glyphshift-resource-inspector' `
+    -Expected @('glyphshift-dictionary-package', 'glyphshift-plugin-package', 'serde_json')
 Assert-Dependencies `
     -PackageName 'glyphshift-dictionary-distribution' `
     -Expected @(
@@ -472,10 +309,28 @@ Assert-Dependencies `
         'glyphshift-domain',
         'glyphshift-extension',
         'glyphshift-isolated-worker-host',
+        'glyphshift-plugin-package',
         'glyphshift-protocol',
         'glyphshift-runtime-contract',
         'glyphshift-session',
         'glyphshift-target-process-host',
+        'serde',
+        'serde_json',
+        'sha2',
+        'tempfile',
+        'url'
+    )
+Assert-Dependencies `
+    -PackageName 'glyphshift-registry-client' `
+    -Expected @(
+        'base64',
+        'ed25519-dalek',
+        'glyphshift-dictionary-distribution',
+        'glyphshift-dictionary-package',
+        'glyphshift-plugin-package',
+        'glyphshift-resource-inspector',
+        'reqwest',
+        'semver',
         'serde',
         'serde_json',
         'sha2',
@@ -491,6 +346,8 @@ Assert-Dependencies `
         'glyphshift-desktop-runtime',
         'glyphshift-dictionary-distribution',
         'glyphshift-domain',
+        'glyphshift-plugin-package',
+        'glyphshift-registry-client',
         'glyphshift-runtime-contract',
         'glyphshift-translation',
         'glyphshift-workflow',
@@ -557,12 +414,6 @@ function Assert-PackagePartition {
 }
 
 $adapterImplementationPackages = @(
-    'glyphshift-adapter-kirikiri',
-    'glyphshift-adapter-catsystem2-native',
-    'glyphshift-adapter-console',
-    'glyphshift-adapter-console-native',
-    'glyphshift-adapter-direct2d',
-    'glyphshift-adapter-direct2d-native',
     'glyphshift-adapter-directwrite',
     'glyphshift-adapter-directwrite-native',
     'glyphshift-adapter-draw-text-native',
@@ -571,36 +422,9 @@ $adapterImplementationPackages = @(
     'glyphshift-adapter-gdi-native-support',
     'glyphshift-adapter-gdi-text-out-native',
     'glyphshift-adapter-gdiplus',
-    'glyphshift-adapter-gdiplus-native',
-    'glyphshift-adapter-gtk3-pango',
-    'glyphshift-adapter-gtk3-pango-native',
-    'glyphshift-adapter-monogame',
-    'glyphshift-adapter-ocr',
-    'glyphshift-adapter-qt-painter',
-    'glyphshift-adapter-qt-painter-native',
-    'glyphshift-adapter-qt-quick',
-    'glyphshift-adapter-qt-quick-native',
-    'glyphshift-adapter-qt-text-document',
-    'glyphshift-adapter-qt-text-document-native',
-    'glyphshift-adapter-qt-translation',
-    'glyphshift-adapter-qt-translation-native',
-    'glyphshift-adapter-raylib',
-    'glyphshift-adapter-raylib-native',
-    'glyphshift-adapter-renpy',
-    'glyphshift-adapter-rpgmaker-mv',
-    'glyphshift-adapter-sidefx-cv-paint-buffer',
-    'glyphshift-adapter-sidefx-cv-paint-buffer-native',
-    'glyphshift-adapter-tyranoscript',
-    'glyphshift-adapter-unity-standard-ui',
-    'glyphshift-adapter-unity-mono-standard-ui',
-    'glyphshift-adapter-unity-mono-standard-ui-native',
-    'glyphshift-adapter-unity-il2cpp-standard-ui',
-    'glyphshift-adapter-unity-il2cpp-standard-ui-native',
-    'glyphshift-adapter-vgui-localize-native',
-    'glyphshift-adapter-vgui-runs-native'
+    'glyphshift-adapter-gdiplus-native'
 )
 $testSupportPackages = @(
-    'glyphshift-test-kag-runtime-host',
     'glyphshift-reference-adapters',
     'glyphshift-test-native-adapter',
     'glyphshift-test-acquisition-worker',
@@ -609,7 +433,6 @@ $testSupportPackages = @(
     'glyphshift-windows-host',
     'glyphshift-windows-runtime-target'
 )
-
 $packageFamilies = @{
     Core = @(
         'glyphshift-capture',
@@ -621,13 +444,16 @@ $packageFamilies = @{
     )
     Dictionary = @(
         'glyphshift-dictionary-distribution',
-        'glyphshift-dictionary-package'
+        'glyphshift-dictionary-package',
+        'glyphshift-resource-inspector'
     )
     AdapterPlatform = @(
+        'glyphshift-adapter-devkit',
         'glyphshift-adapter-native-abi',
         'glyphshift-adapter-native-host',
         'glyphshift-adapter-registry',
-        'glyphshift-adapter-sdk'
+        'glyphshift-adapter-sdk',
+        'glyphshift-plugin-package'
     )
     AdapterImplementation = $adapterImplementationPackages
     Runtime = @(
@@ -651,7 +477,8 @@ $packageFamilies = @{
     )
     Product = @(
         'glyphshift-ai-translation',
-        'glyphshift-desktop-backend'
+        'glyphshift-desktop-backend',
+        'glyphshift-registry-client'
     )
     Application = @('glyphshift-desktop-shell', 'glyphshift-service')
     TestSupport = $testSupportPackages
@@ -699,9 +526,15 @@ $dependencyLayers = @{
     L4 = @(
         'glyphshift-desktop-backend',
         'glyphshift-desktop-runtime',
+        'glyphshift-plugin-package',
         'glyphshift-service'
     )
-    L5 = @('glyphshift-desktop-shell')
+    L5 = @(
+        'glyphshift-adapter-devkit',
+        'glyphshift-desktop-shell',
+        'glyphshift-registry-client',
+        'glyphshift-resource-inspector'
+    )
     Test = $testSupportPackages
 }
 
@@ -811,7 +644,6 @@ $productionScanPackageNames = @(
     'glyphshift-adapter-sdk',
     'glyphshift-adapter-native-abi',
     'glyphshift-adapter-native-host',
-    'glyphshift-adapter-ocr',
     'glyphshift-controller-sdk',
     'glyphshift-controller-host',
     'glyphshift-controller-windows',
@@ -935,112 +767,20 @@ foreach ($pausedProductToken in @(
         throw "Paused observer/acquisition capability leaked into the shipping Runtime Bundle: $pausedProductToken"
     }
 }
-foreach ($emptyWorkerCatalog in @('isolated_workers = @()', 'acquisition_workers = @()')) {
-    if ($runtimeBundleScript.IndexOf(
-        $emptyWorkerCatalog,
-        [System.StringComparison]::Ordinal
-    ) -lt 0) {
-        throw "Shipping Runtime Bundle must keep the paused worker catalog empty: $emptyWorkerCatalog"
-    }
+if ($runtimeBundleScript.IndexOf(
+    'build-core-runtime.ps1',
+    [System.StringComparison]::Ordinal
+) -lt 0) {
+    throw 'Shipping Runtime Bundle must delegate to the Public Core build entry point.'
 }
 
-$defaultTestScript = [System.IO.File]::ReadAllText(
-    (Join-Path $workspaceRoot 'scripts\test.ps1')
-)
-$workspaceManifest = [System.IO.File]::ReadAllText(
-    (Join-Path $workspaceRoot 'Cargo.toml')
-)
-$archiveOnlyPackages = @(
-    @{ Name = 'glyphshift-adapter-uia'; Path = 'crates/adapters/implementations/accessibility/uia' },
-    @{ Name = 'glyphshift-adapter-uia-worker'; Path = 'crates/adapters/implementations/accessibility/uia-worker' },
-    @{ Name = 'glyphshift-adapter-ocr-worker'; Path = 'crates/adapters/implementations/fallback/ocr-worker' }
-)
-foreach ($archivePackage in $archiveOnlyPackages) {
-    if ($workspacePackagesByName.ContainsKey($archivePackage.Name)) {
-        throw "Archive-only package must not be a workspace member: $($archivePackage.Name)"
-    }
-    if ($workspaceManifest.IndexOf(
-        "`"$($archivePackage.Path)`"",
-        [System.StringComparison]::Ordinal
-    ) -lt 0) {
-        throw "Archive-only path must remain in the workspace exclude list: $($archivePackage.Path)"
-    }
-    if ($defaultTestScript -match "(?m)-p\s+$([regex]::Escape($archivePackage.Name))(?:\s|`$)") {
-        throw "Default tests must not schedule archive-only package: $($archivePackage.Name)"
-    }
-    if ($defaultTestScript.IndexOf(
-        "'$($archivePackage.Name)'",
-        [System.StringComparison]::Ordinal
-    ) -lt 0) {
-        throw "Default tests must explicitly exclude archive-only package: $($archivePackage.Name)"
-    }
+$publicCoreBoundaryScript = Join-Path $workspaceRoot 'scripts\check-public-core-boundary.py'
+if (-not (Test-Path -LiteralPath $publicCoreBoundaryScript -PathType Leaf)) {
+    throw 'Public Core boundary checker is missing.'
 }
-$archiveUiaRoot = Join-Path $workspaceRoot 'crates\adapters\implementations\accessibility'
-$archiveUiaTestSources = @(
-    Get-ChildItem -LiteralPath (Join-Path $archiveUiaRoot 'uia') -Recurse -File -Filter '*.rs'
-    Get-ChildItem -LiteralPath (Join-Path $archiveUiaRoot 'uia-worker') -Recurse -File -Filter '*.rs'
-)
-$archiveUiaTestCount = 0
-$archiveUiaGuardedCount = 0
-foreach ($source in $archiveUiaTestSources) {
-    $text = [System.IO.File]::ReadAllText($source.FullName)
-    $archiveUiaTestCount += [regex]::Matches($text, '#\[test\]').Count
-    $archiveUiaGuardedCount += [regex]::Matches(
-        $text,
-        '(?ms)#\[test\]\s*#\[ignore\s*=\s*"archive-only UIA;[^"]*"\]\s*fn\s+archive_uia_[A-Za-z0-9_]+\s*\('
-    ).Count
-}
-if ($archiveUiaTestCount -eq 0 -or $archiveUiaGuardedCount -ne $archiveUiaTestCount) {
-    throw "Every archived UIA test must be ignored and use the archive_uia_ prefix: $archiveUiaGuardedCount/$archiveUiaTestCount"
-}
-$archiveUiaTestScript = [System.IO.File]::ReadAllText(
-    (Join-Path $archiveUiaRoot 'uia-worker\test.ps1')
-)
-foreach ($requiredArchiveToken in @('[switch]$ArchiveUia', 'archive_uia_', '--ignored')) {
-    if ($archiveUiaTestScript.IndexOf(
-        $requiredArchiveToken,
-        [System.StringComparison]::Ordinal
-    ) -lt 0) {
-        throw "UIA archive test entry point is missing '$requiredArchiveToken'."
-    }
-}
-foreach ($requiredDefaultTestToken in @('$excludedPackages =', '$excludedPackages.Contains(')) {
-    if ($defaultTestScript.IndexOf(
-        $requiredDefaultTestToken,
-        [System.StringComparison]::Ordinal
-    ) -lt 0) {
-        throw "Default repository tests must preserve active-package exclusion logic: $requiredDefaultTestToken"
-    }
-}
-foreach ($pausedAdapterPackage in @(
-    'glyphshift-adapter-console',
-    'glyphshift-adapter-console-native',
-    'glyphshift-adapter-ocr'
-)) {
-    $references = [regex]::Matches(
-        $defaultTestScript,
-        [regex]::Escape("'$pausedAdapterPackage'")
-    ).Count
-    if ($references -ne 1) {
-        throw "Paused Adapter must appear only in the default test exclusion list: $pausedAdapterPackage"
-    }
-}
-
-$pausedAdapterPackageNames = @(
-    'glyphshift-adapter-console',
-    'glyphshift-adapter-console-native',
-    'glyphshift-adapter-ocr'
-)
-foreach ($activeWorkspacePackage in $metadata.packages | Where-Object {
-    $metadata.workspace_members -contains $_.id -and
-    $pausedAdapterPackageNames -notcontains $_.name
-}) {
-    $pausedDependencies = @($activeWorkspacePackage.dependencies | Where-Object {
-        $pausedAdapterPackageNames -contains $_.name
-    })
-    if ($pausedDependencies.Count -gt 0) {
-        throw "Active package depends on a paused Adapter package: $($activeWorkspacePackage.name) <= $($pausedDependencies.name -join ', ')"
-    }
+& python -B $publicCoreBoundaryScript
+if ($LASTEXITCODE -ne 0) {
+    throw 'Public Core boundary checker rejected the repository.'
 }
 
 $repositoryInstructions = [System.IO.File]::ReadAllText(
@@ -1053,10 +793,10 @@ if ($repositoryInstructions.IndexOf(
     throw 'Repository instructions must require the synchronized desktop review launcher.'
 }
 if ($repositoryInstructions.IndexOf(
-    'Archive-only UIA boundary',
+    'private `glyphshift/adapter-*` repositories',
     [System.StringComparison]::Ordinal
 ) -lt 0) {
-    throw 'Repository instructions must keep UIA archive-only and outside executable validation.'
+    throw 'Repository instructions must keep official paid Adapter sources outside Public Core.'
 }
 
 Write-Output 'Glyphshift architecture checks passed.'

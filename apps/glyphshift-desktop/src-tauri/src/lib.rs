@@ -83,12 +83,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 use workflow::{
-    WorkflowRuntimeView, idle_workflow_runtime_view, runtime_command_error, workflow_runtime_view,
+    WorkflowRuntimeView, idle_workflow_runtime_view, runtime_command_error,
+    workflow_activation_command_error, workflow_runtime_view,
 };
 #[cfg(test)]
 use workflow::{
     WorkflowTargetRuntimeView, runtime_command_error_with_privilege,
-    workflow_activation_command_error,
 };
 
 const DESKTOP_API_VERSION: u16 = 38;

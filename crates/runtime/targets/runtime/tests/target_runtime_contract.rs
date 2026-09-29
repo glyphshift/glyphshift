@@ -110,15 +110,6 @@ fn gdiplus_native_package() -> PathBuf {
     profile.join("glyphshift_adapter_gdiplus_native.dll")
 }
 
-fn qt_painter_native_package() -> PathBuf {
-    let executable = std::env::current_exe().expect("current test executable");
-    let profile = executable
-        .parent()
-        .and_then(|deps| deps.parent())
-        .expect("Cargo profile directory");
-    profile.join("glyphshift_adapter_qt_painter_native.dll")
-}
-
 fn refresh_native_package() -> PathBuf {
     let executable = std::env::current_exe().expect("current test executable");
     let profile = executable
@@ -288,24 +279,6 @@ fn gdiplus_binding(
     }
 }
 
-fn qt_painter_binding(
-    hash: ArtifactHash,
-    features: impl IntoIterator<Item = Feature>,
-) -> AdapterBinding {
-    let descriptor = glyphshift_adapter_qt_painter::descriptor();
-    AdapterBinding {
-        descriptor: descriptor.clone(),
-        adapter_id: descriptor.adapter_id().clone(),
-        version: descriptor.version(),
-        apply_model: descriptor.apply_model(),
-        artifact_hash: hash,
-        host: AdapterHostBinding::TargetProcess {
-            library: PackageArtifactId::new("adapters/qt-painter"),
-        },
-        features: features.into_iter().collect(),
-    }
-}
-
 fn refresh_binding(hash: ArtifactHash) -> AdapterBinding {
     let descriptor = glyphshift_test_native_adapter::descriptor();
     AdapterBinding {
@@ -357,94 +330,6 @@ fn trh_004_requests_adapter_refresh_after_each_lifecycle_change() {
 
     deactivate_runtime().expect("deactivate synthetic refresh Adapter");
     assert_eq!(unsafe { refresh_count() }, baseline + 3);
-}
-
-#[test]
-#[ignore = "requires Native Adapter DLLs built before the target Runtime contract"]
-fn trh_003_keeps_a_compatible_adapter_active_when_a_peer_is_unavailable() {
-    let gdi_package = native_package();
-    let gdi_hash = artifact_hash(&gdi_package);
-    let qt_package = qt_painter_native_package();
-    let qt_hash = artifact_hash(&qt_package);
-    let baseline = render_raw_gdi_unicode("Open").expect("baseline render");
-    let deployment = TargetRuntimeDeployment::new(
-        scoped_publication(
-            1,
-            "Translated by compatible adapter",
-            glyphshift_adapter_gdi::ADAPTER_ID,
-        ),
-        [
-            NativeAdapterDeployment::new(gdi_package, binding(gdi_hash, [Feature::TextReplace]))
-                .expect("compatible GDI deployment"),
-            NativeAdapterDeployment::new(
-                qt_package,
-                qt_painter_binding(qt_hash, [Feature::TextReplace]),
-            )
-            .expect("unavailable Qt deployment"),
-        ],
-    );
-
-    activate_deployment(deployment)
-        .expect("one unavailable candidate must not disable a compatible adapter");
-    assert_eq!(
-        query_activation()
-            .expect("activation report")
-            .active_adapter_ids()
-            .collect::<Vec<_>>(),
-        vec![glyphshift_adapter_gdi::ADAPTER_ID]
-    );
-    let translated = render_raw_gdi_unicode("Open").expect("translated render");
-    assert_ne!(translated.signature(), baseline.signature());
-
-    deactivate_runtime().expect("deactivate compatible adapter");
-    let restored = render_raw_gdi_unicode("Open").expect("restored render");
-    assert_eq!(restored.signature(), baseline.signature());
-}
-
-#[test]
-#[ignore = "requires Native Adapter DLLs built before the target Runtime contract"]
-fn trh_005_failed_activation_rolls_back_before_a_different_deployment_retries() {
-    let qt_package = qt_painter_native_package();
-    let qt_hash = artifact_hash(&qt_package);
-    let unavailable = TargetRuntimeDeployment::new(
-        scoped_publication(
-            1,
-            "Unavailable Qt translation",
-            glyphshift_adapter_qt_painter::ADAPTER_ID,
-        ),
-        [NativeAdapterDeployment::new(
-            qt_package,
-            qt_painter_binding(qt_hash, [Feature::TextReplace]),
-        )
-        .expect("unavailable Qt deployment")],
-    );
-    assert_eq!(
-        activate_deployment(unavailable),
-        Err(glyphshift_target_runtime::TargetRuntimeError::AdapterActivation)
-    );
-
-    let gdi_package = native_package();
-    let gdi_hash = artifact_hash(&gdi_package);
-    let retry = TargetRuntimeDeployment::new(
-        scoped_publication(
-            2,
-            "Recovered GDI translation",
-            glyphshift_adapter_gdi::ADAPTER_ID,
-        ),
-        [
-            NativeAdapterDeployment::new(gdi_package, binding(gdi_hash, [Feature::TextReplace]))
-                .expect("retry GDI deployment"),
-        ],
-    );
-    activate_deployment(retry).expect("a different deployment retries without target restart");
-    assert_eq!(
-        query_activation()
-            .expect("retry activation report")
-            .active_adapter_ids()
-            .collect::<Vec<_>>(),
-        vec![glyphshift_adapter_gdi::ADAPTER_ID]
-    );
-    deactivate_runtime().expect("deactivate retry deployment");
 }
 
 #[test]
