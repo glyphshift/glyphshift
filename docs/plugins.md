@@ -12,6 +12,11 @@ Unity 及其他游戏引擎均按需安装插件，即使其 Adapter ID 以 `win
 Unreal Engine（UE）目前没有可分发的适配器实现，未来实现时同样提供独立引擎插件；不按单个游戏拆包。
 完整内置引擎集合仅用于显式研究与集成验证，不作为默认 App 或安装包。
 
+安装包构建在交给 Tauri 打包前运行 `scripts/verify-base-runtime.py`：两个架构各自必须恰好包含
+五项基础 Adapter，目录只允许清单引用的 Controller、Target Runtime 和基础 DLL，且摘要全部一致。
+未引用的引擎 DLL、GSP、测试程序、插件子目录或 Worker 都会阻止发布构建，防止旧文件混入基础版。
+这项分发检查不执行 DLL；原生兼容性仍由 Runtime Bundle 生产加载器验证。
+
 这 12 个包的引擎源码已分别迁到 `glyphshift/adapter-*` 独立仓库，用固定 SDK 独立构建。
 主仓保留带来源校验的兼容快照，用于完整 Bundle 构建与集成测试；维护与导入规则见 [SDK 与源码所有权](adapter-sdk.md)。
 未进入现有产品包的研究实现不会因拆包自动上线；UIA 与依赖它的 OCR Worker 继续归档。

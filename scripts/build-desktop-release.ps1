@@ -42,9 +42,8 @@ $runtimeManifest = $runtimeManifestJson | ConvertFrom-Json
 if ($runtimeManifest.schema -notin @('glyphshift.runtime-bundle/3', 'glyphshift.runtime-bundle/4')) {
     throw 'Desktop Release requires a supported Runtime Bundle schema.'
 }
-if (Test-Path -LiteralPath (Join-Path $runtimeRoot 'test-target.exe')) {
-    throw 'Desktop Release Runtime must not include the synthetic test target.'
-}
+& python -B (Join-Path $PSScriptRoot 'verify-base-runtime.py') $runtimeRoot
+if ($LASTEXITCODE -ne 0) { throw 'Desktop Release must contain only the Windows base Runtime.' }
 
 $resources = [ordered]@{}
 $resources[$runtimeRoot] = 'runtime'

@@ -7,6 +7,9 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 
+& python -B (Join-Path $PSScriptRoot 'test-base-runtime.py')
+if ($LASTEXITCODE -ne 0) { throw 'Base Runtime distribution contracts failed.' }
+
 & python (Join-Path $PSScriptRoot 'sync-raylib-snapshot.py') --check
 if ($LASTEXITCODE -ne 0) { throw 'Raylib compatibility snapshot differs from its pinned source.' }
 
