@@ -1,6 +1,8 @@
 //! Exact-version Registry consumption with independently pinned trust.
 //! Installation does not select or execute plugins, and never replaces user-edited dictionaries.
 mod dictionary;
+mod discovery;
+pub use discovery::{DictionaryEntry, DictionaryPage, DictionarySearch};
 #[cfg(test)]
 mod fixtures;
 mod http;

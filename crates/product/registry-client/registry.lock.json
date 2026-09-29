@@ -1,8 +1,8 @@
 {
   "schema": "glyphshift.registry-consumer-contract/1",
   "repository": "https://github.com/glyphshift/registry",
-  "commit": "36b13ee196e34f958cc030073b7cbcbc88f7f297",
-  "apiVersion": "0.3.0",
+  "commit": "e19793249e82ad5de5dc0084f9a6c5b0a40fc886",
+  "apiVersion": "0.4.0",
   "proofSchema": "glyphshift.release-proof/1",
   "statementSchema": "glyphshift.release-statement/1",
   "trustSchema": "glyphshift.release-trust/1",

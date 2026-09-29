@@ -1,8 +1,8 @@
 # Registry 指定版本安装
 
 `glyphshift-registry-client` 提供共享 Rust 验签/下载/安装逻辑，`glyphshift-registry` 是显式操作的 CLI。
-当前完成的是指定资源 ID、版本和发布者的安装入口；桌面 GUI 的在线搜索、安装按钮、账户登录和网页唤起尚未接入。
-现有桌面目录端口继续保持离线占位，不把按 ID 查版本当作全站搜索。
+当前完成在线字典发现/精确详情、指定资源 ID、版本和发布者的安装入口；桌面 GUI 的在线搜索、安装按钮、账户登录和网页唤起尚未接入。
+现有桌面目录端口继续保持离线占位；共享库和 CLI 已消费独立的全站字典发现接口。
 
 ## 信任与流程
 
@@ -64,3 +64,19 @@ CI 将 Registry 测试提供方 checkout 到本机测试目录，版本固定在
 Rust 生产库没有依赖 Go 可执行文件；主产品静态检查器的 stdin 协议保持不变。
 
 生产部署、正式信任配置分发、在线检索/详情界面、桌面账户和深链接仍是后续工作。
+
+## 字典发现与详情
+
+```text
+glyphshift-registry search-dictionaries <https-origin> <trust.json> <query.json>
+glyphshift-registry dictionary-detail <https-origin> <trust.json> <dictionary-id> <version> <publisher-userKey>
+```
+
+查询文件为 JSON，例如 `{"text":"menu","sourceLocale":"en-US","targetLocale":"zh-CN","tag":"menus","size":50}`。
+可选 `cursor` 使用上一页的 `nextCursor`；改变筛选或页大小时清空游标。空页仍可能有下一页，直到 `nextCursor` 为 null。
+
+目录展示每个字典最新可用稳定版本，详情可访问仍有效的历史/预发行版本。展示文本和标签是原件的有界预览，不表示自动翻译或软件兼容。
+客户端限制响应体、条目数、字段、版本和重复 ID，拒绝循环游标；只查询固定 origin，不接收远端分页 URL。
+目录及详情经过 HTTPS 获取，**不是客户端已验签的安装结果**。从条目创建 `ReleaseRequest` 可固定用户选择的发布者及版本，安装再执行完整证明/原件检查。
+
+桌面后续接入应在后台执行网络请求，安装提交仍使用既有编辑锁；不能把现有 GUI 的强制覆盖按钮直接连接到拒绝强制覆盖的 Registry 安装入口。

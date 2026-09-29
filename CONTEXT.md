@@ -255,3 +255,7 @@ _Avoid_: bundle identifier 目录、测试证据目录、整份配置一次性�
 **UI Locale**：
 Glyphshift 自身菜单、按钮和提示使用的语言，与目标软件语言、词典语言和目录展示语言相互独立。
 _Avoid_: Source Locale、Target Locale、Artifact Presentation Locale
+
+### Dictionary Discovery（字典发现）
+
+Registry 对已审核、活动且证明有效的字典提供公开搜索与精确版本详情。默认每个字典展示最新可用稳定版本；名称/说明/标签为有界展示投影，不是客户端验签或安装许可。共享 Rust/CLI 已消费该合同，桌面 GUI 仍待接入。安装继续固定用户选择的发布者与版本，重新校验 proof 和原件。

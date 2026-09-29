@@ -119,6 +119,102 @@ fn secure_configuration_rejects_non_origin_or_insecure_urls() {
     }
 }
 
+fn discovery_entry() -> serde_json::Value {
+    serde_json::json!({"packageId":"fixture.dictionary","version":"1.0.0","publisherUserKey":"Abcdef23",
+        "name":"Synthetic","summary":"Menus","sourceLocale":"en-US","targetLocale":"zh-CN","tags":["menus"]})
+}
+
+fn discovery_reply(value: serde_json::Value) -> (u16, String, Vec<u8>) {
+    (
+        200,
+        "application/json".into(),
+        serde_json::to_vec(&value).unwrap(),
+    )
+}
+
+#[test]
+fn discovery_rejects_invalid_pages_and_checks_exact_details() {
+    use crate::DictionarySearch;
+    let fixture = Fixture::dictionary("1.0.0");
+    let entry = discovery_entry();
+    let query = DictionarySearch::default();
+    for page in [
+        serde_json::json!({"items":[entry.clone(),entry.clone()],"nextCursor":null}),
+        serde_json::json!({"items":[],"nextCursor":"https://foreign.invalid"}),
+        serde_json::json!({"items":[],"nextCursor":null,"extra":true}),
+        {
+            let mut e = entry.clone();
+            e["version"] = serde_json::json!("1.0.0-rc.1");
+            serde_json::json!({"items":[e],"nextCursor":null})
+        },
+    ] {
+        let server = Server::new(vec![discovery_reply(page)]);
+        assert!(server
+            .client(fixture.trust())
+            .search_dictionaries(&query)
+            .is_err());
+    }
+    let server = Server::new(vec![discovery_reply(
+        serde_json::json!({"items":[],"nextCursor":"next"}),
+    )]);
+    let query = DictionarySearch {
+        cursor: Some("next".into()),
+        ..Default::default()
+    };
+    assert!(server
+        .client(fixture.trust())
+        .search_dictionaries(&query)
+        .is_err());
+    let server = Server::new(vec![discovery_reply(entry.clone()), discovery_reply(entry)]);
+    let client = server.client(fixture.trust());
+    assert_eq!(
+        client
+            .dictionary_detail(
+                &ReleaseRequest::new("dictionary", "fixture.dictionary", "1.0.0", "Abcdef23")
+                    .unwrap()
+            )
+            .unwrap()
+            .name,
+        "Synthetic"
+    );
+    assert!(matches!(
+        client.dictionary_detail(
+            &ReleaseRequest::new("dictionary", "fixture.dictionary", "1.0.0", "Zbcdef23").unwrap()
+        ),
+        Err(Error::IdentityMismatch)
+    ));
+}
+
+#[test]
+fn discovery_query_is_bounded_and_encoded_as_values() {
+    use crate::DictionarySearch;
+    for json in [
+        r#"{"size":0}"#,
+        r#"{"size":101}"#,
+        r#"{"url":"https://foreign.invalid"}"#,
+        r#"{"size":1,"size":2}"#,
+        r#"{"sourceLocale":"../../"}"#,
+        r#"{"tag":""}"#,
+    ] {
+        assert!(DictionarySearch::from_json(json.as_bytes()).is_err());
+    }
+    let f = Fixture::dictionary("1.0.0");
+    let server = Server::new(vec![discovery_reply(
+        serde_json::json!({"items":[],"nextCursor":null}),
+    )]);
+    let query = DictionarySearch {
+        text: "menu&cursor=foreign".into(),
+        ..Default::default()
+    };
+    server
+        .client(f.trust())
+        .search_dictionaries(&query)
+        .unwrap();
+    let paths = server.paths.lock().unwrap();
+    assert!(paths[0].contains("text=menu%26cursor%3Dforeign"));
+    assert!(!paths[0].contains("&cursor=foreign"));
+}
+
 #[test]
 fn withdrawal_during_download_never_creates_installation() {
     let f = Fixture::dictionary("1.0.0");

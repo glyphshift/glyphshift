@@ -89,9 +89,14 @@ def main():
     for version in ["1.0.0", "1.0.1", "1.0.2"]:
         dictionary = root / f"dictionary-{version}.json"
         dictionary.write_text(json.dumps({"schema": "glyphshift.dictionary/3", "revision": 1,
-            "metadata": {"id": "fixture.dictionary", "releaseVersion": version, "name": "Synthetic dictionary", "sourceLocale": "en-US", "targetLocale": "zh-CN"},
+            "metadata": {"id": "fixture.dictionary", "releaseVersion": version, "name": "Synthetic dictionary", "sourceLocale": "en-US", "targetLocale": "zh-CN", "tags": ["menus"]},
             "entries": [{"source": "Open", "translation": "打开"}]}, ensure_ascii=False), encoding="utf-8")
         publish("dictionary", dictionary, "cross-runtime-dictionary-" + version)
+    secondary = json.loads(dictionary.read_text(encoding="utf-8"))
+    secondary["metadata"].update(id="fixture.secondary", name="Second dictionary", releaseVersion="1.0.0")
+    secondary_file = root / "secondary.json"
+    secondary_file.write_text(json.dumps(secondary), encoding="utf-8")
+    publish("dictionary", secondary_file, "cross-runtime-secondary-001")
     adapter = args.adapter.resolve() if args.adapter else root / "synthetic.gsp"
     if args.adapter is None:
         synthetic_gsp(adapter)
@@ -139,6 +144,23 @@ def main():
         client = args.client.resolve()
         trust = root / "trust.json"
 
+        query_file = root / "query.json"
+        def search(query, fail=False):
+            query_file.write_text(json.dumps(query), encoding="utf-8")
+            return run(client, "search-dictionaries", origin, trust, query_file, fail=fail)
+
+        page = search({"size": 1})
+        assert len(page["items"]) == 1 and page["items"][0]["version"] == "1.0.2" and page["nextCursor"]
+        next_page = search({"size": 1, "cursor": page["nextCursor"]})
+        assert next_page["items"][0]["packageId"] == "fixture.secondary" and next_page["nextCursor"] is None
+        search({"size": 1, "cursor": page["nextCursor"], "text": "changed"}, fail=True)
+        filtered = search({"text": "SYNTHETIC", "sourceLocale": "en-US", "targetLocale": "zh-CN", "tag": "MENUS"})
+        assert len(filtered["items"]) == 1 and filtered["items"][0]["packageId"] == "fixture.dictionary"
+        assert search({"targetLocale": "ja-JP"})["items"] == []
+        detail = run(client, "dictionary-detail", origin, trust, "fixture.dictionary", "1.0.0", "Abcdef23")
+        assert detail["name"] == "Synthetic dictionary" and detail["tags"] == ["menus"]
+        run(client, "dictionary-detail", origin, trust, "fixture.dictionary", "1.0.0", "Zbcdef23", fail=True)
+
         data_root = root / "dictionary-store"
         def install_dictionary(version, destination=data_root, fail=False):
             return run(client, "install-dictionary", origin, trust, "fixture.registry", "fixture.dictionary", version,
@@ -179,7 +201,12 @@ def main():
         denied_state = root / "must-not-install-quarantined"
         install_adapter(denied_state, fail=True)
         assert not denied_state.exists()
+        operator("availability", "--actor", "Zbcdef23", "--kind", "dictionary", "--package", "fixture.dictionary",
+                 "--version", "1.0.2", "--state", "quarantined", "--reason", "synthetic discovery quarantine")
+        assert search({"text": "SYNTHETIC"})["items"][0]["version"] == "1.0.1"
+        run(client, "dictionary-detail", origin, trust, "fixture.dictionary", "1.0.2", "Abcdef23", fail=True)
         result = {"status": "passed", "dictionaryInstallUpdate": True, "localChangesPreserved": True,
+                  "discoveryPaginationFilters": True, "exactDetails": True, "discoveryQuarantine": True,
                   "adapterInstalledNotSelected": True, "idempotentInstall": True, "revokedKeyRejected": True,
                   "untrustedTLSRejected": True, "quarantinedReleaseRejected": True,
                   "adapterBytes": adapter.stat().st_size, "adapterSHA256": selection["sha256"]}
