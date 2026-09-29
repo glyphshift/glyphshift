@@ -15,5 +15,28 @@ apps/glyphshift-desktop/src-tauri/gen
 # Local design material
 .impeccable
 
+# Private official Adapter sources and real-engine fixtures never belong in Public Core.
+/crates/adapters/implementations/framework/
+/crates/adapters/implementations/accessibility/
+/crates/adapters/implementations/fallback/
+/crates/adapters/implementations/native/console/
+/crates/adapters/implementations/native/console-native/
+/crates/adapters/implementations/native/direct2d/
+/crates/adapters/implementations/native/direct2d-native/
+/test-support/catsystem2-native/
+/test-support/coreclr-late-attach/
+/test-support/kag-bridge-contract/
+/test-support/kag-parser-contract/
+/test-support/kag-runtime-host/
+/test-support/monogame-text/
+/test-support/native-framework-abi/
+/test-support/renpy-text/
+/test-support/rpgmaker-mv-text/
+/test-support/tyranoscript-text/
+/test-support/unity-il2cpp-custom-text-negative/
+/test-support/vgui-localize-lifecycle/
+/test-support/vgui-localize-probe/
+/test-support/webview2-dom-host/
+
 # Miscellaneous generated files
 *.tmp
