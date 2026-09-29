@@ -39,6 +39,9 @@ const emit = defineEmits<{
     }"
     @update:open="emit('update:open', $event)"
   >
+    <template v-if="$slots.default" #body>
+      <slot />
+    </template>
     <template #footer>
       <UButton
         color="neutral"

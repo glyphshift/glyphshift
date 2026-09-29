@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useI18n } from 'vue-i18n'
 import { translateCommandError, type CommandError } from '../commandError'
-import { hasDesktopRuntime } from '../workspace/state'
+import type { DesktopSnapshot } from '../model'
+import { applyDesktopSnapshot, hasDesktopRuntime, model } from '../workspace/state'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 interface Plugin {
@@ -13,6 +14,7 @@ interface Plugin {
   sha256: string
   architectures: string[]
   adapters: string[]
+  adapterIds: string[]
   selected: boolean
   loaded: boolean
   problem: CommandError | null
@@ -27,6 +29,17 @@ const notice = ref('')
 const prepared = ref<Plugin | null>(null)
 const selection = ref<Plugin | null>(null)
 let disposed = false
+const selectionDependencies = computed(() => {
+  if (!selection.value?.selected) return []
+  const adapterIds = new Set(selection.value.adapterIds)
+  return model.value.workflows
+    .filter(workflow => workflow.targets.some(target => target.adapterPlan.adapterIds.some(id => adapterIds.has(id))))
+    .map(workflow => ({
+      id: workflow.id,
+      name: workflow.name,
+      running: model.value.workflowRuntimeStatus[workflow.id]?.targets.some(target => target.active) ?? false,
+    }))
+})
 
 function label(plugin: Plugin) {
   const names: Record<string, string> = { qt: 'Qt', gtk3: 'GTK3', unity: 'Unity', raylib: 'Raylib', sidefx: 'SideFX', monogame: 'MonoGame', renpy: "Ren’Py", web: 'Web / Chromium', 'rpgmaker-mv': 'RPGMaker MV', tyranoscript: 'TyranoScript', vgui: 'VGUI', catsystem2: 'CatSystem2', kirikiri: 'KiriKiri' }
@@ -42,7 +55,10 @@ async function run(action: () => Promise<void>) {
   finally { busy.value = false }
 }
 async function refresh() {
-  await run(async () => { snapshot.value = await invoke<Snapshot>('desktop_plugins') })
+  await run(async () => {
+    snapshot.value = await invoke<Snapshot>('desktop_plugins')
+    applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_snapshot'))
+  })
 }
 async function choose() {
   await run(async () => {
@@ -74,6 +90,7 @@ async function changeSelection() {
   await run(async () => {
     try {
       snapshot.value = await invoke<Snapshot>('desktop_select_plugin', { sha256: candidate.sha256, enabled: !candidate.selected })
+      applyDesktopSnapshot(await invoke<DesktopSnapshot>('desktop_snapshot'))
     } finally { selection.value = null }
   })
 }
@@ -141,5 +158,17 @@ onBeforeUnmount(() => {
   <ConfirmDialog :open="!!selection" :title="t(selection?.selected ? 'plugins.disableTitle' : 'plugins.enableTitle')"
     :description="t(selection?.selected ? 'plugins.disableHint' : 'plugins.enableHint', { name: selection ? label(selection) : '' })"
     :confirm-label="t(selection?.selected ? 'plugins.disable' : 'plugins.enable')" confirm-color="primary" :busy="busy"
-    @update:open="value => { if (!value && !busy) selection = null }" @confirm="changeSelection" />
+    @update:open="value => { if (!value && !busy) selection = null }" @confirm="changeSelection">
+    <div v-if="selection?.selected" class="space-y-2 px-5 pb-1">
+      <p class="type-label font-semibold">{{ t('plugins.dependenciesTitle', { count: selectionDependencies.length }) }}</p>
+      <p v-if="!selectionDependencies.length" class="type-body text-[var(--text-secondary)]">{{ t('plugins.dependenciesNone') }}</p>
+      <ul v-else class="space-y-2">
+        <li v-for="workflow in selectionDependencies" :key="workflow.id" class="flex min-w-0 items-center justify-between gap-3 rounded-md border border-[var(--border)] px-3 py-2">
+          <span class="type-body min-w-0 truncate">{{ workflow.name }}</span>
+          <UBadge :color="workflow.running ? 'warning' : 'neutral'" variant="soft" size="sm" :label="t(workflow.running ? 'plugins.dependencyRunning' : 'plugins.dependencyStopped')" />
+        </li>
+      </ul>
+      <p v-if="selectionDependencies.some(workflow => workflow.running)" class="type-caption text-[var(--text-secondary)]">{{ t('plugins.runningDependencyHint') }}</p>
+    </div>
+  </ConfirmDialog>
 </template>

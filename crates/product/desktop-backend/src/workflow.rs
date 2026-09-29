@@ -139,7 +139,37 @@ impl DesktopBackend {
             return Err(BackendError::InvalidArtifact("workflow-collection-active"));
         }
         if self.enabled_workflows.contains_key(&artifact.id) {
-            self.validate_workflow_activation(&artifact)?;
+            if let Err(error) = self.validate_workflow_activation(&artifact) {
+                let preserves_existing_missing_adapters = matches!(
+                    error,
+                    BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))
+                ) && {
+                    let current_references = current
+                        .targets
+                        .iter()
+                        .flat_map(|target| {
+                            target.adapter_plan.adapter_ids.iter().map(move |adapter_id| {
+                                (target.software_id.as_ref(), adapter_id.as_ref())
+                            })
+                        })
+                        .collect::<BTreeSet<_>>();
+                    artifact
+                        .targets
+                        .iter()
+                        .flat_map(|target| {
+                            target.adapter_plan.adapter_ids.iter().map(move |adapter_id| {
+                                (target.software_id.as_ref(), adapter_id.as_ref())
+                            })
+                        })
+                        .filter(|(_, adapter_id)| {
+                            !self.environment.adapter_requirements.contains_key(*adapter_id)
+                        })
+                        .all(|reference| current_references.contains(&reference))
+                };
+                if !preserves_existing_missing_adapters {
+                    return Err(error);
+                }
+            }
             if let Some(error) = self.activation_conflict(&artifact) {
                 return Err(error);
             }

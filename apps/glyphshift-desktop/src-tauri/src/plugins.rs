@@ -2,7 +2,7 @@
 use super::{CommandError, DesktopRuntimeError, RuntimeBundle};
 use glyphshift_plugin_package::{Manifest, Package, PackageError, PluginStore};
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -24,6 +24,7 @@ pub(super) struct PluginView {
     sha256: String,
     architectures: Vec<String>,
     adapters: Vec<String>,
+    adapter_ids: Vec<String>,
     selected: bool,
     loaded: bool,
     problem: Option<CommandError>,
@@ -53,6 +54,45 @@ fn error(error: PackageError) -> CommandError {
     })
 }
 
+pub(super) fn selected_digests(store_root: &Path) -> Result<BTreeSet<String>, CommandError> {
+    PluginStore::new(store_root)
+        .selected()
+        .map(|packages| {
+            packages
+                .into_iter()
+                .map(|package| package.sha256().to_owned())
+                .collect()
+        })
+        .map_err(error)
+}
+
+pub(super) fn loaded_adapter_digests(
+    store_root: &Path,
+    loaded: &BTreeSet<String>,
+) -> Result<BTreeMap<Box<str>, Box<str>>, CommandError> {
+    let store = PluginStore::new(store_root);
+    let mut adapters = BTreeMap::new();
+    for digest in loaded {
+        let package = store.get(digest).map_err(error)?;
+        for adapter_id in package
+            .manifest()
+            .variants
+            .iter()
+            .flat_map(|variant| &variant.adapters)
+            .map(|adapter| adapter.native_metadata.adapter_id.as_str())
+            .collect::<BTreeSet<_>>()
+        {
+            if adapters
+                .insert(adapter_id.into(), digest.as_str().into())
+                .is_some()
+            {
+                return Err(error(PackageError::Conflict));
+            }
+        }
+    }
+    Ok(adapters)
+}
+
 fn view(manifest: &Manifest, sha256: &str) -> PluginView {
     PluginView {
         package_id: manifest.package_id.clone(),
@@ -73,6 +113,14 @@ fn view(manifest: &Manifest, sha256: &str) -> PluginView {
             .iter()
             .flat_map(|v| &v.adapters)
             .map(|a| a.name.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        adapter_ids: manifest
+            .variants
+            .iter()
+            .flat_map(|v| &v.adapters)
+            .map(|a| a.native_metadata.adapter_id.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect(),
@@ -147,6 +195,7 @@ impl DesktopPlugins {
                     sha256: release.sha256.clone(),
                     architectures: Vec::new(),
                     adapters: Vec::new(),
+                    adapter_ids: Vec::new(),
                     selected: false,
                     loaded: false,
                     problem: Some(error(problem)),

@@ -84,6 +84,8 @@ fn probe_translation_edit_publishes_the_next_live_preview_generation() {
         documentation_url: None,
         configuration: "none".into(),
         process_resident_after_deactivate: false,
+        available_for_new_usage: true,
+        restart_required: false,
     }];
 
     let created = application

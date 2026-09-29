@@ -173,6 +173,8 @@ struct AdapterView {
     documentation_url: Option<Box<str>>,
     configuration: Box<str>,
     process_resident_after_deactivate: bool,
+    available_for_new_usage: bool,
+    restart_required: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -405,6 +407,8 @@ struct WorkflowCompatibilityCheck {
 
 struct DesktopApplication {
     loaded_plugin_digests: BTreeSet<String>,
+    plugin_store_root: PathBuf,
+    loaded_plugin_adapter_digests: BTreeMap<Box<str>, Box<str>>,
     backend: DesktopBackend,
     dictionary_distribution: DictionaryDistribution,
     runtimes: Option<Box<dyn WorkflowRuntimeService>>,
@@ -445,8 +449,12 @@ impl DesktopApplication {
         let quick_probe_sessions = QuickProbeSessionStore::open(&data_root)
             .map_err(|error| format!("quick probe startup: {error:?}"))?;
         let dictionary_distribution = offline_dictionary_distribution(&data_root)?;
+        let plugin_store_root = data_root.join("plugins");
         let (runtime_bundle, loaded_plugin_digests) =
-            plugins::open_runtime(&runtime_root, data_root.join("plugins"));
+            plugins::open_runtime(&runtime_root, plugin_store_root.clone());
+        let loaded_plugin_adapter_digests =
+            plugins::loaded_adapter_digests(&plugin_store_root, &loaded_plugin_digests)
+                .map_err(|error| format!("plugin adapter state: {error:?}"))?;
         let runtime_bundle_error = runtime_bundle.as_ref().err().copied();
         let runtime_bundle = runtime_bundle.ok();
         if let Some(bundle) = &runtime_bundle {
@@ -495,6 +503,8 @@ impl DesktopApplication {
                         configuration: adapter.configuration().into(),
                         process_resident_after_deactivate: adapter
                             .process_resident_after_deactivate(),
+                        available_for_new_usage: true,
+                        restart_required: false,
                     })
                     .collect()
             })
@@ -524,6 +534,8 @@ impl DesktopApplication {
             .map_err(|error| format!("{error:?}"))?;
         let mut application = Self {
             loaded_plugin_digests,
+            plugin_store_root,
+            loaded_plugin_adapter_digests,
             backend,
             dictionary_distribution,
             runtimes: runtime_bundle.map(|bundle| {
@@ -600,9 +612,63 @@ impl DesktopApplication {
         DesktopProductSnapshot {
             configuration,
             workflow_runtime_status,
-            adapters: self.adapters.clone(),
+            adapters: self.adapter_views(),
             font_families: self.font_families.clone(),
         }
+    }
+
+    fn adapter_views(&self) -> Vec<AdapterView> {
+        let selected = plugins::selected_digests(&self.plugin_store_root).ok();
+        self.adapters
+            .iter()
+            .cloned()
+            .map(|mut adapter| {
+                if let Some(digest) = self.loaded_plugin_adapter_digests.get(adapter.id.as_ref()) {
+                    if let Some(selected) = selected.as_ref() {
+                        adapter.available_for_new_usage = selected.contains(digest.as_ref());
+                        adapter.restart_required = !adapter.available_for_new_usage;
+                    }
+                }
+                adapter
+            })
+            .collect()
+    }
+
+    fn ensure_adapters_available_for_new_usage<'a>(
+        &self,
+        adapter_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), CommandError> {
+        let adapter_ids = adapter_ids.into_iter().collect::<Vec<_>>();
+        for adapter_id in &adapter_ids {
+            if !self.adapters.iter().any(|adapter| adapter.id.as_ref() == *adapter_id) {
+                return Err(CommandError::new("workflow.unknown_adapter")
+                    .with_arg("adapterId", (*adapter_id).to_string()));
+            }
+        }
+        let unavailable = self.unavailable_adapters_for_new_usage(adapter_ids)?;
+        if let Some(adapter_id) = unavailable.into_iter().next() {
+            return Err(CommandError::new("workflow.adapter_unavailable")
+                .with_arg("adapterId", adapter_id.to_string()));
+        }
+        Ok(())
+    }
+
+    fn unavailable_adapters_for_new_usage<'a>(
+        &self,
+        adapter_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<BTreeSet<Box<str>>, CommandError> {
+        let selected = plugins::selected_digests(&self.plugin_store_root)?;
+        let mut unavailable = BTreeSet::new();
+        for adapter_id in adapter_ids {
+            if self
+                .loaded_plugin_adapter_digests
+                .get(adapter_id)
+                .is_some_and(|digest| !selected.contains(digest.as_ref()))
+            {
+                unavailable.insert(adapter_id.into());
+            }
+        }
+        Ok(unavailable)
     }
 
     fn refresh_font_families(&mut self) -> Result<DesktopProductSnapshot, CommandError> {

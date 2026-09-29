@@ -226,6 +226,16 @@ impl WorkflowTargetCreate {
         self.font_policy = policy;
         self
     }
+
+    #[must_use]
+    pub fn software_id(&self) -> &str {
+        &self.software_id
+    }
+
+    #[must_use]
+    pub const fn adapter_plan(&self) -> &WorkflowAdapterPlan {
+        &self.adapter_plan
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -269,6 +279,10 @@ impl WorkflowCreate {
     }
     pub fn global_shortcut(&self) -> &str {
         &self.global_shortcut
+    }
+    #[must_use]
+    pub fn targets(&self) -> &[WorkflowTargetCreate] {
+        &self.targets
     }
     #[must_use]
     pub fn with_global_shortcut(mut self, value: impl Into<Box<str>>) -> Self {
@@ -320,6 +334,10 @@ impl WorkflowEdit {
     }
     pub fn global_shortcut(&self) -> &str {
         &self.global_shortcut
+    }
+    #[must_use]
+    pub fn targets(&self) -> &[WorkflowTargetCreate] {
+        &self.targets
     }
     #[must_use]
     pub fn with_global_shortcut(mut self, value: impl Into<Box<str>>) -> Self {

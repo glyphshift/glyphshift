@@ -81,6 +81,89 @@ fn workflow_with_an_adapter_missing_from_the_current_environment_stays_rejected(
 }
 
 #[test]
+fn restored_workflow_keeps_enabled_intent_when_its_adapter_is_missing() {
+    let (mut application, _calls, software_id, data_root) = workflow_application();
+    application
+        .enable_workflow("workflow.product", false)
+        .expect("persist enabled workflow");
+    drop(application);
+
+    let backend = DesktopBackend::open_with_environment(
+        data_root.path(),
+        DesktopEnvironment::new(Vec::<AdapterRequirement>::new(), Vec::<Box<str>>::new()),
+    )
+    .expect("reopen product data without the former adapter");
+    let calls = Arc::new(StdMutex::new(WorkflowRuntimeCalls::default()));
+    let runtimes: Box<dyn WorkflowRuntimeService> = Box::new(RecordingWorkflowRuntime {
+        calls: Arc::clone(&calls),
+        start_capture_error: None,
+        capture_capability: ProbeRuntimeCapability::DirectReplace,
+    });
+    let mut reopened = test_desktop_application(data_root.path(), backend, runtimes);
+    reopened.adapters.clear();
+
+    reopened
+        .restore_enabled_workflows()
+        .expect("restore keeps unavailable workflow intent");
+    assert_eq!(
+        reopened.backend.enabled_workflow_ids(),
+        &[Box::<str>::from("workflow.product")]
+    );
+    let restored = reopened.snapshot();
+    let runtime = &restored.workflow_runtime_status["workflow.product"];
+    assert_eq!(runtime.lifecycle.as_ref().unwrap().phase, "failed");
+    assert_eq!(
+        runtime.errors.values().next().unwrap().code(),
+        "workflow.unknown_adapter"
+    );
+    assert!(calls.lock().unwrap().enabled.is_empty());
+
+    let current = reopened.workflow_detail("workflow.product").unwrap();
+    reopened
+        .update_workflow(
+            WorkflowEdit::new(current.id(), "Renamed while unavailable", current.revision())
+                .with_targets([WorkflowTargetCreate::new(
+                    software_id,
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.product"],
+                )]),
+        )
+        .expect("editing may preserve an existing unavailable adapter reference");
+    assert_eq!(
+        reopened.backend.enabled_workflow_ids(),
+        &[Box::<str>::from("workflow.product")]
+    );
+    assert_eq!(
+        reopened
+            .workflow_runtime_status
+            .get("workflow.product")
+            .unwrap()
+            .errors
+            .values()
+            .next()
+            .unwrap()
+            .code(),
+        "workflow.unknown_adapter"
+    );
+
+    reopened
+        .refresh_workflows_with_retry(true)
+        .expect("refresh keeps unavailable workflow intent");
+    assert_eq!(
+        reopened.backend.enabled_workflow_ids(),
+        &[Box::<str>::from("workflow.product")]
+    );
+    assert!(calls.lock().unwrap().refreshed.is_empty());
+
+    let disabled = reopened
+        .disable_workflow("workflow.product")
+        .expect("missing adapter does not prevent disabling saved intent");
+    assert!(!disabled.activation.enabled);
+    assert!(reopened.backend.enabled_workflow_ids().is_empty());
+    assert!(calls.lock().unwrap().disabled.is_empty());
+}
+
+#[test]
 fn runtime_protocol_rejection_does_not_collapse_into_a_generic_activation_error() {
     let error = serde_json::to_value(runtime_command_error(
         DesktopRuntimeError::ProtocolRejected,
@@ -226,6 +309,151 @@ fn workflow_enable_and_disable_share_one_product_command_path() {
 }
 
 #[test]
+fn disabling_a_loaded_plugin_preserves_the_running_workflow_and_blocks_new_usage() {
+    let (mut application, calls, software_id, data_root) = workflow_application();
+    let digest = attach_loaded_test_plugin(&mut application, data_root.path());
+    application
+        .enable_workflow("workflow.product", false)
+        .expect("enable workflow while plugin is selected");
+    let enabled_calls = calls.lock().expect("runtime call log").enabled.len();
+
+    PluginStore::new(data_root.path().join("plugins"))
+        .deselect_release(&digest, |_| Ok(()))
+        .expect("deselect loaded plugin");
+
+    let snapshot = application.snapshot();
+    let adapter = snapshot
+        .adapters
+        .iter()
+        .find(|adapter| adapter.id.as_ref() == TEST_ADAPTER_ID)
+        .expect("test adapter");
+    assert!(!adapter.available_for_new_usage);
+    assert!(adapter.restart_required);
+
+    application
+        .reconcile_enabled_workflows()
+        .expect("skip reconcile for disabled loaded plugin");
+    application
+        .refresh_workflows_with_retry(true)
+        .expect("skip refresh for disabled loaded plugin");
+    assert!(application.workflow_runtime_status["workflow.product"].targets[0].active);
+    let runtime_calls = calls.lock().expect("runtime call log");
+    assert_eq!(runtime_calls.enabled.len(), enabled_calls);
+    assert!(runtime_calls.refreshed.is_empty());
+    drop(runtime_calls);
+
+    application
+        .disable_workflow("workflow.product")
+        .expect("stop existing workflow");
+    assert_eq!(
+        application
+            .enable_workflow("workflow.product", false)
+            .expect_err("disabled plugin cannot start again")
+            .code(),
+        "workflow.adapter_unavailable"
+    );
+    assert_eq!(
+        application
+            .copy_workflow("workflow.product", "workflow.copy".into(), "Copy".into())
+            .expect_err("copy creates new plugin references")
+            .code(),
+        "workflow.adapter_unavailable"
+    );
+    assert_eq!(
+        application
+            .create_workflow(
+                WorkflowCreate::new("workflow.new", "New").with_targets([
+                    WorkflowTargetCreate::new(
+                        software_id.clone(),
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
+                ]),
+            )
+            .expect_err("create cannot add disabled plugin reference")
+            .code(),
+        "workflow.adapter_unavailable"
+    );
+
+    let current = application.workflow_detail("workflow.product").unwrap();
+    application
+        .update_workflow(
+            WorkflowEdit::new(current.id(), "Renamed", current.revision()).with_targets([
+                WorkflowTargetCreate::new(
+                    software_id.clone(),
+                    [TEST_ADAPTER_ID],
+                    ["dictionary.product"],
+                ),
+            ]),
+        )
+        .expect("existing disabled plugin reference remains editable");
+
+    let second_executable =
+        write_synthetic_executable(data_root.path(), "SecondWorkflowHost.exe");
+    let second_snapshot = application
+        .backend
+        .add_software(ExecutableSelection::new(&second_executable))
+        .expect("add second software");
+    let second_software_id = second_snapshot
+        .software()
+        .iter()
+        .map(|software| software.id())
+        .find(|id| *id != software_id.as_ref())
+        .expect("second software")
+        .to_owned();
+    let current = application.workflow_detail("workflow.product").unwrap();
+    assert_eq!(
+        application
+            .update_workflow(
+                WorkflowEdit::new(current.id(), current.name(), current.revision()).with_targets([
+                    WorkflowTargetCreate::new(
+                        software_id,
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
+                    WorkflowTargetCreate::new(
+                        second_software_id,
+                        [TEST_ADAPTER_ID],
+                        ["dictionary.product"],
+                    ),
+                ]),
+            )
+            .expect_err("editing cannot add a new disabled plugin reference")
+            .code(),
+        "workflow.adapter_unavailable"
+    );
+}
+
+#[test]
+fn plugin_admission_tracks_the_exact_loaded_release_digest() {
+    let (mut application, _calls, _software_id, data_root) = workflow_application();
+    let loaded_digest = attach_loaded_test_plugin(&mut application, data_root.path());
+    let selected_newer_digest = install_selected_test_plugin(data_root.path(), 1);
+    assert_ne!(loaded_digest, selected_newer_digest);
+
+    let adapter = application
+        .snapshot()
+        .adapters
+        .into_iter()
+        .find(|adapter| adapter.id.as_ref() == TEST_ADAPTER_ID)
+        .expect("test adapter");
+    assert!(!adapter.available_for_new_usage);
+    assert!(adapter.restart_required);
+
+    PluginStore::new(data_root.path().join("plugins"))
+        .select(&loaded_digest, |_| Ok(()))
+        .expect("reselect exact loaded release");
+    let adapter = application
+        .snapshot()
+        .adapters
+        .into_iter()
+        .find(|adapter| adapter.id.as_ref() == TEST_ADAPTER_ID)
+        .expect("test adapter");
+    assert!(adapter.available_for_new_usage);
+    assert!(!adapter.restart_required);
+}
+
+#[test]
 fn workflow_diagnostics_exposes_public_names_and_bounded_trace_facts() {
     let (mut application, _calls, software_id, _data_root) = workflow_application();
     application.adapters.push(AdapterView {
@@ -240,6 +468,8 @@ fn workflow_diagnostics_exposes_public_names_and_bounded_trace_facts() {
         documentation_url: None,
         configuration: "none".into(),
         process_resident_after_deactivate: false,
+        available_for_new_usage: true,
+        restart_required: false,
     });
     application
         .enable_workflow("workflow.product", false)
@@ -564,6 +794,8 @@ fn persisted_activations_are_restored_and_refreshed_as_workflow_runtime_state() 
     });
     let mut reopened = DesktopApplication {
         loaded_plugin_digests: BTreeSet::new(),
+        plugin_store_root: data_root.path().join("plugins"),
+        loaded_plugin_adapter_digests: BTreeMap::new(),
         backend,
         dictionary_distribution: offline_dictionary_distribution(data_root.path())
             .expect("offline dictionary distribution"),

@@ -92,6 +92,7 @@ const messageKeys: Record<string, string> = {
   'workflow.unknown_software': 'errors.workflow.unknownSoftware',
   'workflow.unknown_dictionary': 'errors.workflow.unknownDictionary',
   'workflow.unknown_adapter': 'errors.workflow.unknownAdapter',
+  'workflow.adapter_unavailable': 'errors.workflow.adapterUnavailable',
   'workflow.empty_font_families': 'errors.workflow.emptyFontFamilies',
   'workflow.font_scale_unavailable': 'errors.workflow.fontScaleUnavailable',
   'workflow.invalid_font_scale': 'workflows.fontScaleRange',

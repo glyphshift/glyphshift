@@ -3,7 +3,7 @@ import { model, storageKey } from './fixtures/productModel'
 
 const candidate = {
   packageId: 'glyphshift-adapter-synthetic', version: '1.0.0', sha256: 'a'.repeat(64),
-  architectures: ['x86', 'x86_64'], adapters: ['Synthetic inline'],
+  architectures: ['x86', 'x86_64'], adapters: ['Synthetic inline'], adapterIds: ['synthetic.ext-text-out'],
   selected: false, loaded: false, problem: null,
 }
 
@@ -11,10 +11,11 @@ async function setup(page: Page, desktop = true, installed = false) {
   await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), { key: storageKey, value: model })
   await page.goto('/')
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  if (desktop) await page.evaluate(({ candidate, installed }) => {
+  if (desktop) await page.evaluate(({ candidate, installed, model }) => {
     const w = window as any
     w.__pluginCalls = []
     w.__pluginFailure = false
+    w.__desktopSnapshot = structuredClone(model)
     w.__pluginSnapshot = { packages: installed ? [candidate] : [], restartRequired: false, runtimeReady: true }
     w.__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
       w.__pluginCalls.push({ command, args })
@@ -27,9 +28,10 @@ async function setup(page: Page, desktop = true, installed = false) {
         w.__pluginSnapshot.restartRequired = args.enabled
       }
       if (command === 'desktop_plugins' || command === 'desktop_install_plugin' || command === 'desktop_select_plugin') return structuredClone(w.__pluginSnapshot)
+      if (command === 'desktop_snapshot') return structuredClone(w.__desktopSnapshot)
       return null
     } }
-  }, { candidate, installed })
+  }, { candidate, installed, model })
   await page.getByRole('tab', { name: '插件管理', exact: true }).click()
 }
 
@@ -91,6 +93,36 @@ test('loaded version and damaged versions stay distinguishable in a compact wind
   await expect(page.getByRole('button', { name: '安装本地插件', exact: true })).toBeInViewport()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.screenshot({ path: info.outputPath('plugins-compact.png') })
+})
+
+test('disabling a selected plugin shows dependent workflows and their running state', async ({ page }) => {
+  await setup(page, true, true)
+  await page.evaluate(() => {
+    const w = window as any
+    Object.assign(w.__pluginSnapshot.packages[0], { selected: true, loaded: true })
+    w.__desktopSnapshot.activations = [{ workflowId: 'workflow-proof', revision: 5 }]
+    w.__desktopSnapshot.workflowRuntimeStatus = {
+      'workflow-proof': {
+        workflowId: 'workflow-proof',
+        targets: [{
+          softwareId: 'software-proof', discovered: true, active: true,
+          translationRequested: true, fontRequested: true,
+          translationActive: true, fontActive: true, appliedGeneration: 4,
+        }],
+        errors: {},
+      },
+    }
+  })
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+
+  const row = page.getByTestId('plugin-glyphshift-adapter-synthetic-1.0.0')
+  await row.getByRole('button', { name: '停用', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '停用插件' })
+  await expect(dialog).toContainText('依赖工作流 · 1')
+  await expect(dialog).toContainText('默认创作工作流')
+  await expect(dialog.getByText('运行中', { exact: true })).toBeVisible()
+  await expect(dialog).toContainText('一旦停止，本次启动内不会再使用这个已停用插件重新连接')
+  await expect.poll(() => page.evaluate(() => (window as any).__pluginCalls.filter((v: any) => v.command === 'desktop_select_plugin').length)).toBe(0)
 })
 
 test('browser mode explains desktop-only management', async ({ page }) => {

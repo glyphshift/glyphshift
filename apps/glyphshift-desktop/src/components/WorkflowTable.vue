@@ -212,6 +212,41 @@ const fontCoverageOptions = computed(() => [
 const workflowMessage = computed(() => props.messages.workflows || props.items.map(item => props.messages[item.id]).find(Boolean) || '')
 const workflowAdapters = computed(() => props.adapters.filter(adapter =>
   adapter.features.includes('textReplace') || adapter.features.includes('fontSubstitute')))
+const availableWorkflowAdapters = computed(() => workflowAdapters.value.filter(adapter => adapter.availableForNewUsage !== false))
+const missingActiveWorkflowAdapters = computed<AdapterOption[]>(() => {
+  const known = new Set(workflowAdapters.value.map(adapter => adapter.id))
+  return [...new Set(activeTarget.value?.adapterPlan.adapterIds ?? [])]
+    .filter(id => !known.has(id))
+    .map(id => ({
+      id,
+      name: id,
+      version: '',
+      summary: t('workflows.adapterTable.missingSummary'),
+      platforms: [],
+      technologies: [],
+      features: [],
+      technicalTarget: '',
+      documentationUrl: null,
+      configuration: 'none',
+      processResidentAfterDeactivate: false,
+      availableForNewUsage: false,
+      restartRequired: false,
+    }))
+})
+const activeWorkflowAdapters = computed(() => {
+  const selected = new Set(activeTarget.value?.adapterPlan.adapterIds ?? [])
+  return [
+    ...workflowAdapters.value.filter(adapter => adapter.availableForNewUsage !== false || selected.has(adapter.id)),
+    ...missingActiveWorkflowAdapters.value,
+  ]
+})
+const activeUnavailableAdapters = computed(() => {
+  const selected = new Set(activeTarget.value?.adapterPlan.adapterIds ?? [])
+  return activeWorkflowAdapters.value.filter(adapter => selected.has(adapter.id) && adapter.availableForNewUsage === false)
+})
+const activeUnavailableAdapterNames = computed(() => activeUnavailableAdapters.value
+  .map(adapter => adapterDisplayName(adapter.name, t))
+  .join(locale.value === 'zh-CN' ? '、' : ', '))
 const columnOptions = computed(() => [
   { key: 'software', label: t('workflows.columns.software'), visible: visibleColumns.value.software },
   { key: 'assets', label: t('workflows.columns.assets'), visible: visibleColumns.value.assets },
@@ -425,7 +460,7 @@ function toggleSoftware(id: string) {
   const previous = targets.value[0]
   targets.value = [{
     softwareId: id,
-    adapterPlan: { strategy: 'parallel', adapterIds: workflowAdapters.value.map(adapter => adapter.id) },
+    adapterPlan: { strategy: 'parallel', adapterIds: availableWorkflowAdapters.value.map(adapter => adapter.id) },
     dictionaryIds: previous?.dictionaryIds ?? [],
     writeDictionaryId: previous?.writeDictionaryId ?? null,
     collectNewSources: previous?.collectNewSources ?? true,
@@ -592,8 +627,9 @@ usePageEscape(() => formOpen.value, requestCloseForm)
 
             <section v-if="activeTarget" data-testid="workflow-adapter-config" class="space-y-3 border-t border-[var(--border)] pt-5">
               <div><h3 class="type-label m-0 font-semibold">{{ t('workflows.interceptionFor', { name: softwareName(activeTarget.softwareId) }) }}</h3><p class="type-metadata m-0 mt-1 text-[var(--text-muted)]">{{ t('workflows.adaptersHint') }}</p></div>
-              <AdapterSelectionTable v-if="workflowAdapters.length" v-model="activeTarget.adapterPlan.adapterIds" :adapters="workflowAdapters" />
-              <UAlert v-if="!workflowAdapters.length" color="warning" variant="soft" :title="t('workflows.noAdapters')" :description="t('workflows.noAdaptersDescription')" />
+              <AdapterSelectionTable v-if="activeWorkflowAdapters.length" v-model="activeTarget.adapterPlan.adapterIds" :adapters="activeWorkflowAdapters" />
+              <UAlert v-if="activeUnavailableAdapters.length" color="warning" variant="soft" :title="t('workflows.adaptersUnavailableTitle')" :description="t('workflows.adaptersUnavailableDescription', { names: activeUnavailableAdapterNames })" />
+              <UAlert v-if="!activeWorkflowAdapters.length" color="warning" variant="soft" :title="t('workflows.noAdapters')" :description="t('workflows.noAdaptersDescription')" />
             </section>
             <UEmpty v-else icon="i-tabler-app-window" :title="t('workflows.chooseTarget')" :description="t('workflows.addSoftwareFirstDescription')" size="sm" />
             <UAlert v-if="softwareProblems.length" color="warning" variant="soft" :title="t('workflows.cannotSave')" :description="describeProblems(softwareProblems)" />

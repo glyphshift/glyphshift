@@ -1,4 +1,5 @@
 use super::*;
+use glyphshift_adapter_native_host::NativeAdapterMetadata;
 use glyphshift_adapter_registry::{AdapterRequirement, AdapterVersion, AdapterVersionRequirement};
 use glyphshift_desktop_backend::{
     DictionaryCreate, DictionaryEdit, DictionaryEntryCreate, WorkflowCreate, WorkflowEdit,
@@ -8,6 +9,11 @@ use glyphshift_dictionary_distribution::{
     ArtifactPresentation, DictionaryArtifactDescriptor, FixedInstallationClock,
     InMemoryDictionaryCatalog, InMemoryTrustVerifier, Sha256Digest,
 };
+use glyphshift_plugin_package::{
+    Adapter as PackageAdapter, FileRole as PackageFileRole, Manifest as PackageManifest,
+    Package as PluginPackage, PackageFile, PluginStore, Variant as PackageVariant, build_package,
+    sha256 as package_sha256,
+};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -15,6 +21,88 @@ use tempfile::tempdir;
 
 const TEST_ADAPTER_ID: &str = "test.inline";
 const TEST_DICTIONARY_URL: &str = "https://catalog.example/dictionary.json";
+
+fn install_selected_test_plugin(data_root: &Path, patch: u16) -> String {
+    let source = data_root.join(format!("plugin-source-{patch}"));
+    fs::create_dir_all(source.join("windows-x86_64")).expect("plugin source directory");
+    let adapter_path = "windows-x86_64/adapter.dll";
+    let mut image = vec![0_u8; 90];
+    image[..2].copy_from_slice(b"MZ");
+    image[60..64].copy_from_slice(&64_u32.to_le_bytes());
+    image[64..68].copy_from_slice(b"PE\0\0");
+    image[68..70].copy_from_slice(&0x8664_u16.to_le_bytes());
+    image[88..90].copy_from_slice(&0x20b_u16.to_le_bytes());
+    image.extend_from_slice(&patch.to_le_bytes());
+    fs::write(source.join(adapter_path), &image).expect("write plugin adapter fixture");
+    fs::write(source.join("license.txt"), b"Synthetic fixture license")
+        .expect("write plugin license fixture");
+    let manifest = PackageManifest {
+        schema: glyphshift_plugin_package::PACKAGE_SCHEMA.into(),
+        package_id: "glyphshift-adapter-test-inline".into(),
+        version: [1, 0, patch],
+        runtime_bundle_schema: "glyphshift.runtime-bundle/4".into(),
+        license_file: "license.txt".into(),
+        files: vec![
+            PackageFile {
+                path: adapter_path.into(),
+                sha256: package_sha256(&image),
+                size: image.len() as u64,
+                role: PackageFileRole::NativeAdapter,
+            },
+            PackageFile {
+                path: "license.txt".into(),
+                sha256: package_sha256(b"Synthetic fixture license"),
+                size: 25,
+                role: PackageFileRole::License,
+            },
+        ],
+        variants: vec![PackageVariant {
+            platform: "windows".into(),
+            architecture: "x86_64".into(),
+            adapters: vec![PackageAdapter {
+                file: adapter_path.into(),
+                native_metadata: NativeAdapterMetadata {
+                    adapter_id: TEST_ADAPTER_ID.into(),
+                    version: [1, 0, patch],
+                    abi: [1, 0],
+                    apply_model: 1,
+                    placement: 1,
+                    feature_bits: 3,
+                    platform_bits: 1,
+                    architecture_bits: 2,
+                    source_policy: 0,
+                },
+                name: "Synthetic inline".into(),
+                summary: "Synthetic package fixture".into(),
+                technology: "Synthetic".into(),
+                process_resident_after_deactivate: false,
+            }],
+        }],
+    };
+    let archive = data_root.join(format!("test-inline-{patch}.gsp"));
+    fs::write(
+        &archive,
+        build_package(&manifest, &source).expect("build plugin package"),
+    )
+    .expect("write plugin archive");
+    let package = PluginPackage::open(&archive).expect("open plugin package");
+    let digest = package.sha256().to_owned();
+    let store = PluginStore::new(data_root.join("plugins"));
+    store.install(&package, &digest).expect("install plugin package");
+    store
+        .select(&digest, |_| Ok(()))
+        .expect("select plugin package");
+    digest
+}
+
+fn attach_loaded_test_plugin(application: &mut DesktopApplication, data_root: &Path) -> String {
+    let digest = install_selected_test_plugin(data_root, 0);
+    application.plugin_store_root = data_root.join("plugins");
+    application.loaded_plugin_digests = BTreeSet::from([digest.clone()]);
+    application.loaded_plugin_adapter_digests =
+        BTreeMap::from([(TEST_ADAPTER_ID.into(), digest.as_str().into())]);
+    digest
+}
 
 #[test]
 fn default_workspace_root_uses_the_product_name() {
@@ -426,6 +514,8 @@ fn test_desktop_application(
 ) -> DesktopApplication {
     DesktopApplication {
         loaded_plugin_digests: BTreeSet::new(),
+        plugin_store_root: data_root.join("plugins"),
+        loaded_plugin_adapter_digests: BTreeMap::new(),
         backend,
         dictionary_distribution: offline_dictionary_distribution(data_root)
             .expect("offline dictionary distribution"),
@@ -444,6 +534,8 @@ fn test_desktop_application(
             documentation_url: None,
             configuration: "none".into(),
             process_resident_after_deactivate: false,
+            available_for_new_usage: true,
+            restart_required: false,
         }],
         adapter_target_support: BTreeMap::from([(
             TEST_ADAPTER_ID.into(),

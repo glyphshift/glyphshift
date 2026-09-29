@@ -328,11 +328,21 @@ impl DesktopApplication {
             })
             .cloned();
         if let Some(workflow_id) = workflow_id {
+            let definition = self.workflow_detail(&workflow_id)?;
+            self.ensure_adapters_available_for_new_usage(definition.targets().iter().flat_map(
+                |target| {
+                    target
+                        .adapter_plan()
+                        .adapter_ids()
+                        .iter()
+                        .map(|adapter_id| adapter_id.as_ref())
+                },
+            ))?;
             self.prepare_workflow_collection(&workflow_id)?;
             let intent = self
                 .backend
                 .effective_workflow_intent(&workflow_id)
-                .map_err(|_| CommandError::new("software.launch_failed"))?;
+                .map_err(workflow_activation_command_error)?;
             let runtimes = self.runtimes.as_mut().ok_or_else(|| {
                 runtime_command_error(
                     self.runtime_bundle_error

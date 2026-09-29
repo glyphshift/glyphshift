@@ -139,6 +139,8 @@ export interface AdapterOption {
   documentationUrl: string | null
   configuration: 'none'
   processResidentAfterDeactivate: boolean
+  availableForNewUsage?: boolean
+  restartRequired?: boolean
 }
 
 export type ProbeRunStatus = 'ready' | 'running' | 'paused' | 'interrupted'

@@ -289,8 +289,17 @@ impl DesktopBackend {
             .keys()
             .filter(|workflow_id| {
                 backend.workflows.get(*workflow_id).is_none_or(|artifact| {
-                    backend.validate_workflow_activation(artifact).is_err()
-                        || backend.activation_conflict(artifact).is_some()
+                    let invalid_dependency = match backend.validate_workflow_activation(artifact) {
+                        Ok(()) => false,
+                        Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))) => {
+                            // A plugin can be intentionally disabled between launches. Keep the
+                            // user's saved activation intent so the desktop layer can report the
+                            // unavailable adapter without starting it.
+                            false
+                        }
+                        Err(_) => true,
+                    };
+                    invalid_dependency || backend.activation_conflict(artifact).is_some()
                 })
             })
             .cloned()

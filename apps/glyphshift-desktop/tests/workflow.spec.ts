@@ -127,6 +127,65 @@ test('workflow adapter catalog is one table with classification columns and sele
   await expect(checkedAdapterCheckboxes).toHaveCount(0)
 })
 
+test('disabled plugin adapter stays visible only while an existing workflow still references it', async ({ page }) => {
+  const snapshot = structuredClone(model)
+  Object.assign(snapshot.adapters[0], { availableForNewUsage: false, restartRequired: true })
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '设置软件' }).click()
+  const adapterTable = dialog.getByTestId('workflow-adapter-table')
+  const unavailableRow = adapterTable.locator('tbody > tr').filter({ hasText: '传统 Windows 文字（高级）' })
+
+  await expect(unavailableRow.getByText('不可用', { exact: true })).toBeVisible()
+  await expect(unavailableRow.getByText(/当前 App 不再允许新增使用/)).toBeVisible()
+  await expect(dialog.getByText('工作流引用了当前不可用的适配器', { exact: true })).toBeVisible()
+  const checkbox = unavailableRow.getByRole('checkbox', { name: '选择适配器 传统 Windows 文字（高级）' })
+  await expect(checkbox).toBeChecked()
+  await checkbox.click()
+
+  await expect(unavailableRow).toHaveCount(0)
+  await expect(dialog.getByText('工作流引用了当前不可用的适配器', { exact: true })).toHaveCount(0)
+})
+
+test('missing adapter reference remains removable after restart', async ({ page }) => {
+  const snapshot = structuredClone(model)
+  snapshot.adapters = snapshot.adapters.filter(adapter => adapter.id !== 'synthetic.ext-text-out')
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '编辑 默认创作工作流' }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '设置软件' }).click()
+  const adapterTable = dialog.getByTestId('workflow-adapter-table')
+  const missingRow = adapterTable.locator('tbody > tr').filter({ hasText: 'synthetic.ext-text-out' })
+
+  await expect(missingRow).toBeVisible()
+  await expect(missingRow.getByText('不可用', { exact: true })).toBeVisible()
+  await expect(missingRow).toContainText('当前启动没有加载它')
+  await expect(dialog.getByText('工作流引用了当前不可用的适配器', { exact: true })).toBeVisible()
+  const checkbox = missingRow.getByRole('checkbox', { name: '选择适配器 synthetic.ext-text-out' })
+  await expect(checkbox).toBeChecked()
+  await checkbox.click()
+  await expect(missingRow).toHaveCount(0)
+})
+
+test('new workflow does not offer adapters disabled by plugin selection', async ({ page }) => {
+  const snapshot = structuredClone(model)
+  Object.assign(snapshot.adapters[0], { availableForNewUsage: false, restartRequired: true })
+  await replaceModel(page, snapshot)
+
+  await page.getByRole('button', { name: '新建工作流' }).click()
+  const softwarePicker = page.getByRole('dialog', { name: '设置软件', exact: true })
+  await softwarePicker.getByRole('button', { name: /Vector Studio/ }).click()
+  await softwarePicker.getByRole('button', { name: '确认', exact: true }).click()
+  const dialog = workflowEditor(page)
+  await dialog.getByRole('tab', { name: '设置软件' }).click()
+
+  await expect(dialog.getByTestId('workflow-adapter-table').getByText('传统 Windows 文字（高级）', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByRole('checkbox', { name: /^选择适配器 /, checked: true })).toHaveCount(model.adapters.length - 1)
+})
+
 test('new workflow selects a searched font by clicking its visible row', async ({ page }) => {
   await page.getByRole('button', { name: '新建工作流' }).click()
   const softwarePicker = page.getByRole('dialog', { name: '设置软件', exact: true })

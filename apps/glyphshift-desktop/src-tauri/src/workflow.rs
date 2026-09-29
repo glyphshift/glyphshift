@@ -149,17 +149,49 @@ impl DesktopApplication {
         &mut self,
         create: WorkflowCreate,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        self.ensure_adapters_available_for_new_usage(create.targets().iter().flat_map(|target| {
+            target
+                .adapter_plan()
+                .adapter_ids()
+                .iter()
+                .map(|adapter_id| adapter_id.as_ref())
+        }))?;
         self.backend
             .create_workflow(create)
             .map_err(|_| CommandError::new("workflow.invalid_create"))?;
         Ok(self.snapshot())
     }
 
-    #[cfg(test)]
     pub(super) fn update_workflow(
         &mut self,
         edit: WorkflowEdit,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        let current = self.workflow_detail(edit.id())?;
+        let current_references = current
+            .targets()
+            .iter()
+            .flat_map(|target| {
+                target.adapter_plan().adapter_ids().iter().map(move |adapter_id| {
+                    (Box::<str>::from(target.software_id()), adapter_id.clone())
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let candidate_references = edit
+            .targets()
+            .iter()
+            .flat_map(|target| {
+                target.adapter_plan().adapter_ids().iter().map(move |adapter_id| {
+                    (Box::<str>::from(target.software_id()), adapter_id.clone())
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let added_adapters = candidate_references
+            .difference(&current_references)
+            .map(|(_, adapter_id)| adapter_id.clone())
+            .collect::<BTreeSet<_>>();
+        self.ensure_adapters_available_for_new_usage(
+            added_adapters.iter().map(|adapter_id| adapter_id.as_ref()),
+        )?;
         let workflow_id = self
             .backend
             .update_workflow(edit)
@@ -176,6 +208,14 @@ impl DesktopApplication {
         new_workflow_id: Box<str>,
         name: Box<str>,
     ) -> Result<DesktopProductSnapshot, CommandError> {
+        let source = self.workflow_detail(source_workflow_id)?;
+        self.ensure_adapters_available_for_new_usage(source.targets().iter().flat_map(|target| {
+            target
+                .adapter_plan()
+                .adapter_ids()
+                .iter()
+                .map(|adapter_id| adapter_id.as_ref())
+        }))?;
         self.backend
             .copy_workflow(source_workflow_id, new_workflow_id, name)
             .map_err(|_| CommandError::new("workflow.invalid_copy"))?;
@@ -239,14 +279,32 @@ impl DesktopApplication {
         {
             return Ok(());
         }
+        let definition = self.workflow_detail(workflow_id)?;
+        let unavailable = self.unavailable_adapters_for_new_usage(
+            definition.targets().iter().flat_map(|target| {
+                target
+                    .adapter_plan()
+                    .adapter_ids()
+                    .iter()
+                    .map(|adapter_id| adapter_id.as_ref())
+            }),
+        )?;
+        if !unavailable.is_empty() {
+            return Ok(());
+        }
         self.prepare_workflow_collection(workflow_id)?;
         let intent = match self.backend.effective_workflow_intent(workflow_id) {
             Ok(intent) => intent,
-            Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))) => {
-                self.backend
-                    .disable_workflow(workflow_id)
-                    .map_err(|_| CommandError::new("workflow.disable_failed"))?;
-                self.workflow_runtime_status.remove(workflow_id);
+            Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(adapter_id))) => {
+                self.workflow_runtime_status.insert(
+                    workflow_id.into(),
+                    unavailable_workflow_definition_runtime_view(
+                        &definition,
+                        CommandError::new("workflow.unknown_adapter")
+                            .with_arg("adapterId", adapter_id.to_string()),
+                        true,
+                    ),
+                );
                 return Ok(());
             }
             Err(error) => return Err(workflow_activation_command_error(error)),
@@ -310,10 +368,35 @@ impl DesktopApplication {
             } else {
                 previous.map_or(0, |runtime| runtime.retry_attempt)
             };
-            let intent = self
-                .backend
-                .effective_workflow_intent(&workflow_id)
-                .map_err(workflow_activation_command_error)?;
+            let definition = self.workflow_detail(&workflow_id)?;
+            let unavailable = self.unavailable_adapters_for_new_usage(
+                definition.targets().iter().flat_map(|target| {
+                    target
+                        .adapter_plan()
+                        .adapter_ids()
+                        .iter()
+                        .map(|adapter_id| adapter_id.as_ref())
+                }),
+            )?;
+            if !unavailable.is_empty() {
+                continue;
+            }
+            let intent = match self.backend.effective_workflow_intent(&workflow_id) {
+                Ok(intent) => intent,
+                Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(adapter_id))) => {
+                    self.workflow_runtime_status.insert(
+                        workflow_id.clone().into(),
+                        unavailable_workflow_definition_runtime_view(
+                            &definition,
+                            CommandError::new("workflow.unknown_adapter")
+                                .with_arg("adapterId", adapter_id.to_string()),
+                            true,
+                        ),
+                    );
+                    continue;
+                }
+                Err(error) => return Err(workflow_activation_command_error(error)),
+            };
             let mut runtime = self.runtimes.as_mut().map_or_else(
                 || unavailable_workflow_runtime_view(&intent, true),
                 |runtimes| runtimes.refresh_workflow(&intent),
@@ -438,6 +521,16 @@ impl DesktopApplication {
         workflow_id: &str,
         replace_conflicts: bool,
     ) -> Result<WorkflowCommandResult, CommandError> {
+        let definition = self.workflow_detail(workflow_id)?;
+        self.ensure_adapters_available_for_new_usage(definition.targets().iter().flat_map(
+            |target| {
+                target
+                    .adapter_plan()
+                    .adapter_ids()
+                    .iter()
+                    .map(|adapter_id| adapter_id.as_ref())
+            },
+        ))?;
         self.exiting = false;
         self.exit_ready = false;
         self.prepare_workflow_collection(workflow_id)?;
@@ -508,21 +601,31 @@ impl DesktopApplication {
         &mut self,
         workflow_id: &str,
     ) -> Result<WorkflowCommandResult, CommandError> {
-        let intent = self
-            .backend
-            .effective_workflow_intent(workflow_id)
-            .map_err(|_| CommandError::new("workflow.disable_invalid"))?;
-        self.backend
-            .disable_workflow(workflow_id)
-            .map_err(|_| CommandError::new("workflow.disable_failed"))?;
-        let runtime = self.runtimes.as_mut().map_or_else(
-            || idle_workflow_runtime_view(&intent, false),
-            |runtimes| runtimes.stop_workflow(&intent),
-        );
         let definition = self
             .backend
             .workflow(workflow_id)
             .map_err(|_| CommandError::new("workflow.invalid"))?;
+        let intent = match self.backend.effective_workflow_intent(workflow_id) {
+            Ok(intent) => Some(intent),
+            Err(BackendError::WorkflowRejected(ResolveError::UnknownAdapter(_))) => None,
+            Err(_) => return Err(CommandError::new("workflow.disable_invalid")),
+        };
+        self.backend
+            .disable_workflow(workflow_id)
+            .map_err(|_| CommandError::new("workflow.disable_failed"))?;
+        let runtime = intent.as_ref().map_or_else(
+            || unavailable_workflow_definition_runtime_view(
+                &definition,
+                CommandError::new("workflow.unknown_adapter"),
+                false,
+            ),
+            |intent| {
+                self.runtimes.as_mut().map_or_else(
+                    || idle_workflow_runtime_view(intent, false),
+                    |runtimes| runtimes.stop_workflow(intent),
+                )
+            },
+        );
         self.workflow_runtime_status
             .insert(workflow_id.into(), runtime.clone());
         self.update_workflow_collection_status(workflow_id, false)?;
@@ -781,6 +884,45 @@ fn unavailable_workflow_runtime_view(
     }
 }
 
+fn unavailable_workflow_definition_runtime_view(
+    definition: &WorkflowView,
+    error: CommandError,
+    enabling: bool,
+) -> WorkflowRuntimeView {
+    WorkflowRuntimeView {
+        lifecycle: None,
+        checked_at_ms: glyphshift_capture::unix_time_millis(),
+        revision: crate::workflow_lifecycle::next_revision(),
+        retry_attempt: 0,
+        retry_after_ms: 0,
+        workflow_id: definition.id().into(),
+        targets: definition
+            .targets()
+            .iter()
+            .map(|target| WorkflowTargetRuntimeView {
+                software_id: target.software_id().into(),
+                discovered: false,
+                active: false,
+                translation_requested: enabling && !target.dictionary_ids().is_empty(),
+                font_requested: enabling && target.font_policy().is_some(),
+                translation_active: false,
+                font_active: false,
+                applied_generation: None,
+            })
+            .collect(),
+        errors: if enabling {
+            definition
+                .targets()
+                .iter()
+                .map(|target| (Box::<str>::from(target.software_id()), error.clone()))
+                .collect()
+        } else {
+            BTreeMap::new()
+        },
+        warnings: BTreeMap::new(),
+    }
+}
+
 pub(super) fn idle_workflow_runtime_view(
     intent: &EffectiveWorkflowIntent,
     enabled: bool,
@@ -874,13 +1016,8 @@ pub(super) fn desktop_update_workflow(
         application
             .lock()
             .map_err(|_| workspace_unavailable())?
-            .backend
             .update_workflow(edit)
-            .map_err(workflow_update_error)
-    })?;
-    let mut application = application.lock().map_err(|_| workspace_unavailable())?;
-    application.reconcile_workflow_if_enabled(&id)?;
-    Ok(application.snapshot())
+    })
 }
 
 #[tauri::command]

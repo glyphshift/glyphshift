@@ -10,6 +10,7 @@ use glyphshift_dictionary_distribution::{
     InMemoryTrustVerifier, InstallRequest, PublisherIdentity, Sha256Digest, SignatureEnvelope,
 };
 use glyphshift_domain::{AdapterId, Feature};
+use glyphshift_workflow::ResolveError;
 use sha2::{Digest, Sha256};
 use std::fs;
 use tempfile::tempdir;
@@ -82,6 +83,59 @@ fn workflow_shortcut_survives_restart_and_is_not_copied() {
             .expect("workflow retained")
             .global_shortcut(),
         ""
+    );
+}
+
+#[test]
+fn missing_adapter_on_reopen_preserves_saved_workflow_activation() {
+    let root = tempdir().expect("product data");
+    let executable = root.path().join("SyntheticLifecycleHost.exe");
+    fs::write(&executable, b"synthetic executable").expect("synthetic executable");
+    let mut backend =
+        DesktopBackend::open_with_environment(root.path(), environment()).expect("backend");
+    let software_id = backend
+        .add_software(glyphshift_desktop_backend::ExecutableSelection::new(
+            &executable,
+        ))
+        .expect("software")
+        .selected_software_id()
+        .expect("selected")
+        .to_owned();
+    backend
+        .create_workflow(
+            WorkflowCreate::new("missing-adapter-reopen", "Missing adapter reopen")
+                .with_targets([WorkflowTargetCreate::new(
+                    software_id.as_ref(),
+                    ["adapter-gdi"],
+                    [] as [&str; 0],
+                )
+                .with_font_policy(WorkflowFontPolicy::new(
+                    ["Available Sans"],
+                    FontCoverage::AllObservations,
+                ))]),
+        )
+        .expect("workflow");
+    backend
+        .enable_workflow("missing-adapter-reopen")
+        .expect("enable workflow");
+    drop(backend);
+
+    let reopened = DesktopBackend::open_with_environment(
+        root.path(),
+        DesktopEnvironment::new([], ["Available Sans"]),
+    )
+    .expect("reopen without adapter");
+    assert_eq!(
+        reopened.enabled_workflow_ids(),
+        &[Box::<str>::from("missing-adapter-reopen")]
+    );
+    assert_eq!(
+        reopened
+            .workflow_runtime_spec("missing-adapter-reopen", &software_id)
+            .expect_err("missing adapter must remain unavailable"),
+        BackendError::WorkflowRejected(ResolveError::UnknownAdapter(Box::<str>::from(
+            "adapter-gdi",
+        )))
     );
 }
 
