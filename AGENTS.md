@@ -9,6 +9,11 @@
 
 ## Engine-level adaptation scope
 
+- Engine sources pinned in `adapter-sources.lock.json` are compatibility snapshots from their
+  independent `glyphshift/adapter-*` repositories. Edit the owning repository, then import a
+  reviewed Git archive with `scripts/sync-adapter-snapshots.py`; do not hand-edit both copies.
+  Raylib retains its existing `raylib/upstream.json` and dedicated import command.
+
 - Build reusable engine/framework adapters across applications and games. Individual games are validation samples, not implementation targets.
 - Do not hardcode game titles, scenario names, dialogue, installation paths, or game-specific addresses into production adapters. Detect and declare engine API, architecture, and version capabilities instead.
 - Validate shared contracts with synthetic fixtures and multiple independent engine projects. A successful single-game experiment does not establish general engine support.

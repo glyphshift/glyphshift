@@ -1,0 +1,28 @@
+name: Adapter contracts and GSP
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned targets
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup target add --toolchain 1.98.0 x86_64-pc-windows-msvc i686-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Rust targets failed.' }
+      - name: Build, test, inspect and package
+        shell: pwsh
+        run: ./scripts/build.ps1 -Profile Release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: adapter-release-candidate
+          path: local-test/evidence/packages/*
+          if-no-files-found: error
+          retention-days: 30

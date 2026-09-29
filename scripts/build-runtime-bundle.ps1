@@ -72,6 +72,10 @@ if (-not $IncludeOptionalAdapters) {
 }
 
 # Full engine bundles are development/package inputs, not the default App payload.
+& python -B (Join-Path $PSScriptRoot 'sync-raylib-snapshot.py') --check
+if ($LASTEXITCODE -ne 0) { throw 'Raylib compatibility snapshot differs from its source.' }
+& python -B (Join-Path $PSScriptRoot 'sync-adapter-snapshots.py') --check
+if ($LASTEXITCODE -ne 0) { throw 'Engine compatibility snapshots differ from their sources.' }
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
     'build',

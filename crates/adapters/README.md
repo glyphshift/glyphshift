@@ -15,7 +15,7 @@ crate types, and runtime discovery remain stable across the folder split.
 
 ## Implementations
 
-`implementations/` owns technology-specific descriptors and their deployable companions. Its second level is a
+`implementations/` contains technology-specific descriptors and their deployable companions. Its second level is a
 navigation aid based on how text is acquired; it does not introduce another runtime interface:
 
 - `native/` — Console, Direct2D, DirectWrite, Win32 DrawText/GDI, and GDI+ hooks.
@@ -32,3 +32,9 @@ implementations at runtime and must not add static dependencies on them.
 
 See [the local GSP pilot](../../docs/plugins.md) for package manifests, developer commands,
 explicit local trust, and version selection. Native plugin packages do not duplicate the shared Runtime.
+
+The shipping engine families now have independent source repositories. Entries pinned in
+`adapter-sources.lock.json` are compatibility snapshots for explicit full-bundle builds and
+product integration tests; edit the owning `glyphshift/adapter-*` repository and import a reviewed
+source archive. Raylib uses its existing dedicated lock/importer. See [SDK and source ownership](../../docs/adapter-sdk.md).
+The default App builds only the five Windows core adapters; archive-only UIA remains excluded.

@@ -7,7 +7,8 @@ TyranoScript、VGUI、CatSystem2。Qt 的四个 Adapter ID 放在一个包；Uni
 架构覆盖、原 Adapter ID 和实验标识保持不变，插件共享 App 的 Runtime，不复制 Controller/Runtime。
 分组以 [`adapter-distribution.json`](../scripts/adapter-distribution.json) 为准。
 
-这是分发边界拆分：除已有独立仓库的 Raylib 外，其他引擎源码暂时仍在主仓库构建。
+这 12 个包的引擎源码已分别迁到 `glyphshift/adapter-*` 独立仓库，用固定 SDK 独立构建。
+主仓保留带来源校验的兼容快照，用于完整 Bundle 构建与集成测试；维护与导入规则见 [SDK 与源码所有权](adapter-sdk.md)。
 未进入现有产品包的研究实现不会因拆包自动上线；UIA 与依赖它的 OCR Worker 继续归档。
 
 开发者构建：

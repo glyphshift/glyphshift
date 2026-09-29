@@ -10,6 +10,11 @@ $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 & python (Join-Path $PSScriptRoot 'sync-raylib-snapshot.py') --check
 if ($LASTEXITCODE -ne 0) { throw 'Raylib compatibility snapshot differs from its pinned source.' }
 
+& python -B (Join-Path $PSScriptRoot 'sync-adapter-snapshots.py') --check
+if ($LASTEXITCODE -ne 0) { throw 'Engine compatibility snapshots differ from their pinned sources.' }
+& python -B (Join-Path $PSScriptRoot 'test-adapter-snapshots.py')
+if ($LASTEXITCODE -ne 0) { throw 'Adapter source import contracts failed.' }
+
 & (Join-Path $PSScriptRoot 'test-runtime-bundle-kirikiri-packaging.ps1')
 
 # Native integration tests load real DLL and executable artifacts by filename.

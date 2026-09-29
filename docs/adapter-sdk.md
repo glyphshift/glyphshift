@@ -34,16 +34,45 @@ glyphshift-adapter-tool verify <package.gsp>
 工具可独立编译，不依赖桌面 Runtime。`metadata` 需要对应架构的工具与明确摘要认可，因为读取实际导出会执行
 DLL 加载初始化；`pack`/`verify` 不执行插件代码。具体包合同见 [plugins.md](plugins.md)。
 
-## Raylib 独立仓库
+## 引擎独立仓库
+
+除已有的 `adapter-raylib` 外，当前分发的引擎源码分别由 `glyphshift/adapter-gtk3`、`adapter-qt`、
+`adapter-sidefx`、`adapter-unity`、`adapter-monogame`、`adapter-renpy`、`adapter-web`、
+`adapter-rpgmaker-mv`、`adapter-tyranoscript`、`adapter-vgui`、`adapter-catsystem2` 拥有。
+一个框架仍是一个 GSP 包；Qt 与 Unity 的多个 Adapter ID 不拆成彼此依赖的小仓。
+所有仓库使用固定 SDK 0.1.0，常规构建入口是 `scripts/build.ps1 -Profile Release`，
+独立构建、运行支持架构的 Rust 合同、检查实际 Native DLL、打包并校验 GSP；没有相邻主仓 path 依赖。
+C++ 包的构建脚本使用 SDK C ABI 头文件；下载的第三方构建输入保留原来的摘要校验。
+实现目录内保留的原始技术说明可能引用主产品的 Runtime、桌面审阅或合成宿主脚本；
+这些产品集成入口仍归主仓，独立仓的可执行入口以根 README 与 `scripts/build.ps1` 为准。
+
+主仓 `adapter-sources.lock.json` 记录这 11 个仓库的固定提交、源归档摘要、SDK 摘要和兼容快照清单。
+主仓兼容目录用于显式完整 Bundle 与产品集成测试，默认 App 仍只包含五种基础 Windows Adapter。
+常规维护先改独立仓库，再导入已审阅的源码归档；主仓完整 Bundle 与活动测试入口会拒绝快照漂移。
+
+```text
+python scripts/sync-adapter-snapshots.py --check
+python scripts/sync-adapter-snapshots.py --archive <reviewed-git-archive.zip> --sha256 <approved-sha256> --revision <full-source-commit>
+```
+
+首次转移使用 `--initialize` 且要求实现字节不变；后续导入拒绝脏快照、文件映射改变和未经审阅的 SDK 升级。
+Cargo 的 SDK 相对依赖在导入时还原为主仓合同路径，其他实现源码不作手工转换。
+`scripts/extract-adapter-repositories.py` 与 `scripts/adapter-template/` 是首次迁移工具，不是独立仓库的运行依赖。
+新增源文件或 SDK 合同变化需要显式审阅清单，不会从任意归档自动扩张允许范围。
+
+各仓库 CI 上传构建候选，不自动发布软件 Release 或 Registry 版本。未进入产品分发的研究实现、
+需要外部 SDK 授权输入的 KiriKiri 及归档 UIA 不在这次 12 个独立引擎仓库的范围内。
+
+## Raylib 的既有源码锁
 
 `adapter-raylib` 拥有描述符与 Native DLL 实现、跨架构合同、构建/打包入口和 CI 定义。
 它通过 `sdk.lock.json` 固定 SDK 来源，展开的 `.sdk/` 是生成依赖缓存，不引用相邻主仓。
 源码 SDK 随独立仓库固定在 vendor 中；SDK Release 草稿不作为可匿名下载的依赖地址。第三方 Rust 依赖正常通过
 Cargo 锁文件取得，SDK 与构建工具都不进入最终 `.gsp`。
 
-主产品暂保留原路径下的 Raylib **内置兼容快照**，维持现有构建、默认能力与集成测试。
+主产品暂保留原路径下的 Raylib **兼容快照**，用于显式完整构建与集成测试。
 源码权威已经转移到独立仓库；此快照按 `raylib/upstream.json` 的源 commit 与摘要管理，不作为第二份手工实现维护。
-在独立包正式发布并具备默认安装政策前，不因拆仓突然删除用户已有的内置能力。
+默认 App 已按基础内置政策拆包；升级迁移及插件选择见 [插件分发说明](plugins.md)。
 
 ```text
 python scripts/sync-raylib-snapshot.py --check
