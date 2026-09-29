@@ -1,0 +1,28 @@
+{
+  "schema": "glyphshift.adapter-distribution/1",
+  "core": [
+    "windows.gdi.ext-text-out",
+    "windows.gdi.text-out",
+    "windows.user32.draw-text",
+    "windows.gdiplus.draw-string",
+    "windows.directwrite.text-layout"
+  ],
+  "packages": {
+    "glyphshift-adapter-gtk3": ["windows.gtk3.pango-render-layout"],
+    "glyphshift-adapter-qt": ["windows.qt.painter-draw-text", "windows.qt.translation-service", "windows.qt.text-document", "windows.qt.quick-text"],
+    "glyphshift-adapter-raylib": ["windows.raylib.draw-text-ex"],
+    "glyphshift-adapter-sidefx": ["windows.sidefx.cv-paint-buffer-text"],
+    "glyphshift-adapter-unity": ["windows.unity.mono.standard-ui", "windows.unity.il2cpp.standard-ui"],
+    "glyphshift-adapter-monogame": ["windows.monogame.sprite-batch-draw-string"],
+    "glyphshift-adapter-renpy": ["windows.renpy.message"],
+    "glyphshift-adapter-web": ["windows.electron.dom-text"],
+    "glyphshift-adapter-rpgmaker-mv": ["windows.rpgmaker-mv.message"],
+    "glyphshift-adapter-tyranoscript": ["windows.tyranoscript.message"],
+    "glyphshift-adapter-vgui": ["windows.vgui.localize-query"],
+    "glyphshift-adapter-catsystem2": ["windows.catsystem2.utf8-text"]
+  },
+  "optionalPackages": {
+    "glyphshift-adapter-kirikiri": ["experimental.kirikiri.kag-scenario"]
+  },
+  "coreBuildTargets": ["glyphshift-adapter-gdi-native", "glyphshift-adapter-gdi-text-out-native", "glyphshift-adapter-draw-text-native", "glyphshift-adapter-gdiplus-native", "glyphshift-adapter-directwrite-native"]
+}

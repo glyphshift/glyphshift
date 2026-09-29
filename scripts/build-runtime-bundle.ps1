@@ -11,6 +11,8 @@ param(
 
     [switch]$ResearchQt5,
 
+    [switch]$IncludeOptionalAdapters,
+
     [string]$KirikiriKagBridgeX86,
 
     [string]$KirikiriSdkLicensePath,
@@ -61,6 +63,15 @@ if ($includeKirikiriKag) {
     }
 }
 
+if (-not $IncludeOptionalAdapters) {
+    if ($ResearchQt5 -or $includeKirikiriKag) {
+        throw 'Engine research inputs require -IncludeOptionalAdapters.'
+    }
+    & (Join-Path $PSScriptRoot 'build-core-runtime.ps1') -Profile $Profile -OutputRoot $OutputRoot -CargoTargetDir $CargoTargetDir -IncludeTestTarget:$IncludeTestTarget
+    return
+}
+
+# Full engine bundles are development/package inputs, not the default App payload.
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 $cargoArguments = @(
     'build',

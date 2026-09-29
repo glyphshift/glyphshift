@@ -9,6 +9,8 @@ param(
 
     [switch]$ResearchQt5,
 
+    [switch]$IncludeOptionalAdapters,
+
     [string]$KirikiriKagBridgeX86,
 
     [string]$KirikiriSdkLicensePath,
@@ -91,6 +93,7 @@ $runtimeBundleArguments = @{
     OutputRoot = $runtimeRoot
     CargoTargetDir = $cargoTargetDir
     ResearchQt5 = $ResearchQt5
+    IncludeOptionalAdapters = $IncludeOptionalAdapters
 }
 if (-not [string]::IsNullOrWhiteSpace($KirikiriKagBridgeX86) -or
     -not [string]::IsNullOrWhiteSpace($KirikiriSdkLicensePath)) {

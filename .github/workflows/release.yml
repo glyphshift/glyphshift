@@ -113,6 +113,15 @@ jobs:
         shell: pwsh
         run: ./scripts/build-desktop-release.ps1
 
+      - name: Build independent adapter packages
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python -B scripts/test-adapter-distribution.py
+          if ($LASTEXITCODE -ne 0) { throw 'Adapter distribution contracts failed.' }
+          ./scripts/build-adapter-packages.ps1 -Version $env:PACKAGE_VERSION -OutputRoot local-test/evidence/release-adapters
+
       - name: Collect release assets
         shell: pwsh
         run: |
@@ -139,9 +148,22 @@ jobs:
           Copy-Item -LiteralPath $installer.FullName -Destination $assetRoot.FullName
           Copy-Item -LiteralPath $manifest -Destination $assetRoot.FullName
           Copy-Item -LiteralPath 'local-test/evidence/docs-release/docs.zip' -Destination $assetRoot.FullName
-          $docsChecksum = (Get-FileHash -LiteralPath (Join-Path $assetRoot.FullName 'docs.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
-          $checksum = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          @("$checksum  $($installer.Name)", "$docsChecksum  docs.zip") | Out-File -LiteralPath (Join-Path $assetRoot.FullName 'SHA256SUMS.txt') -Encoding ascii
+          $packageRoot = 'local-test/evidence/release-adapters'
+          $report = Get-Content -Raw (Join-Path $packageRoot 'adapter-packages.json') | ConvertFrom-Json
+          $catalog = Get-Content -Raw scripts/adapter-distribution.json | ConvertFrom-Json
+          if ($report.packages.Count -ne @($catalog.packages.PSObject.Properties).Count) { throw 'Incomplete adapter release.' }
+          foreach ($package in $report.packages) {
+            $source = Join-Path $packageRoot $package.file
+            if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $package.sha256) { throw 'Adapter checksum mismatch.' }
+            Copy-Item -LiteralPath $source -Destination $assetRoot.FullName
+          }
+          Copy-Item -LiteralPath (Join-Path $packageRoot 'adapter-packages.json') -Destination $assetRoot.FullName
+          . ./scripts/cargo-target.ps1
+          $targetRoot = Get-GlyphshiftCargoTargetDirectory -RepoRoot (Get-Location).Path
+          Copy-Item -LiteralPath (Join-Path $targetRoot 'release/glyphshift-plugin.exe') -Destination $assetRoot.FullName
+          Get-ChildItem -LiteralPath $assetRoot.FullName -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Out-File -LiteralPath (Join-Path $assetRoot.FullName 'SHA256SUMS.txt') -Encoding ascii
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -157,8 +179,10 @@ jobs:
             throw "Release '$tag' already exists; published release assets are not overwritten."
           }
           $assets = @(Get-ChildItem -LiteralPath 'release-assets' -File | ForEach-Object { $_.FullName })
-          if ($assets.Count -ne 4) {
-            throw "Expected four release assets, found $($assets.Count)."
+          $catalog = Get-Content -Raw scripts/adapter-distribution.json | ConvertFrom-Json
+          $expected = 6 + @($catalog.packages.PSObject.Properties).Count
+          if ($assets.Count -ne $expected) {
+            throw "Expected $expected release assets, found $($assets.Count)."
           }
           $notes = 'The Windows installer is currently unsigned. Windows SmartScreen may ask for confirmation before installation.'
           gh release create $tag @assets `

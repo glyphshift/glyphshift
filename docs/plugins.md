@@ -1,4 +1,34 @@
-# 适配器插件：本地 GSP 试点
+# 适配器插件：基础内置与引擎 GSP
+
+默认 App 构建只内置 DrawText、ExtTextOut、TextOut、GDI+、DirectWrite 五种 Windows 基础文字能力，
+同时带 x86/x64 Controller 和 Target Runtime。其余当前在完整 Runtime Bundle 分发的 16 个 Adapter ID
+改为 12 个独立包：GTK3、Qt、Raylib、SideFX、Unity、MonoGame、Ren'Py、Web/Chromium、RPGMaker MV、
+TyranoScript、VGUI、CatSystem2。Qt 的四个 Adapter ID 放在一个包；Unity 的 Mono/IL2CPP 放在一个包。
+架构覆盖、原 Adapter ID 和实验标识保持不变，插件共享 App 的 Runtime，不复制 Controller/Runtime。
+分组以 [`adapter-distribution.json`](../scripts/adapter-distribution.json) 为准。
+
+这是分发边界拆分：除已有独立仓库的 Raylib 外，其他引擎源码暂时仍在主仓库构建。
+未进入现有产品包的研究实现不会因拆包自动上线；UIA 与依赖它的 OCR Worker 继续归档。
+
+开发者构建：
+
+```powershell
+# 默认仅基础内置；发布安装包也使用此默认值。
+./scripts/build-runtime-bundle.ps1 -Profile Release
+# 一次产出基础 Runtime、12 个 GSP、校验和、体积报告，并实际安装/选择验证全部插件。
+./scripts/build-adapter-packages.ps1 -Version 0.1.0
+# 研究/回归需要完整内置集合时显式选择；桌面审阅仍只能用 review-app。
+./scripts/review-app.ps1 -IncludeOptionalAdapters -BuildOnly
+```
+
+构建产物只保存在忽略的本地证据目录。插件构建要求新的输出目录，完成全部校验后才整体生成结果。
+KiriKiri 仍需成对提供桥接 DLL 与已审核 SDK 许可证，显式启用后另外生成实验包；默认不包含。
+Release 工作流会附带 GSP、`adapter-packages.json`、`glyphshift-plugin.exe` 和覆盖全部资产的校验和；
+修改工作流不等于已发布新版本。
+
+已有工作流引用外置 Adapter ID 时，升级后须安装并选择对应插件，再重启 App；不会自动下载或执行插件。
+安装与选择分开，使用下文 CLI 和当前用户的数据根。`.gsp` 的 SHA-256 应先与可信发行校验和核对。
+同一 Adapter ID 由外置插件接管时不会与旧内置版本叠加，旧工作流无需改名。
 
 已提供 `.gsp` 包合同、开发者 CLI、本地不可变安装与桌面启动加载。独立 Registry 已实现审核发布证明，
 Rust 的[指定版本安装入口](registry-client.md)支持 HTTPS、固定公钥验签和原件复检。

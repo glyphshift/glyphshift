@@ -243,6 +243,16 @@ _Avoid_: Author、Vendor display name
 
 ## 应用
 
+**基础内置适配器（Core Adapters）**：
+随 App Runtime Bundle 分发的 Windows 基础文字能力：DrawText、ExtTextOut、TextOut、GDI+、DirectWrite。
+基础包包含 x86/x64 Controller 和 Target Runtime，供内置适配器与外置插件共同使用。
+
+**引擎插件包（Engine Adapter Package）**：
+按引擎或框架组织的 `.gsp` 分发单元。一个包可包含多个 Adapter ID 和多个架构 DLL，
+例如 Qt 包包含 Painter、Translation、TextDocument、Quick。包不携带 Controller 或 Target Runtime；
+DLL 数量不等于插件数量。独立分发不等于源码已迁入独立仓库，也不提高实验能力的成熟度。
+_Avoid_: 一个 DLL 必须一个包、每个插件自带 Runtime、拆包即正式支持
+
 **App Settings**：
 当前设备上的 Glyphshift 偏好，包括界面、快捷键、启动、关闭和权限。用户资产不属于 App Settings。
 _Avoid_: AI Profile、Workflow、Software、Dictionary
