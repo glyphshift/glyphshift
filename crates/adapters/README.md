@@ -15,17 +15,13 @@ crate types, and runtime discovery remain stable across the folder split.
 
 ## Implementations
 
-`implementations/` contains technology-specific descriptors and their deployable companions. Its second level is a
-navigation aid based on how text is acquired; it does not introduce another runtime interface:
+Public Core keeps only the five first-party Windows text implementations required by the base application:
+Win32 DrawText/GDI TextOut/ExtTextOut, GDI+, and DirectWrite. Their descriptor/native companions live under
+`implementations/native/` together with the shared GDI native support they require.
 
-- `native/` — Console, Direct2D, DirectWrite, Win32 DrawText/GDI, and GDI+ hooks.
-- `framework/` — GTK3/Pango, Qt Painter, Qt Quick retained labels, raylib, and MonoGame hooks.
-- `accessibility/` — UI Automation descriptor and isolated Worker.
-- `fallback/` — OCR descriptor and isolated Worker.
-
-Descriptor, Native DLL, shared native support, and isolated Worker crates stay separate when they own distinct test,
-ABI, or process seams. Companions for one technology remain adjacent inside the same group. Empty future categories
-are not created before a concrete Adapter exists.
+Official framework, engine, accessibility, OCR, Console, and Direct2D implementations are maintained outside this
+public repository and are distributed as GSP plugins. Public Core intentionally does not vendor source snapshots of
+those implementations.
 
 Adapters are organized by text technology, not by software brand. Product orchestration discovers concrete
 implementations at runtime and must not add static dependencies on them.
@@ -33,8 +29,7 @@ implementations at runtime and must not add static dependencies on them.
 See [the local GSP pilot](../../docs/plugins.md) for package manifests, developer commands,
 explicit local trust, and version selection. Native plugin packages do not duplicate the shared Runtime.
 
-The shipping engine families now have independent source repositories. Entries pinned in
-`adapter-sources.lock.json` are compatibility snapshots for explicit full-bundle builds and
-product integration tests; edit the owning `glyphshift/adapter-*` repository and import a reviewed
-source archive. Raylib uses its existing dedicated lock/importer. See [SDK and source ownership](../../docs/adapter-sdk.md).
-The default App builds only the five Windows core adapters; archive-only UIA remains excluded.
+Official Adapter repositories consume the same public SDK/ABI and produce versioned GSP artifacts. Product integration
+tests must consume those artifacts through the plugin contract instead of importing sibling source trees. See
+[SDK and source ownership](../../docs/adapter-sdk.md). The App build in this repository always contains only the five
+Windows Core adapters.

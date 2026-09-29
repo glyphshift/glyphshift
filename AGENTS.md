@@ -17,28 +17,27 @@
   not individual game. Full bundled engine builds are explicit research/integration tools only;
   they must not become the default desktop or installer distribution.
 
-- Engine sources pinned in `adapter-sources.lock.json` are compatibility snapshots from their
-  independent `glyphshift/adapter-*` repositories. Edit the owning repository, then import a
-  reviewed Git archive with `scripts/sync-adapter-snapshots.py`; do not hand-edit both copies.
-  Raylib retains its existing `raylib/upstream.json` and dedicated import command.
+- Official engine/framework, Console, Direct2D, UIA, and OCR Adapter implementations are owned by
+  private `glyphshift/adapter-*` repositories and must not be vendored or source-snapshotted into
+  this Public Core repository. Integrate them only through versioned GSP/Release/Registry artifacts
+  and the public SDK/ABI contracts. Public Core CI rejects tracked private Adapter source paths.
 
 - Build reusable engine/framework adapters across applications and games. Individual games are validation samples, not implementation targets.
 - Do not hardcode game titles, scenario names, dialogue, installation paths, or game-specific addresses into production adapters. Detect and declare engine API, architecture, and version capabilities instead.
 - Validate shared contracts with synthetic fixtures and multiple independent engine projects. A successful single-game experiment does not establish general engine support.
 
-## Archive-only UIA boundary
+## Private Adapter boundary
 
-- UIA source is repository archive only. Do not build, test, run, launch, package, validate, or
-  otherwise schedule work for `glyphshift-adapter-uia`, `glyphshift-adapter-uia-worker`, or the OCR
-  worker that depends on them unless the current user request explicitly authorizes archive UIA work.
-- Every archived UIA test must use the `archive_uia_` name prefix and Rust's
-  `#[ignore = "archive-only UIA…"]`. The only manual entry point requires an explicit
-  `-ArchiveUia` switch and runs the `archive_uia_ -- --ignored` filter.
-- Never use raw `cargo test --workspace`, `cargo clippy --workspace`, or another workspace-wide Cargo
-  command. Use the repository's explicit active-package validation entry points, which must exclude
-  archive-only packages.
-- UIA cannot change target text and must not be reintroduced into Runtime Bundle, product catalogs,
-  probes, workflows, release gates, or real-software validation.
+- UIA, OCR, Console, standalone Direct2D, and official engine/framework implementations live only in
+  private `glyphshift/adapter-*` repositories. Do not restore their source, reverse-engineering notes,
+  real-engine fixtures, or source-sync tooling to Public Core.
+- Public Core may expose package IDs, compatibility metadata, market UI, SDK/ABI contracts, signature
+  verification, installation, selection, and lifecycle code. It must consume paid official Adapters as
+  versioned GSP/Release/Registry artifacts.
+- Run `python -B scripts/check-public-core-boundary.py` before commits that touch Adapter boundaries.
+  Release CI and architecture checks run the same gate.
+- Keep repository tests scoped to Public Core packages and synthetic reference fixtures. Integration
+  tests requiring a paid Adapter belong with that private Adapter or the private integration-fixture repo.
 
 ## Build cache and local organization
 

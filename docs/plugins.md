@@ -10,32 +10,29 @@ TyranoScript、VGUI、CatSystem2。Qt 的四个 Adapter ID 放在一个包；Uni
 基础版的长期边界是常规 Windows 文字接口与共享运行组件。Qt、Houdini 使用的 SideFX 技术栈、
 Unity 及其他游戏引擎均按需安装插件，即使其 Adapter ID 以 `windows.` 开头也不并入基础版。
 Unreal Engine（UE）目前没有可分发的适配器实现，未来实现时同样提供独立引擎插件；不按单个游戏拆包。
-完整内置引擎集合仅用于显式研究与集成验证，不作为默认 App 或安装包。
+Public Core 不再提供完整内置引擎集合；跨仓集成验证使用各 Adapter 仓生成的版本化 GSP 制品。
 
 安装包构建在交给 Tauri 打包前运行 `scripts/verify-base-runtime.py`：两个架构各自必须恰好包含
 五项基础 Adapter，目录只允许清单引用的 Controller、Target Runtime 和基础 DLL，且摘要全部一致。
 未引用的引擎 DLL、GSP、测试程序、插件子目录或 Worker 都会阻止发布构建，防止旧文件混入基础版。
 这项分发检查不执行 DLL；原生兼容性仍由 Runtime Bundle 生产加载器验证。
 
-这 12 个包的引擎源码已分别迁到 `glyphshift/adapter-*` 独立仓库，用固定 SDK 独立构建。
-主仓保留带来源校验的兼容快照，用于完整 Bundle 构建与集成测试；维护与导入规则见 [SDK 与源码所有权](adapter-sdk.md)。
-未进入现有产品包的研究实现不会因拆包自动上线；UIA 与依赖它的 OCR Worker 继续归档。
+官方扩展 Adapter 的源码由独立的私有 `glyphshift/adapter-*` 仓库拥有，用固定公共 SDK 独立构建 GSP。
+Public Core 不保存这些 Adapter 的源码快照、真实引擎夹具或完整 Bundle 构建入口；维护边界见
+[SDK 与源码所有权](adapter-sdk.md)。第三方仍可使用公开 SDK/ABI 和 reference adapter 开发自己的 GSP。
 
 开发者构建：
 
 ```powershell
-# 默认仅基础内置；发布安装包也使用此默认值。
+# Public Core 与发布安装包都只构建五个基础 Adapter。
 ./scripts/build-runtime-bundle.ps1 -Profile Release
-# 一次产出基础 Runtime、12 个 GSP、校验和、体积报告，并实际安装/选择验证全部插件。
-./scripts/build-adapter-packages.ps1 -Version 0.1.0
-# 研究/回归需要完整内置集合时显式选择；桌面审阅仍只能用 review-app。
-./scripts/review-app.ps1 -IncludeOptionalAdapters -BuildOnly
+# 桌面审阅同样只使用 Public Core Runtime。
+./scripts/review-app.ps1 -BuildOnly
 ```
 
-构建产物只保存在忽略的本地证据目录。插件构建要求新的输出目录，完成全部校验后才整体生成结果。
-KiriKiri 仍需成对提供桥接 DLL 与已审核 SDK 许可证，显式启用后另外生成实验包；默认不包含。
-Release 工作流会附带 GSP、`adapter-packages.json`、`glyphshift-plugin.exe` 和覆盖全部资产的校验和；
-修改工作流不等于已发布新版本。
+构建产物只保存在忽略的本地证据目录。官方扩展 Adapter 的构建、测试和候选 GSP 由对应私有仓负责；
+Public Core Release 不再附带官方扩展 GSP，只发布基础应用、文档、插件 CLI 与校验和。在线市场后续按账户
+entitlement 决定官方 GSP 的下载授权。
 
 已有工作流引用外置 Adapter ID 时，升级后须安装并选择对应插件，再重启 App；不会自动下载或执行插件。
 安装与选择分开，可使用 App 的「设置 → 插件管理」或下文 CLI。两者共享当前用户数据根中的插件库。
@@ -45,7 +42,7 @@ Release 工作流会附带 GSP、`adapter-packages.json`、`glyphshift-plugin.ex
 已提供 `.gsp` 包合同、开发者 CLI、本地不可变安装与桌面启动加载。独立 Registry 已实现审核发布证明，
 Rust 的[指定版本安装入口](registry-client.md)支持 HTTPS、固定公钥验签和原件复检。
 本地插件管理界面已提供；双击关联、自动下载、热切换或物理卸载尚未提供，生产 Registry 尚未部署。
-独立 SDK 源码包和 Raylib 组织仓库已建立，构建与快照边界见 [adapter-sdk.md](adapter-sdk.md)；Release 处于草稿准备阶段。
+独立 SDK 合同和官方 Adapter 仓边界见 [adapter-sdk.md](adapter-sdk.md)；Release 处于草稿准备阶段。
 术语以 [CONTEXT.md](../CONTEXT.md#适配器插件) 为准。当前包不是面向普通用户的线上发行流程。
 Registry 的无执行静态验收入口见 [资源发布检查](resource-publication.md)。
 
@@ -154,11 +151,10 @@ glyphshift-plugin pack <manifest.json> <source-directory> <output.gsp>
 ```powershell
 . ./scripts/cargo-target.ps1
 $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot (Get-Location).Path
-cargo build -p glyphshift-adapter-raylib-native
 cargo test -p glyphshift-plugin-package
 cargo test -p glyphshift-desktop-runtime --lib --test plugin_bundle_contract
 ```
 
 合同覆盖多适配器/多架构、路径与链接拒绝、摘要/ABI/架构错误、外部摘要认可、不可变版本、并发写入、
-失败回退与真实 DLL 描述检查。合成的 Controller/Runtime 仅用于加载组合测试，不证明真实 Raylib 应用兼容性；
-引擎兼容矩阵仍按现有适配器验证计划推进。
+失败回退与真实 DLL 描述检查。合成的 Controller/Runtime 仅用于加载组合测试，不证明任何商业 Adapter 的
+真实软件兼容性；官方付费 Adapter 的构建与兼容性验证在对应私有仓完成，Public Core 只消费发布后的 GSP。
