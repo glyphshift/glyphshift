@@ -2,7 +2,7 @@
 
 **Translate Windows applications and games with your own dictionaries, with optional AI help.**
 
-[Download](https://www.yuelili.com/apps/glyphshift) · [Online guide (Chinese)](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [简体中文](README.md)
+[Download](https://www.yuelili.com/apps/glyphshift) · [Online guide (Chinese)](https://glyphshift.yuelili.com/docs/) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [简体中文](README.md)
 
 Glyphshift reads text while an application is running, looks up translations in a dictionary, and passes them back to the application for display. Collect text, edit translations, and configure fonts in one workflow, without changing the application's installed files.
 
@@ -88,9 +88,9 @@ If translation does not work, check that the target is open and both application
 
 ## Documentation and releases
 
-Read the [online guide](https://docs.yuelili.com/glyphshift) or browse [docs/index.md](docs/index.md) in the repository. The user guide is currently maintained in Simplified Chinese.
+Read the [online guide](https://glyphshift.yuelili.com/docs/) or browse [docs/index.md](docs/index.md) in the repository. The user guide is currently maintained in Simplified Chinese.
 
-The [Release Action](.github/workflows/release.yml) runs when a `vMAJOR.MINOR.PATCH` tag is pushed. It checks application versions, builds the Windows installer, and packages `docs/` from the same checkout into `docs.zip`. Release assets include the installer, candidate manifest, documentation archive, and SHA-256 checksums.
+The [Release Action](.github/workflows/release.yml) runs when a `vMAJOR.MINOR.PATCH` tag is pushed. It checks application versions, builds the Windows installer, and packages the independent Docs commit pinned in `docs-source.lock.json` into `docs.zip`. Release assets include the installer, candidate manifest, documentation archive, and SHA-256 checksums.
 
 The documentation site can subscribe to the Release's `docs.zip` attachment. The Action packages and uploads the archive; site synchronization requires a separate binding. See [documentation publishing](scripts/docs-publishing.md) for setup and maintenance.
 

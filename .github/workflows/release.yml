@@ -82,9 +82,27 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Read pinned documentation revision
+        id: docs
+        shell: pwsh
+        run: |
+          $source = Get-Content -Raw docs-source.lock.json | ConvertFrom-Json
+          if ($source.schema -ne 'glyphshift.docs-source/1' -or $source.repository -ne 'glyphshift/docs' -or $source.contentDirectory -ne 'content' -or $source.commit -notmatch '^[0-9a-f]{40}$') {
+            throw 'Invalid documentation source lock.'
+          }
+          "commit=$($source.commit)" >> $env:GITHUB_OUTPUT
+
+      - name: Check out pinned user documentation
+        uses: actions/checkout@v6
+        with:
+          repository: glyphshift/docs
+          ref: ${{ steps.docs.outputs.commit }}
+          path: local-test/docs-source
+          persist-credentials: false
+
       - name: Package documentation
         shell: pwsh
-        run: python scripts/yueli_docs_publish.py pack docs --output local-test/evidence/docs-release/docs.zip
+        run: python scripts/yueli_docs_publish.py pack local-test/docs-source/content --output local-test/evidence/docs-release/docs.zip
 
       - name: Install desktop dependencies
         working-directory: apps/glyphshift-desktop

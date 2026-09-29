@@ -1,18 +1,7 @@
----
-id: home
-title: Glyphshift 使用文档
-order: 0
----
-
 # Glyphshift 使用文档
 
-Glyphshift 在软件运行时抓取界面文字，用字典里的译文替换，不修改软件安装文件。
+正文已迁入独立 [glyphshift/docs](https://github.com/glyphshift/docs/blob/main/content/zh/index.md) 仓库，后续修改在那里维护。
 
-第一次用，先看[快速开始](getting-started.md)。
+[打开在线文档](https://glyphshift.yuelili.com/docs/)
 
-- [工作流](workflows.md)：选软件、收集文字、开始和停止运行。
-- [字典](dictionaries.md)：保存译文、调整优先级、导入和导出。
-- [翻译配置与自动翻译](ai-translation.md)：接入大模型或 Microsoft Translator，补全没翻译的内容。
-- [常见问题](faq.md)：抓不到文字、刷新没变化、连接失败怎么办。
-
-目前面向 Windows 软件和游戏。能不能翻译，取决于目标软件用什么方式显示文字，需要实际试一下。
+实现相关说明继续留在本仓：[适配器插件](plugins.md)、[SDK](adapter-sdk.md)、[资源检查](resource-publication.md)、[Registry 客户端](registry-client.md)和[桌面在线字典](desktop-registry.md)。

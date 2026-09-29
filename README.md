@@ -2,7 +2,7 @@
 
 **给 Windows 软件和游戏翻译界面，用自己的字典，也可以让 AI 帮忙。**
 
-[下载软件](https://www.yuelili.com/apps/glyphshift) · [在线文档](https://docs.yuelili.com/glyphshift) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [English](README.en.md)
+[下载软件](https://www.yuelili.com/apps/glyphshift) · [在线文档](https://glyphshift.yuelili.com/docs/) · [GitHub Releases](https://github.com/glyphshift/glyphshift/releases) · [English](README.en.md)
 
 Glyphshift 在目标软件运行时读取文字，查找字典，再把译文交给目标软件显示。收集原文、填写译文、调整字体都在同一个工作流里完成，不需要修改目标软件的安装文件。
 
@@ -94,9 +94,9 @@ Glyphshift 自身支持简体中文和 English，提供深色、浅色和跟随�
 
 ## 文档与发布
 
-日常使用看[在线文档](https://docs.yuelili.com/glyphshift)，仓库内的文档入口是 [docs/index.md](docs/index.md)。
+日常使用看[在线文档](https://glyphshift.yuelili.com/docs/)，仓库内的文档入口是 [docs/index.md](docs/index.md)。
 
-项目已配置 [Release Action](.github/workflows/release.yml)：推送 `vMAJOR.MINOR.PATCH` 标签后，校验应用版本、构建 Windows 安装包，并把同一份代码中的 `docs/` 打包成 `docs.zip`。Release 附件包括安装包、候选清单、文档包和 SHA-256 校验文件。
+项目已配置 [Release Action](.github/workflows/release.yml)：推送 `vMAJOR.MINOR.PATCH` 标签后，校验应用版本、构建 Windows 安装包，并按 `docs-source.lock.json` 固定的独立 Docs 提交打包 `docs.zip`。Release 附件包括安装包、候选清单、文档包和 SHA-256 校验文件。
 
 文档站可以绑定 Release 的 `docs.zip` 自动同步；Action 本身负责打包和上传附件。维护和绑定步骤见[文档发布说明](scripts/docs-publishing.md)。
 
