@@ -30,9 +30,6 @@ try {
         $outputRoot = Join-Path $targetRoot "$target/$($Profile.ToLowerInvariant())"
         foreach ($entry in @($entries | Where-Object { $_.build_script })) {
             $arguments = @{ OutputRoot=$outputRoot }
-            if ($entry.build_script -eq 'build-monogame-native.ps1') {
-                $arguments.Architecture = if ($architecture -eq 'x86') { 'x86' } else { 'x64' }
-            }
             & (Join-Path $PSScriptRoot $entry.build_script) @arguments
         }
         & cargo build --locked --manifest-path .sdk/Cargo.toml -p glyphshift-adapter-devkit --target $target @profileArguments

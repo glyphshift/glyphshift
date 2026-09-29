@@ -126,8 +126,7 @@ $env:GLYPHSHIFT_RUNTIME_ROOT = $runtimeBundleRoot
 Write-Output 'Verifying the desktop Runtime against isolated target processes...'
 $targetRuntimeContracts = @(
     'trh_001_runs_a_real_native_adapter_from_publication_through_update_and_stop',
-    'trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog',
-    'trh_003_keeps_a_compatible_adapter_active_when_a_peer_is_unavailable'
+    'trh_002_capture_observes_real_adapter_text_and_writes_provenance_catalog'
 )
 foreach ($targetRuntimeContract in $targetRuntimeContracts) {
     & cargo test `

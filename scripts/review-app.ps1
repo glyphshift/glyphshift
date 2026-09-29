@@ -7,14 +7,6 @@ param(
 
     [switch]$UseUserData,
 
-    [switch]$ResearchQt5,
-
-    [switch]$IncludeOptionalAdapters,
-
-    [string]$KirikiriKagBridgeX86,
-
-    [string]$KirikiriSdkLicensePath,
-
     [switch]$BuildOnly
 )
 
@@ -92,13 +84,6 @@ $runtimeBundleArguments = @{
     Profile = $Profile
     OutputRoot = $runtimeRoot
     CargoTargetDir = $cargoTargetDir
-    ResearchQt5 = $ResearchQt5
-    IncludeOptionalAdapters = $IncludeOptionalAdapters
-}
-if (-not [string]::IsNullOrWhiteSpace($KirikiriKagBridgeX86) -or
-    -not [string]::IsNullOrWhiteSpace($KirikiriSdkLicensePath)) {
-    $runtimeBundleArguments.KirikiriKagBridgeX86 = $KirikiriKagBridgeX86
-    $runtimeBundleArguments.KirikiriSdkLicensePath = $KirikiriSdkLicensePath
 }
 & (Join-Path $PSScriptRoot 'build-runtime-bundle.ps1') @runtimeBundleArguments
 

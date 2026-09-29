@@ -58,7 +58,7 @@ def export(root: Path, revision: str, output: Path) -> dict:
         "Contains Domain, SDK, Native ABI headers, native inspection, GSP packaging, and the reviewed retour patch.\n"
         "Build glyphshift-adapter-tool for each target architecture to inspect locally built DLLs.\n"
         "Use Cargo.lock and --locked. Native metadata inspection requires explicit digest approval.\n"
-        "No desktop/controller/target Runtime or archived UIA implementation is included.\n"
+        "No desktop/controller/target Runtime or official paid Adapter implementation is included.\n"
         "Third-party retour source retains its BSD license; Glyphshift source uses the included LICENSE.\n").encode()
     output.parent.mkdir(parents=True, exist_ok=True)
     # Resolve only this allowlisted graph, seeded with the committed lockfile.

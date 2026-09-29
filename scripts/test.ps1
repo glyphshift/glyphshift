@@ -7,37 +7,21 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot $repoRoot
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
 
+& python -B (Join-Path $PSScriptRoot 'check-public-core-boundary.py')
+if ($LASTEXITCODE -ne 0) { throw 'Public Core source boundary check failed.' }
+
 & python -B (Join-Path $PSScriptRoot 'test-base-runtime.py')
 if ($LASTEXITCODE -ne 0) { throw 'Base Runtime distribution contracts failed.' }
 
-& python (Join-Path $PSScriptRoot 'sync-raylib-snapshot.py') --check
-if ($LASTEXITCODE -ne 0) { throw 'Raylib compatibility snapshot differs from its pinned source.' }
-
-& python -B (Join-Path $PSScriptRoot 'sync-adapter-snapshots.py') --check
-if ($LASTEXITCODE -ne 0) { throw 'Engine compatibility snapshots differ from their pinned sources.' }
-& python -B (Join-Path $PSScriptRoot 'test-adapter-snapshots.py')
-if ($LASTEXITCODE -ne 0) { throw 'Adapter source import contracts failed.' }
-
-& (Join-Path $PSScriptRoot 'test-runtime-bundle-kirikiri-packaging.ps1')
-
-# Native integration tests load real DLL and executable artifacts by filename.
-# `cargo test --workspace` does not guarantee that those artifacts are emitted first.
+# Native integration tests load these artifacts by filename, so emit the public
+# Core DLLs and synthetic test fixtures before enumerating package tests.
 & cargo build `
     --manifest-path $manifestPath `
-    -p glyphshift-adapter-direct2d-native `
     -p glyphshift-adapter-directwrite-native `
     -p glyphshift-adapter-draw-text-native `
     -p glyphshift-adapter-gdi-native `
     -p glyphshift-adapter-gdi-text-out-native `
     -p glyphshift-adapter-gdiplus-native `
-    -p glyphshift-adapter-gtk3-pango-native `
-    -p glyphshift-adapter-qt-painter-native `
-    -p glyphshift-adapter-qt-translation-native `
-    -p glyphshift-adapter-qt-text-document-native `
-    -p glyphshift-adapter-qt-quick-native `
-    -p glyphshift-adapter-raylib-native `
-    -p glyphshift-adapter-sidefx-cv-paint-buffer-native `
-    -p glyphshift-adapter-unity-mono-standard-ui-native `
     -p glyphshift-target-runtime `
     -p glyphshift-test-native-adapter `
     -p glyphshift-test-controller-plugin `
@@ -45,29 +29,19 @@ if ($LASTEXITCODE -ne 0) { throw 'Adapter source import contracts failed.' }
     -p glyphshift-test-acquisition-worker `
     -p glyphshift-windows-runtime-target
 if ($LASTEXITCODE -ne 0) {
-    throw "native Adapter package build failed with exit code $LASTEXITCODE"
+    throw "Public Core native package build failed with exit code $LASTEXITCODE"
 }
 
-# Enumerate active packages explicitly; archived UIA and its dependants never enter a test build.
-$excludedPackages = [System.Collections.Generic.HashSet[string]]::new()
-@('glyphshift-adapter-console', 'glyphshift-adapter-console-native', 'glyphshift-adapter-ocr',
-  'glyphshift-adapter-uia', 'glyphshift-adapter-uia-worker', 'glyphshift-adapter-ocr-worker') |
-    ForEach-Object { $null = $excludedPackages.Add($_) }
+# Keep the repository rule of enumerating active packages instead of invoking a
+# raw `cargo test --workspace`.
 $metadata = (& cargo metadata --manifest-path $manifestPath --format-version 1 --no-deps | ConvertFrom-Json)
-if ($LASTEXITCODE -ne 0) { throw 'Cannot read active package metadata.' }
-do {
-    $changed = $false
-    foreach ($package in $metadata.packages) {
-        if (@($package.dependencies | Where-Object { $excludedPackages.Contains($_.name) }).Count -gt 0) {
-            $changed = $excludedPackages.Add($package.name) -or $changed
-        }
-    }
-} while ($changed)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read Public Core package metadata.' }
 $testArguments = @('test', '--no-fail-fast', '--manifest-path', $manifestPath)
 foreach ($package in $metadata.packages) {
-    if ($metadata.workspace_members -contains $package.id -and -not $excludedPackages.Contains($package.name)) {
+    if ($metadata.workspace_members -contains $package.id) {
         $testArguments += @('-p', $package.name)
     }
 }
 & cargo @testArguments
-if ($LASTEXITCODE -ne 0) { throw "active package tests failed with exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) { throw "Public Core package tests failed with exit code $LASTEXITCODE" }
+
