@@ -1,0 +1,31 @@
+[package]
+name = "glyphshift-registry-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "glyphshift-registry"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22.1"
+ed25519-dalek = "=2.2.0"
+glyphshift-dictionary-distribution = { path = "../../dictionary/distribution" }
+glyphshift-dictionary-package = { path = "../../dictionary/package" }
+glyphshift-resource-inspector = { path = "../../dictionary/inspector" }
+glyphshift-plugin-package = { path = "../../adapters/platform/package" }
+reqwest = { version = "=0.13.4", default-features = false, features = ["blocking", "native-tls", "system-proxy"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2.5"
+
+[dev-dependencies]
+glyphshift-adapter-native-host = { path = "../../adapters/platform/native-host" }
+tempfile = "3"
+
+[lints]
+workspace = true

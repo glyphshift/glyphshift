@@ -1,0 +1,59 @@
+name: Registry client contracts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/product/registry-client/**'
+      - 'crates/dictionary/**'
+      - 'crates/adapters/platform/package/**'
+      - 'scripts/*registry-client*'
+      - '.github/workflows/registry-client.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read pinned Registry fixture revision
+        id: registry
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw crates/product/registry-client/registry.lock.json | ConvertFrom-Json
+          if ($lock.commit -notmatch '^[0-9a-f]{40}$') { throw 'Invalid Registry fixture revision.' }
+          "commit=$($lock.commit)" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+        with:
+          repository: glyphshift/registry
+          ref: ${{ steps.registry.outputs.commit }}
+          path: local-test/providers/registry
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: local-test/providers/registry/go.mod
+          cache-dependency-path: local-test/providers/registry/go.sum
+      - name: Build pinned Go Registry fixture
+        shell: pwsh
+        working-directory: local-test/providers/registry
+        run: |
+          go build -trimpath -o registry-local.exe ./cmd/registry-local
+          if ($LASTEXITCODE -ne 0) { throw 'Registry fixture build failed.' }
+      - name: Install stable Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup default stable
+      - name: Validate Rust contracts and Go HTTPS installation
+        shell: pwsh
+        run: ./scripts/test-registry-client.ps1 -RegistryExecutable (Resolve-Path local-test/providers/registry/registry-local.exe).Path

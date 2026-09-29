@@ -55,6 +55,7 @@ members = [
     "crates/core/capture",
     "crates/core/decision",
     "crates/product/desktop-backend",
+    "crates/product/registry-client",
     "crates/runtime/desktop",
     "crates/dictionary/distribution",
     "crates/dictionary/package",

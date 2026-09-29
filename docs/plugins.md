@@ -1,7 +1,8 @@
 # 适配器插件：本地 GSP 试点
 
-第一阶段已提供 `.gsp` 包合同、开发者 CLI、本地不可变安装与桌面启动加载。尚未提供在线 Registry、
-发布者签名验证、插件管理界面、双击关联、自动下载、热切换或物理卸载。
+已提供 `.gsp` 包合同、开发者 CLI、本地不可变安装与桌面启动加载。独立 Registry 已实现审核发布证明，
+Rust 的[指定版本安装入口](registry-client.md)支持 HTTPS、固定公钥验签和原件复检。
+插件管理界面、双击关联、自动下载、热切换或物理卸载尚未提供，生产 Registry 尚未部署。
 独立 SDK 源码包和 Raylib 组织仓库已建立，构建与快照边界见 [adapter-sdk.md](adapter-sdk.md)；Release 处于草稿准备阶段。
 术语以 [CONTEXT.md](../CONTEXT.md#适配器插件) 为准。当前包不是面向普通用户的线上发行流程。
 Registry 的无执行静态验收入口见 [资源发布检查](resource-publication.md)。
