@@ -9,6 +9,14 @@
 
 ## Engine-level adaptation scope
 
+- The base App includes only conventional Windows text APIs: GDI ExtTextOut/TextOut,
+  User32 DrawText, GDI+ DrawString, and DirectWrite TextLayout, plus shared Controller/Target Runtime.
+- Framework, vendor, and game-engine adapters ship as separate `.gsp` plugins, including Qt,
+  SideFX (Houdini), Unity, and any future Unreal Engine adapter. A `windows.*` Adapter ID
+  does not make a framework adapter part of the base App. Group game plugins by engine,
+  not individual game. Full bundled engine builds are explicit research/integration tools only;
+  they must not become the default desktop or installer distribution.
+
 - Engine sources pinned in `adapter-sources.lock.json` are compatibility snapshots from their
   independent `glyphshift/adapter-*` repositories. Edit the owning repository, then import a
   reviewed Git archive with `scripts/sync-adapter-snapshots.py`; do not hand-edit both copies.

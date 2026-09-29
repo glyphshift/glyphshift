@@ -247,6 +247,9 @@ _Avoid_: Author、Vendor display name
 **基础内置适配器（Core Adapters）**：
 随 App Runtime Bundle 分发的 Windows 基础文字能力：DrawText、ExtTextOut、TextOut、GDI+、DirectWrite。
 基础包包含 x86/x64 Controller 和 Target Runtime，供内置适配器与外置插件共同使用。
+基础版仅覆盖这些常规 Windows 文字接口；框架、厂商技术栈与游戏引擎不属于基础内置范围。
+Qt、Houdini 使用的 SideFX 能力以及 Unity 等均以插件交付；未来 Unreal Engine（UE）能力也遵循此边界。
+Adapter ID 以 `windows.` 开头只表示运行平台，不表示应当内置。
 
 **引擎插件包（Engine Adapter Package）**：
 按引擎或框架组织的 `.gsp` 分发单元。一个包可包含多个 Adapter ID 和多个架构 DLL，
