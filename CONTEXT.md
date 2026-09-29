@@ -258,7 +258,7 @@ _Avoid_: Source Locale、Target Locale、Artifact Presentation Locale
 
 ### Dictionary Discovery（字典发现）
 
-Registry 对已审核、活动且证明有效的字典提供公开搜索与精确版本详情。默认每个字典展示最新可用稳定版本；名称/说明/标签为有界展示投影，不是客户端验签或安装许可。共享 Rust/CLI 已消费该合同，桌面 GUI 仍待接入。安装继续固定用户选择的发布者与版本，重新校验 proof 和原件。
+Registry 对已审核、活动且证明有效的字典提供公开搜索与精确版本详情。默认每个字典展示最新可用稳定版本；名称/说明/标签为有界展示投影，不是客户端验签或安装许可。共享 Rust/CLI 与桌面 GUI 已消费该合同；桌面使用显式受信配置，在后台搜索和准备安装。安装继续固定用户选择的发布者与版本，重新校验 proof 和原件。
 
 ### Prepared Dictionary（待提交字典）
 
