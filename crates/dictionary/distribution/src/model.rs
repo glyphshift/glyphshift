@@ -3,7 +3,7 @@ use semver::Version;
 use std::collections::BTreeSet;
 use url::Url;
 
-pub const DICTIONARY_MEDIA_TYPE: &str = "application/vnd.glyphshift.dictionary+json;version=2";
+pub use glyphshift_dictionary_package::DICTIONARY_MEDIA_TYPE;
 pub const DICTIONARY_ARTIFACT_STATEMENT_SCHEMA: &str = "glyphshift.dictionary-artifact-statement/1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

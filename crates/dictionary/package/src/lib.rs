@@ -3,7 +3,10 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeSet;
 
+mod publication;
+
 pub const DICTIONARY_SCHEMA: &str = "glyphshift.dictionary/3";
+pub const DICTIONARY_MEDIA_TYPE: &str = "application/vnd.glyphshift.dictionary+json;version=3";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackageError {
@@ -529,6 +532,13 @@ pub struct DictionaryPackage {
 }
 
 impl DictionaryPackage {
+    /// Strict upload validation. Never repairs metadata or discards malformed entries.
+    pub fn decode_publication_json(
+        source: &str,
+        expected_id: Option<&str>,
+    ) -> Result<Self, PackageError> {
+        publication::decode(source, expected_id)
+    }
     pub fn create(create: DictionaryCreate) -> Result<Self, PackageError> {
         Self::at_revision(create, 1)
     }

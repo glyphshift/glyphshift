@@ -1996,6 +1996,7 @@ name = "glyphshift-dictionary-package"
 version = "0.1.0"
 dependencies = [
  "glyphshift-translation",
+ "semver",
  "serde",
  "serde_json",
 ]
@@ -2068,6 +2069,15 @@ version = "0.1.0"
 dependencies = [
  "glyphshift-adapter-sdk",
  "glyphshift-domain",
+]
+
+[[package]]
+name = "glyphshift-resource-inspector"
+version = "0.1.0"
+dependencies = [
+ "glyphshift-dictionary-package",
+ "glyphshift-plugin-package",
+ "serde_json",
 ]
 
 [[package]]

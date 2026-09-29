@@ -58,6 +58,7 @@ members = [
     "crates/runtime/desktop",
     "crates/dictionary/distribution",
     "crates/dictionary/package",
+    "crates/dictionary/inspector",
     "crates/core/domain",
     "crates/core/extension",
     "crates/runtime/worker/host",
