@@ -186,6 +186,7 @@ pub(super) struct DictionaryCatalogInstallRequest {
     pub(super) dictionary_id: Box<str>,
     pub(super) release_version: Box<str>,
     pub(super) replacement: DictionaryReplacementRequest,
+    pub(super) publisher_identity: Box<str>,
 }
 
 impl DesktopApplication {
@@ -227,6 +228,7 @@ impl DesktopApplication {
             .map_err(dictionary_distribution_error)
     }
 
+    #[cfg(test)]
     pub(super) fn install_dictionary_release(
         &mut self,
         request: DictionaryCatalogInstallRequest,
@@ -239,7 +241,10 @@ impl DesktopApplication {
         )
         .map_err(|_| CommandError::new("dictionary.catalog_invalid"))?;
         self.dictionary_distribution
-            .install(&InstallRequest::new(release, request.replacement.into()))
+            .install(&glyphshift_dictionary_distribution::InstallRequest::new(
+                release,
+                request.replacement.into(),
+            ))
             .map_err(dictionary_distribution_error)?;
         self.backend.reload_dictionaries().map_err(|_| {
             dictionary_distribution_error(DictionaryDistributionError::StorageFailure)
@@ -418,25 +423,23 @@ pub(super) fn desktop_dictionary(
 }
 
 #[tauri::command]
-pub(super) fn desktop_query_dictionary_catalog(
+pub(super) async fn desktop_query_dictionary_catalog(
     request: DictionaryCatalogQueryRequest,
-    application: State<'_, Mutex<DesktopApplication>>,
+    app: tauri::AppHandle,
 ) -> Result<DictionaryCatalogPageView, CommandError> {
-    application
-        .lock()
+    tauri::async_runtime::spawn_blocking(move || crate::registry::query(&app, request))
+        .await
         .map_err(|_| workspace_unavailable())?
-        .query_dictionary_catalog(request)
 }
 
 #[tauri::command]
-pub(super) fn desktop_install_dictionary_release(
+pub(super) async fn desktop_install_dictionary_release(
     request: DictionaryCatalogInstallRequest,
-    application: State<'_, Mutex<DesktopApplication>>,
+    app: tauri::AppHandle,
 ) -> Result<DesktopProductSnapshot, CommandError> {
-    application
-        .lock()
+    tauri::async_runtime::spawn_blocking(move || crate::registry::install(&app, request))
+        .await
         .map_err(|_| workspace_unavailable())?
-        .install_dictionary_release(request)
 }
 
 #[tauri::command]

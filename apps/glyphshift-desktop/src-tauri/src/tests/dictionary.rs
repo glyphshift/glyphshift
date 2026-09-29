@@ -92,6 +92,7 @@ fn catalog_query_and_install_return_presentation_and_refreshed_installation_summ
     let snapshot = application
         .install_dictionary_release(DictionaryCatalogInstallRequest {
             catalog_id: "glyphshift.official".into(),
+            publisher_identity: "publisher.example".into(),
             dictionary_id: "dictionary.catalog".into(),
             release_version: "1.2.0".into(),
             replacement: DictionaryReplacementRequest::RejectExisting,

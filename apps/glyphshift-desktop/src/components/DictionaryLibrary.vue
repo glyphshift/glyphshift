@@ -63,7 +63,7 @@ const pageSize = ref(50)
 const selected = ref(new Set<string>())
 const creating = ref(false)
 const pendingRemoval = ref<DictionarySummary[]>([])
-const pendingInstall = ref<DictionaryCatalogRelease | null>(null)
+const installConflict = ref('')
 const catalogQuery = ref('')
 const catalogTag = ref('')
 const catalogPageNumber = ref(1)
@@ -138,14 +138,6 @@ const catalogColumns = computed<TableColumn<DictionaryCatalogRelease>[]>(() => [
 const removalDescription = computed(() => pendingRemoval.value.length === 1
   ? t('dictionaries.deleteOne', { name: pendingRemoval.value[0]?.metadata.name ?? '' })
   : t('dictionaries.deleteMany', { count: pendingRemoval.value.length }))
-const replacementDescription = computed(() => {
-  const release = pendingInstall.value
-  if (!release) return ''
-  const current = localDictionary(release.dictionaryId)
-  return current?.installation.state === 'modified'
-    ? t('dictionaries.catalog.replaceModifiedDescription', { name: current.metadata.name, version: release.releaseVersion })
-    : t('dictionaries.catalog.replaceLocalDescription', { name: current?.metadata.name ?? release.name, version: release.releaseVersion })
-})
 
 watch([query, pageSize], () => { page.value = 1 })
 watch(pageCount, count => { page.value = Math.min(page.value, count) })
@@ -289,9 +281,10 @@ function installButtonLabel(release: DictionaryCatalogRelease) {
 }
 
 function beginInstall(release: DictionaryCatalogRelease) {
+  installConflict.value = ''
   const current = localDictionary(release.dictionaryId)
   if (current && current.installation.state !== 'verified') {
-    pendingInstall.value = release
+    installConflict.value = t('dictionaries.catalog.localChangesProtected', { name: current.metadata.name })
     return
   }
   emitInstall(release, current ? 'replace_verified' : 'reject_existing')
@@ -305,13 +298,9 @@ function emitInstall(
     catalogId: release.catalogId,
     dictionaryId: release.dictionaryId,
     releaseVersion: release.releaseVersion,
+    publisherIdentity: release.publisherIdentity,
     replacement,
   })
-}
-
-function confirmInstall() {
-  if (pendingInstall.value) emitInstall(pendingInstall.value, 'replace_any')
-  pendingInstall.value = null
 }
 
 async function chooseImport() { await importDialog.value?.choose() }
@@ -439,11 +428,14 @@ async function chooseImport() { await importDialog.value?.choose() }
       </UTable>
     </ManagementTableFrame>
 
+    <DismissibleAlert v-if="mode === 'catalog' && installConflict" color="warning" icon="i-tabler-shield-lock" :description="installConflict" @dismiss="installConflict = ''" />
+    <DismissibleAlert v-if="mode === 'catalog' && catalogError && catalogPage.releases.length" color="error" :description="catalogError" />
+
     <ManagementTableFrame
-      v-else
+      v-if="mode === 'catalog'"
       v-model:query="catalogQuery"
       v-model:page-size="catalogPageSize"
-      :page-sizes="[50, 100, 200]"
+      :page-sizes="[50, 100]"
       :page="catalogPageNumber"
       :search-placeholder="t('dictionaries.catalog.searchPlaceholder')"
       :search-label="t('dictionaries.catalog.searchLabel')"
@@ -559,16 +551,6 @@ async function chooseImport() { await importDialog.value?.choose() }
       @confirm="confirmRemoval"
     />
 
-    <ConfirmDialog
-      :open="Boolean(pendingInstall)"
-      :title="t('dictionaries.catalog.replaceTitle')"
-      :description="replacementDescription"
-      :busy="catalogBusy"
-      confirm-color="warning"
-      :confirm-label="t('dictionaries.catalog.replaceConfirm')"
-      @update:open="$event || (pendingInstall = null)"
-      @confirm="confirmInstall"
-    />
     <DictionaryExportDialog ref="exportDialog" />
     <DictionaryImportDialog ref="importDialog" :apply="applyImport" />
   </section>

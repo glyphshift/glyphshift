@@ -259,3 +259,7 @@ _Avoid_: Source Locale、Target Locale、Artifact Presentation Locale
 ### Dictionary Discovery（字典发现）
 
 Registry 对已审核、活动且证明有效的字典提供公开搜索与精确版本详情。默认每个字典展示最新可用稳定版本；名称/说明/标签为有界展示投影，不是客户端验签或安装许可。共享 Rust/CLI 已消费该合同，桌面 GUI 仍待接入。安装继续固定用户选择的发布者与版本，重新校验 proof 和原件。
+
+### Prepared Dictionary（待提交字典）
+
+后台完成 Registry 证明/原件验证后的短期内存结果，不是可保存或转发的安装许可。桌面在编辑锁内重新检查当前公钥、配置与本地修改后提交；超过 30 秒须重新准备。桌面在线目录现已按显式受信配置接入，账户和网页唤起仍待实现。

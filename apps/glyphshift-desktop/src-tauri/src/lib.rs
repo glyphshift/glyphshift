@@ -3,6 +3,7 @@ mod ai_models;
 mod command_error;
 mod data;
 mod dictionary;
+mod registry;
 mod entry_resolution;
 mod exit;
 mod font_catalog;
@@ -51,7 +52,7 @@ use glyphshift_dictionary_distribution::{
     ArtifactStatement, ArtifactTrustVerifier, CatalogPage, CatalogPortError, CatalogQuery,
     CatalogRelease, CatalogSourcePage, DictionaryDistribution, DictionaryDistributionError,
     DictionaryDistributionPort, DictionaryReleaseKey, DictionaryReplacementPolicy,
-    FileDictionaryInstallStore, InstallRequest, PublisherIdentity, SignatureEnvelope,
+    FileDictionaryInstallStore, PublisherIdentity, SignatureEnvelope,
     SystemInstallationClock, TrustVerifierError,
 };
 use glyphshift_domain::{Feature, Generation, Placement, RouteOperator};
@@ -89,7 +90,7 @@ use workflow::{
     workflow_activation_command_error,
 };
 
-const DESKTOP_API_VERSION: u16 = 36;
+const DESKTOP_API_VERSION: u16 = 37;
 const DATA_ROOT_ARGUMENT: &str = "--glyphshift-data-root";
 const RUNTIME_ROOT_ARGUMENT: &str = "--glyphshift-runtime-root";
 
@@ -835,7 +836,7 @@ pub fn run() {
             let saved_settings = settings
                 .current()
                 .map_err(|error| std::io::Error::other(format!("settings startup: {error:?}")))?;
-            let application = DesktopApplication::open(data_root, runtime_root, &saved_settings)
+            let application = DesktopApplication::open(data_root.clone(), runtime_root, &saved_settings)
                 .map_err(std::io::Error::other)?;
             settings
                 .initialize_favorite_fonts(&application.font_families)
@@ -845,6 +846,7 @@ pub fn run() {
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(ai_state));
             app.manage(Mutex::new(application));
+            app.manage(registry::DesktopRegistry::from_environment(data_root));
             software::manage_quick_capture(app);
             workflow_shortcut::manage(app);
             window_controls::setup(app.handle(), &saved_settings)?;

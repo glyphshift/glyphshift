@@ -89,6 +89,7 @@ test('dictionary library separates local provenance from the offline catalog mod
 
   const localMode = page.getByRole('button', { name: /本地字典/ })
   const catalogMode = page.getByRole('button', { name: '在线目录', exact: true })
+  await expect(page.getByTestId('dictionary-catalog-table')).toHaveCount(0)
   await expect(localMode).toHaveAttribute('aria-pressed', 'true')
   await expect(localMode).toHaveClass(/text-primary/)
   await expect(page.getByRole('columnheader', { name: '来源状态' })).toBeVisible()
@@ -292,6 +293,7 @@ test('configured dictionary catalog queries and installs through the desktop sea
         }
         if (command === 'desktop_install_dictionary_release') {
           ;(window as unknown as { __catalogInstall?: unknown }).__catalogInstall = args?.request
+          if ((window as unknown as { __failCatalogInstall?: boolean }).__failCatalogInstall) throw { schemaVersion: 1, code: 'dictionary.local_changes_conflict', args: {} }
           return installed
         }
         return null
@@ -313,6 +315,11 @@ test('configured dictionary catalog queries and installs through the desktop sea
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __catalogQuery?: { tag?: string | null } }).__catalogQuery
   ))).toEqual(expect.objectContaining({ tag: null }))
+  await page.evaluate(() => { (window as unknown as { __failCatalogInstall?: boolean }).__failCatalogInstall = true })
+  await page.getByRole('button', { name: '安装', exact: true }).click()
+  await expect(page.getByTestId('dictionary-catalog-table')).toBeVisible()
+  await expect(page.getByText(/在线更新不会覆盖/)).toBeVisible()
+  await page.evaluate(() => { (window as unknown as { __failCatalogInstall?: boolean }).__failCatalogInstall = false })
   await page.getByRole('button', { name: '安装', exact: true }).click()
   await expect(page.getByRole('button', { name: '已安装', exact: true })).toBeDisabled()
   await expect.poll(() => page.evaluate(() => (
@@ -321,10 +328,11 @@ test('configured dictionary catalog queries and installs through the desktop sea
     dictionaryId: 'dictionary-catalog',
     releaseVersion: '1.2.0',
     replacement: 'reject_existing',
+    publisherIdentity: 'publisher.example',
   }))
 })
 
-test('catalog requires explicit confirmation before replacing local dictionary changes', async ({ page }) => {
+test('catalog protects local dictionary changes without sending an overwrite', async ({ page }) => {
   const snapshot = JSON.parse(JSON.stringify(model))
   snapshot.dictionaries[0].installation = {
     state: 'modified', installedRelease: '1.0.0', verifiedPublisher: 'publisher.example', updateRelease: '1.2.0',
@@ -358,15 +366,11 @@ test('catalog requires explicit confirmation before replacing local dictionary c
   await page.getByRole('button', { name: '字典', exact: true }).click()
   await page.getByRole('button', { name: '在线目录', exact: true }).click()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '替换本地字典' })
-  await expect(dialog.getByText(/包含本地修改/)).toBeVisible()
+  await expect(page.getByText(/在线更新不会覆盖/)).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => (
     (window as unknown as { __catalogReplacement?: unknown }).__catalogReplacement
   ))).toBeUndefined()
-  await dialog.getByRole('button', { name: '替换并安装' }).click()
-  await expect.poll(() => page.evaluate(() => (
-    (window as unknown as { __catalogReplacement?: { replacement?: string } }).__catalogReplacement
-  ))).toEqual(expect.objectContaining({ replacement: 'replace_any' }))
 })
 
 test('catalog presentation follows the English interface locale', async ({ page }) => {
@@ -444,8 +448,14 @@ test('dictionary editor saves the complete portable metadata set', async ({ page
   await selectLanguage(page, settings.getByRole('button', { name: '目标语言', exact: true }), 'de-DE')
   await settings.getByRole('button', { name: '更多发布信息' }).click()
   await settings.getByRole('spinbutton', { name: '主版本号' }).fill('2')
+  await settings.getByRole('spinbutton', { name: '主版本号' }).press('Tab')
+  await expect(settings.getByRole('spinbutton', { name: '主版本号' })).toHaveAttribute('aria-valuenow', '2')
   await settings.getByRole('spinbutton', { name: '次版本号' }).fill('0')
+  await settings.getByRole('spinbutton', { name: '次版本号' }).press('Tab')
+  await expect(settings.getByRole('spinbutton', { name: '次版本号' })).toHaveAttribute('aria-valuenow', '0')
   await settings.getByRole('spinbutton', { name: '修订版本号' }).fill('0')
+  await settings.getByRole('spinbutton', { name: '修订版本号' }).press('Tab')
+  await expect(settings.getByRole('spinbutton', { name: '修订版本号' })).toHaveAttribute('aria-valuenow', '0')
   const authorInput = settings.getByRole('textbox', { name: '作者' })
   await authorInput.fill('Alice')
   await authorInput.press('Enter')

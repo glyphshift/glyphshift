@@ -11,7 +11,7 @@ mod strict_json;
 #[cfg(test)]
 mod tests;
 
-pub use http::RegistryClient;
+pub use http::{PreparedDictionary, RegistryClient};
 pub use proof::{Artifact, ReleaseRequest, Statement, TrustStore, VerifiedProof};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

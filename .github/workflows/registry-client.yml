@@ -6,6 +6,7 @@ on:
     paths:
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - 'apps/glyphshift-desktop/**'
       - 'crates/product/registry-client/**'
       - 'crates/dictionary/**'
       - 'crates/adapters/platform/package/**'
@@ -58,3 +59,23 @@ jobs:
       - name: Validate Rust contracts and Go HTTPS installation
         shell: pwsh
         run: ./scripts/test-registry-client.ps1 -RegistryExecutable (Resolve-Path local-test/providers/registry/registry-local.exe).Path
+
+      - name: Validate desktop Registry commands
+        shell: pwsh
+        run: |
+          . ./scripts/cargo-target.ps1
+          $null = Get-GlyphshiftCargoTargetDirectory -RepoRoot (Get-Location).Path
+          cargo test --locked -p glyphshift-desktop-shell --lib
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop Registry command tests failed.' }
+      - name: Validate dictionary interface
+        shell: pwsh
+        working-directory: apps/glyphshift-desktop
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop dependencies failed.' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop web build failed.' }
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Playwright browser installation failed.' }
+          npm test -- tests/dictionary.spec.ts
+          if ($LASTEXITCODE -ne 0) { throw 'Dictionary interface tests failed.' }

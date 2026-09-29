@@ -112,7 +112,8 @@ export interface DictionaryCatalogInstallRequest {
   catalogId: string
   dictionaryId: string
   releaseVersion: string
-  replacement: 'reject_existing' | 'replace_verified' | 'replace_any'
+  publisherIdentity: string
+  replacement: 'reject_existing' | 'replace_verified'
 }
 
 export interface DictionaryEntry {

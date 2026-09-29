@@ -832,10 +832,7 @@ export default {
       install: 'Install',
       installed: 'Installed',
       update: 'Update',
-      replaceTitle: 'Replace local dictionary',
-      replaceModifiedDescription: '“{name}” has local changes. Continuing replaces them with catalog release v{version}. This cannot be undone.',
-      replaceLocalDescription: '“{name}” is not a verified catalog release. Continuing replaces it with catalog release v{version}. This cannot be undone.',
-      replaceConfirm: 'Replace and install',
+      localChangesProtected: '“{name}” contains local content that online updates will not overwrite. Export a backup before managing the local dictionary.',
     },
     columns: {
       dictionary: 'Dictionary',
@@ -1486,7 +1483,7 @@ export default {
       trustUnavailable: 'The dictionary publisher cannot be verified right now. Try again later.',
       payloadInvalid: 'The dictionary package content is invalid and was not installed.',
       releaseIdentityMismatch: 'The dictionary package identifier or version does not match the catalog release.',
-      localChangesConflict: 'This dictionary has local changes. Confirm replacement before continuing.',
+      localChangesConflict: 'The local dictionary has changes that online updates will not overwrite. Export a backup before managing the local content.',
       installationStorageFailure: 'Dictionary installation data could not be saved. Check the app data directory.',
     },
     workflow: {

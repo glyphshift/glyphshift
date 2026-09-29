@@ -2039,6 +2039,7 @@ dependencies = [
  "glyphshift-dictionary-distribution",
  "glyphshift-dictionary-package",
  "glyphshift-domain",
+ "glyphshift-registry-client",
  "glyphshift-runtime-contract",
  "glyphshift-translation",
  "glyphshift-workflow",

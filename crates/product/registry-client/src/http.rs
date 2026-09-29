@@ -175,9 +175,52 @@ impl RegistryClient {
         {
             return Err(Error::Configuration);
         }
-        let fetched = self.fetch_current(request)?;
+        self.prepare_dictionary(request)?
+            .install(self.trust.clone(), catalog_id, root, replacement)
+    }
+
+    /// Fetch and verify without holding the desktop's mutation lock.
+    pub fn prepare_dictionary(
+        &self,
+        request: &ReleaseRequest,
+    ) -> Result<PreparedDictionary, Error> {
+        if request.kind() != "dictionary" {
+            return Err(Error::Configuration);
+        }
+        Ok(PreparedDictionary {
+            fetched: self.fetch_current(request)?,
+            prepared_at: std::time::Instant::now(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+/// Short-lived verified bytes; cannot be constructed by callers or serialized as approval.
+pub struct PreparedDictionary {
+    fetched: Fetched,
+    prepared_at: std::time::Instant,
+}
+impl PreparedDictionary {
+    /// Commit under the caller's editing lock, using freshly loaded trusted keys.
+    pub fn install(
+        self,
+        trust: TrustStore,
+        catalog_id: &str,
+        root: &Path,
+        replacement: DictionaryReplacementPolicy,
+    ) -> Result<DictionaryInstallationView, Error> {
+        if replacement == DictionaryReplacementPolicy::ReplaceAny {
+            return Err(Error::Configuration);
+        }
+        if self.prepared_at.elapsed() > Duration::from_secs(30) {
+            return Err(Error::Unavailable);
+        }
+        let fetched = self.fetched;
+        trust.verify_jws(fetched.proof.jws())?;
         crate::dictionary::install(
-            self.trust.clone(),
+            trust,
             fetched.proof,
             fetched.body,
             fetched.download_url,
@@ -187,6 +230,3 @@ impl RegistryClient {
         )
     }
 }
-
-#[cfg(test)]
-mod tests;

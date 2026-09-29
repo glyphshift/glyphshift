@@ -74,6 +74,7 @@ impl Server {
             origin: self.origin.clone(),
             http: Client::builder()
                 .no_proxy()
+                .pool_max_idle_per_host(0)
                 .redirect(redirect::Policy::none())
                 .timeout(Duration::from_secs(2))
                 .build()
@@ -381,4 +382,93 @@ fn dictionary_install_and_update_keep_local_modification_guard() {
         Error::LocalChangesConflict
     );
     assert_eq!(std::fs::read_to_string(dictionary).unwrap(), changed);
+}
+
+#[test]
+fn prepared_install_rechecks_trust_expiry_and_edits_at_commit() {
+    let f = Fixture::dictionary("1.0.0");
+    let destination = root();
+    let request =
+        ReleaseRequest::new("dictionary", "fixture.dictionary", "1.0.0", "Abcdef23").unwrap();
+    let prepare = || {
+        let server = Server::new(vec![
+            ok_proof(&f, "dictionary"),
+            ok_body(&f, "dictionary"),
+            ok_proof(&f, "dictionary"),
+        ]);
+        let mut prepared = server
+            .client(f.trust())
+            .prepare_dictionary(&request)
+            .unwrap();
+        prepared.fetched.download_url = prepared
+            .fetched
+            .download_url
+            .replacen("http://", "https://", 1);
+        prepared
+    };
+    let initial = prepare();
+    let pending = prepare();
+    initial
+        .install(
+            f.trust(),
+            "fixture.registry",
+            destination.path(),
+            DictionaryReplacementPolicy::RejectExisting,
+        )
+        .unwrap();
+    let file = destination
+        .path()
+        .join("dictionaries/fixture.dictionary.json");
+    let edited = std::fs::read_to_string(&file)
+        .unwrap()
+        .replace("打开", "本地编辑");
+    std::fs::write(&file, &edited).unwrap();
+    assert_eq!(
+        pending
+            .install(
+                f.trust(),
+                "fixture.registry",
+                destination.path(),
+                DictionaryReplacementPolicy::ReplaceVerified
+            )
+            .unwrap_err(),
+        Error::LocalChangesConflict
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), edited);
+    let revoked = TrustStore::from_json(&f.trust_bytes("revoked")).unwrap();
+    assert_eq!(
+        prepare()
+            .install(
+                revoked,
+                "fixture.registry",
+                destination.path(),
+                DictionaryReplacementPolicy::RejectExisting
+            )
+            .unwrap_err(),
+        Error::UntrustedKey
+    );
+    let mut expired = prepare();
+    expired.prepared_at = std::time::Instant::now() - Duration::from_secs(31);
+    assert_eq!(
+        expired
+            .install(
+                f.trust(),
+                "fixture.registry",
+                destination.path(),
+                DictionaryReplacementPolicy::RejectExisting
+            )
+            .unwrap_err(),
+        Error::Unavailable
+    );
+    assert_eq!(
+        prepare()
+            .install(
+                f.trust(),
+                "fixture.registry",
+                destination.path(),
+                DictionaryReplacementPolicy::ReplaceAny
+            )
+            .unwrap_err(),
+        Error::Configuration
+    );
 }

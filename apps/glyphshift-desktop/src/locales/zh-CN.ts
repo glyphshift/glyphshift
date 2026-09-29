@@ -850,10 +850,7 @@ export default {
       install: '安装',
       installed: '已安装',
       update: '更新',
-      replaceTitle: '替换本地字典',
-      replaceModifiedDescription: '“{name}”包含本地修改。继续将用目录中的 v{version} 替换这些修改；不可撤销。',
-      replaceLocalDescription: '“{name}”不是已验证的目录版本。继续将用目录中的 v{version} 替换当前内容；不可撤销。',
-      replaceConfirm: '替换并安装',
+      localChangesProtected: '“{name}”包含本地内容，在线更新不会覆盖。请先导出备份，再自行处理本地字典。',
     },
     columns: {
       dictionary: '字典',
@@ -1504,7 +1501,7 @@ export default {
       trustUnavailable: '暂时无法验证字典发布者，请稍后重试。',
       payloadInvalid: '字典包内容无效，未进行安装。',
       releaseIdentityMismatch: '字典包标识或版本与目录不一致，未进行安装。',
-      localChangesConflict: '本地字典已经修改；确认替换本地更改后才能继续。',
+      localChangesConflict: '本地字典已修改，在线更新不会覆盖。请先导出备份，再处理本地内容。',
       installationStorageFailure: '无法保存字典安装信息，请检查应用数据目录。',
     },
     workflow: {
