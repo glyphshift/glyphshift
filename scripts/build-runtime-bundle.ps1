@@ -21,9 +21,9 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $localTestRoot "runtime-bundle\$($Profile.ToLowerInvariant())"
 }
 
-# Public Core only builds the five first-party Windows adapters declared by
-# adapter-distribution.json. Official engine/framework adapters are produced by
-# their private adapter repositories and installed as GSP plugins.
+# Public Core builds only the shared Runtime. The five free Windows base Adapters
+# are fetched from pinned public GSP Releases; all other official Adapters remain
+# independent plugins.
 & (Join-Path $PSScriptRoot 'build-core-runtime.ps1') `
     -Profile $Profile `
     -OutputRoot $OutputRoot `
@@ -32,4 +32,3 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 if ($LASTEXITCODE -ne 0) {
     throw "Core Runtime Bundle build failed with exit code $LASTEXITCODE"
 }
-

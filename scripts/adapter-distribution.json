@@ -24,5 +24,9 @@
   "optionalPackages": {
     "glyphshift-adapter-kirikiri": ["experimental.kirikiri.kag-scenario"]
   },
-  "coreBuildTargets": ["glyphshift-adapter-gdi-native", "glyphshift-adapter-gdi-text-out-native", "glyphshift-adapter-draw-text-native", "glyphshift-adapter-gdiplus-native", "glyphshift-adapter-directwrite-native"]
+  "bundledPackages": {
+    "glyphshift-adapter-win32-text": ["windows.gdi.ext-text-out", "windows.gdi.text-out", "windows.user32.draw-text"],
+    "glyphshift-adapter-gdiplus": ["windows.gdiplus.draw-string"],
+    "glyphshift-adapter-directwrite": ["windows.directwrite.text-layout"]
+  }
 }

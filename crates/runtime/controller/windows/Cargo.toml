@@ -49,7 +49,7 @@ features = [
 ]
 
 [dev-dependencies]
-glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
+glyphshift-adapter-gdi = { git = "https://github.com/glyphshift/adapter-win32-text.git", rev = "506b61c080f854e9edbe46b3e0991107a3e98d3b" }
 glyphshift-adapter-registry = { path = "../../../adapters/platform/registry" }
 glyphshift-domain = { path = "../../../core/domain" }
 glyphshift-test-native-adapter = { path = "../../../../test-support/native-adapter" }

@@ -4,9 +4,10 @@ param()
 $ErrorActionPreference = 'Stop'
 $workspaceManifest = Join-Path $PSScriptRoot '..\..\..\..\Cargo.toml'
 
+& (Join-Path $PSScriptRoot '..\..\..\..\scripts\prepare-base-adapter-test-artifacts.ps1')
+
 & cargo build `
     --manifest-path $workspaceManifest `
-    -p glyphshift-adapter-gdi-native `
     -p glyphshift-test-native-adapter
 if ($LASTEXITCODE -ne 0) {
     throw "native Adapter package build failed with exit code $LASTEXITCODE"

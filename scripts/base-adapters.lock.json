@@ -1,0 +1,49 @@
+{
+  "schema": "glyphshift.base-adapters-lock/1",
+  "packages": [
+    {
+      "package_id": "glyphshift-adapter-win32-text",
+      "version": [1, 0, 0],
+      "url": "https://github.com/glyphshift/adapter-win32-text/releases/download/v1.0.0/glyphshift-adapter-win32-text-1.0.0-release.gsp",
+      "sha256": "e1ba5146dee447cda642533e0118f3218c00ac30a9a9215a59d9920bf9e5a194",
+      "adapters": [
+        {
+          "id": "windows.gdi.ext-text-out",
+          "file": "glyphshift_adapter_gdi_native.dll"
+        },
+        {
+          "id": "windows.gdi.text-out",
+          "file": "glyphshift_adapter_gdi_text_out_native.dll"
+        },
+        {
+          "id": "windows.user32.draw-text",
+          "file": "glyphshift_adapter_draw_text_native.dll"
+        }
+      ]
+    },
+    {
+      "package_id": "glyphshift-adapter-gdiplus",
+      "version": [1, 0, 0],
+      "url": "https://github.com/glyphshift/adapter-gdiplus/releases/download/v1.0.0/glyphshift-adapter-gdiplus-1.0.0-release.gsp",
+      "sha256": "a7ffa43367b6739a6235372612929120cffef37d3c726ba28e72cbc86c7852fd",
+      "adapters": [
+        {
+          "id": "windows.gdiplus.draw-string",
+          "file": "glyphshift_adapter_gdiplus_native.dll"
+        }
+      ]
+    },
+    {
+      "package_id": "glyphshift-adapter-directwrite",
+      "version": [1, 0, 0],
+      "url": "https://github.com/glyphshift/adapter-directwrite/releases/download/v1.0.0/glyphshift-adapter-directwrite-1.0.0-release.gsp",
+      "sha256": "dd3cff881d69d331886111d24ffb61e5285ba0a105f5db54de3655dfbac098dc",
+      "adapters": [
+        {
+          "id": "windows.directwrite.text-layout",
+          "file": "glyphshift_adapter_directwrite_native.dll"
+        }
+      ]
+    }
+  ]
+}

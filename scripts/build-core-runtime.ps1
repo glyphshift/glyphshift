@@ -20,6 +20,16 @@ if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -F
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 $catalog = Get-Content -Raw (Join-Path $PSScriptRoot 'adapter-distribution.json') | ConvertFrom-Json
 if ($catalog.schema -ne 'glyphshift.adapter-distribution/1') { throw 'Unknown adapter distribution schema.' }
+$baseAdapterLock = Get-Content -Raw (Join-Path $PSScriptRoot 'base-adapters.lock.json') | ConvertFrom-Json
+if ($baseAdapterLock.schema -ne 'glyphshift.base-adapters-lock/1') { throw 'Unknown base Adapter lock schema.' }
+$baseAdapters = @($baseAdapterLock.packages | ForEach-Object { $_.adapters })
+$lockedIds = @($baseAdapters | ForEach-Object { $_.id })
+if (@(Compare-Object $catalog.core $lockedIds).Count -ne 0) {
+    throw 'Pinned base Adapter set differs from adapter-distribution.json.'
+}
+$baseAdapterRoot = Join-Path $repoRoot 'local-test/cache/runtime-bundle-base-adapters'
+& python -B (Join-Path $PSScriptRoot 'fetch-base-adapters.py') --output $baseAdapterRoot
+if ($LASTEXITCODE -ne 0) { throw 'Pinned base Adapter fetch failed.' }
 $presentations = Get-Content -Raw (Join-Path $PSScriptRoot 'runtime-bundle-adapters.zh-CN.json') | ConvertFrom-Json
 $profileDirectory = $Profile.ToLowerInvariant()
 $manifestPath = Join-Path $repoRoot 'Cargo.toml'
@@ -33,7 +43,6 @@ $groups = @()
 foreach ($architecture in @('x86_64','x86')) {
     $arguments = @('build','--locked','--manifest-path',$manifestPath,'--target-dir',$CargoTargetDir,
         '-p','glyphshift-controller-windows','-p','glyphshift-target-runtime')
-    foreach ($package in $catalog.coreBuildTargets) { $arguments += @('-p',$package) }
     if ($architecture -eq 'x86') { $arguments += @('--target','i686-pc-windows-msvc') }
     if ($IncludeTestTarget) { $arguments += @('-p','glyphshift-windows-runtime-target') }
     if ($Profile -eq 'Release') { $arguments += '--release' }
@@ -45,21 +54,26 @@ foreach ($architecture in @('x86_64','x86')) {
     $controller.protocol = @(1,0)
     $runtime = Copy-Artifact (Join-Path $source 'glyphshift_target_runtime.dll') "runtime-$architecture"
     $adapters = @()
-    foreach ($package in $catalog.coreBuildTargets) {
-        $artifact = Copy-Artifact (Join-Path $source ($package.Replace('-','_') + '.dll')) "$package-$architecture"
+    foreach ($baseAdapter in $baseAdapters) {
+        $adapterSource = Join-Path (Join-Path $baseAdapterRoot $architecture) $baseAdapter.file
+        if (-not (Test-Path -LiteralPath $adapterSource)) {
+            throw "Pinned base Adapter artifact is missing: $($baseAdapter.id) ($architecture)"
+        }
+        $stem = "adapter-$($baseAdapter.id.Replace('.','-'))-$architecture"
+        $artifact = Copy-Artifact $adapterSource $stem
         $metadata = & (Join-Path $stage $controller.file) --inspect-adapter (Join-Path $stage $artifact.file)
-        if ($LASTEXITCODE -ne 0) { throw "Core descriptor inspection failed: $package" }
+        if ($LASTEXITCODE -ne 0) { throw "Base Adapter descriptor inspection failed: $($baseAdapter.id)" }
         $metadata = $metadata | ConvertFrom-Json
-        if ($metadata.adapter_id -notin $catalog.core) { throw 'Unexpected core Adapter ID.' }
+        if ($metadata.adapter_id -ne $baseAdapter.id) { throw 'Pinned base Adapter ID differs from native descriptor.' }
         $presentation = @($presentations | Where-Object id -eq $metadata.adapter_id)
-        if ($presentation.Count -ne 1) { throw 'Missing or duplicate core presentation.' }
+        if ($presentation.Count -ne 1) { throw 'Missing or duplicate base Adapter presentation.' }
         $presentation = $presentation[0]
         foreach ($key in @('name','summary','technology','technicalTarget','documentationUrl')) { $artifact[$key] = $presentation.$key }
         $artifact.native_metadata = $metadata
         $adapters += $artifact
     }
     $actualIds = @($adapters | ForEach-Object { $_.native_metadata.adapter_id })
-    if (@(Compare-Object $catalog.core $actualIds).Count -ne 0) { throw 'Incomplete core Adapter set.' }
+    if (@(Compare-Object $catalog.core $actualIds).Count -ne 0) { throw 'Incomplete bundled base Adapter set.' }
     if ($IncludeTestTarget) {
         $name = if ($architecture -eq 'x86') { 'test-target-x86.exe' } else { 'test-target.exe' }
         Copy-Item -LiteralPath (Join-Path $source 'glyphshift-windows-runtime-target.exe') -Destination (Join-Path $stage $name)

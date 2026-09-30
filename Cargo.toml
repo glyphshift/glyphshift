@@ -5,15 +5,6 @@ members = [
     "crates/adapters/platform/registry",
     "crates/adapters/platform/package",
     "crates/adapters/tools/devkit",
-    "crates/adapters/implementations/native/draw-text-native",
-    "crates/adapters/implementations/native/directwrite",
-    "crates/adapters/implementations/native/directwrite-native",
-    "crates/adapters/implementations/native/gdi",
-    "crates/adapters/implementations/native/gdi-native",
-    "crates/adapters/implementations/native/gdi-native-support",
-    "crates/adapters/implementations/native/gdi-text-out-native",
-    "crates/adapters/implementations/native/gdiplus",
-    "crates/adapters/implementations/native/gdiplus-native",
     "crates/adapters/platform/native-abi",
     "crates/adapters/platform/native-host",
     "crates/adapters/platform/sdk",
@@ -71,3 +62,8 @@ unsafe_code = "forbid"
 
 [patch.crates-io]
 retour = { path = "vendor/retour" }
+
+[patch."https://github.com/glyphshift/glyphshift.git"]
+glyphshift-adapter-sdk = { path = "crates/adapters/platform/sdk" }
+glyphshift-adapter-native-abi = { path = "crates/adapters/platform/native-abi" }
+glyphshift-domain = { path = "crates/core/domain" }

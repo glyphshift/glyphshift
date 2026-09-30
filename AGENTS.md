@@ -9,35 +9,39 @@
 
 ## Engine-level adaptation scope
 
-- The base App includes only conventional Windows text APIs: GDI ExtTextOut/TextOut,
+- The base App bundles only conventional Windows text APIs: GDI ExtTextOut/TextOut,
   User32 DrawText, GDI+ DrawString, and DirectWrite TextLayout, plus shared Controller/Target Runtime.
+  Their source lives in the public `adapter-win32-text`, `adapter-gdiplus`, and
+  `adapter-directwrite` repositories. The App consumes pinned GSP Release artifacts.
 - Framework, vendor, and game-engine adapters ship as separate `.gsp` plugins, including Qt,
   SideFX (Houdini), Unity, and any future Unreal Engine adapter. A `windows.*` Adapter ID
   does not make a framework adapter part of the base App. Group game plugins by engine,
   not individual game. Full bundled engine builds are explicit research/integration tools only;
   they must not become the default desktop or installer distribution.
 
-- Official engine/framework, Console, Direct2D, UIA, and OCR Adapter implementations are owned by
-  private `glyphshift/adapter-*` repositories and must not be vendored or source-snapshotted into
-  this Public Core repository. Integrate them only through versioned GSP/Release/Registry artifacts
-  and the public SDK/ABI contracts. Public Core CI rejects tracked private Adapter source paths.
+- All concrete Adapter implementations are owned by independent `glyphshift/adapter-*`
+  repositories and must not be vendored or source-snapshotted into this Public Core repository.
+  Free base Adapters are public; commercial/experimental official Adapters may be private.
+  Product integration uses versioned GSP/Release/Registry artifacts and the public SDK/ABI
+  contracts. Public Core CI rejects every tracked concrete Adapter implementation path.
 
 - Build reusable engine/framework adapters across applications and games. Individual games are validation samples, not implementation targets.
 - Do not hardcode game titles, scenario names, dialogue, installation paths, or game-specific addresses into production adapters. Detect and declare engine API, architecture, and version capabilities instead.
 - Validate shared contracts with synthetic fixtures and multiple independent engine projects. A successful single-game experiment does not establish general engine support.
 
-## Private Adapter boundary
+## External Adapter boundary
 
-- UIA, OCR, Console, standalone Direct2D, and official engine/framework implementations live only in
-  private `glyphshift/adapter-*` repositories. Do not restore their source, reverse-engineering notes,
-  real-engine fixtures, or source-sync tooling to Public Core.
+- Concrete Adapter implementations live only in independent `glyphshift/adapter-*` repositories.
+  Do not restore their source, reverse-engineering notes, real-engine fixtures, or source-sync
+  tooling to Public Core.
 - Public Core may expose package IDs, compatibility metadata, market UI, SDK/ABI contracts, signature
-  verification, installation, selection, and lifecycle code. It must consume paid official Adapters as
-  versioned GSP/Release/Registry artifacts.
+  verification, installation, selection, and lifecycle code. Product builds consume official
+  Adapters as pinned versioned GSP/Release/Registry artifacts.
 - Run `python -B scripts/check-public-core-boundary.py` before commits that touch Adapter boundaries.
   Release CI and architecture checks run the same gate.
-- Keep repository tests scoped to Public Core packages and synthetic reference fixtures. Integration
-  tests requiring a paid Adapter belong with that private Adapter or the private integration-fixture repo.
+- Keep product code independent from concrete Adapter source. Tests may use a pinned public Adapter
+  revision for descriptor types and pinned GSP artifacts for real DLL integration. Tests requiring a
+  private Adapter belong with that Adapter or the private integration-fixture repository.
 
 ## Build cache and local organization
 

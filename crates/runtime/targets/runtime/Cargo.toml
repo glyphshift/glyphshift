@@ -29,8 +29,8 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
-glyphshift-adapter-gdi = { path = "../../../adapters/implementations/native/gdi" }
-glyphshift-adapter-gdiplus = { path = "../../../adapters/implementations/native/gdiplus" }
+glyphshift-adapter-gdi = { git = "https://github.com/glyphshift/adapter-win32-text.git", rev = "506b61c080f854e9edbe46b3e0991107a3e98d3b" }
+glyphshift-adapter-gdiplus = { git = "https://github.com/glyphshift/adapter-gdiplus.git", rev = "ca85012ef41a6e4d7c79a0c065167a5c9a16290e" }
 glyphshift-adapter-sdk = { path = "../../../adapters/platform/sdk" }
 glyphshift-test-native-adapter = { path = "../../../../test-support/native-adapter" }
 glyphshift-translation = { path = "../../../core/translation" }

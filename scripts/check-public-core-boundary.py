@@ -1,4 +1,4 @@
-"""Reject private official Adapter material accidentally tracked by Public Core."""
+"""Reject concrete Adapter implementation material accidentally tracked by Public Core."""
 
 from __future__ import annotations
 
@@ -12,13 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FORBIDDEN_PREFIXES = (
     "research/",
-    "crates/adapters/implementations/framework/",
-    "crates/adapters/implementations/accessibility/",
-    "crates/adapters/implementations/fallback/",
-    "crates/adapters/implementations/native/console/",
-    "crates/adapters/implementations/native/console-native/",
-    "crates/adapters/implementations/native/direct2d/",
-    "crates/adapters/implementations/native/direct2d-native/",
+    "crates/adapters/implementations/",
     "test-support/catsystem2-native/",
     "test-support/coreclr-late-attach/",
     "test-support/kag-bridge-contract/",
@@ -65,7 +59,7 @@ def verify_core_presentations() -> list[str]:
         return []
     return [
         "scripts/runtime-bundle-adapters.zh-CN.json must contain exactly the five "
-        f"Public Core Adapter presentations (expected {expected!r}, got {actual!r})"
+        f"bundled base Adapter presentations (expected {expected!r}, got {actual!r})"
     ]
 
 

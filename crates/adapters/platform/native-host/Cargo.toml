@@ -16,9 +16,9 @@ libloading = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
-glyphshift-adapter-directwrite = { path = "../../implementations/native/directwrite" }
-glyphshift-adapter-gdi = { path = "../../implementations/native/gdi" }
-glyphshift-adapter-gdiplus = { path = "../../implementations/native/gdiplus" }
+glyphshift-adapter-directwrite = { git = "https://github.com/glyphshift/adapter-directwrite.git", rev = "c5b6335384cb9b0da5186275dcfc60f99317c898" }
+glyphshift-adapter-gdi = { git = "https://github.com/glyphshift/adapter-win32-text.git", rev = "506b61c080f854e9edbe46b3e0991107a3e98d3b" }
+glyphshift-adapter-gdiplus = { git = "https://github.com/glyphshift/adapter-gdiplus.git", rev = "ca85012ef41a6e4d7c79a0c065167a5c9a16290e" }
 glyphshift-windows-host = { path = "../../../../test-support/windows-host" }
 
 [target.'cfg(windows)'.dev-dependencies]

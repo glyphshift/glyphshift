@@ -9,8 +9,8 @@ publish.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-glyphshift-adapter-gdi = { path = "../../crates/adapters/implementations/native/gdi" }
-glyphshift-adapter-gdiplus = { path = "../../crates/adapters/implementations/native/gdiplus" }
+glyphshift-adapter-gdi = { git = "https://github.com/glyphshift/adapter-win32-text.git", rev = "506b61c080f854e9edbe46b3e0991107a3e98d3b" }
+glyphshift-adapter-gdiplus = { git = "https://github.com/glyphshift/adapter-gdiplus.git", rev = "ca85012ef41a6e4d7c79a0c065167a5c9a16290e" }
 glyphshift-adapter-sdk = { path = "../../crates/adapters/platform/sdk" }
 glyphshift-domain = { path = "../../crates/core/domain" }
 windows-sys = { version = "0.61", features = [

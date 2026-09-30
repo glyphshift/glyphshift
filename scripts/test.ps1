@@ -13,15 +13,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Public Core source boundary check failed.' }
 & python -B (Join-Path $PSScriptRoot 'test-base-runtime.py')
 if ($LASTEXITCODE -ne 0) { throw 'Base Runtime distribution contracts failed.' }
 
-# Native integration tests load these artifacts by filename, so emit the public
-# Core DLLs and synthetic test fixtures before enumerating package tests.
+# Native integration tests load the pinned public base Adapter Release artifacts
+# by filename. Keep their source outside this repository while retaining the
+# existing Runtime/Host integration coverage.
+& (Join-Path $PSScriptRoot 'prepare-base-adapter-test-artifacts.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Base Adapter test artifact preparation failed.' }
+
 & cargo build `
     --manifest-path $manifestPath `
-    -p glyphshift-adapter-directwrite-native `
-    -p glyphshift-adapter-draw-text-native `
-    -p glyphshift-adapter-gdi-native `
-    -p glyphshift-adapter-gdi-text-out-native `
-    -p glyphshift-adapter-gdiplus-native `
     -p glyphshift-target-runtime `
     -p glyphshift-test-native-adapter `
     -p glyphshift-test-controller-plugin `
@@ -29,7 +28,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Base Runtime distribution contracts failed.' }
     -p glyphshift-test-acquisition-worker `
     -p glyphshift-windows-runtime-target
 if ($LASTEXITCODE -ne 0) {
-    throw "Public Core native package build failed with exit code $LASTEXITCODE"
+    throw "Public Core test fixture build failed with exit code $LASTEXITCODE"
 }
 
 # Keep the repository rule of enumerating active packages instead of invoking a
@@ -44,4 +43,3 @@ foreach ($package in $metadata.packages) {
 }
 & cargo @testArguments
 if ($LASTEXITCODE -ne 0) { throw "Public Core package tests failed with exit code $LASTEXITCODE" }
-

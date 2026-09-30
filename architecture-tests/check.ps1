@@ -91,15 +91,6 @@ Assert-Dependencies -PackageName 'glyphshift-adapter-devkit' -Expected @(
     'serde_json',
     'tempfile'
 )
-Assert-Dependencies -PackageName 'glyphshift-adapter-directwrite' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies -PackageName 'glyphshift-adapter-directwrite-native' -Expected @('glyphshift-adapter-directwrite', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdi' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-native-support' -Expected @('glyphshift-adapter-native-abi', 'windows')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdi-text-out-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies -PackageName 'glyphshift-adapter-draw-text-native' -Expected @('glyphshift-adapter-gdi', 'glyphshift-adapter-gdi-native-support', 'glyphshift-adapter-native-abi', 'retour', 'windows')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdiplus' -Expected @('glyphshift-adapter-sdk', 'glyphshift-domain')
-Assert-Dependencies -PackageName 'glyphshift-adapter-gdiplus-native' -Expected @('glyphshift-adapter-gdiplus', 'glyphshift-adapter-native-abi', 'retour', 'windows')
 Assert-Dependencies `
     -PackageName 'glyphshift-worker-process-grant' `
     -Expected @('windows-sys')
@@ -413,17 +404,7 @@ function Assert-PackagePartition {
     Assert-PackageSet -SetName $PartitionName -Actual $assigned
 }
 
-$adapterImplementationPackages = @(
-    'glyphshift-adapter-directwrite',
-    'glyphshift-adapter-directwrite-native',
-    'glyphshift-adapter-draw-text-native',
-    'glyphshift-adapter-gdi',
-    'glyphshift-adapter-gdi-native',
-    'glyphshift-adapter-gdi-native-support',
-    'glyphshift-adapter-gdi-text-out-native',
-    'glyphshift-adapter-gdiplus',
-    'glyphshift-adapter-gdiplus-native'
-)
+$adapterImplementationPackages = @()
 $testSupportPackages = @(
     'glyphshift-reference-adapters',
     'glyphshift-test-native-adapter',
@@ -793,10 +774,10 @@ if ($repositoryInstructions.IndexOf(
     throw 'Repository instructions must require the synchronized desktop review launcher.'
 }
 if ($repositoryInstructions.IndexOf(
-    'private `glyphshift/adapter-*` repositories',
+    'All concrete Adapter implementations are owned by independent `glyphshift/adapter-*`',
     [System.StringComparison]::Ordinal
 ) -lt 0) {
-    throw 'Repository instructions must keep official paid Adapter sources outside Public Core.'
+    throw 'Repository instructions must keep every concrete Adapter implementation outside Public Core.'
 }
 
 Write-Output 'Glyphshift architecture checks passed.'
