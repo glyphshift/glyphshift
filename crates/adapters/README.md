@@ -15,13 +15,18 @@ crate types, and runtime discovery remain stable across the folder split.
 
 ## Implementations
 
-Public Core keeps only the five first-party Windows text implementations required by the base application:
-Win32 DrawText/GDI TextOut/ExtTextOut, GDI+, and DirectWrite. Their descriptor/native companions live under
-`implementations/native/` together with the shared GDI native support they require.
+Public Core contains no concrete Adapter implementation source. All implementations live in
+independent `glyphshift/adapter-*` repositories and are distributed as versioned GSP packages.
 
-Official framework, engine, accessibility, OCR, Console, and Direct2D implementations are maintained outside this
-public repository and are distributed as GSP plugins. Public Core intentionally does not vendor source snapshots of
-those implementations.
+The five free base Adapter IDs come from three public repositories:
+
+- `adapter-win32-text` — GDI ExtTextOut/TextOut and User32 DrawText
+- `adapter-gdiplus` — GDI+ DrawString
+- `adapter-directwrite` — DirectWrite TextLayout
+
+The base App still bundles those five capabilities. `scripts/base-adapters.lock.json` pins the
+Release URL and SHA-256 for each GSP; the Runtime Bundle build verifies and extracts the pinned
+artifacts instead of compiling Adapter source in this repository.
 
 Adapters are organized by text technology, not by software brand. Product orchestration discovers concrete
 implementations at runtime and must not add static dependencies on them.
@@ -30,6 +35,6 @@ See [the local GSP pilot](../../docs/plugins.md) for package manifests, develope
 explicit local trust, and version selection. Native plugin packages do not duplicate the shared Runtime.
 
 Official Adapter repositories consume the same public SDK/ABI and produce versioned GSP artifacts. Product integration
-tests must consume those artifacts through the plugin contract instead of importing sibling source trees. See
-[SDK and source ownership](../../docs/adapter-sdk.md). The App build in this repository always contains only the five
-Windows Core adapters.
+must consume those artifacts through the plugin contract instead of importing sibling source trees. See
+[SDK and source ownership](../../docs/adapter-sdk.md). The App build in this repository always bundles only the five
+free Windows base Adapter IDs.

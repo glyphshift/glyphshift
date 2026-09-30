@@ -1,6 +1,6 @@
-# 适配器插件：基础内置与引擎 GSP
+# 适配器插件：基础随包与独立 GSP
 
-默认 App 构建只内置 DrawText、ExtTextOut、TextOut、GDI+、DirectWrite 五种 Windows 基础文字能力，
+默认 App 构建只随包提供 DrawText、ExtTextOut、TextOut、GDI+、DirectWrite 五种 Windows 基础文字能力，
 同时带 x86/x64 Controller 和 Target Runtime。其余当前在完整 Runtime Bundle 分发的 16 个 Adapter ID
 改为 12 个独立包：GTK3、Qt、Raylib、SideFX、Unity、MonoGame、Ren'Py、Web/Chromium、RPGMaker MV、
 TyranoScript、VGUI、CatSystem2。Qt 的四个 Adapter ID 放在一个包；Unity 的 Mono/IL2CPP 放在一个包。
@@ -11,26 +11,30 @@ TyranoScript、VGUI、CatSystem2。Qt 的四个 Adapter ID 放在一个包；Uni
 Unity 及其他游戏引擎均按需安装插件，即使其 Adapter ID 以 `windows.` 开头也不并入基础版。
 Unreal Engine（UE）目前没有可分发的适配器实现，未来实现时同样提供独立引擎插件；不按单个游戏拆包。
 Public Core 不再提供完整内置引擎集合；跨仓集成验证使用各 Adapter 仓生成的版本化 GSP 制品。
+五个基础 Adapter 的源码同样不在 Public Core：它们分别由公开的 `adapter-win32-text`、
+`adapter-gdiplus` 与 `adapter-directwrite` 维护。Runtime Bundle 构建读取
+`base-adapters.lock.json`，按固定 Release URL 与 SHA-256 获取 GSP，再将两个架构的 DLL 纳入基础包。
 
 安装包构建在交给 Tauri 打包前运行 `scripts/verify-base-runtime.py`：两个架构各自必须恰好包含
 五项基础 Adapter，目录只允许清单引用的 Controller、Target Runtime 和基础 DLL，且摘要全部一致。
 未引用的引擎 DLL、GSP、测试程序、插件子目录或 Worker 都会阻止发布构建，防止旧文件混入基础版。
 这项分发检查不执行 DLL；原生兼容性仍由 Runtime Bundle 生产加载器验证。
 
-官方扩展 Adapter 的源码由独立的私有 `glyphshift/adapter-*` 仓库拥有，用固定公共 SDK 独立构建 GSP。
-Public Core 不保存这些 Adapter 的源码快照、真实引擎夹具或完整 Bundle 构建入口；维护边界见
+所有具体 Adapter 的源码由独立 `glyphshift/adapter-*` 仓库拥有，用固定公共 SDK 独立构建 GSP；
+基础三个仓公开，扩展仓按产品策略决定可见性。Public Core 不保存这些 Adapter 的源码快照、真实引擎
+夹具或具体实现构建入口；维护边界见
 [SDK 与源码所有权](adapter-sdk.md)。第三方仍可使用公开 SDK/ABI 和 reference adapter 开发自己的 GSP。
 
 开发者构建：
 
 ```powershell
-# Public Core 与发布安装包都只构建五个基础 Adapter。
+# 主仓只构建 Runtime；五个基础 Adapter 从固定 GSP Release 取入。
 ./scripts/build-runtime-bundle.ps1 -Profile Release
-# 桌面审阅同样只使用 Public Core Runtime。
+# 桌面审阅使用同一套固定基础 Adapter 制品。
 ./scripts/review-app.ps1 -BuildOnly
 ```
 
-构建产物只保存在忽略的本地证据目录。官方扩展 Adapter 的构建、测试和候选 GSP 由对应私有仓负责；
+构建产物只保存在忽略的本地证据目录。各 Adapter 的构建、测试和候选 GSP 由对应独立仓负责；
 Public Core Release 不再附带官方扩展 GSP，只发布基础应用、文档、插件 CLI 与校验和。在线市场后续按账户
 entitlement 决定官方 GSP 的下载授权。
 

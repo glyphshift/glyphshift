@@ -36,14 +36,25 @@ DLL 加载初始化；`pack`/`verify` 不执行插件代码。具体包合同见
 
 ## 官方 Adapter 独立仓库
 
-Public Core 只拥有五种基础 Windows Adapter、SDK/ABI/Native Host 与 GSP 生命周期合同。官方扩展能力由
-`glyphshift/adapter-*` 私有仓库拥有，包括 Qt、GTK3、SideFX、Unity、Raylib、MonoGame、Ren'Py、
-Web/Chromium、RPGMaker MV、TyranoScript、VGUI、CatSystem2，以及独立维护的 KiriKiri、Console、
-Direct2D、UIA 与 OCR 源码。真实引擎集成夹具也不进入 Public Core。
+Public Core 只拥有 SDK/ABI、Native Host、GSP 生命周期和产品集成能力，不再保存任何具体 Adapter
+实现源码。基础版随包的五种 Windows Adapter 也已独立：
+
+- `glyphshift/adapter-win32-text`：ExtTextOutW、TextOutW、DrawTextW/DrawTextExW
+- `glyphshift/adapter-gdiplus`：GdipDrawString
+- `glyphshift/adapter-directwrite`：DirectWrite TextLayout
+
+这三个仓库公开源码并发布双架构 GSP。主仓通过 `scripts/base-adapters.lock.json` 固定 Release
+URL 与 SHA-256，构建 Runtime Bundle 时下载、校验并内置，因此“源码独立开源”和“基础版默认携带”
+可以同时成立。
+
+官方扩展能力由其他 `glyphshift/adapter-*` 仓库拥有，包括 Qt、GTK3、SideFX、Unity、Raylib、
+MonoGame、Ren'Py、Web/Chromium、RPGMaker MV、TyranoScript、VGUI、CatSystem2，以及独立维护的
+KiriKiri、Console、Direct2D、UIA 与 OCR 源码。真实引擎集成夹具也不进入 Public Core。
 
 一个技术栈仍以一个 GSP 包为主要交付单元；Qt 与 Unity 的多个 Adapter ID 不拆成相互依赖的小包。
 官方仓固定公共 SDK 版本并独立构建、测试、检查 Native ABI、打包和验证 GSP，不允许通过相邻源码路径
-依赖 Public Core。Public Core 的跨仓验收只消费版本化 GSP/Release/Registry 制品。
+依赖 Public Core。产品构建只消费版本化 GSP/Release/Registry 制品；主仓测试若需要公开基础 Adapter
+的描述符类型，也必须固定到明确 Git revision，真实 DLL 仍来自锁定的 GSP。
 
 Public Core 不维护 `adapter-sources.lock.json`、引擎源码兼容快照或源码同步脚本。SDK/ABI 变化通过版本化
 公共合同演进；官方 Adapter 仓选择何时升级该合同。第三方 Adapter 开发者使用相同的公开合同，不需要访问
